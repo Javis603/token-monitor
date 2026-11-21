@@ -11072,26 +11072,29 @@ function renderMainViewInspector(view, { off, lastVisible, unavailable }) {
   title.id = 'mainViewInspectorTitle';
   title.textContent = viewLabel(view);
   heading.append(title);
-  if (off) {
-    const subtitle = document.createElement('span');
-    subtitle.className = 'main-view-subtitle';
-    subtitle.textContent = t('settings.views.hiddenGroup');
-    heading.append(subtitle);
-  }
-  header.append(badge, heading);
-  const visibility = document.createElement('label');
-  visibility.className = 'checkbox-label main-view-visibility';
-  const visibilityText = document.createElement('span');
-  visibilityText.className = 'settings-item-title';
-  visibilityText.textContent = t('settings.views.showInSwitcher');
+  // The switch sits in the header: it acts on the whole view, and the
+  // subtitle carries its state or, when it is locked, the reason.
+  const status = unavailable ? t('settings.views.limitsUnavailable')
+    : lastVisible ? t('settings.views.lastVisible')
+      : off ? t('settings.views.hiddenGroup') : '';
   const visibilityInput = document.createElement('input');
   visibilityInput.type = 'checkbox';
+  visibilityInput.className = 'settings-switch';
+  visibilityInput.setAttribute('aria-label', t('settings.views.showInSwitcher'));
   visibilityInput.checked = !off;
   visibilityInput.disabled = lastVisible || unavailable;
   visibilityInput.addEventListener('change', () => void onMainViewVisibilityToggle(view.id));
-  visibility.append(visibilityText, visibilityInput);
+  if (status) {
+    const subtitle = document.createElement('span');
+    subtitle.id = 'mainViewInspectorStatus';
+    subtitle.className = 'main-view-subtitle';
+    subtitle.textContent = status;
+    heading.append(subtitle);
+    visibilityInput.setAttribute('aria-describedby', subtitle.id);
+  }
+  header.append(badge, heading, visibilityInput);
   inspector.setAttribute('aria-labelledby', title.id);
-  inspector.replaceChildren(header, visibility);
+  inspector.replaceChildren(header);
   const settings = MAIN_VIEW_SETTINGS[view.id];
   if (settings) inspector.append(settings());
 }
@@ -11405,94 +11408,46 @@ function renderHomeSettingsList() {
   return wrap;
 }
 
+// Activity's options follow the other Home modules: a nested list of
+// title-left/control-right rows, with a select like Limits' display mode so
+// the narrow inspector column never wraps the choices.
 function renderHomeActivitySettings() {
-  const frag = document.createDocumentFragment();
-
-  const heatmapRow = document.createElement('div');
-  heatmapRow.className = 'home-activity-settings';
-  const heatmapLabel = document.createElement('span');
-  heatmapLabel.textContent = t('settings.home.heatmapColor');
-  const heatmapOptions = document.createElement('div');
-  heatmapOptions.className = 'inline-options';
-  heatmapOptions.setAttribute('role', 'radiogroup');
-  heatmapOptions.setAttribute('aria-label', heatmapLabel.textContent);
-  const currentMetric = state.settings?.heatmapMetric || 'cost';
-  for (const metric of ['tokens', 'cost']) {
-    const option = document.createElement('label');
-    option.className = 'inline-option';
-    const input = document.createElement('input');
-    input.type = 'radio';
-    input.name = 'homeHeatmapMetric';
-    input.value = metric;
-    input.checked = currentMetric === metric;
-    input.addEventListener('change', () => {
-      if (input.checked) void saveSettings({ heatmapMetric: metric }).then(renderHomeIfVisible);
-    });
+  const wrap = document.createElement('div');
+  wrap.className = 'settings-nested-list';
+  const row = (titleKey, options, value, onChange) => {
+    const label = document.createElement('label');
+    label.className = 'settings-item';
     const text = document.createElement('span');
-    text.textContent = t(metric === 'tokens' ? 'dashboard.heatmap.tokens' : 'dashboard.heatmap.cost');
-    option.append(input, text);
-    heatmapOptions.append(option);
-  }
-  heatmapRow.append(heatmapLabel, heatmapOptions);
-  frag.append(heatmapRow);
-
-  const daysRow = document.createElement('div');
-  daysRow.className = 'home-activity-settings';
-  const daysLabel = document.createElement('span');
-  daysLabel.textContent = t('settings.home.activeDaysWindow');
-  const daysOptions = document.createElement('div');
-  daysOptions.className = 'inline-options';
-  daysOptions.setAttribute('role', 'radiogroup');
-  daysOptions.setAttribute('aria-label', daysLabel.textContent);
-  const currentDaysWindow = state.settings?.homeActiveDaysWindow || 'all';
-  for (const mode of ['all', 'year']) {
-    const option = document.createElement('label');
-    option.className = 'inline-option';
-    const input = document.createElement('input');
-    input.type = 'radio';
-    input.name = 'homeActiveDaysWindow';
-    input.value = mode;
-    input.checked = currentDaysWindow === mode;
-    input.addEventListener('change', () => {
-      if (input.checked) void saveSettings({ homeActiveDaysWindow: mode }).then(renderHomeIfVisible);
-    });
-    const text = document.createElement('span');
-    text.textContent = t(`settings.home.activeDaysWindow.${mode}`);
-    option.append(input, text);
-    daysOptions.append(option);
-  }
-  daysRow.append(daysLabel, daysOptions);
-  frag.append(daysRow);
-
-  const trendTokensRow = document.createElement('div');
-  trendTokensRow.className = 'home-activity-settings';
-  const trendTokensLabel = document.createElement('span');
-  trendTokensLabel.textContent = t('settings.home.trendTokens');
-  const trendTokensOptions = document.createElement('div');
-  trendTokensOptions.className = 'inline-options';
-  trendTokensOptions.setAttribute('role', 'radiogroup');
-  trendTokensOptions.setAttribute('aria-label', trendTokensLabel.textContent);
-  const showExactTokens = state.settings?.showExactHomeTrendTokens === true;
-  for (const mode of ['compact', 'exact']) {
-    const option = document.createElement('label');
-    option.className = 'inline-option';
-    const input = document.createElement('input');
-    input.type = 'radio';
-    input.name = 'homeTrendTokens';
-    input.value = mode;
-    input.checked = showExactTokens === (mode === 'exact');
-    input.addEventListener('change', () => {
-      if (input.checked) void saveSettings({ showExactHomeTrendTokens: mode === 'exact' }).then(renderHomeIfVisible);
-    });
-    const text = document.createElement('span');
-    text.textContent = t(`settings.home.trendTokens.${mode}`);
-    option.append(input, text);
-    trendTokensOptions.append(option);
-  }
-  trendTokensRow.append(trendTokensLabel, trendTokensOptions);
-  frag.append(trendTokensRow);
-
-  return frag;
+    text.className = 'settings-item-text';
+    const title = document.createElement('span');
+    title.className = 'settings-item-title';
+    title.textContent = t(titleKey);
+    text.append(title);
+    const select = document.createElement('select');
+    for (const [optionValue, optionKey] of options) {
+      const option = document.createElement('option');
+      option.value = optionValue;
+      option.textContent = t(optionKey);
+      select.append(option);
+    }
+    select.value = value;
+    select.addEventListener('change', () => void onChange(select.value).then(renderHomeIfVisible));
+    label.append(text, select);
+    wrap.append(label);
+  };
+  row('settings.home.heatmapColor',
+    [['tokens', 'dashboard.heatmap.tokens'], ['cost', 'dashboard.heatmap.cost']],
+    state.settings?.heatmapMetric || 'cost',
+    (metric) => saveSettings({ heatmapMetric: metric }));
+  row('settings.home.activeDaysWindow',
+    ['all', 'year'].map((mode) => [mode, `settings.home.activeDaysWindow.${mode}`]),
+    state.settings?.homeActiveDaysWindow || 'all',
+    (mode) => saveSettings({ homeActiveDaysWindow: mode }));
+  row('settings.home.trendTokens',
+    ['compact', 'exact'].map((mode) => [mode, `settings.home.trendTokens.${mode}`]),
+    state.settings?.showExactHomeTrendTokens === true ? 'exact' : 'compact',
+    (mode) => saveSettings({ showExactHomeTrendTokens: mode === 'exact' }));
+  return wrap;
 }
 
 function renderLimitsViewSettingsList() {
@@ -11674,10 +11629,7 @@ function renderSessionSettingsList() {
   });
   wrap.append(titleLabel, titleNote);
   // A plain `.settings-item` row, matching the Model ranking control in Main —
-  // the same title-left/control-right shape. It deliberately does NOT reuse
-  // `.home-activity-settings`: that carries its own indent rule for the Home
-  // modules list, and this row already sits inside `.settings-nested-list`,
-  // which draws that rule, so borrowing it painted a second line.
+  // the same title-left/control-right shape.
   const row = document.createElement('div');
   row.className = 'settings-item';
   const label = document.createElement('span');
