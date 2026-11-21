@@ -5,6 +5,7 @@ const { abortError } = require('../../probeDeadline');
 const { spawn } = require('node:child_process');
 const fs = require('node:fs/promises');
 const { once } = require('node:events');
+const { setTimeout: delay } = require('node:timers/promises');
 const net = require('node:net');
 const os = require('node:os');
 const path = require('node:path');
@@ -241,7 +242,7 @@ function parseProcessLine(line, desktopHubs) {
   };
 }
 
-function runProcessText(cmd, args, { timeoutMs = 10000, deps = {} } = {}) {
+function runProcessText(cmd, args, { timeoutMs = 10000, deps = {}, emptyOnExitOne = false } = {}) {
   const spawnFn = deps.spawn || spawn;
   return new Promise((resolve, reject) => {
     const child = spawnFn(cmd, args, { windowsHide: true });
@@ -268,7 +269,9 @@ function runProcessText(cmd, args, { timeoutMs = 10000, deps = {} } = {}) {
     child.stderr.on('data', (chunk) => { stderr += chunk.toString(); });
     child.on('error', (err) => finish(reject, err));
     child.on('close', (code) => {
-      if (code !== 0) {
+      if (emptyOnExitOne && code === 1 && !stderr.trim()) {
+        finish(resolve, '');
+      } else if (code !== 0) {
         finish(reject, errorWithStatus('unavailable', stderr.trim() || `${cmd} exited ${code}`));
       } else {
         finish(resolve, stdout);
@@ -397,7 +400,17 @@ function statusFromHttpCode(code) {
   return 'unavailable';
 }
 
-async function connectVerifiedDesktopSocket(port, pid, timeoutMs, parentSignal) {
+async function desktopSocketOwned(port, pid, localPort, timeoutMs, deps) {
+  if ((deps.platform || process.platform) === 'win32') {
+    const script = `Get-NetTCPConnection -OwningProcess ${pid} -State Established -LocalAddress 127.0.0.1 -LocalPort ${port} -RemoteAddress 127.0.0.1 -RemotePort ${localPort} -ErrorAction SilentlyContinue | Select-Object -ExpandProperty OwningProcess`;
+    const output = await runProcessText('powershell', ['-NoProfile', '-NonInteractive', '-Command', script], { timeoutMs, deps });
+    return output.split(/\r?\n/).some((line) => line.trim() === String(pid));
+  }
+  const output = await runProcessText('lsof', ['-nP', '-a', '-p', String(pid), '-i4TCP', '-sTCP:ESTABLISHED', '-Fn'], { timeoutMs, deps, emptyOnExitOne: true });
+  return output.split(/\r?\n/).includes(`n127.0.0.1:${port}->127.0.0.1:${localPort}`);
+}
+
+async function connectVerifiedDesktopSocket(port, pid, timeoutMs, parentSignal, deps) {
   const timeout = AbortSignal.timeout(timeoutMs);
   const signal = parentSignal ? AbortSignal.any([timeout, parentSignal]) : timeout;
   const socket = net.createConnection({ host: '127.0.0.1', port, signal });
@@ -407,14 +420,15 @@ async function connectVerifiedDesktopSocket(port, pid, timeoutMs, parentSignal) 
   try {
     await once(socket, 'connect', { signal });
     const localPort = socket.localPort;
-    let owned;
-    if (process.platform === 'win32') {
-      const script = `Get-NetTCPConnection -OwningProcess ${pid} -State Established -LocalAddress 127.0.0.1 -LocalPort ${port} -RemoteAddress 127.0.0.1 -RemotePort ${localPort} -ErrorAction SilentlyContinue | Select-Object -ExpandProperty OwningProcess`;
-      const output = await runProcessText('powershell', ['-NoProfile', '-NonInteractive', '-Command', script], { timeoutMs, deps: { signal } });
-      owned = output.split(/\r?\n/).some((line) => line.trim() === String(pid));
-    } else {
-      const output = await runProcessText('lsof', ['-nP', '-a', '-p', String(pid), '-i4TCP', '-sTCP:ESTABLISHED', '-Fn'], { timeoutMs, deps: { signal } });
-      owned = output.split(/\r?\n/).includes(`n127.0.0.1:${port}->127.0.0.1:${localPort}`);
+    const ownershipDeps = { ...deps, signal };
+    let owned = await desktopSocketOwned(port, pid, localPort, timeoutMs, ownershipDeps);
+    throwIfAborted(signal);
+    if (!owned && !socket.destroyed) {
+      // The handshake can finish before the server accepts the connection.
+      await delay(20, undefined, { signal });
+      if (!socket.destroyed) {
+        owned = await desktopSocketOwned(port, pid, localPort, timeoutMs, ownershipDeps);
+      }
     }
     throwIfAborted(signal);
     if (!owned || socket.destroyed) throw errorWithStatus('unavailable', 'Antigravity no longer owns the connected RPC socket');
@@ -435,7 +449,7 @@ function callLs({
   host = '127.0.0.1',
   timeoutMs = DEFAULT_RPC_TIMEOUT_MS,
   signal
-}) {
+}, deps = {}) {
   if (desktopPid && (scheme !== 'http' || host !== '127.0.0.1' || !Number.isSafeInteger(desktopPid) || desktopPid <= 0)) {
     return Promise.reject(errorWithStatus('unavailable', 'Invalid Antigravity desktop RPC endpoint'));
   }
@@ -449,7 +463,7 @@ function callLs({
         // Supplying createConnection without an agent keeps the request buffered
         // until the callback hands it the verified socket.
         createConnection: (_options, done) => {
-          void connectVerifiedDesktopSocket(port, desktopPid, timeoutMs, signal)
+          void connectVerifiedDesktopSocket(port, desktopPid, timeoutMs, signal, deps)
             .then((socket) => done(null, socket), done);
         }
       } : {}),
