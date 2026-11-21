@@ -520,6 +520,22 @@ test('slot panel readings retain legacy aggregate fallback without devices', asy
   assert.deepEqual(seen[0][1], rows); assert.deepEqual(seen.at(-1)[1], rows);
 });
 
+test('provider settings can rename a remote fallback before it appears in aggregate Limits', () => {
+  const local = { provider: 'kimi', status: 'ok', region: '', accountKey: 'local-key', sourceDeviceId: 'local' };
+  const remote = { ...local, accountKey: 'peer-key', sourceDeviceId: undefined };
+  const peer = { deviceId: 'peer', stale: true, limits: { providers: [remote] } };
+  const { context } = rendererSlotContext({
+    limits: { providers: [local] },
+    devices: [peer],
+    limitAccountLinkCandidates: [{ provider: 'kimi', accountKey: remote.accountKey, region: remote.region, deviceId: peer.deviceId }]
+  });
+  const records = Array.from(context.limitAccountContext('kimi').records, row => ({ ...row }));
+  assert.deepEqual(records, [local, { ...remote, stale: true, sourceDeviceId: 'peer' }]);
+  assert.deepEqual(Array.from(context.limitAccountContext('qoder').records), [local]);
+  context.state.stats.limits.providers.push({ ...remote, sourceDeviceId: 'peer' });
+  assert.equal(context.limitAccountContext('kimi').records.length, 2);
+});
+
 test('a probe starting or finishing repaints only its provider account rows in visible Settings', () => {
   const fs = require('node:fs'); const vm = require('node:vm');
   const source = fs.readFileSync(require.resolve('../../src/electron/renderer/app.js'), 'utf8');
