@@ -634,7 +634,7 @@ function pickBetterProvider(current, candidate, multiAccount = false) {
   // their exact account, in both aggregation passes.
   if (multiAccount && winner.accountKey !== loser.accountKey) return winner;
   const balanced = carryProviderBalance(winner, loser);
-  return providerPolicies[winner.provider]?.carryObservation?.(balanced, loser) || balanced;
+  return providerPolicies[winner.provider]?.carryObservation?.(balanced, loser, normalizeAccountKeyAliases) || balanced;
 }
 
 function betterProvider(current, candidate) {

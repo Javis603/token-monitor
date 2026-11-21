@@ -474,6 +474,24 @@ for (const [hub, core] of [
       [provisional, 'portable'].sort());
   });
 
+  test(`${hub} retains Qoder aliases across readings of the same account`, () => {
+    const now = Date.parse('2026-11-20T10:00:00Z');
+    const base = { provider: 'qoder', source: 'web', region: 'global', status: 'ok',
+      updatedAt: new Date(now).toISOString(), windows: [] };
+    const older = new Date(now - 3600000).toISOString();
+    const readings = [
+      { ...base, accountKey: 'portable', accountKeyPortable: true, accountKeyAliases: ['cookie-1'], updatedAt: older },
+      { ...base, accountKey: 'portable', accountKeyPortable: true, accountKeyAliases: ['cookie-2'] },
+      { ...base, accountKey: 'cookie-1', updatedAt: older }
+    ];
+    const providers = core.aggregateLimits(readings.map((row, i) => ({
+      deviceId: String(i), limits: core.syncLimits({ providers: [row] })
+    })), 0, now).providers;
+    assert.deepEqual(providers.map(row => row.accountKey), ['portable']);
+    assert.deepEqual(providers[0].accountKeyAliases, ['cookie-1', 'cookie-2']);
+    assert.equal(providers[0].sourceDeviceId, '1');
+  });
+
   test(`${hub} keeps healthy Qoder fallback visible beside a fresh unavailable account`, () => {
     const now = Date.parse('2026-11-20T10:00:00Z');
     const base = {

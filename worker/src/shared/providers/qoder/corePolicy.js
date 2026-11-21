@@ -37,12 +37,15 @@ function suppressCandidates(rows, multiAccount, configured) {
   });
 }
 
-/** @param {any} winner @param {any} loser */
-function carryObservation(winner, loser) {
-  // An older client can have the newer quota reading for the same known key.
-  return loser.accountKeyPortable && loser.accountKey === winner.accountKey && !winner.accountKeyPortable
-    ? { ...winner, accountKeyPortable: true }
-    : winner;
+/** @param {any} winner @param {any} loser @param {(values: unknown, key: string) => string[]} normalizeAliases */
+function carryObservation(winner, loser, normalizeAliases) {
+  if (winner.accountKey !== loser.accountKey || winner.region !== loser.region
+    || !(winner.accountKeyPortable || loser.accountKeyPortable)) return winner;
+  const accountKeyAliases = normalizeAliases([
+    ...(winner.accountKeyAliases || []), ...(loser.accountKeyAliases || [])
+  ], winner.accountKey);
+  // Keep identity evidence from both reports while using the winner's quota.
+  return { ...winner, accountKeyPortable: true, ...(accountKeyAliases.length ? { accountKeyAliases } : {}) };
 }
 
 module.exports = { aggregateKey, collapseKey, preserveStaleAccount, suppressCandidates, carryObservation };

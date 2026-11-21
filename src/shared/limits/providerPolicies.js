@@ -9,7 +9,7 @@
  * freshnessKey?: (row: any) => string, snapshotRank?: (count: number) => number,
  * preserveAccount?: boolean, isPlaceholder?: (row: any) => boolean,
  * preserveStaleAccount?: (row: any) => boolean,
- * carryObservation?: (winner: any, loser: any) => any,
+ * carryObservation?: (winner: any, loser: any, normalizeAliases: (values: unknown, key: string) => string[]) => any,
  * suppressCandidates?: (rows: any[], multiAccount: boolean, configured: (row: any) => boolean) => any[]}} ProviderPolicy */
 /** @type {Readonly<Record<string, ProviderPolicy>>} */
 const providerPolicies = Object.freeze({
