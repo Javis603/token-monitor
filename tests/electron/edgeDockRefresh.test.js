@@ -225,6 +225,7 @@ test('dock re-projections keep manual stats through settings updates but never a
   const fresh = context.localStats;
   const syncSource = main.slice(main.indexOf('function syncDockSurfaces('), main.indexOf('function refreshLimitStatsPresentation('));
   Object.assign(context, {
+    screenUiSuspended: false,
     canUseEdgeDock: () => true,
     syncNotch() {},
     ensureEdgeDockController: () => ({ setAppearance() {}, sync() {} }),
