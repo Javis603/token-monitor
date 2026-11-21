@@ -7210,6 +7210,11 @@ function createWindow(boundsOverride, options = {}) {
     transparent: true,
     resizable: !collapsedFloatingBubble,
     show: false,
+    // A tray-mode widget can stay closed for a whole session. Electron paints a
+    // show:false window by default, which allocates a compositor surface (and its
+    // textures) even while the window is never revealed. Defer painting until the
+    // first reveal; the renderer still loads and reports readiness as before.
+    ...(settings?.trayMode ? { paintWhenInitiallyHidden: false } : {}),
     backgroundColor: '#00000000',
     ...appWindowIcon(),
     skipTaskbar: collapsedFloatingBubble || skipTaskbarForSettings(settings),
