@@ -445,6 +445,14 @@ function callLs({
     const req = transport.request({
       host,
       port,
+      ...(desktopPid ? {
+        // Supplying createConnection without an agent keeps the request buffered
+        // until the callback hands it the verified socket.
+        createConnection: (_options, done) => {
+          void connectVerifiedDesktopSocket(port, desktopPid, timeoutMs, signal)
+            .then((socket) => done(null, socket), done);
+        }
+      } : {}),
       method: 'POST',
       path: `/${LS_SERVICE}/${method}`,
       headers: {
@@ -456,15 +464,7 @@ function callLs({
       },
       timeout: timeoutMs,
       signal,
-      ...(scheme === 'https' ? { rejectUnauthorized: false } : {}),
-      ...(desktopPid ? {
-        // Supplying createConnection without an agent keeps the request buffered
-        // until the callback hands it the verified socket.
-        createConnection: (_options, done) => {
-          void connectVerifiedDesktopSocket(port, desktopPid, timeoutMs, signal)
-            .then((socket) => done(null, socket), done);
-        }
-      } : {})
+      ...(scheme === 'https' ? { rejectUnauthorized: false } : {})
     }, (res) => {
       const chunks = [];
       res.on('data', (chunk) => chunks.push(chunk));
