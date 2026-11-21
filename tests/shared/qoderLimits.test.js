@@ -474,6 +474,25 @@ for (const [hub, core] of [
       [provisional, 'portable'].sort());
   });
 
+  test(`${hub} deduplicates a uniquely matched Qoder alias in multi-account mode`, () => {
+    const now = Date.parse('2026-11-21T10:00:00Z');
+    const base = { provider: 'qoder', source: 'web', region: 'global', status: 'ok',
+      updatedAt: new Date(now).toISOString(), windows: [] };
+    const known = { ...base, accountKey: 'K1', accountKeyPortable: true, accountKeyAliases: ['C1'] };
+    const peer = { ...base, accountKey: 'K2', accountKeyPortable: true };
+    const cookie = { ...base, accountKey: 'C1' };
+    const keys = (first, second = peer) => core.aggregateLimits([
+      { deviceId: 'new', limits: core.syncLimits({ multiAccountProviders: ['qoder'], providers: [first, second] }) },
+      { deviceId: 'old', limits: core.syncLimits({ providers: [cookie] }) }
+    ], 0, now).providers.map(row => row.accountKey);
+
+    assert.deepEqual(keys(known), ['K1', 'K2']);
+    assert.deepEqual(keys({ ...known, status: 'unavailable' }), ['C1', 'K1', 'K2']);
+    assert.deepEqual(keys({ ...known, region: 'cn' }), ['C1', 'K1', 'K2']);
+    assert.deepEqual(keys({ ...known, updatedAt: new Date(now - 3600000).toISOString() }), ['C1', 'K1', 'K2']);
+    assert.deepEqual(keys(known, { ...peer, accountKeyAliases: ['C1'] }), ['C1', 'K1', 'K2']);
+  });
+
   test(`${hub} retains Qoder aliases across readings of the same account`, () => {
     const now = Date.parse('2026-11-20T10:00:00Z');
     const base = { provider: 'qoder', source: 'web', region: 'global', status: 'ok',

@@ -20,9 +20,8 @@ function collapseKey(row, key) {
   return preserveStaleAccount(row) ? key : '';
 }
 
-/** @param {any[]} rows @param {boolean} multiAccount @param {(row: any) => boolean} configured */
-function suppressCandidates(rows, multiAccount, configured) {
-  if (multiAccount) return [];
+/** @param {any[]} rows @param {boolean} _multiAccount @param {(row: any) => boolean} configured */
+function suppressCandidates(rows, _multiAccount, configured) {
   const portable = rows.filter(row => row.accountKeyPortable && configured(row));
   return rows.filter(row => {
     if (row.accountKeyPortable || !row.accountKey || row.accountKey === DEFAULT_SLOT_KEY) return false;
