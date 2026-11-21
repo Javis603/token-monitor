@@ -8,6 +8,7 @@ const { contextBridge, ipcRenderer } = require('electron');
 contextBridge.exposeInMainWorld('tokenMonitorEdgeDock', {
   ready: () => ipcRenderer.send('edgeDock:ready'),
   click: (cellIndex) => ipcRenderer.send('edgeDock:click', { cellIndex }),
+  openHome: () => ipcRenderer.send('edgeDock:openHome'),
   pointer: () => ipcRenderer.send('edgeDock:pointer'),
   dragStart: (grabOffsetY, grabOffsetX, gestureId) => ipcRenderer.send('edgeDock:dragStart', { grabOffsetY, grabOffsetX, gestureId }),
   dragFrame: (gestureId) => ipcRenderer.send('edgeDock:dragFrame', { gestureId }),

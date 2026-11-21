@@ -1396,11 +1396,12 @@ test('trigger strip reaches the physical display edge past a side Dock', () => {
 
 test('cursor resolves to the cell under it, including the gap below a cell', () => {
   const rail = edgeDockRailBounds({ workArea, side: 'right', offset: 0, cellCount: 3 });
-  const { shoulder, padding, cellHeight, cellGap } = EDGE_DOCK_METRICS;
-  const top = shoulder + padding;
+  const { shoulder, cellHeight, cellGap } = EDGE_DOCK_METRICS;
+  const { homeTop, homeHeight, tops: [top] } = rail.cells;
   const at = (dy) => edgeDockCellAt({ x: rail.x + 10, y: rail.y + dy }, rail, 3);
   // The shoulders belong to the rail window but hold no cell.
   assert.equal(at(shoulder / 2), null);
+  assert.equal(at(homeTop + homeHeight / 2), null, 'Home is an action, not the first quota cell');
   assert.equal(at(top - 1), null);
   assert.equal(at(top + 1), 0);
   assert.equal(at(top + cellHeight + cellGap / 2), 0);
@@ -1410,7 +1411,7 @@ test('cursor resolves to the cell under it, including the gap below a cell', () 
 
 test('only the column around the marks is a hover target, not the screen edge', () => {
   const rail = edgeDockRailBounds({ workArea, side: 'right', offset: 0, cellCount: 2 });
-  const y = rail.y + EDGE_DOCK_METRICS.shoulder + EDGE_DOCK_METRICS.padding + 20;
+  const y = rail.y + rail.cells.tops[0] + 20;
   const centerX = rail.x + rail.width / 2;
   assert.equal(edgeDockCellAt({ x: centerX, y }, rail, 2), 0);
   assert.equal(edgeDockCellAt({ x: centerX + EDGE_DOCK_METRICS.hitRadius, y }, rail, 2), 0);
@@ -1429,14 +1430,27 @@ test('the leave corridor is only the gap between card and rail, not their boundi
   assert.deepEqual(left, { x: 58, y: 50, width: 16, height: 100 });
 });
 
+test('a clipped rail keeps its last visible quota clickable after adding Home', () => {
+  const cellKinds = Array(18).fill('provider');
+  for (const [height, lastVisible] of [[514, 8], [730, 12]]) {
+    const rail = edgeDockRailBounds({ workArea: { ...workArea, height }, side: 'right', cellKinds });
+    const bottom = { x: rail.x + rail.width / 2, y: rail.y + rail.height - 1 };
+    assert.equal(edgeDockCellAt(bottom, rail, cellKinds.length), lastVisible);
+  }
+});
+
 test('stat readouts are shorter than rings and the layout compresses before overflowing', () => {
   const m = EDGE_DOCK_METRICS;
   const mixed = edgeDockCellLayout(workArea, ['stat', 'provider']);
   assert.deepEqual(mixed.heights, [m.statHeight, m.cellHeight]);
-  assert.equal(mixed.tops[1], m.shoulder + m.padding + m.statHeight + m.cellGap);
+  assert.equal(mixed.tops[0], mixed.homeTop + mixed.homeHeight + m.cellGap);
+  assert.equal(mixed.tops[1], mixed.tops[0] + m.statHeight + m.cellGap);
   const rail = edgeDockRailBounds({ workArea, side: 'right', offset: 0, cellKinds: ['stat', 'provider'] });
   assert.equal(edgeDockCellAt({ x: rail.x + 32, y: rail.y + mixed.tops[1] + 5 }, rail, 2), 1);
-  const crowded = edgeDockCellLayout(workArea, Array.from({ length: 14 }, () => 'provider'));
+  // A rail with room for every compact row and Home, but not for full-size rings.
+  const compactHeight = 2 * (m.shoulder + m.padding + m.screenMargin) + m.homeHeight
+    + 14 * (m.minCellHeight + m.cellGap);
+  const crowded = edgeDockCellLayout({ ...workArea, height: compactHeight }, Array(14).fill('provider'));
   assert.equal(crowded.compact, true);
   assert.equal(crowded.heights[0], m.minCellHeight);
 });
@@ -1445,8 +1459,7 @@ test('an explicit empty cell list keeps the rail empty instead of reserving a ce
   const empty = edgeDockCellLayout(workArea, []);
   assert.deepEqual(empty.kinds, []);
   assert.deepEqual(empty.tops, []);
-  // Only the chrome above and below the cells remains.
-  assert.equal(empty.length, EDGE_DOCK_METRICS.shoulder * 2 + EDGE_DOCK_METRICS.padding * 2);
+  assert.equal(empty.length, EDGE_DOCK_METRICS.shoulder * 2 + EDGE_DOCK_METRICS.padding * 2 + EDGE_DOCK_METRICS.homeHeight);
   const rail = edgeDockRailBounds({ workArea, side: 'right', offset: 0, cellKinds: [] });
   assert.equal(rail.cells.kinds.length, 0);
   assert.equal(rail.height, empty.length);
@@ -1514,7 +1527,7 @@ test('bubble opens inward with its tail aimed at the cell, even when clamped', (
   const bubble = edgeDockBubbleBounds({ railBounds: rail, cellIndex: 1, height: 120, workArea, side: 'right' });
   assert.equal(bubble.width, m.bubbleWidth + m.bubbleTail);
   assert.equal(bubble.x + bubble.width + m.bubbleGap, rail.x);
-  const cellCenter = rail.y + m.shoulder + m.padding + m.cellHeight + m.cellGap + m.cellHeight / 2;
+  const cellCenter = rail.y + rail.cells.tops[1] + rail.cells.heights[1] / 2;
   assert.equal(bubble.y + bubble.height / 2, cellCenter);
   assert.equal(bubble.y + bubble.tailY, cellCenter);
 
@@ -1522,7 +1535,7 @@ test('bubble opens inward with its tail aimed at the cell, even when clamped', (
   const tall = edgeDockBubbleBounds({ railBounds: top, cellIndex: 0, height: 600, workArea, side: 'left' });
   assert.equal(tall.x, top.x + top.width + m.bubbleGap);
   assert.equal(tall.y, workArea.y + m.screenMargin);
-  assert.equal(tall.y + tall.tailY, top.y + m.shoulder + m.padding + m.cellHeight / 2);
+  assert.equal(tall.y + tall.tailY, top.y + top.cells.tops[0] + top.cells.heights[0] / 2);
 });
 
 test('rail silhouette starts and ends on the screen edge and mirrors for the left', () => {
@@ -1614,6 +1627,18 @@ test('intent: hovering a cell opens its card after a delay, then switches instan
   assert.deepEqual(intent.tick({ inRail: true, cellIndex: 1 }, EDGE_DOCK_TIMING.bubbleDelayMs + 10), [{ type: 'bubble', cell: 1 }]);
   // Moving into the card keeps it open.
   assert.deepEqual(intent.tick({ inBubble: true }, 1000), []);
+});
+
+test('resting on rail padding does not count towards the first card hover', () => {
+  const intent = createEdgeDockIntent();
+  const delay = EDGE_DOCK_TIMING.bubbleDelayMs;
+  const cell = { inRail: true, cellIndex: 0 };
+  intent.reveal();
+  intent.tick(cell, 0);
+  intent.tick({ inRail: true, cellIndex: null }, delay - 1);
+  assert.deepEqual(intent.tick(cell, delay + 10), []);
+  assert.deepEqual(intent.tick(cell, 2 * delay + 9), []);
+  assert.deepEqual(intent.tick(cell, 2 * delay + 10), [{ type: 'bubble', cell: 0 }]);
 });
 
 test('intent: leaving retracts after the grace period unless pinned', () => {
@@ -3293,6 +3318,10 @@ for (const eventType of ['lostpointercapture', 'pointercancel']) {
       { dragStart: (...args) => starts.push(args), dragEnd: () => ends.push(true), dragCaptureLost: id => captureLosses.push(id), onDragEnded: fn => { acknowledge = fn; } }, rail, () => 0, 5, { payload: { platform: 'darwin' } });
     bind(rail);
     const event = { button: 0, pointerId: 1, screenX: 10, screenY: 20, clientX: 25, clientY: 40 };
+    const button = { closest: selector => selector.split(', ').includes('button') ? button : null };
+    handlers.get('pointerdown')({ ...event, target: button });
+    handlers.get('pointermove')({ ...event, buttons: 1, screenX: 100 });
+    assert.equal(starts.length, 0, 'a press inside a plugin button stays with the button');
     handlers.get('pointerdown')(event);
     handlers.get(eventType)({ ...event, type: eventType });
     handlers.get('pointermove')({ ...event, screenX: 100 });
@@ -3329,7 +3358,26 @@ for (const eventType of ['lostpointercapture', 'pointercancel']) {
   });
 }
 
-test('macOS rail forwards pointer reports using the existing bridge without affecting Windows', () => {
+test('the handle opens on the primary press and ignores its trailing click and the refresh action', () => {
+  const dock = readRendererFile(path.join('edgeDock', 'dock.js'));
+  const start = dock.indexOf("if (surface === 'peek') {", dock.indexOf('function renderPeek('));
+  const handlers = new Map(), clicks = [];
+  const root = { addEventListener: (name, fn) => handlers.set(name, fn) };
+  const state = { payload: { peekMode: 'handle' } };
+  Function('surface', 'root', 'state', 'bridge', dock.slice(start, dock.indexOf('// On macOS the handle', start)))(
+    'peek', root, state, { click: index => clicks.push(index) });
+  handlers.get('pointerdown')({ button: 2 });
+  handlers.get('pointerdown')({ button: 0 });
+  assert.deepEqual(clicks, [null]);
+  handlers.get('click')({ detail: 1 });
+  handlers.get('click')({ detail: 0 });
+  state.payload.peekMode = 'refresh';
+  handlers.get('pointerdown')({ button: 0 });
+  handlers.get('click')({ detail: 0 });
+  assert.deepEqual(clicks, [null, null]);
+});
+
+test('the rail forwards macOS mouse moves and only Windows window or cell crossings', () => {
   const dock = readRendererFile(path.join('edgeDock', 'dock.js'));
   const start = dock.indexOf('// On macOS the handle');
   const source = dock.slice(start, dock.indexOf('// The notch window', start));
@@ -3337,10 +3385,18 @@ test('macOS rail forwards pointer reports using the existing bridge without affe
     const handlers = new Map();
     const reports = [];
     const document = { addEventListener: (name, fn) => handlers.set(name, fn), documentElement: { addEventListener: (name, fn) => handlers.set(name, fn) } };
-    Function('surface', 'state', 'document', 'bridge', source)('rail', { payload: { platform } }, document, { pointer: () => reports.push(true) });
+    Function('surface', 'state', 'document', 'bridge', 'indexFromTarget', source)(
+      'rail', { payload: { platform } }, document, { pointer: () => reports.push(true) }, node => node.index);
     handlers.get('mousemove')?.();
     handlers.get('mouseleave')?.();
     assert.equal(reports.length, platform === 'darwin' ? 2 : 0);
+    const one = { index: 1 }, two = { index: 2 };
+    handlers.get('pointerover')({ target: one, relatedTarget: null });
+    handlers.get('pointerover')({ target: { index: 1 }, relatedTarget: one });
+    handlers.get('pointerout')({ target: one, relatedTarget: two });
+    handlers.get('pointerover')({ target: two, relatedTarget: one });
+    handlers.get('pointerout')({ target: two, relatedTarget: null });
+    assert.equal(reports.length, platform === 'win32' ? 3 : 2);
   }
 });
 

@@ -90,6 +90,7 @@ function createEdgeDockController(deps) {
     applyShapeMask,
     installNonActivatingInput = () => {},
     primaryButtonDown = () => null,
+    onOpenHome,
     onToggleRateMode,
     onSwitchCodexAccount,
     canRefreshLimits = () => false,
@@ -552,7 +553,8 @@ function createEdgeDockController(deps) {
     const scale = dockScale();
     if (scale === 1) return layout;
     const toPage = (values) => values.map((value) => value / scale);
-    return { ...layout, tops: toPage(layout.tops), heights: toPage(layout.heights), length: layout.length / scale };
+    return { ...layout, tops: toPage(layout.tops), heights: toPage(layout.heights),
+      homeTop: layout.homeTop / scale, homeHeight: layout.homeHeight / scale, length: layout.length / scale };
   }
 
   function renderPayload(surface) {
@@ -1210,14 +1212,14 @@ function createEdgeDockController(deps) {
     if (!running) return;
     clearTimeout(pollTimer);
     const snapshot = intent.snapshot();
-    // The approach zone is on the way to the handle, and only the poll lets the
-    // handle take the pointer, so it runs at the active rate from there on.
-    const delay = edgeDockPollDelay({ drag, revealed: snapshot.revealed, near: peekNear });
+    // Poll outside the shaped windows too, and meet a pending Windows hover
+    // deadline without increasing the idle sampling rate.
+    const cadence = edgeDockPollDelay({ drag, revealed: snapshot.revealed, near: peekNear });
+    const delay = platform === 'win32' ? Math.min(cadence, Math.max(1, snapshot.checkAt - Date.now())) : cadence;
     pollTimer = setTimeout(poll, delay);
   }
 
   function poll() {
-    pollTimer = null;
     if (!running) return;
     try {
       const point = screen.getCursorScreenPoint();
@@ -1253,7 +1255,7 @@ function createEdgeDockController(deps) {
           inRail: revealed && (rectContains(current.rail, point) || inRefresh || inRefreshCorridor),
           inBubble: Boolean(bubbleRect && rectContains(bubbleRect, point)),
           inCorridor: Boolean(bubbleRect && rectContains(edgeDockCorridorBounds(current.rail, bubbleRect), point)),
-          cellIndex: revealed ? edgeDockCellAt(point, current.rail, cells.length, metrics()) : null
+          cellIndex: revealed && !inRefresh ? edgeDockCellAt(point, current.rail, cells.length, metrics()) : null
         };
         const enteredRail = input.inRail && !pointerOnRail;
         pointerOnRail = input.inRail;
@@ -1387,8 +1389,17 @@ function createEdgeDockController(deps) {
         showBubble(index);
       }
     });
+    ipcMain.on('edgeDock:openHome', (event) => {
+      if (surfaceFor(event.sender) === 'rail' && railVisible && !drag) onOpenHome?.();
+    });
     ipcMain.on('edgeDock:pointer', (event) => {
       const surface = surfaceFor(event.sender);
+      // Windows reports surface and cell crossings. Sample the actual cursor at
+      // the boundary so a deliberate hover needn't wait for the next idle poll.
+      if (platform === 'win32') {
+        if (surface && visibleTargets[surface] && !drag) poll();
+        return;
+      }
       if (surface === 'rail') { syncRailPointer(); return; }
       if (surface === 'bubble') { syncBubblePointer(); return; }
       if (surface !== 'peek' || peekMode !== 'handle' || drag) return;

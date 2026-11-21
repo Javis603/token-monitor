@@ -124,6 +124,26 @@ test('early appearance does not consume a plugin-dependent initial Limits prefer
   assert.equal(context.state.breakdown, 'limits');
 });
 
+test('an explicit Home request wins over a startup view preference that arrives later', () => {
+  const state = { settings: null, breakdown: 'project' };
+  const context = vm.createContext({
+    state, availableBreakdownIds: () => ['project', 'home'], els: { shell: { classList: { remove() {} } } },
+    syncModeSelect: null, syncContentForm: null, stopWindowShortcutRecording() {}, resetSettingsListSearch() {},
+    syncPluginLimitsDemand() {}, ensureServiceStatusTicker() {},
+    renderBreakdownChange: id => { state.breakdown = id; return true; },
+    VIEW_DISPLAY_OPTIONS: [{ id: 'project' }, { id: 'home' }],
+    effectiveViewDisplayOrderValue: () => 'project,home',
+    viewDisplayPreferencesApi: require('../../src/electron/renderer/viewDisplayPreferences'),
+    setBreakdown: id => { state.breakdown = id; }
+  });
+  const open = app.slice(app.indexOf('function openViewFromTray('), app.indexOf('\nconst HOME_HISTORY_MAX_RETRIES'));
+  const preference = app.slice(app.indexOf('function applyInitialBreakdownPreference('), app.indexOf('\nfunction renderSessionUsageArchiveStatus'));
+  vm.runInContext(`let initialBreakdownPreferenceApplied = false; ${open} ${preference}; openViewFromTray('home')`, context);
+  state.settings = { viewDisplayOrder: 'project,home', hiddenViews: '' };
+  vm.runInContext('applyInitialBreakdownPreference()', context);
+  assert.equal(state.breakdown, 'home');
+});
+
 function initialAppearance({ nativeHidden, windowVisible }) {
   let applied = 0;
   let signaled = 0;
