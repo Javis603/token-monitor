@@ -1,5 +1,6 @@
 'use strict';
 
+const { accountSelectionKey } = require('./accountScope');
 const { normalizeLimitProductId } = require('./products');
 const { staleAfterMsForSyncUpload } = require('../syncUploadInterval');
 const { LIMIT_PROVIDER_CATALOG, LIMIT_PROVIDER_IDS, VALID_LIMIT_WINDOW_METRICS } = require('./providers');
@@ -649,7 +650,7 @@ function providerFreshnessKey(provider) {
   return providerPolicies[provider.provider]?.freshnessKey?.(provider) || provider.provider;
 }
 
-function aggregateLimits(devices, staleAfterMs = 0, nowMs = Date.now()) {
+function aggregateLimits(devices, staleAfterMs = 0, nowMs = Date.now(), accountPresentation, links = []) {
   const aggregate = { updatedAt: new Date(nowMs).toISOString(), providers: [] };
   const multiAccountProviders = new Set((devices || []).flatMap(device =>
     normalizeLimitsSummary(device?.limits).multiAccountProviders || []));
@@ -717,10 +718,22 @@ function aggregateLimits(devices, staleAfterMs = 0, nowMs = Date.now()) {
     for (const row of omitted) suppressed.add(row);
   }
   const byProvider = new Map();
+  const candidates = new Map();
+  const linked = new Set(links.flatMap(pair => pair.keys.map(key => linkMemberId(pair.provider, pair.scope, key))));
   for (const candidate of byKey.values()) {
     if (suppressed.has(candidate)) continue;
     const multiAccount = multiAccountProviders.has(candidate.provider);
-    const knownAccount = candidate.accountKey && (multiAccount
+    const scope = accountPresentation && linkableAccount(candidate) ? linkScope(candidate) : '';
+    const id = scope ? linkMemberId(candidate.provider, scope, candidate.accountKey) : '';
+    const labelKey = accountPresentation && isConfiguredProvider(candidate)
+      ? accountSelectionKey(candidate.provider, candidate.accountKey, candidate.region) : '';
+    if (scope) candidates.set(id, {
+      provider: candidate.provider, accountKey: candidate.accountKey, scope,
+      labelKey, deviceId: candidate.sourceDeviceId, region: candidate.region
+    });
+    const explicitlyNamed = labelKey && Boolean(accountPresentation[candidate.provider]?.labels?.[labelKey]);
+    const named = explicitlyNamed || linked.has(id);
+    const knownAccount = candidate.accountKey && (named || multiAccount
       || providerPolicies[candidate.provider]?.preserveStaleAccount?.(candidate));
     const freshnessKey = providerFreshnessKey(candidate);
     // A keyless row says nothing once its lane has a configured account. A lane
@@ -735,7 +748,7 @@ function aggregateLimits(devices, staleAfterMs = 0, nowMs = Date.now()) {
       ? providersWithFreshConfiguredAccounts
       : providersWithConfiguredAccounts;
     if (!knownAccount && !isConfiguredProvider(candidate) && configuredProviders.has(freshnessKey)) continue;
-    const collapseKey = providerCollapseKey(candidate, multiAccount);
+    const collapseKey = providerCollapseKey(candidate, named || multiAccount);
     byProvider.set(collapseKey, pickBetterProvider(byProvider.get(collapseKey), candidate, multiAccount));
   }
   aggregate.providers = Array.from(byProvider.values())
@@ -746,7 +759,49 @@ function aggregateLimits(devices, staleAfterMs = 0, nowMs = Date.now()) {
       const bLabel = b.accountEmail || b.accountName || b.accountLabel || b.accountKey;
       return aLabel.localeCompare(bLabel);
     });
+  if (candidates.size) aggregate.linkCandidates = [...candidates.values()];
   return aggregate;
+}
+
+// Some portable identities are credential hashes. Two keys may still belong
+// to one account and can be linked explicitly when their quota lane agrees.
+const PORTABLE_CREDENTIAL_PROVIDERS = new Set(['deepseek', 'hark']);
+
+function linkableAccount(row) {
+  return isConfiguredProvider(row) && row.sourceDeviceId
+    && /^sha256:[a-f0-9]{64}$/.test(row.accountKey) && !row.accountKeyPortable
+    && !row.accountEmail && !row.relatedAccountKey
+    && (!PORTABLE_ACCOUNT_PROVIDERS.has(row.provider) || PORTABLE_CREDENTIAL_PROVIDERS.has(row.provider))
+    && providerPolicies[row.provider]?.canLinkAccount?.(row) !== false;
+}
+
+function linkScope(row) {
+  const products = [...new Set(row.windows.map(window => window.productId).filter(Boolean))].sort();
+  return JSON.stringify([row.region, row.source, row.adapterId || '', row.workspaceKind, products]);
+}
+
+// Confirmed links affect the selected reading only. Raw device observations
+// and their account keys stay intact so splitting a pair is reversible.
+function linkMemberId(provider, scope, key) {
+  return JSON.stringify([provider, scope, key]);
+}
+
+function withLimitAccountLinks(stats, document) {
+  const limitAccountLinks = document.value || [];
+  const { linkCandidates: limitAccountLinkCandidates, providers, ...limits } = stats.limits;
+  const eligible = new Map(providers.filter(linkableAccount)
+    .map(row => [linkMemberId(row.provider, linkScope(row), row.accountKey), row]));
+  const hidden = new Set();
+  for (const { provider, scope, keys } of limitAccountLinks) {
+    const [a, b] = keys.map(key => eligible.get(linkMemberId(provider, scope, key)));
+    if (!a || !b) continue;
+    const winner = betterProvider(a, b);
+    hidden.add(winner === a ? b : a);
+  }
+  return {
+    ...stats, limitAccountLinks, ...(limitAccountLinkCandidates ? { limitAccountLinkCandidates } : {}),
+    limits: { ...limits, providers: hidden.size ? providers.filter(row => !hidden.has(row)) : providers }
+  };
 }
 
 function publicLimits(limits) {
@@ -795,6 +850,7 @@ function syncLimits(limits) {
 module.exports = {
   DEFAULT_LIMITS_REFRESH_MS,
   aggregateLimits,
+  withLimitAccountLinks,
   isProviderStale,
   mergeCodexTransientWindows,
   normalizeLimitProvider,

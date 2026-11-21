@@ -3407,7 +3407,7 @@ async function requestSyncContent(context, pathname, method, body) {
     const hub = embeddedHub.hub;
     try {
       if (pathname === '/api/sync/content') return { status: 200, body: hub.getSyncContent() };
-      const match = pathname.match(/^\/api\/sync\/settings\/(modelAliases|customPricing|limitAccountPresentation)$/);
+      const match = pathname.match(/^\/api\/sync\/settings\/(modelAliases|customPricing|limitAccountPresentation|limitAccountLinks)$/);
       if (match) return { status: 200, body: { ok: true, ...(method === 'PUT'
         ? hub.setSyncSettings(match[1], body) : hub.getSyncSettings(match[1])) } };
       const titleMatch = pathname.match(/^\/api\/sync\/titles\/([^/]+)$/);
@@ -8435,7 +8435,10 @@ app.whenReady().then(() => {
         rows.push(...Object.values(result?.profiles || {}));
         if (result?.environmentAccountKey) rows.push({ accountKey: result.environmentAccountKey });
       }
-      return rows.map(row => row.accountKey || row.canonicalAccountKey).filter(Boolean);
+      const stats = currentHubStatsCache() || (settings.hubMode === 'host' ? embeddedHub?.hub.getStats() : null);
+      const candidates = stats?.limitAccountLinkCandidates || [];
+      return [...rows.map(row => row.accountKey || row.canonicalAccountKey),
+        ...candidates.filter(row => row.provider === provider).map(row => row.labelKey)].filter(Boolean);
     },
     write: (patch) => {
       const { limitProviders, limitsEnabled, ...slotPatch } = patch;
@@ -8473,6 +8476,14 @@ app.whenReady().then(() => {
         void queueLimitInvalidation({ provider, accountKey }, 'settings-change', { clear: true, refresh: false });
       }
     }
+  });
+  ipcMain.handle('limits:limitAccountLink', async (_event, input) => {
+    const context = syncContentContext();
+    if (!['client', 'host'].includes(context.mode) || !context.url) return { ok: false };
+    const stats = context.mode === 'host' ? embeddedHub?.hub.getStats() : currentHubStatsCache();
+    const { changeLimitAccountLink } = require('./limits/limitAccountLinks');
+    return changeLimitAccountLink(stats, input, settings.limitAccountPresentation || {},
+      payload => requestSyncContent(context, '/api/sync/settings/limitAccountLinks', 'PUT', payload));
   });
   for (const operation of ['list', 'add', 'replace', 'rename', 'setEnabled', 'remove', 'move', 'presentation']) {
     ipcMain.handle(`limits:accountSlots:${operation}`, (_event, ...args) => accountSlotService[operation](...args));

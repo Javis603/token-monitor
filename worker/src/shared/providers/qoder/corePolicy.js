@@ -47,4 +47,7 @@ function carryObservation(winner, loser, normalizeAliases) {
   return { ...winner, accountKeyPortable: true, ...(accountKeyAliases.length ? { accountKeyAliases } : {}) };
 }
 
-module.exports = { aggregateKey, collapseKey, preserveStaleAccount, suppressCandidates, carryObservation };
+/** @param {any} row */
+const canLinkAccount = row => row.accountKey !== DEFAULT_SLOT_KEY;
+
+module.exports = { canLinkAccount, aggregateKey, collapseKey, preserveStaleAccount, suppressCandidates, carryObservation };
