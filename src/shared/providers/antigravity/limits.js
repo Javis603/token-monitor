@@ -6,6 +6,7 @@ const { mergedOwnerAccounts } = require('../../limits/ownerAccountSlots');
 
 const antigravityOAuth = require('./oauth');
 const antigravityProbe = require('./probe');
+const { quotaGroupFromLabel } = require('./corePolicy');
 const {
   normalizeLimitProvider
 } = require('../../limits/core');
@@ -19,8 +20,7 @@ const {
 
 function groupedWindowGroupKey(window) {
   if (typeof window?.windowMinutes !== 'number') return '';
-  const match = String(window?.label || '').trim().match(/^(.+?)\s+(?:5-hour|weekly)$/i);
-  return match ? match[1].trim().toLowerCase() : '';
+  return quotaGroupFromLabel(window.label).toLowerCase();
 }
 
 function mergeMissingOAuthGroups(local, existing) {
@@ -50,6 +50,7 @@ function mapAntigravitySnapshot(snapshot, { nowMs, source = 'rpc', account = nul
   const accountEmail = String(snapshot?.accountEmail || account?.accountEmail || '').trim().toLowerCase();
   const accountLabel = snapshot?.accountPlan ? antigravityPlanLabelFromParts(snapshot.accountPlan) : '';
   const accountKeySeed = accountEmail || snapshot?.accountPlan || account?.id || 'default';
+  const legacyPools = source === 'oauth' ? snapshot?.pools || [] : [];
   const windows = Array.isArray(snapshot?.windows)
     ? snapshot.windows.map((window) => ({
         kind: window.kind,
@@ -62,7 +63,7 @@ function mapAntigravitySnapshot(snapshot, { nowMs, source = 'rpc', account = nul
         windowMinutes: window.kind === 'session' ? 300 : window.kind === 'weekly' ? 10_080 : null,
         showMeter: window.showMeter !== false
       }))
-    : (snapshot?.pools || []).map((pool) => ({
+    : legacyPools.map((pool) => ({
         kind: 'weekly',
         label: pool.name,
         usedPercent: Number.isFinite(pool.remainingFraction)
@@ -161,20 +162,10 @@ async function fetchAntigravityLimits(options = {}, deps = {}) {
   const providers = [...remote];
   if (local?.accountKey) {
     const duplicateIndex = providers.findIndex((provider) => provider.accountKey === local.accountKey);
-    if (duplicateIndex >= 0) {
-      const existing = providers[duplicateIndex];
-      const existingHasGrouped = (existing.windows || []).some((w) => typeof w.windowMinutes === 'number');
-      const localHasGrouped = (local.windows || []).some((w) => typeof w.windowMinutes === 'number');
-      const localIsHealthy = local.status === 'ok';
-      if (localIsHealthy && (localHasGrouped || !existingHasGrouped)) {
-        providers.splice(
-          duplicateIndex,
-          1,
-          localHasGrouped && existingHasGrouped ? mergeMissingOAuthGroups(local, existing) : local
-        );
-      }
-    } else {
+    if (duplicateIndex < 0) {
       providers.unshift(local);
+    } else if (local.status === 'ok') {
+      providers[duplicateIndex] = mergeMissingOAuthGroups(local, providers[duplicateIndex]);
     }
   }
   return providers;
