@@ -1,7 +1,7 @@
 // @ts-check
 'use strict';
 
-const { hiddenLinkedLimitReadings, isProviderStale, limitAccountLinkScope } = require('../../shared/limits/core');
+const { aggregateLimits, hiddenLinkedLimitReadings, withLimitAccountLinks } = require('../../shared/limits/core');
 const { normalizeSharedSyncValue } = require('../../shared/syncContent');
 const KIND = 'limitAccountLinks';
 
@@ -40,26 +40,17 @@ async function changeLimitAccountLink(stats, input, presentation, write) {
 function limitsForAccountHistory(stats) {
   const { limits } = stats;
   if (!stats.limitAccountLinks?.length || !limits?.providers) return limits;
-  const hiddenReadings = stats[hiddenLinkedLimitReadings];
-  if (hiddenReadings) return { ...limits, providers: [...limits.providers, ...hiddenReadings] };
-  const nowMs = Date.parse(limits.updatedAt) || Date.now();
-  const hidden = [];
-  for (const pair of stats.limitAccountLinks) {
-    const keys = new Set(limits.providers.filter((/** @type {any} */ row) => row.provider === pair.provider
-      && pair.keys.includes(row.accountKey) && limitAccountLinkScope(row) === pair.scope)
-      .map((/** @type {any} */ row) => row.accountKey));
-    if (keys.size !== 1) continue;
-    const member = stats.limitAccountLinkCandidates?.find((/** @type {any} */ row) => row.provider === pair.provider
-      && row.scope === pair.scope && pair.keys.includes(row.accountKey) && !keys.has(row.accountKey));
-    if (!member) continue;
-    const device = stats.devices?.find((/** @type {any} */ row) => row.deviceId === member.deviceId);
-    const reading = device?.limits?.providers?.find((/** @type {any} */ row) => row.provider === pair.provider
-      && row.accountKey === member.accountKey && limitAccountLinkScope(row) === pair.scope);
-    if (!reading) continue;
-    hidden.push({ ...reading, sourceDeviceId: device.deviceId,
-      stale: isProviderStale(reading, device.limits, device, stats.staleAfterMs || 0, nowMs) });
+  let hidden = stats[hiddenLinkedLimitReadings];
+  if (!hidden && stats.devices?.length) {
+    // A remote snapshot cannot carry the process-local readings. Rebuild the
+    // pair from its devices so same-account observations can contribute a
+    // balance or other carried data before choosing the hidden reading.
+    const links = stats.limitAccountLinks;
+    const nowMs = Date.parse(limits.updatedAt) || Date.now();
+    const unlinked = aggregateLimits(stats.devices, stats.staleAfterMs || 0, nowMs, {}, links);
+    hidden = withLimitAccountLinks({ limits: unlinked }, { value: links })[hiddenLinkedLimitReadings];
   }
-  return hidden.length ? { ...limits, providers: [...limits.providers, ...hidden] } : limits;
+  return hidden?.length ? { ...limits, providers: [...limits.providers, ...hidden] } : limits;
 }
 
 module.exports = { changeLimitAccountLink, limitsForAccountHistory };
