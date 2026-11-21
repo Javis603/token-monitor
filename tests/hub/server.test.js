@@ -150,9 +150,9 @@ test('ingest, devices, and history share the same header gate', async () => {
   }
 });
 
-test('health exposes the Node Hub build identity without authentication', async () => {
+test('health exposes the Node Hub build identity and App deployment without authentication', async () => {
   const dataFile = tempDataFile();
-  const hub = createHub({ port: 0, host: '127.0.0.1', secret: 'shh', dataFile, logger: { error() {}, warn() {} } });
+  const hub = createHub({ port: 0, host: '127.0.0.1', deployment: 'app', secret: 'shh', dataFile, logger: { error() {}, warn() {} } });
   await hub.start();
   try {
     const { port } = hub.server.address();
@@ -160,6 +160,7 @@ test('health exposes the Node Hub build identity without authentication', async 
     const health = await response.json();
     assert.equal(response.status, 200);
     assert.equal(health.runtime, 'node-hub');
+    assert.equal(health.deployment, 'app');
     assert.equal(health.hubBuild.runtime, 'node-hub');
     assert.match(health.hubBuild.coreBuildId, /^sha256:[a-f0-9]{64}$/);
     assert.match(health.hubBuild.runtimeBuildId, /^sha256:[a-f0-9]{64}$/);

@@ -3037,6 +3037,7 @@ async function startEmbeddedHub() {
     }
     const hub = createHub({
       port,
+      deployment: 'app',
       host: '0.0.0.0',
       secret: settings.hubHostSecret,
       syncSessionTitles: settings.hubSyncSessionTitles === true,

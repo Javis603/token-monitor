@@ -445,7 +445,7 @@ async function fetchCopilotAccountLimits(options = {}, deps = {}) {
     }
     const credentialKey = copilotAccountKey(token, enterpriseHost);
     const accountKey = options.accountKey || (accountSeed ? copilotAccountKey(accountSeed, enterpriseHost) : remembered?.accountKey) || credentialKey;
-    const verified = accountKey !== credentialKey || Boolean(accountSeed || options.accountName || remembered?.accountName);
+    const verified = accountKey !== credentialKey;
     return mapCopilotUsageToProvider(usage, {
       accountKey,
       ...(verified || normalizedEnterpriseHost(enterpriseHost) === COPILOT_DEFAULT_HOST ? { accountKeyPortable: verified } : {}),

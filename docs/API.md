@@ -28,6 +28,8 @@ During Node Hub shutdown, new requests are rejected with `503`, `{ "error": "hub
 
 Health check. Does not require authentication.
 
+Node Hubs may report a top-level `deployment` field. `app` identifies an instance started by Token Monitor's Host mode, and `standalone` identifies an instance started by the standalone command. Clients display the generic Node Hub label when the value is missing or unrecognized. The `runtime` and `hubBuild.runtime` values for both deployments are `node-hub`.
+
 Example response:
 
 ```json
