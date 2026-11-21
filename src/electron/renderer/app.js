@@ -828,7 +828,7 @@ let displaySettings = null;
 function applySettingsSectionDom(id, open) {
   if (id === 'sync' && !open) { syncModeSelect?.close(); syncContentForm?.closeHelp(); }
   if (id === 'appearance' && !open) appearanceColorPicker.close();
-  if (id === 'window' && !open) stopWindowShortcutRecording();
+  if (id === 'window' && !open) { stopWindowShortcutRecording(); displaySettings?.close?.(); }
   const toggle = document.querySelector(`[data-settings-section="${id}"]`);
   const details = document.getElementById(`${id}SettingsDetails`);
   const group = toggle?.closest('.settings-collapsible-group');
@@ -6481,6 +6481,9 @@ function openViewFromTray(viewId) {
   syncModeSelect?.close();
   syncContentForm?.closeHelp();
   appearanceColorPicker.close();
+  // Every later open, including Home's Customize shortcuts, starts on the main
+  // window tile; openSettingsPanel('notch') still deep-links past it.
+  displaySettings?.reset();
   els.settingsPanel?.classList.add('hidden');
   els.shell.classList.remove('settings-open');
   state.untrackedWithDataProbed = null;
@@ -11225,7 +11228,7 @@ function renderHomeLimitProviderList() {
   page.className = 'main-view-subpage';
   const back = document.createElement('button');
   back.type = 'button';
-  back.className = 'display-settings-back main-view-back';
+  back.className = 'main-view-back';
   back.textContent = t('views.home');
   back.addEventListener('click', () => setHomeLimitProvidersOpen(false));
   const title = document.createElement('strong');
@@ -14854,6 +14857,7 @@ els.settingsButton.addEventListener('click', (event) => {
     syncModeSelect?.close();
     syncContentForm?.closeHelp();
     appearanceColorPicker.close();
+    displaySettings?.reset();
     resetSettingsListSearch();
     stopWindowShortcutRecording();
     state.untrackedWithDataProbed = null;
@@ -17305,7 +17309,6 @@ function refreshTrayComposers() {
     createTrayComposer
   );
   Object.values(trayComposers).forEach((composer) => composer?.refresh());
-  displaySettings?.refreshLivePreview();
   syncCustomTrayClockTimer();
 }
 
@@ -18226,14 +18229,11 @@ setupSettingsAccordion(
   document.getElementById('syncContentDetails'), expanded => syncContentForm.setExpanded(expanded)
 );
 setupSettingsSections();
-const displaySettingsPreview = window.TokenMonitorDisplaySettingsPreview.create({
-  window, document, bridge: window.tokenMonitor, settings: () => state.settings,
-  bitmap: trayComposerPreview, stats: () => state.stats, t
-});
 displaySettings = window.TokenMonitorDisplaySettings.create({
   document, root: document.getElementById('windowSettingsDetails').querySelector('.settings-section-details-inner'),
-  scrollPanel: els.settingsPanel, t, platform: () => state.appInfo?.platform, settings: () => state.settings,
-  preview: displaySettingsPreview.show, cancelScroll: cancelSettingsScrollAnchorOnInteraction,
+  t, platform: () => state.appInfo?.platform, settings: () => state.settings,
+  helpPopover: window.TokenMonitorHelpPopover,
+  cancelScroll: cancelSettingsScrollAnchorOnInteraction,
   stopWindowShortcutRecording
 });
 let legacyAccountOwners;

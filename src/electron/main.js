@@ -8280,10 +8280,6 @@ app.whenReady().then(() => {
     }
     return true;
   });
-  ipcMain.handle('settings:displayPreview', (event, surface, phase, slots) => {
-    if (event.sender !== mainWindow?.webContents) return null;
-    return require('./displayPreview').buildDisplayPreview(settingsForRenderer(), surface, phase, process.platform, Date.now(), slots, pluginRuntime?.limitsSnapshot());
-  });
   ipcMain.on('window:viewState', (_event, patch) => {
     updateRendererViewState(patch);
   });

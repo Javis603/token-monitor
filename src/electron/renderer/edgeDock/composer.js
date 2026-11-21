@@ -167,7 +167,7 @@
       button.setAttribute('aria-pressed', String(ui.selected === id));
       button.append(markFor(item));
       button.addEventListener('click', () => {
-        ui.selected = ui.selected === id ? '' : id;
+        ui.selected = !limitsOnly ? id : (ui.selected === id ? '' : id);
         ui.menuOpen = false;
         render();
       });
@@ -493,6 +493,7 @@
       const allItems = [...effectiveItems(), ...(refreshEnabled() ? [refreshItem] : [])];
       const items = allItems.filter(itemAvailable);
       if (ui.selected && !items.some((item) => idFor(item) === ui.selected)) ui.selected = '';
+      if (!limitsOnly && !ui.menuOpen && !ui.selected && items.length) ui.selected = idFor(items[0]);
       const selectedItem = items.find((item) => idFor(item) === ui.selected);
       // A stats tick can change token totals without changing any control here.
       // Replacing a focused picker on every tick interrupts its selection.
