@@ -17042,7 +17042,7 @@
       'settings.edgeDock.items': 'Itens',
       'settings.edgeDock.addSessions': 'Sessões',
       'settings.edgeDock.addActions': 'Ações',
-      'settings.edgeDock.refreshNote': 'Executa a mesma atualização do app sem abri-lo. Aparece ao abrir o Edge Dock ou passar o cursor sobre ela.',
+      'settings.edgeDock.refreshNote': 'Executa a mesma atualização do app sem abri-lo. Aparece ao abrir o Edge Dock ou passar o cursor sobre ele.',
       "settings.notch.limitsHint": "Escolha e ordene os provedores exibidos nas páginas Início e Limites.",
       "settings.notch.accountTitle": "Conta a exibir",
       "settings.notch.refreshNote": "Botão de atualização no canto superior direito do painel aberto.",

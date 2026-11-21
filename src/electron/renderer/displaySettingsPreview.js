@@ -13,9 +13,9 @@
       if (!entry.data || !entry.frame || entry.stage.clientWidth <= 0) return;
       const { width, height, previewHeight = height, scale: size = 1, align } = entry.data;
       // One fixed scene scale for the notch so changing its size remains visible.
-      // Both edge-dock orientations are drawn at the same scale, measured on the
-      // sample's long side, so a top or bottom bar does not dwarf the side rail
-      // it sits next to in the same panel.
+      // Both edge-dock orientations fit their long side to the same length, so a
+      // top or bottom bar does not dwarf the side rail it sits next to in the
+      // same panel. The factors differ; the drawn length is what matches.
       const scale = entry.surface === 'notch' ? Math.min(1, entry.stage.clientWidth / 740)
         : Math.min(.9 * size, 220 / Math.max(width, height), entry.stage.clientWidth / width);
       const frame = entry.frame;
