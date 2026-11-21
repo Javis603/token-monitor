@@ -10436,3 +10436,4 @@ button.slot-device-toggle { width: 100%; min-height: 0; padding: 0; border: 0; b
 .account-link-action { padding: 8px 0 12px; }
 .account-link-action > .settings-note { margin: 0 0 6px; }
 .account-link-action > .settings-actions { margin: 0; }
+.account-link-action button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
