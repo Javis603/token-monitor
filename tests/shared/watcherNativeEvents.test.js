@@ -205,6 +205,40 @@ test('native file events reach a watcher on this platform', async () => {
   }
 });
 
+test('native watcher reports size-only writes while the writing handle stays open', async () => {
+  const dir = withTmpDir();
+  const file = path.join(dir, 'session.jsonl');
+  const mtime = new Date('2000-01-01T00:00:00Z');
+  const atime = new Date('2000-01-02T00:00:00Z');
+  fs.writeFileSync(file, '{"tokens":1}\n');
+  fs.utimesSync(file, atime, mtime);
+  const fd = fs.openSync(file, 'r+');
+  try {
+    await watchAndCollect(dir, async ({ waitForEvent }) => {
+      for (const operation of ['append', 'truncate']) {
+        const observed = waitForEvent(
+          (event, filePath) => event === 'change' && samePath(filePath, file),
+          `a size-only ${operation}`
+        );
+        const before = fs.fstatSync(fd);
+        if (operation === 'append') fs.writeSync(fd, '{"tokens":2}\n', before.size);
+        else fs.ftruncateSync(fd, 0);
+        // Model Windows' deferred mtime deterministically on every CI platform.
+        // Both operations finish before yielding to the native event callback.
+        fs.futimesSync(fd, atime, mtime);
+        const after = fs.fstatSync(fd);
+        assert.notEqual(after.size, before.size);
+        assert.equal(after.mtimeMs, before.mtimeMs);
+        assert.ok(after.atimeMs > after.mtimeMs);
+        await observed;
+      }
+    });
+  } finally {
+    fs.closeSync(fd);
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test('native file events reach a subdirectory created after the watch started', async () => {
   // The realistic hot path, and the one a per-directory backend can miss:
   // clients write into a fresh project directory (~/.claude/projects/<new>/)

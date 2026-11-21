@@ -1,0 +1,44 @@
+diff --git a/node_modules/chokidar/esm/handler.js b/node_modules/chokidar/esm/handler.js
+index bbda010..8691d66 100644
+--- a/node_modules/chokidar/esm/handler.js
++++ b/node_modules/chokidar/esm/handler.js
+@@ -357,7 +357,7 @@ export class NodeFsHandler {
+                     // Check that change event was not fired because of changed only accessTime.
+                     const at = newStats.atimeMs;
+                     const mt = newStats.mtimeMs;
+-                    if (!at || at <= mt || mt !== prevStats.mtimeMs) {
++                    if (!at || at <= mt || mt !== prevStats.mtimeMs || newStats.size !== prevStats.size) {
+                         this.fsw._emit(EV.CHANGE, file, newStats);
+                     }
+                     if ((isMacos || isLinux || isFreeBSD) && prevStats.ino !== newStats.ino) {
+@@ -381,7 +381,7 @@ export class NodeFsHandler {
+                 // Check that change event was not fired because of changed only accessTime.
+                 const at = newStats.atimeMs;
+                 const mt = newStats.mtimeMs;
+-                if (!at || at <= mt || mt !== prevStats.mtimeMs) {
++                if (!at || at <= mt || mt !== prevStats.mtimeMs || newStats.size !== prevStats.size) {
+                     this.fsw._emit(EV.CHANGE, file, newStats);
+                 }
+                 prevStats = newStats;
+diff --git a/node_modules/chokidar/handler.js b/node_modules/chokidar/handler.js
+index 9c2ef28..801a677 100644
+--- a/node_modules/chokidar/handler.js
++++ b/node_modules/chokidar/handler.js
+@@ -362,7 +362,7 @@ class NodeFsHandler {
+                     // Check that change event was not fired because of changed only accessTime.
+                     const at = newStats.atimeMs;
+                     const mt = newStats.mtimeMs;
+-                    if (!at || at <= mt || mt !== prevStats.mtimeMs) {
++                    if (!at || at <= mt || mt !== prevStats.mtimeMs || newStats.size !== prevStats.size) {
+                         this.fsw._emit(EV.CHANGE, file, newStats);
+                     }
+                     if ((exports.isMacos || exports.isLinux || exports.isFreeBSD) && prevStats.ino !== newStats.ino) {
+@@ -386,7 +386,7 @@ class NodeFsHandler {
+                 // Check that change event was not fired because of changed only accessTime.
+                 const at = newStats.atimeMs;
+                 const mt = newStats.mtimeMs;
+-                if (!at || at <= mt || mt !== prevStats.mtimeMs) {
++                if (!at || at <= mt || mt !== prevStats.mtimeMs || newStats.size !== prevStats.size) {
+                     this.fsw._emit(EV.CHANGE, file, newStats);
+                 }
+                 prevStats = newStats;
