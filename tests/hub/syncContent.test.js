@@ -425,6 +425,8 @@ test('Node CLI: camel/kebab flags override server environment with explicit fals
         if (error.code !== 'EADDRINUSE' || attempt === 2) throw error;
       }
     }
+    const health = await fetch(`http://127.0.0.1:${port}/api/health`, { signal: AbortSignal.timeout(5000) });
+    assert.equal((await health.json()).deployment, 'standalone');
     const response = await fetch(`http://127.0.0.1:${port}/api/sync/content`, {
       headers: { authorization: 'Bearer secret' }, signal: AbortSignal.timeout(5000)
     });
