@@ -339,9 +339,9 @@ async function probe(sessionToken, opts = {}) {
   const configuredTimeoutMs = Number.isFinite(opts.timeoutMs) ? opts.timeoutMs : 15000;
   const cache = opts.providerRuntimeState;
   const cacheKey = cache && `cursor-user-info:${hashKey(sessionToken)}`;
-  const now = opts.now || Date.now;
+  const nowMs = () => Number((opts.now || Date.now)());
   const cached = cache?.get(cacheKey);
-  const cachedUser = cached && cached.expiresAt > now() ? cached.user : null;
+  const cachedUser = cached && cached.expiresAt > nowMs() ? cached.user : null;
   // Grok Bot and plan info are best effort: neither may fail the account row.
   const grokBotResultPromise = dashboardRpc(SAND_USAGE_URL, sessionToken, opts, configuredTimeoutMs);
   const planInfoResultPromise = dashboardRpc(PLAN_INFO_URL, sessionToken, opts, configuredTimeoutMs);
@@ -355,7 +355,7 @@ async function probe(sessionToken, opts = {}) {
   }
   const user = cachedUser || parseUserInfo(userResult?.ok ? userResult.json : null);
   if (!cachedUser && user.sub && !opts.signal?.aborted) {
-    cache?.set(cacheKey, { user, expiresAt: now() + USER_INFO_TTL_MS });
+    cache?.set(cacheKey, { user, expiresAt: nowMs() + USER_INFO_TTL_MS });
   }
   let requestUsage = null;
   if (user.sub) {

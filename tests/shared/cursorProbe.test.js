@@ -272,6 +272,14 @@ test('probe caches Cursor identity while refreshing legacy request usage', async
   calls.length = 0;
   await probe('tok', deps);
   assert.ok(calls.some(call => call.path === '/api/auth/me'));
+
+  calls.length = 0;
+  const dateClock = { ...deps, now: () => new Date(now) };
+  await probe('date-clock-token', dateClock);
+  assert.ok(calls.some(call => call.path === '/api/auth/me'));
+  calls.length = 0;
+  assert.deepEqual(await probe('date-clock-token', dateClock), result);
+  assert.equal(calls.length, 4);
 });
 
 test('probe treats Grok Bot as a best-effort optional request', async () => {
