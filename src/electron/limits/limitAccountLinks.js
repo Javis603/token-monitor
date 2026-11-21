@@ -1,7 +1,7 @@
 // @ts-check
 'use strict';
 
-const { isProviderStale, limitAccountLinkScope } = require('../../shared/limits/core');
+const { hiddenLinkedLimitReadings, isProviderStale, limitAccountLinkScope } = require('../../shared/limits/core');
 const { normalizeSharedSyncValue } = require('../../shared/syncContent');
 const KIND = 'limitAccountLinks';
 
@@ -40,6 +40,8 @@ async function changeLimitAccountLink(stats, input, presentation, write) {
 function limitsForAccountHistory(stats) {
   const { limits } = stats;
   if (!stats.limitAccountLinks?.length || !limits?.providers) return limits;
+  const hiddenReadings = stats[hiddenLinkedLimitReadings];
+  if (hiddenReadings) return { ...limits, providers: [...limits.providers, ...hiddenReadings] };
   const nowMs = Date.parse(limits.updatedAt) || Date.now();
   const hidden = [];
   for (const pair of stats.limitAccountLinks) {

@@ -318,7 +318,7 @@ const {
 } = require('./macWidget/historyStore');
 const { createMacWidgetLaunchServicesRecovery } = require('./macWidget/launchServicesRecovery');
 const { projectLimitStatsForDisplay } = require('./limits/statsPresentation');
-const { changeLimitAccountLink, limitsForAccountHistory } = require('./limits/limitAccountLinks');
+const { changeLimitAccountLink } = require('./limits/limitAccountLinks');
 const { DEFAULT_WIDGET_KIND, requestMacWidgetReload, resetMacWidgetReloadThrottle } = require('./macWidget/reloader');
 const { WIDGET_DEMAND_MARKER, WIDGET_DEMAND_PROVISIONAL_MARKER, createMacWidgetDemandState } = require('./macWidget/demand');
 const linuxAutostart = require('./linuxAutostart');
@@ -4586,7 +4586,7 @@ function sendPush(payload, options = {}) {
     getSyncContentRuntime().notifyStats(latestStats);
     getAccountPresentationSync().notifyStats(latestStats);
     const visibleStats = electronPresentationStats(latestStats);
-    getLimitsHistoryStore().record(currentHubStatsIdentity(), limitsForAccountHistory(visibleStats));
+    getLimitsHistoryStore().record(currentHubStatsIdentity(), visibleStats.limits, visibleStats);
     limitsHistoryController?.refresh();
     migrateCodexAdditionalLimits(visibleStats);
     if (wantsRenderer) {
