@@ -45,7 +45,7 @@ Requests use the injected limits transport, `credentials: 'omit'`, and rejected 
 - The allowance's `basic_ai_credits` units are neither measured tokens nor a money balance. Do not attach the shared `credits` money metric, currency or token estimates to them.
 - Custom Agents, Workers and premium-model credit pools are outside this integration. No credits-pool endpoint is queried or inferred from the per-user allowance.
 - HTTP 401 and ordinary 403 reject the session; a 403 explicitly marked `cf-mitigated: challenge` is unavailable and preserves last-good readings through the shared runtime. Error bodies are never inspected or forwarded.
-- One explicit cookie/workspace pair is configured per device. Distinct workspace accounts can be observed on separate devices; this does not add a multiple-workspace picker or automatic account import.
+- Each local account slot holds an explicit cookie/workspace pair. Existing fixed credentials migrate automatically, copying the workspace setting so environment credentials can still use it. Separate slots can track different users or workspaces; workspace discovery remains explicit and no automatic account import is provided.
 - Account identity requires verified user and workspace IDs. Never replace them with an email, a workspace name, the cookie value, or a fallback workspace selected from `getSpaces`.
 
 ## Verification

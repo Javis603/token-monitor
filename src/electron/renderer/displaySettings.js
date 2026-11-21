@@ -15,7 +15,7 @@
     interaction: ['notchHideSummaryInFullScreenInput', 'edgeDockModeLabel', 'notchHoverActionLabel', 'notchHoverDelayRow', 'notchHapticInput', 'edgeDockHapticInput', 'floatingBubbleTriggerRow', 'notchSwipeGesturesInput', 'trayModeInput', 'trayOptions', 'hideAppIconRow', 'hideAppIconOptions'],
     appearance: ['edgeDockSideLabel', 'edgeDockSizeLabel', 'edgeDockCustomScaleRow', 'edgeDockBubbleSizeLabel', 'edgeDockBubbleCustomScaleRow', 'notchSizeLabel', 'notchCustomScaleRow', 'notchShapeLabel', 'notchStyleInput', 'edgeDockMacBackdropRow', 'edgeDockWindowsBackdropRow', 'notchProgressiveBlurInput']
   };
-  function create({ document, root, scrollPanel, t, platform, settings = () => ({}), preview, cancelScroll }) {
+  function create({ document, root, scrollPanel, t, platform, settings = () => ({}), preview, cancelScroll, stopWindowShortcutRecording }) {
     if (!root) return null;
     const make = (tag, className, key) => {
       const node = document.createElement(tag); node.className = className;
@@ -26,7 +26,6 @@
     const container = make('div', 'display-settings');
     const overview = make('div', 'display-settings-overview');
     const main = root.querySelector('.settings-window-group');
-    overview.append(main);
     const list = make('div', 'display-settings-list'); overview.append(list);
     const detail = make('div', 'display-settings-detail'); detail.hidden = true;
     const back = make('button', 'display-settings-back', 'settings.displayModes.back');
@@ -55,9 +54,57 @@
         select(buttons[next]); buttons[next].focus({ preventScroll: true });
       });
     }
+    function registerPage(surface, page, input) {
+      const row = make('div', 'display-settings-row');
+      const openButton = make('button', 'display-settings-open');
+      const thumb = make('span', `display-settings-thumb display-settings-thumb-${surface.short}`);
+      thumb.setAttribute('aria-hidden', 'true');
+      thumb.append(make('i', ''));
+      const labels = make('span', 'display-settings-labels');
+      const summary = make('span', 'settings-item-desc', input ? `settings.displayModes.${surface.short}Note` : undefined);
+      labels.append(make('span', 'settings-item-title', surface.title), summary);
+      openButton.append(thumb, labels);
+      openButton.addEventListener('click', () => open(surface.id));
+      row.append(openButton);
+      let toggle;
+      if (input) {
+        toggle = make('input', '');
+        toggle.type = 'checkbox';
+        toggle.addEventListener('change', () => {
+          input.checked = toggle.checked;
+          input.dispatchEvent(new Event('change', { bubbles: true }));
+          sync();
+        });
+        const toggleLabel = make('label', 'checkbox-label display-settings-switch');
+        toggleLabel.append(toggle);
+        row.append(toggleLabel);
+      }
+      list.append(row);
+      const tab = make('button', '', `settings.displayModes.${surface.short}`);
+      tab.id = `display-tab-${surface.id}`;
+      tab.setAttribute('role', 'tab');
+      tab.setAttribute('aria-controls', page.id);
+      page.setAttribute('aria-labelledby', tab.id);
+      tab.addEventListener('click', () => open(surface.id));
+      quick.append(tab);
+      const entry = { surface, input, page, tab, row, toggle, openButton, summary };
+      entries.set(surface.id, entry);
+      return entry;
+    }
+    const mainSurface = { id: 'main', title: 'settings.displayModes.main', short: 'main' };
+    const mainPage = make('section', 'display-settings-page display-settings-page-flat');
+    mainPage.id = 'display-page-main';
+    mainPage.hidden = true;
+    mainPage.setAttribute('role', 'tabpanel');
+    const mainTitle = make('div', 'display-settings-title settings-item');
+    mainTitle.append(make('span', 'settings-item-title', mainSurface.title));
+    mainPage.append(mainTitle, main);
+    content.append(mainPage);
+    const mainEntry = registerPage(mainSurface, mainPage);
+    const mainBehavior = main.querySelector('#windowBehaviorInput');
+
     for (const surface of SURFACES) {
       const input = document.getElementById(surface.input);
-      const feature = input.closest('.presence-feature');
       const page = make('section', 'display-settings-page'); page.id = `display-page-${surface.id}`; page.hidden = true;
       page.setAttribute('role', 'tabpanel');
       const flat = ['floatingBubble', 'tray'].includes(surface.id);
@@ -108,23 +155,8 @@
         }
       }
       page.append(title, stage, states, note, tabs, ...Object.values(groups)); content.append(page);
-      const row = make('div', 'display-settings-row');
-      const openButton = make('button', 'display-settings-open');
-      const thumb = make('span', `display-settings-thumb display-settings-thumb-${surface.short}`); thumb.setAttribute('aria-hidden', 'true');
-      // Only indicates screen position. Detailed previews use the actual renderer.
-      thumb.append(make('i', ''));
-      const labels = make('span', 'display-settings-labels');
-      labels.append(make('span', 'settings-item-title', surface.title), make('span', 'settings-item-desc', `settings.displayModes.${surface.short}Note`));
-      openButton.append(thumb, labels); openButton.addEventListener('click', () => open(surface.id));
-      const toggle = make('input', ''); toggle.type = 'checkbox';
-      toggle.addEventListener('change', () => { input.checked = toggle.checked; input.dispatchEvent(new Event('change', { bubbles: true })); sync(); });
-      const toggleLabel = make('label', 'checkbox-label display-settings-switch'); toggleLabel.append(toggle);
-      row.append(openButton, toggleLabel); list.append(row);
-      const tab = make('button', '', `settings.displayModes.${surface.short}`); tab.id = `display-tab-${surface.id}`;
-      tab.setAttribute('role', 'tab'); tab.setAttribute('aria-controls', page.id); page.setAttribute('aria-labelledby', tab.id);
-      tab.addEventListener('click', () => open(surface.id)); quick.append(tab);
-      const entry = { flat, surface, feature, input, page, stage, note, groups, tabs, tab, row, toggle, openButton, phase: 'open' };
-      entries.set(surface.id, entry);
+      const entry = registerPage(surface, page, input);
+      Object.assign(entry, { flat, stage, note, groups, tabs, phase: 'open' });
       for (const button of tabs.children) button.hidden = !groups[button.dataset.category].childElementCount;
       chooseCategory(surface.id, 'content');
       wireArrows(tabs, button => chooseCategory(surface.id, button.dataset.category));
@@ -133,11 +165,16 @@
     container.append(overview, detail); root.append(container);
     wireArrows(quick, button => open([...entries].find(([, entry]) => entry.tab === button)[0]));
     function available(id) { return id === 'notch' ? platform() === 'darwin' : id !== 'edgeDock' || ['darwin', 'win32'].includes(platform()); }
-    function updatePreview(force = false) { if (scrollPanel.classList.contains('hidden') || root.closest('.settings-section-details')?.classList.contains('hidden')) return; if (active) { const entry = entries.get(active); preview?.(active, entry.stage, entry.phase, { force }); } }
+    function updatePreview(force = false) {
+      if (scrollPanel.classList.contains('hidden') || root.closest('.settings-section-details')?.classList.contains('hidden')) return;
+      const entry = entries.get(active);
+      if (entry?.stage) preview?.(active, entry.stage, entry.phase, { force });
+    }
     function open(id) {
       if (!entries.has(id) || !available(id)) return;
       cancelScroll?.();
       if (!active) overviewScroll = scrollPanel.scrollTop;
+      if (active === 'main' && id !== active) stopWindowShortcutRecording?.();
       active = id; overview.hidden = true; detail.hidden = false;
       for (const [key, entry] of entries) {
         entry.page.hidden = key !== id;
@@ -150,6 +187,7 @@
     }
     function close() {
       if (!active) return;
+      if (active === 'main') stopWindowShortcutRecording?.();
       cancelScroll?.(); const previous = entries.get(active); active = null;
       overview.hidden = false; detail.hidden = true;
       scrollPanel.scrollTop = overviewScroll; previous.openButton.focus({ preventScroll: true });
@@ -162,10 +200,14 @@
       if (active && !available(active)) close();
       for (const [id, entry] of entries) {
         entry.row.hidden = entry.tab.hidden = !available(id);
-        entry.toggle.checked = entry.input.checked; entry.toggle.setAttribute('aria-label', t(entry.surface.title));
+        if (entry.toggle) {
+          entry.toggle.checked = entry.input.checked;
+          entry.toggle.setAttribute('aria-label', t(entry.surface.title));
+        }
         if (id === 'tray') entry.note.dataset.i18n = platform() === 'linux' ? 'settings.displayModes.desktopPreview' : 'settings.displayModes.currentPreview';
       }
       for (const node of container.querySelectorAll('[data-i18n]')) node.textContent = t(node.dataset.i18n);
+      mainEntry.summary.textContent = t(mainBehavior.selectedOptions[0].dataset.i18n);
       quick.setAttribute('aria-label', t('settings.displayModes.switch'));
       updatePreview();
     }

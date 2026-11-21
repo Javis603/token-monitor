@@ -1,7 +1,12 @@
+// @ts-check
 'use strict';
 
-module.exports = {
+module.exports = /** @satisfies {import('../../limits/accounts').AccountDeclaration} */ ({
   id: 'mistral',
+  accountSlots: true,
+  sources: [
+    { id: 'web', kind: 'web', relation: 'single', products: ['mistral'], labelKey: 'settings.limits.sources.web', descriptionKey: 'settings.limits.sources.webDescription' }
+  ],
   fetch: 'fetchMistralLimits',
   fields: [{
     key: 'mistralCookie', kind: 'credential', storePath: ['providers', 'mistral', 'cookie'],
@@ -25,4 +30,4 @@ module.exports = {
     openUrl: { url: 'https://admin.mistral.ai/subscription' }
   },
   urlPolicy: [{ hosts: ['admin.mistral.ai'], exactPaths: ['/subscription'] }]
-};
+});

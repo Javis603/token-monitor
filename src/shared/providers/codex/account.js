@@ -1,9 +1,16 @@
+// @ts-check
 'use strict';
 
 // Codex limits account wiring. Leaf module: no requires.
-module.exports = {
+module.exports = /** @satisfies {import('../../limits/accounts').AccountDeclaration} */ ({
   id: 'codex',
+  sources: [
+    { id: 'oauth', kind: 'oauth', relation: 'alternative', products: ['codex'], labelKey: 'settings.limits.sources.oauth', descriptionKey: 'settings.limits.sources.oauthDescription' },
+    { id: 'app', kind: 'desktop', relation: 'alternative', products: ['codex'], labelKey: 'settings.limits.sources.desktop', descriptionKey: 'settings.limits.sources.desktopDescription' },
+    { id: 'cli', kind: 'cli', relation: 'alternative', products: ['codex'], labelKey: 'settings.limits.sources.cli', descriptionKey: 'settings.limits.sources.cliDescription' }
+  ],
   fetch: 'fetchCodexLimits',
+  accountRefresh: true,
   fields: [
     {
       key: 'codexManagedAccounts',
@@ -16,4 +23,4 @@ module.exports = {
   urlPolicy: [
     { hosts: ['codex-resets.com'], exactPaths: ['', '/'] }
   ]
-};
+});

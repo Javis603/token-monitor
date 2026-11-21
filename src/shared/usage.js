@@ -318,6 +318,7 @@ function normalizeClientName(value) {
   if (raw.includes('workbuddy')) return 'workbuddy';
   if (raw.includes('proma')) return 'proma';
   if (raw === 'catpaw') return 'catpaw';
+  if (raw === 'qoder') return 'qoder';
   if (raw.includes('qodercn') || raw === 'qoder-cn' || raw === 'qoder cn') return 'qodercn';
   if (raw.includes('reasonix')) return 'reasonix';
   if (/cherry[\s_-]*studio/.test(raw)) return 'cherrystudio';
@@ -332,6 +333,7 @@ function normalizeClientName(value) {
   // Tokscale's id for MiniMax Code. The bare vendor name stays a model vendor
   // and limits provider, so only the product spellings map here.
   if (raw === 'mcode' || /^minimax[\s_-]*code$/.test(raw)) return 'mcode';
+  if (/^open[\s_-]*code[\s_-]*review$/.test(raw)) return 'opencodereview';
   if (raw.includes('opencode')) return 'opencode';
   if (raw.includes('openclaw') || raw.includes('clawd') || raw.includes('moltbot') || raw.includes('moldbot')) return 'openclaw';
   const slug = raw.replace(/[^a-z0-9_-]+/g, '-');
@@ -719,7 +721,9 @@ function emptySession(client, id) {
 
 const sessionsWithLiveSource = new WeakSet();
 
-function mergeSession(target, source) {
+// `now` judges live-activity observations, which a future peer clock must not
+// set; it defaults to the wall clock.
+function mergeSession(target, source, now) {
   mergeSessionModelComponents(target, source);
   const sourceTokens = Math.max(0, Math.round(asNumber(source.totalTokens)));
   target.totalTokens += sourceTokens;
@@ -811,7 +815,7 @@ function mergeSession(target, source) {
   // token or transcript write. An explicit unknown reading clears old evidence.
   if (isSessionActivityClient(source.client)) {
     const reading = normalizeLiveActivity(source.liveActivity);
-    if (reading && canReplaceLiveActivity(target.liveActivity, reading)) {
+    if (reading && canReplaceLiveActivity(target.liveActivity, reading, now)) {
       target.liveActivity = reading;
     }
   }
@@ -848,12 +852,12 @@ function mergeSession(target, source) {
   return target;
 }
 
-function addSession(period, session) {
+function addSession(period, session, now) {
   if (!session?.client || !session?.sessionId || isReasonixSyntheticSession(session)) return;
   const key = sessionKey(session.client, session.sessionId);
   if (isReasonixSyntheticSession(session, key)) return;
   if (!period.sessions[key]) period.sessions[key] = emptySession(session.client, session.sessionId);
-  mergeSession(period.sessions[key], session);
+  mergeSession(period.sessions[key], session, now);
 }
 
 function sessionFromRow(row) {
@@ -1038,6 +1042,8 @@ function normalizePeriod(input, options = {}) {
     return period;
   }
   const projectsEnabled = options.projectsEnabled !== false;
+  // The clock live activity is judged against; the wall clock unless given.
+  const now = options.nowMs;
   period.totalTokens = Math.max(0, Math.round(asNumber(input.totalTokens ?? input.total_tokens ?? 0)));
   const componentCapability = input.capabilities?.tokenComponents;
   const hasLegacyComponentShape = [
@@ -1183,13 +1189,13 @@ function normalizePeriod(input, options = {}) {
   reconcileCursorAutoGlobalModels(period, input);
   if (input.sessions && typeof input.sessions === 'object') {
     for (const [key, value] of Object.entries(input.sessions)) {
-      const session = normalizeSession(sessionWithActivity(input, key, value), key);
+      const session = normalizeSession(sessionWithActivity(input, key, value, now), key);
       if (!session) continue;
       if (!projectsEnabled) {
         session.projectId = '';
         session.projectLabel = '';
       }
-      addSession(period, session);
+      addSession(period, session, now);
     }
   }
   period.projects = projectsEnabled
@@ -1408,7 +1414,11 @@ function normalizeRecordHistoryFields(record, nowIso = new Date().toISOString())
   return fields;
 }
 
-function normalizeDeviceRecord(record) {
+// `options.normalizePeriod` lets a caller that sees the same period object in
+// several records reuse its normalization. It must return what normalizePeriod
+// would, and whatever it returns is read, never mutated.
+function normalizeDeviceRecord(record, options = {}) {
+  const normalizeRecordPeriod = options.normalizePeriod || normalizePeriod;
   const nowIso = new Date().toISOString();
   const historyFields = normalizeRecordHistoryFields(record, nowIso);
   const normalized = {
@@ -1456,7 +1466,7 @@ function normalizeDeviceRecord(record) {
     normalized.allTimeTokensUnavailable = true;
   }
   for (const periodName of PERIODS) {
-    normalized.periods[periodName] = normalizePeriod(record[periodName] || record.periods?.[periodName], {
+    normalized.periods[periodName] = normalizeRecordPeriod(record[periodName] || record.periods?.[periodName], {
       projectsEnabled: normalized.projectsEnabled !== false
     });
   }
@@ -1601,17 +1611,6 @@ function preserveUntrackedClientUsage(existingRecord, incomingRecord, trackedCli
   }
 }
 
-function limitProviderMergeKey(provider) {
-  const name = String(provider?.provider || '').trim();
-  if (!name) return '';
-  if (GUI_SECRET_LIMIT_PROVIDERS.has(name)) return name;
-  const accountKey = String(provider?.accountKey || '').trim();
-  if (accountKey) return `${name}:${accountKey}`;
-  const accountEmail = String(provider?.accountEmail || '').trim().toLowerCase();
-  if (accountEmail) return `${name}:email:${accountEmail}`;
-  return `${name}:${String(provider?.status || '').trim()}`;
-}
-
 function isConfiguredLimitProvider(provider) {
   return Boolean(provider?.accountKey && provider.status !== 'notConfigured' && provider.status !== 'disabled');
 }
@@ -1623,6 +1622,12 @@ function shouldKeepExistingGuiSecretProvider(existingProvider, incomingProvider,
   if (!isConfiguredLimitProvider(existingProvider)) return false;
   const existingRuntime = String(existingRecord?.agentRuntime || '').trim();
   const incomingRuntime = String(incomingRecord?.agentRuntime || '').trim();
+  // Managed Copilot profiles belong to the widget, even after headless usage
+  // uploads replace the device-level runtime stamp. The widget can still clear
+  // its own profiles explicitly.
+  if (incomingProvider.provider === 'copilot' && existingProvider.sourceDetail === 'managed') {
+    return incomingRuntime === 'headless-agent';
+  }
   return Boolean(existingRuntime && incomingRuntime && existingRuntime !== incomingRuntime);
 }
 
@@ -1631,19 +1636,27 @@ function mergeDeviceLimits(existingRecord, incomingRecord) {
   const incomingLimits = normalizeLimitsSummary(incomingRecord?.limits);
   if (!incomingLimits.providers.length) return incomingLimits;
 
-  const existingByKey = new Map();
-  for (const provider of existingLimits.providers) {
-    const key = limitProviderMergeKey(provider);
-    if (key) existingByKey.set(key, provider);
-  }
-  return {
-    ...incomingLimits,
-    providers: incomingLimits.providers.map((provider) => {
-      const existing = existingByKey.get(limitProviderMergeKey(provider));
-      if (shouldKeepExistingGuiSecretProvider(existing, provider, existingRecord, incomingRecord)) return existing;
-      return provider;
-    })
-  };
+  const retainedProviders = new Set();
+  // An account the incoming summary reports itself is not restored beside it.
+  const incomingAccounts = new Set(incomingLimits.providers.filter(provider => provider.accountKey)
+    .map(provider => `${provider.provider}:${provider.accountKey}`));
+  const providers = incomingLimits.providers.flatMap((provider) => {
+    if (GUI_SECRET_LIMIT_PROVIDERS.has(provider.provider) && provider.status === 'notConfigured') {
+      // Several placeholders for one provider must not each restore the accounts.
+      if (retainedProviders.has(provider.provider)) return [];
+      const retained = existingLimits.providers.filter(existing => existing.provider === provider.provider
+        && !incomingAccounts.has(`${existing.provider}:${existing.accountKey}`)
+        && shouldKeepExistingGuiSecretProvider(existing, provider, existingRecord, incomingRecord));
+      if (!retained.length) return provider;
+      retainedProviders.add(provider.provider);
+      return retained;
+    }
+    return provider;
+  });
+  // A credential-less runtime cannot revoke the signal for accounts it keeps.
+  const multiAccountProviders = [...(incomingLimits.multiAccountProviders || []),
+    ...(existingLimits.multiAccountProviders || []).filter(id => retainedProviders.has(id))];
+  return normalizeLimitsSummary({ ...incomingLimits, multiAccountProviders, providers });
 }
 
 function mergeDeviceRecord(existing, incoming) {
@@ -1866,7 +1879,7 @@ function aggregateHistory(devices, options = {}) {
 // Adds every numeric field and nested map of `source` into `target` (an
 // emptyPeriod()-shaped object). Shared by device aggregation and the WSL merge so
 // the two never diverge on which period fields exist.
-function addPeriodInto(target, source) {
+function addPeriodInto(target, source, copyNormalizedSessions = false) {
   target.capabilities.tokenComponents = target.capabilities.tokenComponents === true
     && source.capabilities?.tokenComponents === true;
   target.capabilities.throughput = target.capabilities.throughput === true
@@ -1920,7 +1933,24 @@ function addPeriodInto(target, source) {
     }
   }
   for (const [key, project] of Object.entries(source.projects || {})) addProjectInto(target.projects, key, project);
-  for (const session of Object.values(source.sessions)) addSession(target, session);
+  if (copyNormalizedSessions) {
+    // Canonical rows already have the shape of a first contribution. Keep
+    // the normal merge for overlapping keys and time-sensitive activity.
+    for (const [key, session] of Object.entries(source.sessions)) {
+      const existing = target.sessions[key];
+      if (existing) {
+        mergeSession(existing, session);
+      } else if (session.liveActivity) {
+        addSession(target, session);
+      } else {
+        const copy = cloneSessionForMerge(session);
+        if (session.promptCache) copy.promptCache = { ...session.promptCache };
+        target.sessions[key] = copy;
+      }
+    }
+  } else {
+    for (const session of Object.values(source.sessions)) addSession(target, session);
+  }
   return target;
 }
 
@@ -2017,7 +2047,8 @@ function aggregateDevices(devices, staleAfterMs, nowMs = Date.now(), options = {
     // pass here only re-walked every session again.
     for (const periodName of PERIODS) {
       if (isPeriodExpired(normalized, periodName, now)) continue;
-      addPeriodInto(aggregate.periods[periodName], normalized.periods[periodName]);
+      addPeriodInto(aggregate.periods[periodName], normalized.periods[periodName],
+        periodName === 'month' && options.copyNormalizedMonthSessions === true);
     }
   }
   aggregate.limits = aggregateLimits(aggregate.devices, staleAfterMs, now);
@@ -2389,6 +2420,7 @@ module.exports = {
   PERIODS,
   UNATTRIBUTED_USAGE_CLIENT,
   addPeriodInto,
+  isPeriodExpired,
   aggregateDevices,
   aggregateHistory,
   applyPeriodDelta,

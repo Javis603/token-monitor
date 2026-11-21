@@ -641,9 +641,11 @@ body.is-windows.floating-bubble-collapsed-right .floating-bubble-tab {
 }
 .settings-panel .checkbox-label > input[type="checkbox"] { order: 2; }
 /* iOS-style switch, drawn on the native checkbox so keyboard/a11y stay intact.
-   Scoped to .checkbox-label rows: compact list checkboxes (.client-checkbox,
-   .tool-preference-toggle) keep their native accent-color look. */
-.settings-panel .checkbox-label > input[type="checkbox"] {
+   Scoped to .checkbox-label rows and to list rows that opt in with
+   .settings-switch (tracked tools, limit providers); other compact list
+   checkboxes keep their native accent-color look. */
+.settings-panel .checkbox-label > input[type="checkbox"],
+.settings-panel input[type="checkbox"].settings-switch {
   appearance: none;
   -webkit-appearance: none;
   flex: 0 0 auto;
@@ -658,7 +660,8 @@ body.is-windows.floating-bubble-collapsed-right .floating-bubble-tab {
   cursor: pointer;
   transition: background 180ms ease, border-color 180ms ease;
 }
-.settings-panel .checkbox-label > input[type="checkbox"]::before {
+.settings-panel .checkbox-label > input[type="checkbox"]::before,
+.settings-panel input[type="checkbox"].settings-switch::before {
   content: "";
   position: absolute;
   top: 2px;
@@ -670,30 +673,39 @@ body.is-windows.floating-bubble-collapsed-right .floating-bubble-tab {
   box-shadow: 0 1px 2px rgba(0, 0, 0, 0.35);
   transition: transform 180ms cubic-bezier(0.22, 1, 0.36, 1), background 180ms ease;
 }
-.settings-panel .checkbox-label > input[type="checkbox"]:checked {
+.settings-panel .checkbox-label > input[type="checkbox"]:checked,
+.settings-panel input[type="checkbox"].settings-switch:checked {
   border-color: rgba(var(--accent-rgb), 0.5);
   background: rgba(var(--accent-rgb), 0.88);
 }
-.settings-panel .checkbox-label > input[type="checkbox"]:checked::before {
+.settings-panel .checkbox-label > input[type="checkbox"]:checked::before,
+.settings-panel input[type="checkbox"].settings-switch:checked::before {
   transform: translateX(14px);
   background: rgb(var(--panel-rgb));
 }
-.settings-panel .checkbox-label > input[type="checkbox"]:focus-visible {
+/* Mixed (Qoder tracks one of its two editions): the knob rests mid-track. */
+.settings-panel input[type="checkbox"].settings-switch:indeterminate {
+  border-color: rgba(var(--accent-rgb), 0.38);
+  background: rgba(var(--accent-rgb), 0.32);
+}
+.settings-panel input[type="checkbox"].settings-switch:indeterminate::before {
+  transform: translateX(7px);
+  background: rgb(var(--accent-rgb));
+}
+.settings-panel .checkbox-label > input[type="checkbox"]:focus-visible,
+.settings-panel input[type="checkbox"].settings-switch:focus-visible {
   outline: 1px solid rgba(115, 189, 245, 0.72);
   outline-offset: 2px;
 }
 /* Disabled switch (e.g. Tray-only mode while the tray icon is off): dim it and
    drop the pointer so it doesn't read as an available control. */
-.settings-panel .checkbox-label > input[type="checkbox"]:disabled {
+.settings-panel .checkbox-label > input[type="checkbox"]:disabled,
+.settings-panel input[type="checkbox"].settings-switch:disabled {
   opacity: 0.4;
   cursor: default;
 }
 .settings-panel .checkbox-label.is-disabled .settings-item-title { color: var(--muted); }
 .settings-group { display: grid; min-width: 0; gap: 8px; }
-.settings-collection-cadence {
-  grid-template-columns: minmax(0, 1fr);
-}
-.session-archive-settings { display: grid; gap: 6px; }
 .session-archive-settings .session-archive-toggle { color: var(--text); }
 .session-archive-footer {
   display: flex;
@@ -725,12 +737,6 @@ body.is-windows.floating-bubble-collapsed-right .floating-bubble-tab {
 .session-archive-clear:disabled { opacity: 0.38; cursor: default; }
 .settings-wsl-block { display: grid; gap: 6px; min-width: 0; }
 .wsl-panel { display: grid; gap: 4px; margin-top: 4px; }
-.settings-export-block { display: grid; gap: 8px; min-width: 0; }
-/* Give the section description room under the header so the two small-text lines don't merge. */
-.settings-export-block > .settings-note { margin: 2px 0 4px; }
-/* The group after Data export is a .settings-group (no subgroup divider), so add the
-   standard subgroup top-rule to it — closes the Data export section off from 自訂模型單價. */
-.settings-export-block + .settings-group { padding-top: 9px; border-top: 1px solid rgba(var(--line-rgb), 0.075); }
 .export-auto-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; min-width: 0; }
 .export-auto-head .export-auto-toggle { flex: 1 1 auto; min-width: 0; }
 .export-status-pill { flex: 0 0 auto; }
@@ -909,6 +915,10 @@ span.settings-note.settings-item-desc {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+[data-settings-section="limits"] .settings-section-heading > span:last-child {
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
 .settings-section-meta {
   display: flex;
   min-width: 0;
@@ -930,11 +940,11 @@ span.settings-note.settings-item-desc {
 }
 .settings-section-disclosure::before {
   content: "";
-  width: 5px;
-  height: 5px;
-  border-right: 1.5px solid currentColor;
-  border-bottom: 1.5px solid currentColor;
-  transform: translateY(-1.5px) rotate(45deg);
+  width: 12px;
+  height: 12px;
+  background: currentColor;
+  -webkit-mask: url("icons/actions/chevron-down.svg") center / contain no-repeat;
+  mask: url("icons/actions/chevron-down.svg") center / contain no-repeat;
 }
 .settings-section-summary,
 .settings-subgroup-summary {
@@ -1115,6 +1125,29 @@ span.settings-note.settings-item-desc {
 .app-update-settings > .app-update-notes {
   margin-top: 4px;
 }
+/* Installed version, its status and the action share one row; the buttons drop
+   below the version when a locale's labels do not fit beside it. */
+.app-update-installed {
+  color: var(--text);
+  font-size: 0.75rem;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+.app-update-status-pill.is-available {
+  border-color: rgba(var(--accent-rgb), 0.45);
+  background: rgba(var(--accent-rgb), 0.1);
+  color: var(--accent);
+}
+.settings-actions.app-update-actions {
+  flex: 0 1 auto;
+  justify-content: flex-end;
+  gap: 6px;
+  margin-left: auto;
+}
+.settings-actions button.app-update-primary {
+  border-color: color-mix(in srgb, var(--accent) 50%, transparent);
+  color: var(--accent);
+}
 .advanced-config-row {
   display: flex;
   min-width: 0;
@@ -1259,11 +1292,11 @@ span.settings-note.settings-item-desc {
 }
 .cursor-disclosure-icon::before {
   content: "";
-  width: 5px;
-  height: 5px;
-  border-right: 1.5px solid currentColor;
-  border-bottom: 1.5px solid currentColor;
-  transform: translateY(-1.5px) rotate(45deg);
+  width: 12px;
+  height: 12px;
+  background: currentColor;
+  -webkit-mask: url("icons/actions/chevron-down.svg") center / contain no-repeat;
+  mask: url("icons/actions/chevron-down.svg") center / contain no-repeat;
 }
 .cursor-account-group.expanded .cursor-disclosure-icon {
   transform: rotate(180deg);
@@ -1273,11 +1306,14 @@ span.settings-note.settings-item-desc {
 }
 .cursor-settings-details-inner {
   display: grid;
+  grid-template-columns: minmax(0, 1fr);
   min-width: 0;
   gap: 8px;
 }
 .managed-account-list {
   display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  min-width: 0;
   gap: 6px;
 }
 .managed-account-list:empty { display: none; }
@@ -1508,21 +1544,19 @@ span.settings-note.settings-item-desc {
   outline: 1px solid rgba(115, 189, 245, 0.72);
   outline-offset: 3px;
 }
+/* The shared chevron, leading the label: it points at the label while closed
+   and down once the notes are open. */
 .app-update-notes-disclosure {
-  width: 8px;
-  height: 8px;
+  width: 10px;
+  height: 10px;
+  transform: rotate(-90deg);
 }
 .app-update-notes-disclosure::before {
-  width: 0;
-  height: 0;
-  border: 0;
-  border-top: 3px solid transparent;
-  border-bottom: 3px solid transparent;
-  border-left: 5px solid currentColor;
-  transform: none;
+  width: 10px;
+  height: 10px;
 }
 .app-update-notes.expanded .app-update-notes-disclosure {
-  transform: rotate(90deg);
+  transform: none;
 }
 .app-update-notes-details { min-width: 0; }
 .app-update-notes-content {
@@ -1554,6 +1588,233 @@ span.settings-note.settings-item-desc {
   font-size: inherit;
 }
 .inline-link:hover { color: var(--text); }
+/* Outranks the flat first-subgroup reset, which would strip a card's top edge. */
+.settings-section-details-inner > .settings-page-card:first-child {
+  margin-top: 6px;
+  padding-top: 8px;
+  border-top: 1px solid var(--line);
+}
+.about-settings-identity {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 10px;
+}
+.about-settings-icon {
+  flex: 0 0 auto;
+  width: 36px;
+  height: 36px;
+  border-radius: 9px;
+}
+.about-settings-name {
+  display: grid;
+  min-width: 0;
+  gap: 1px;
+}
+.about-settings-name strong {
+  color: var(--text);
+  font-size: 0.75rem;
+  font-weight: 600;
+}
+#aboutVersion {
+  color: var(--muted);
+  font-size: 0.59375rem;
+  font-variant-numeric: tabular-nums;
+}
+/* The card's one prominent action. A static two-tone edge (drawn by ::before so
+   it stays a hairline over the translucent card) carries a comet of light round
+   the button while hovered, and ::after sweeps a sheen across it. */
+@property --about-star-orbit {
+  syntax: '<angle>';
+  inherits: false;
+  initial-value: 0deg;
+}
+.settings-panel button.about-settings-star {
+  --about-star-gold-rgb: 241, 217, 115;
+  position: relative;
+  isolation: isolate;
+  display: flex;
+  width: 100%;
+  min-height: 32px;
+  align-items: center;
+  gap: 8px;
+  padding: 0 6px 0 10px;
+  overflow: hidden;
+  border: 0;
+  border-radius: 9px;
+  background: linear-gradient(180deg, rgba(var(--accent-rgb), 0.14), rgba(var(--accent-rgb), 0.04));
+  box-shadow: 0 6px 16px -10px rgba(var(--accent-rgb), 0.6);
+  color: var(--text);
+  cursor: pointer;
+  font-size: 0.6875rem;
+  font-weight: 600;
+  transition: box-shadow 250ms ease, transform 150ms ease;
+}
+.settings-panel button.about-settings-star::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  padding: 1px;
+  border-radius: inherit;
+  background:
+    conic-gradient(from var(--about-star-orbit), transparent 0 62%, rgba(255, 255, 255, 0.95) 74%, rgba(var(--about-star-gold-rgb), 0.9) 80%, transparent 90%),
+    linear-gradient(120deg, rgba(var(--accent-rgb), 0.8), rgba(var(--about-star-gold-rgb), 0.6) 45%, rgba(var(--accent-rgb), 0.2));
+  -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+  -webkit-mask-composite: xor;
+  mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+  mask-composite: exclude;
+  animation: about-star-orbit 2.6s linear infinite paused;
+  pointer-events: none;
+}
+.settings-panel button.about-settings-star::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  background: linear-gradient(105deg, transparent 35%, rgba(255, 255, 255, 0.14) 50%, transparent 65%);
+  transform: translateX(-120%);
+  pointer-events: none;
+}
+.settings-panel button.about-settings-star:hover { box-shadow: 0 6px 20px -8px rgba(var(--accent-rgb), 0.75); }
+.settings-panel button.about-settings-star:hover::before { animation-play-state: running; }
+.settings-panel button.about-settings-star:hover::after {
+  transform: translateX(120%);
+  transition: transform 800ms ease;
+}
+.settings-panel button.about-settings-star:active { transform: scale(0.985); }
+.settings-panel button.about-settings-star:focus-visible {
+  outline: 1px solid var(--accent);
+  outline-offset: 2px;
+}
+/* Played once per launch, the first time the card is shown: two slow breaths
+   and one sheen, then still. */
+.settings-panel button.about-settings-star.is-arriving { animation: about-star-breathe 2.4s ease-in-out 2; }
+.settings-panel button.about-settings-star.is-arriving::after { animation: about-star-sweep 1.2s 400ms ease; }
+@keyframes about-star-orbit { to { --about-star-orbit: 360deg; } }
+@keyframes about-star-breathe {
+  50% { box-shadow: 0 0 0 3px rgba(var(--accent-rgb), 0.14), 0 0 22px -2px rgba(var(--accent-rgb), 0.55); }
+}
+@keyframes about-star-sweep {
+  from { transform: translateX(-120%); }
+  to { transform: translateX(120%); }
+}
+.about-settings-star-label {
+  display: inline-flex;
+  flex: 1 1 auto;
+  min-width: 0;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  color: var(--accent);
+}
+.about-settings-github-mark {
+  flex: 0 0 auto;
+  width: 13px;
+  height: 13px;
+  background: currentColor;
+  -webkit-mask: url("icons/brands/github.svg") center / contain no-repeat;
+  mask: url("icons/brands/github.svg") center / contain no-repeat;
+}
+/* The count sits in a soft chip rather than behind a divider. It uses the
+   display font, like the total, because a monospaced comma takes a whole cell
+   and splits the number. */
+.about-settings-star-count {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 5px;
+  height: 22px;
+  padding: 0 8px;
+  border-radius: 6px;
+  background: rgba(var(--overlay-rgb), 0.07);
+  font-family: var(--display-font, -apple-system, BlinkMacSystemFont, "SF Pro Display", "Segoe UI", sans-serif);
+  font-weight: 400;
+  font-variant-numeric: tabular-nums;
+}
+.about-settings-star-icon {
+  flex: 0 0 auto;
+  width: 12px;
+  height: 12px;
+  fill: transparent;
+  stroke: currentColor;
+  stroke-width: 2;
+  stroke-linejoin: round;
+  transform-origin: 50% 55%;
+  transition: transform 350ms cubic-bezier(0.34, 1.56, 0.64, 1), color 200ms ease, fill 200ms ease;
+}
+.settings-panel button.about-settings-star:hover .about-settings-star-icon {
+  color: rgb(var(--about-star-gold-rgb));
+  fill: rgb(var(--about-star-gold-rgb));
+  transform: rotate(72deg) scale(1.15);
+}
+.settings-panel button.about-settings-star.is-popping .about-settings-star-icon {
+  color: rgb(var(--about-star-gold-rgb));
+  fill: rgb(var(--about-star-gold-rgb));
+  animation: about-star-pop 500ms cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+@keyframes about-star-pop { 40% { transform: scale(1.6) rotate(-14deg); } }
+.about-settings-star-spark {
+  position: absolute;
+  z-index: 1;
+  width: 4px;
+  height: 4px;
+  border-radius: 50%;
+  background: rgb(var(--about-star-gold-rgb));
+  pointer-events: none;
+  animation: about-star-spark 650ms ease-out forwards;
+}
+@keyframes about-star-spark { to { opacity: 0; transform: translate(var(--spark-x), var(--spark-y)) scale(0.3); } }
+/* Odometer: each digit is a column of 0–9 that slides to its value. The plain
+   number beside it is what assistive technology reads. */
+.about-settings-star-value { display: inline-flex; }
+.about-star-odometer {
+  display: inline-flex;
+  height: 1.2em;
+  overflow: hidden;
+  line-height: 1.2em;
+}
+.about-star-odometer-digit {
+  display: inline-flex;
+  flex-direction: column;
+  transition: transform 1.2s cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+.about-star-odometer-digit > span { height: 1.2em; }
+.about-star-odometer-text {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+:root[data-reduce-motion="on"] .settings-panel button.about-settings-star,
+:root[data-reduce-motion="on"] .settings-panel button.about-settings-star::before,
+:root[data-reduce-motion="on"] .settings-panel button.about-settings-star::after,
+:root[data-reduce-motion="on"] .about-settings-star-icon { animation: none !important; transition: none !important; }
+@media (prefers-reduced-motion: reduce) {
+  :root:not([data-reduce-motion="off"]) .settings-panel button.about-settings-star,
+  :root:not([data-reduce-motion="off"]) .settings-panel button.about-settings-star::before,
+  :root:not([data-reduce-motion="off"]) .settings-panel button.about-settings-star::after,
+  :root:not([data-reduce-motion="off"]) .about-settings-star-icon { animation: none !important; transition: none !important; }
+}
+.about-settings-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+.about-settings-link::before {
+  content: "";
+  flex: 0 0 auto;
+  width: 11px;
+  height: 11px;
+  background: currentColor;
+  -webkit-mask: var(--about-link-icon) center / contain no-repeat;
+  mask: var(--about-link-icon) center / contain no-repeat;
+}
+.about-settings-link-website { --about-link-icon: url("icons/sources/globe.svg"); }
+.about-settings-link-issue { --about-link-icon: url("icons/actions/bug.svg"); }
+.about-settings-link-diagnostics { --about-link-icon: url("icons/actions/stethoscope.svg"); }
 .about-settings-links {
   display: flex;
   flex-wrap: wrap;
@@ -1643,6 +1904,24 @@ span.settings-note.settings-item-desc {
 .sync-device-settings { display: grid; min-width: 0; gap: 8px; }
 .sync-connection-heading { display: flex; align-items: center; justify-content: space-between; gap: 8px; flex-wrap: wrap; }
 .sync-connection-status { display: inline-flex; align-items: center; gap: 8px; min-height: 24px; }
+.hub-profile-picker { display: flex; min-width: 0; }
+/* Sits in the status card where the endpoint line was, so it reads as that
+   line with a disclosure rather than as another boxed field. */
+.settings-panel .hub-profile-picker .select-control-trigger {
+  width: auto;
+  max-width: 100%;
+  margin: -2px -6px;
+  padding: 2px 6px;
+  gap: 6px;
+  border-color: transparent;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--muted);
+  font: inherit;
+}
+.settings-panel .hub-profile-picker .select-control-trigger:hover,
+.settings-panel .hub-profile-picker .select-control-trigger[aria-expanded="true"] { color: var(--text); background: rgba(var(--overlay-rgb), 0.06); }
+.settings-panel .hub-profile-remove { margin-left: auto; color: var(--red); }
 .sync-connection-heading .sync-connection-edit { margin-left: auto; }
 .settings-panel .sync-connection-edit,
 .settings-panel .sync-device-side .device-delete-button {
@@ -1705,7 +1984,6 @@ span.settings-note.settings-item-desc {
   transform: translateY(-50%);
   pointer-events: none;
 }
-.sync-mode-description { margin: 0 0 4px; }
 .hub-mode-fields { min-width: 0; }
 .hub-mode-fields > .accordion-animation-inner { display: grid; min-width: 0; gap: 8px; }
 .hub-secret-row { display: flex; min-width: 0; align-items: center; gap: 6px; }
@@ -1821,13 +2099,15 @@ span.settings-note.settings-item-desc {
 .settings-panel .sync-content-body .checkbox-label > input[type="checkbox"]::before { content: none; }
 .sync-content-dialog,
 .settings-help-popover { width: min(340px, calc(100vw - 32px)); max-height: calc(100vh - 32px); box-sizing: border-box; overflow-y: auto; padding: 16px; color: var(--text); font-size: 0.6875rem; line-height: 1.5; -webkit-app-region: no-drag; }
-.sync-title-heading { display: flex; align-items: center; gap: 3px; }
-.settings-panel .sync-title-heading > label { display: inline; margin: 0; color: inherit; font-size: inherit; }
+.settings-help-heading { display: flex; align-items: center; gap: 3px; }
+.settings-panel .settings-help-heading > label { display: inline; margin: 0; color: inherit; font-size: inherit; }
 button.settings-help-trigger { position: relative; display: inline-grid; place-items: center; flex: 0 0 18px; width: 18px; height: 18px; margin: -2px 0; padding: 0; border: 0; border-radius: 4px; background: transparent; color: var(--muted); font: inherit; font-size: 8px; line-height: 1; cursor: pointer; pointer-events: auto; -webkit-app-region: no-drag; }
 button.settings-help-trigger::before { content: ''; position: absolute; width: 11px; height: 11px; border: 1px solid currentColor; border-radius: 50%; opacity: 0.6; }
 button.settings-help-trigger:hover { background: transparent; color: var(--text); }
 button.settings-help-trigger:hover::before { opacity: 1; }
 button.settings-help-trigger:focus-visible { outline: 1px solid var(--accent); outline-offset: 2px; }
+.settings-model-controls .settings-help-trigger { font-size: 7px; }
+.settings-model-controls .settings-help-trigger::before { box-sizing: border-box; width: 10px; height: 10px; }
 .settings-help-popover { position: fixed; inset: auto; margin: 0; width: min(280px, calc(100vw - 16px)); padding: 12px; font-size: 0.625rem; line-height: 1.6; }
 .settings-help-popover > strong { display: block; font-size: 0.75rem; font-weight: 600; line-height: 1.4; }
 .settings-help-popover dl { margin: 12px 0 0; }
@@ -1934,7 +2214,7 @@ button.settings-help-trigger:focus-visible { outline: 1px solid var(--accent); o
   background: rgba(var(--accent-rgb), 0.85);
 }
 .sync-device-main { display: contents; }
-.sync-device-title { grid-column: 2; grid-row: 1; display: flex; align-items: center; gap: 6px; min-width: 0; }
+.sync-device-title { grid-column: 2 / -1; grid-row: 1; display: flex; align-items: center; gap: 6px; min-width: 0; }
 .sync-device-name {
   min-width: 0;
   overflow: hidden;
@@ -1959,8 +2239,8 @@ button.settings-help-trigger:focus-visible { outline: 1px solid var(--accent); o
   overflow-wrap: anywhere;
 }
 .sync-device-side {
-  grid-column: 3;
-  grid-row: 1;
+  grid-column: 2 / -1;
+  grid-row: 3;
   align-self: center;
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
@@ -1968,7 +2248,6 @@ button.settings-help-trigger:focus-visible { outline: 1px solid var(--accent); o
   gap: 5px 8px;
   min-width: 0;
 }
-.sync-device-row.is-stale .sync-device-side { grid-column: 2 / -1; grid-row: 3; }
 .sync-device-action { display: flex; align-items: center; justify-content: flex-end; height: 0; }
 .sync-device-side .device-delete-button { align-self: center; margin-left: auto; flex-shrink: 0; }
 .sync-device-presence {
@@ -2017,10 +2296,6 @@ button.settings-help-trigger:focus-visible { outline: 1px solid var(--accent); o
 .sync-panel-link:focus-visible { color: var(--text); background: rgba(var(--overlay-rgb), 0.03); }
 .sync-panel-link-arrow::before { content: '→'; display: inline-block; transition: transform 160ms cubic-bezier(0.22, 1, 0.36, 1); }
 .sync-panel-link:hover .sync-panel-link-arrow::before { transform: translateX(2px); }
-@container (max-width: 340px) {
-  .sync-device-title { grid-column: 2 / -1; }
-  .sync-device-side { grid-column: 2 / -1; grid-row: 3; }
-}
 @container (max-width: 240px) {
   .sync-device-side { grid-template-columns: minmax(0, 1fr); }
   .sync-device-action { height: auto; }
@@ -2034,12 +2309,6 @@ button.settings-help-trigger:focus-visible { outline: 1px solid var(--accent); o
 .currency-rate-row { display: grid; gap: 4px; min-width: 0; }
 /* The rate row is a sub-setting of the Currency row: keep them as one unseparated pair. */
 .settings-subgroup > .settings-item + .currency-rate-row { margin-top: 0; }
-/* The pair ends there: the next setting rejoins the grouped list with its hairline,
-   instead of floating off on the generic 8px subgroup margin. */
-.settings-subgroup > .currency-rate-row + .settings-item {
-  margin-top: 0;
-  border-top: 1px solid rgba(var(--line-rgb), 0.06);
-}
 .currency-rate-manual-field { display: flex; align-items: center; gap: 8px; min-width: 0; padding-bottom: 2px; }
 .currency-rate-prefix { flex: 0 0 auto; color: var(--muted); font-size: 0.6875rem; }
 .settings-panel .currency-rate-manual-field input { flex: 1 1 0; width: 0; min-width: 0; font-size: 0.6875rem; }
@@ -2100,20 +2369,6 @@ button.settings-help-trigger:focus-visible { outline: 1px solid var(--accent); o
   gap: 8px;
   min-width: 0;
 }
-/* When the note-row's left cell is an accordion toggle (Vendor Colors), the
-   toggle owns the whole row so its disclosure caret lands at the true right
-   edge; the group-level reset then tucks in just left of the caret instead of
-   pushing it inward and reading as a detached, floating button. */
-.settings-note-row:has(> .cursor-settings-toggle) {
-  display: block;
-  position: relative;
-}
-.settings-note-row:has(> .cursor-settings-toggle) > .tool-header-actions {
-  position: absolute;
-  top: 50%;
-  right: 20px;
-  transform: translateY(-50%);
-}
 .tool-header-actions {
   display: flex;
   flex: 0 0 auto;
@@ -2148,21 +2403,6 @@ button.settings-help-trigger:focus-visible { outline: 1px solid var(--accent); o
 .tool-header-action:disabled {
   opacity: 0.34;
   cursor: default;
-}
-.tool-header-eye {
-  width: 13px;
-  height: 8px;
-  border: 1.5px solid currentColor;
-  border-radius: 999px / 80%;
-}
-.tool-header-eye::after {
-  display: block;
-  width: 3px;
-  height: 3px;
-  margin: 1px auto 0;
-  border-radius: 50%;
-  background: currentColor;
-  content: "";
 }
 /* Filter field for the two long settings lists (tracked tools, limit
    providers). Sits outside the list container on purpose: both lists are
@@ -2237,9 +2477,9 @@ button.settings-help-trigger:focus-visible { outline: 1px solid var(--accent); o
 .tool-preference-row {
   position: relative;
   display: grid;
-  grid-template-columns: 22px minmax(0, 1fr) repeat(2, 22px);
+  grid-template-columns: minmax(0, 1fr) auto;
   align-items: center;
-  column-gap: 5px;
+  column-gap: 4px;
   margin: 0 -2px;
   padding: 1px 2px;
   border-radius: 6px;
@@ -2277,16 +2517,12 @@ button.settings-help-trigger:focus-visible { outline: 1px solid var(--accent); o
 }
 .tool-preference-list.drag-active .tool-preference-row:not(.dragging) { opacity: 0.78; }
 .view-preference-row {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) repeat(2, 22px);
+  display: flex;
   align-items: center;
-  column-gap: 5px;
-  margin: 0 -2px;
-  padding: 1px 2px;
-  border-radius: 6px;
   min-width: 0;
-  flex-wrap: nowrap;
-  transition: background 120ms ease, box-shadow 120ms ease, opacity 120ms ease;
+  height: 28px;
+  border-radius: 7px;
+  color: var(--muted);
 }
 .tool-preference-name {
   flex: 1 1 auto;
@@ -2300,8 +2536,9 @@ button.settings-help-trigger:focus-visible { outline: 1px solid var(--accent); o
 }
 .tool-preference-label {
   display: flex;
+  flex: 1 1 auto;
   align-items: center;
-  gap: 6px;
+  gap: 7px;
   min-width: 0;
 }
 .tool-preference-label .tool-preference-name {
@@ -2319,6 +2556,27 @@ button.settings-help-trigger:focus-visible { outline: 1px solid var(--accent); o
   line-height: 1.2;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+/* The tracked-tools row is the one place a status shares its line with the
+   switch and the row's own controls, so it drops the chip chrome and reads as
+   text with a tone dot. Its width is capped so a long status cannot push the
+   switch. The WSL panel keeps the chip: it has nothing else on the line. */
+.tool-preference-actions > .tool-status-tag {
+  flex: 0 1 auto;
+  max-width: 96px;
+  margin-left: 2px;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  font-size: 0.59375rem;
+}
+/* Healthy: a dot, matching the limits list. */
+.tool-status-tag.is-dot {
+  flex: 0 0 auto;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--success);
 }
 .tool-status-tag-ok {
   border-color: rgba(var(--success-rgb), 0.28);
@@ -2342,21 +2600,9 @@ button.settings-help-trigger:focus-visible { outline: 1px solid var(--accent); o
   color: var(--orange);
 }
 .tool-preference-row.is-hidden .tool-preference-name,
-.view-preference-row.is-hidden .tool-preference-name,
 .home-module-preference-row.is-hidden .tool-preference-name,
 .home-limit-provider-row.is-hidden .tool-preference-name {
   opacity: 0.58;
-}
-.view-preference-row.is-disabled .tool-preference-name,
-.view-preference-row.is-disabled .tool-visibility-button,
-.view-preference-row.is-disabled .view-subgroup-toggle,
-.view-preference-row.is-disabled .preference-order-handle {
-  opacity: 0.42;
-}
-.view-preference-row.is-disabled .tool-visibility-button:hover,
-.view-preference-row.is-disabled .view-subgroup-toggle:hover,
-.view-preference-row.is-disabled .preference-order-handle:hover:not(:disabled) {
-  opacity: 0.72;
 }
 /* The detail panel is a child of the row, not a sibling: the whole row is the
    drag surface, and a sibling would be left behind when the row moves. Vertical
@@ -2373,25 +2619,45 @@ button.settings-help-trigger:focus-visible { outline: 1px solid var(--accent); o
 /* Collapsing must land instantly so the drag snapshot measures settled geometry
    rather than a mid-animation height. */
 .tool-preference-list.is-reordering .accordion-animated-container { transition: none; }
-/* The disclosure sits with the row's other controls, so it is sized like them. */
-.tool-preference-row.has-health {
-  grid-template-columns: 22px minmax(0, 1fr) repeat(3, 22px);
-}
+/* The whole leading area — chevron, icon, name, status — opens the row's
+   detail; the eye, pin and switch on the right own their own clicks. */
 .tool-preference-main {
-  display: grid;
-  place-items: center;
-  width: 22px;
-  height: 22px;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  width: 100%;
+  min-width: 0;
+  min-height: 28px;
   padding: 0;
   border: 0;
   border-radius: 5px;
   background: none;
   color: inherit;
   font: inherit;
-  cursor: pointer;
+  text-align: left;
 }
-.tool-preference-row.expanded .tool-preference-main .cursor-disclosure-icon {
-  transform: rotate(-180deg);
+button.tool-preference-main { cursor: pointer; }
+span.limit-provider-main { cursor: inherit; }
+button.tool-preference-main:focus-visible {
+  outline: 1px solid rgba(var(--accent-rgb), 0.62);
+  outline-offset: 2px;
+}
+/* Chevron column shared by both lists: right-pointing when closed, down when
+   open, and an empty slot when the row has nothing to open. */
+.tool-preference-chevron,
+.limit-provider-chevron {
+  display: inline-grid;
+  flex: 0 0 12px;
+  place-items: center;
+  width: 12px;
+}
+.tool-preference-chevron .cursor-disclosure-icon,
+.limit-provider-chevron .cursor-disclosure-icon {
+  transform: rotate(-90deg);
+}
+.tool-preference-row.expanded .tool-preference-chevron .cursor-disclosure-icon,
+.limit-provider-row.expanded .limit-provider-chevron .cursor-disclosure-icon {
+  transform: none;
 }
 .tool-health-inner {
   display: grid;
@@ -2626,19 +2892,40 @@ button.settings-help-trigger:focus-visible { outline: 1px solid var(--accent); o
 .tool-preference-actions {
   display: contents;
 }
+/* The tracked-tools row groups its controls in one flex run so the status can
+   sit against the switch whether or not the eye and pin are showing. */
+.tool-preference-row > .tool-preference-actions {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+}
+/* Eye and pin stay out of the way until hover or visible focus; a tool
+   that is hidden or pinned keeps its icon so the state reads at a glance. The
+   slots stay reserved so the status beside them never shifts. Untracked tools
+   never reach the main list, so the two controls have nothing to say there. */
+.tool-preference-row .tool-visibility-button {
+  color: var(--muted);
+}
+.tool-preference-row .tool-visibility-button:not(.is-hidden),
+.tool-preference-row .tool-pin-button:not(.is-pinned) {
+  opacity: 0;
+  transition: opacity 120ms ease;
+}
+.tool-preference-row:is(:hover, :has(:focus-visible)) .tool-visibility-button,
+.tool-preference-row:is(:hover, :has(:focus-visible)) .tool-pin-button {
+  opacity: 1;
+}
+.tool-preference-row.is-untracked .tool-visibility-button,
+.tool-preference-row.is-untracked .tool-pin-button {
+  display: none;
+}
 .tool-preference-toggle {
   display: flex !important;
   align-items: center;
-  justify-content: center;
-  width: 22px;
   height: 22px;
   min-width: 0;
-  margin: 0;
-}
-.tool-preference-toggle input[type="checkbox"] {
-  width: auto;
-  margin: 0;
-  accent-color: var(--accent);
+  margin: 0 0 0 2px;
 }
 .tool-visibility-button,
 .tool-pin-button {
@@ -2685,15 +2972,28 @@ button.settings-help-trigger:focus-visible { outline: 1px solid var(--accent); o
   background: rgba(var(--accent-rgb), 0.06);
   color: var(--accent);
 }
-.tool-visibility-button svg,
-.tool-pin-button svg {
+.tool-visibility-button::before,
+.tool-pin-button::before {
+  content: "";
   width: 13px;
   height: 13px;
-  fill: none;
-  stroke: currentColor;
-  stroke-width: 2;
-  stroke-linecap: round;
-  stroke-linejoin: round;
+  background: currentColor;
+  mask: center / contain no-repeat;
+}
+.tool-visibility-button::before {
+  mask-image: url("icons/actions/eye.svg");
+}
+.tool-visibility-button.is-hidden::before {
+  mask-image: url("icons/actions/eye-off.svg");
+}
+.tool-pin-button::before {
+  mask-image: url("icons/actions/pin.svg");
+}
+@media (forced-colors: active) {
+  .tool-visibility-button::before,
+  .tool-pin-button::before {
+    background: ButtonText;
+  }
 }
 .settings-panel .limit-provider-list {
   grid-template-columns: 1fr;
@@ -2702,7 +3002,7 @@ button.settings-help-trigger:focus-visible { outline: 1px solid var(--accent); o
 .settings-panel .limit-provider-row {
   position: relative;
   display: grid;
-  grid-template-columns: auto minmax(0, 1fr);
+  grid-template-columns: minmax(0, 1fr) auto;
   align-items: center;
   gap: 8px;
   margin: 0 -2px;
@@ -2726,10 +3026,10 @@ button.settings-help-trigger:focus-visible { outline: 1px solid var(--accent); o
 .limit-provider-main {
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  gap: 8px;
+  gap: 7px;
   width: 100%;
   min-width: 0;
+  min-height: 28px;
   padding: 0;
   border: 0;
   border-radius: 4px;
@@ -2747,10 +3047,6 @@ button.settings-help-trigger:focus-visible { outline: 1px solid var(--accent); o
 .limit-provider-row.is-disabled .limit-provider-main {
   color: var(--muted);
 }
-.limit-provider-row.is-disabled .limit-provider-tag {
-  border-color: rgba(var(--line-rgb), 0.13);
-  color: var(--muted);
-}
 .limit-provider-actions {
   display: flex;
   flex: 0 1 auto;
@@ -2758,13 +3054,36 @@ button.settings-help-trigger:focus-visible { outline: 1px solid var(--accent); o
   max-width: 58%;
   align-items: center;
   justify-content: flex-end;
-  gap: 4px;
+  gap: 5px;
 }
-.limit-provider-actions > .cursor-status-pill {
+/* Status beside the switch reads as plain text; the switch already says on
+   or off, so a pill border would only add a second frame. */
+.limit-provider-row.has-status-tag .limit-provider-actions > .cursor-status-pill {
+  display: none;
+}
+/* Every status carries a dot in its own tone (setup orange, warning yellow,
+   sync blue), like the green dot of a healthy provider. */
+.limit-provider-actions > .limit-provider-tag-status::before,
+.tool-preference-actions > .tool-status-tag:not(.is-dot)::before {
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  margin: 0 5px 1px 0;
+  border-radius: 50%;
+  background: currentColor;
+  vertical-align: middle;
+  content: "";
+}
+.limit-provider-actions > .cursor-status-pill,
+.limit-provider-actions > .limit-provider-tag {
   flex: 0 1 auto;
-}
-.limit-provider-row.expanded > .limit-provider-main .cursor-disclosure-icon {
-  transform: rotate(180deg);
+  min-width: 0;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: none;
+  font-size: 0.59375rem;
+  text-align: right;
 }
 /* Provider options hang under their own row, spanning the full width beneath
    both the label and the actions. The row's spacing is a column gap only: a row
@@ -2810,20 +3129,129 @@ button.settings-help-trigger:focus-visible { outline: 1px solid var(--accent); o
   border-left: 0;
 }
 .settings-panel .limit-provider-toggle {
-  align-items: flex-start;
+  display: flex;
+  align-items: center;
+  height: 22px;
 }
 .limit-provider-copy {
-  display: grid;
+  display: flex;
   flex: 1 1 auto;
   min-width: 0;
-  gap: 3px;
-  white-space: normal;
 }
 .limit-provider-name-line {
   display: flex;
   min-width: 0;
   align-items: center;
+  gap: 7px;
+}
+/* Provider and tool marks share one size in both settings lists. */
+.settings-panel .settings-list-icon {
+  display: inline-block;
+  flex: 0 0 14px;
+  width: 14px;
+  height: 14px;
+  background-color: currentColor;
+  -webkit-mask-position: center;
+  mask-position: center;
+  -webkit-mask-size: contain;
+  mask-size: contain;
+  -webkit-mask-repeat: no-repeat;
+  mask-repeat: no-repeat;
+}
+.settings-panel .settings-list-icon-fallback {
+  display: inline-grid;
+  place-items: center;
+  border-radius: 4px;
+  background: none;
+  box-shadow: inset 0 0 0 1px rgba(var(--line-rgb), 0.24);
+  color: var(--muted);
+  font-size: 0.5rem;
+  font-weight: 600;
+  line-height: 1;
+}
+/* Enabled rows above, the rest in a collapsed group (see
+   renderSettingsListGroups in app.js). */
+.settings-list-group-label {
+  margin: 0;
+  color: var(--readable-muted);
+  font-size: 0.5625rem;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  white-space: nowrap;
+}
+p.settings-list-group-label { padding: 2px 0 0; }
+.settings-list-group-toggle {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: calc(100% + 4px);
+  min-height: 28px;
+  margin: 0 -2px;
+  padding: 0 2px;
+  border: 0;
+  border-radius: 6px;
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.settings-list-group-toggle:hover { background: rgba(var(--overlay-rgb), var(--control-alpha)); }
+.settings-list-group-toggle:focus-visible {
+  outline: 1px solid rgba(var(--accent-rgb), 0.62);
+  outline-offset: 1px;
+}
+.settings-list-group-icons {
+  display: flex;
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  padding-left: 4px;
+}
+.settings-list-group-toggle.expanded .settings-list-group-icons { visibility: hidden; }
+.settings-list-group-icon {
+  display: inline-grid;
+  flex: 0 0 18px;
+  place-items: center;
+  width: 18px;
+  height: 18px;
+  margin-left: -4px;
+  border-radius: 50%;
+  background: rgb(var(--panel-rgb));
+  box-shadow: 0 0 0 1px rgba(var(--line-rgb), 0.16);
+  color: var(--muted);
+}
+.settings-panel .settings-list-group-icon > .settings-list-icon {
+  flex-basis: 10px;
+  width: 10px;
+  height: 10px;
+  box-shadow: none;
+}
+.settings-list-group-action {
+  flex: 0 0 auto;
+  color: var(--muted);
+  font-size: 0.59375rem;
+}
+.settings-list-group-toggle.expanded .cursor-disclosure-icon { transform: rotate(180deg); }
+/* The animated inner clips; widen it by the rows' negative margin so their
+   edges and focus rings are not cut off. */
+.settings-list-group > .accordion-animation-inner {
+  margin: 0 -2px;
+  padding: 0 2px;
+}
+.settings-list-group-rows {
+  display: grid;
   gap: 6px;
+}
+/* Rows and the group toggle carry their own horizontal margins, which would
+   otherwise cancel the list's 6px spacing; match the limits list's rhythm. */
+.tool-preference-list > * + .tool-preference-row,
+.tool-preference-list > * + .settings-list-group-toggle {
+  margin-top: 6px;
+}
+.settings-list-group .tool-preference-name,
+.settings-list-group .settings-list-icon {
+  color: var(--muted);
 }
 .limit-provider-name {
   overflow: hidden;
@@ -2837,12 +3265,6 @@ button.settings-help-trigger:focus-visible { outline: 1px solid var(--accent); o
   border-radius: 50%;
   background: var(--success);
   box-shadow: 0 0 0 1px rgba(var(--success-rgb), 0.1);
-}
-.limit-provider-tags {
-  display: flex;
-  min-width: 0;
-  flex-wrap: wrap;
-  gap: 3px;
 }
 .limit-provider-tag {
   max-width: 100%;
@@ -2897,10 +3319,12 @@ button.settings-help-trigger:focus-visible { outline: 1px solid var(--accent); o
 }
 .limit-provider-options-inner {
   display: grid;
+  grid-template-columns: minmax(0, 1fr);
   min-width: 0;
   gap: 8px;
 }
 .limit-provider-account-group {
+  min-width: 0;
   margin-left: 0;
 }
 .limit-provider-account-group > .settings-group-header {
@@ -2922,27 +3346,56 @@ button.settings-help-trigger:focus-visible { outline: 1px solid var(--accent); o
 .limit-provider-connection-detail > .settings-note {
   margin: 0;
 }
+.limit-provider-usage-items,
+.main-numbers-group,
+.settings-panel .limit-provider-options-inner > .limit-provider-settings-list {
+  min-width: 0;
+  margin: 0;
+  padding: 8px 12px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+}
+.settings-panel .limit-provider-options-inner > .limit-provider-settings-list > .settings-item {
+  padding: 8px 0;
+}
+.settings-panel .limit-provider-options-inner > .limit-provider-settings-list > .settings-item + .settings-item {
+  border-top-color: var(--line);
+}
+.settings-panel .limit-provider-options-inner > .limit-provider-settings-list > .settings-item:first-child {
+  padding-top: 0;
+}
+.settings-panel .limit-provider-options-inner > .limit-provider-settings-list > .settings-item:last-child {
+  padding-bottom: 0;
+}
+.settings-panel .limit-provider-options-inner > .limit-provider-settings-list .settings-item-desc {
+  padding-bottom: 0;
+}
 .limit-provider-usage-items {
   display: grid;
-  min-width: 0;
   gap: 4px;
-  padding: 4px 0 2px;
 }
 .limit-provider-usage-items-head {
   display: flex;
   align-items: center;
   gap: 6px;
 }
-.limit-provider-usage-items-title {
-  color: var(--text);
+.limit-provider-usage-items-title,
+.main-numbers-title {
+  color: var(--muted);
   font-size: 0.625rem;
+}
+.limit-provider-usage-items-list {
+  display: grid;
+  gap: 0;
 }
 .settings-panel .limit-provider-usage-items-list > .client-checkbox {
   display: flex;
+  flex: 0 1 auto;
+  max-width: 100%;
   align-items: center;
   gap: 8px;
   min-width: 0;
-  min-height: 24px;
+  min-height: 28px;
   font-size: 0.6875rem;
 }
 .settings-panel .limit-provider-usage-items-list > .client-checkbox > input {
@@ -2951,9 +3404,8 @@ button.settings-help-trigger:focus-visible { outline: 1px solid var(--accent); o
 }
 .settings-panel .limit-provider-usage-items-list > .client-checkbox > span {
   min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  white-space: normal;
+  overflow-wrap: anywhere;
 }
 .preference-order-handle {
   display: inline-flex;
@@ -3117,7 +3569,7 @@ button.settings-help-trigger:focus-visible { outline: 1px solid var(--accent); o
 .theme-code-status.success { color: var(--success); }
 .theme-code-status.error { color: var(--red); }
 .theme-color-accordion { border-top: 1px solid var(--line); padding-top: 9px; }
-.color-picker-grid { display: grid; gap: 6px; }
+.color-picker-grid { display: grid; }
 .color-picker-row, .vendor-color-row {
   display: grid;
   grid-template-columns: 1fr auto auto;
@@ -3126,18 +3578,128 @@ button.settings-help-trigger:focus-visible { outline: 1px solid var(--accent); o
   color: var(--muted);
   font-size: 0.6875rem;
 }
+.color-picker-row {
+  min-height: 32px;
+  color: var(--text);
+}
+.color-picker-row + .color-picker-row { border-top: 1px solid rgba(var(--line-rgb), .12); }
+.color-picker-row:nth-child(4) { border-top-color: var(--line); }
+.settings-appearance-type .settings-font-field {
+  grid-template-columns: minmax(0, 1fr) minmax(0, 57%);
+  align-items: center;
+  padding: 4px 0;
+  border-top: 1px solid rgba(var(--line-rgb), .06);
+}
+.settings-appearance-type .settings-font-custom-row { grid-column: 1 / -1; }
+.settings-section-details-inner > .settings-page-card,
+.settings-appearance-section-group .settings-section-details-inner > .settings-subgroup {
+  padding: 8px 10px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: rgba(var(--panel-rgb), .22);
+}
+.settings-appearance-section-group .settings-section-details-inner > .settings-subgroup:first-child {
+  margin-top: 6px;
+}
+.settings-section-details-inner > .settings-page-card:last-child,
+.settings-appearance-section-group .settings-section-details-inner > .settings-subgroup:last-child {
+  margin-bottom: 10px;
+}
+.settings-model-controls > .cursor-account-group:not(.expanded) + .cursor-account-group { margin-top: 0; }
+.settings-model-controls .cursor-settings-toggle { min-height: 30px; }
+.settings-export-block > .export-auto-details:not(.hidden) + .export-manual-row {
+  border-top: 1px solid var(--line);
+  padding-top: 5px;
+}
+.settings-appearance-vendors > .theme-color-accordion { border-top: 0; padding-top: 0; }
 .color-picker-name, .vendor-color-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.settings-panel input.color-picker-input {
-  width: 30px;
-  height: 22px;
-  padding: 0;
+.settings-panel button.color-picker-swatch {
+  width: 32px;
+  height: 24px;
+  padding: 3px;
   border: 1px solid var(--line);
   border-radius: 6px;
-  background: transparent;
-  cursor: pointer;
+  background: rgba(var(--overlay-rgb), var(--control-alpha));
 }
-.settings-panel input.color-picker-input::-webkit-color-swatch-wrapper { padding: 2px; }
-.settings-panel input.color-picker-input::-webkit-color-swatch { border: none; border-radius: 4px; }
+.color-picker-swatch::before,
+.appearance-color-picker-heading > span {
+  content: '';
+  display: block;
+  height: 100%;
+  border: 1px solid rgba(var(--line-rgb), .18);
+  border-radius: 3px;
+  background: var(--swatch-color);
+}
+.settings-panel button.color-picker-swatch:is(:hover, [aria-expanded="true"]) { border-color: var(--line-strong); }
+.appearance-color-picker {
+  position: fixed;
+  inset: auto;
+  box-sizing: border-box;
+  margin: 0;
+  padding: 10px;
+  color: var(--text);
+  overflow: auto;
+  overscroll-behavior: contain;
+  -webkit-app-region: no-drag;
+}
+.appearance-color-picker:popover-open { display: grid; gap: 9px; }
+.appearance-color-picker-heading { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.appearance-color-picker-heading strong { font-size: .75rem; overflow-wrap: anywhere; }
+.appearance-color-picker-heading > span { flex: 0 0 22px; height: 16px; }
+.appearance-color-plane {
+  position: relative;
+  height: 100px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  background: linear-gradient(to top, #000, transparent), linear-gradient(to right, #fff, transparent), hsl(var(--picker-hue) 100% 50%);
+  touch-action: none;
+  cursor: crosshair;
+}
+.appearance-color-plane > span {
+  position: absolute;
+  left: var(--picker-x);
+  top: var(--picker-y);
+  width: 12px;
+  height: 12px;
+  transform: translate(-50%, -50%);
+  border: 2px solid white;
+  border-radius: 50%;
+  box-shadow: 0 0 0 1px black;
+  pointer-events: none;
+}
+.appearance-color-hue {
+  width: 100%;
+  height: 9px;
+  margin: 2px 0;
+  appearance: none;
+  border-radius: 8px;
+  background: linear-gradient(to right, #f00, #ff0, #0f0, #0ff, #00f, #f0f, #f00);
+}
+.appearance-color-hue::-webkit-slider-thumb {
+  appearance: none;
+  width: 12px;
+  height: 12px;
+  border: 2px solid white;
+  border-radius: 50%;
+  background: hsl(var(--picker-hue) 100% 50%);
+  box-shadow: 0 0 0 1px black;
+}
+.appearance-color-values { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+.appearance-color-values label { display: grid; gap: 4px; font-size: .625rem; color: var(--muted); }
+.appearance-color-values input {
+  width: 100%;
+  min-width: 0;
+  padding: 5px 6px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: rgba(var(--sunken-rgb), .48);
+  color: var(--text);
+  font: .6875rem ui-monospace, monospace;
+}
+.appearance-color-values input[aria-invalid="true"] { border-color: var(--red); }
+.appearance-color-picker [role="status"] { margin: 0; color: var(--red); font-size: .625rem; }
+.appearance-color-picker :focus-visible,
+.settings-panel button.color-picker-swatch:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 .vendor-color-list {
   display: grid;
   gap: 6px;
@@ -3198,13 +3760,13 @@ button.settings-help-trigger:focus-visible { outline: 1px solid var(--accent); o
 .select-control-icon { display: flex; flex: 0 0 14px; align-items: center; justify-content: center; color: var(--muted); }
 .select-control-icon svg { width: 14px; height: 14px; }
 .select-control-arrow {
-  width: 6px;
-  height: 6px;
-  flex: 0 0 6px;
-  margin: -3px 2px 0 4px;
-  border-right: 1px solid var(--muted);
-  border-bottom: 1px solid var(--muted);
-  transform: rotate(45deg);
+  width: 12px;
+  height: 12px;
+  flex: 0 0 12px;
+  margin: 0 0 0 2px;
+  background: var(--muted);
+  -webkit-mask: url("icons/actions/chevron-down.svg") center / contain no-repeat;
+  mask: url("icons/actions/chevron-down.svg") center / contain no-repeat;
 }
 .plugin-menu,
 .view-switcher-menu,
@@ -3212,6 +3774,7 @@ button.settings-help-trigger:focus-visible { outline: 1px solid var(--accent); o
 .plugin-menu,
 .view-switcher-menu,
 .select-control-popup,
+.appearance-color-picker,
 .sync-content-dialog,
 .plugin-catalog-dialog,
 .settings-help-popover,
@@ -3271,6 +3834,7 @@ button.settings-help-trigger:focus-visible { outline: 1px solid var(--accent); o
   .plugin-menu,
   .view-switcher-menu,
   .select-control-popup,
+  .appearance-color-picker,
   .sync-content-dialog,
   .plugin-catalog-dialog,
   .settings-help-popover { background: rgb(var(--glass-rgb)); }
@@ -3915,8 +4479,9 @@ html.is-windows .settings-panel select option {
 .home-session-meta .home-list-sub { min-width: 0; }
 .home-session-cache { margin-left: auto; flex: 0 0 auto; color: var(--muted); font-size: 0.625rem; white-space: nowrap; }
 .home-session-context { display: inline-flex; flex: 0 0 auto; align-items: center; gap: 4px; margin-left: auto; color: var(--muted); font-size: 0.625rem; }
-.home-session-context-meter { width: 16px; height: 3px; overflow: hidden; border-radius: 2px; background: rgba(var(--overlay-rgb), 0.18); }
+.home-session-context-meter { flex: 0 0 16px; width: 16px; height: 3px; overflow: hidden; border-radius: 2px; background: rgba(var(--overlay-rgb), 0.18); }
 .home-session-context-fill { display: block; width: 100%; height: 100%; background: rgba(var(--overlay-rgb), 0.5); transform: scaleX(var(--bar-scale, 0)); transform-origin: left center; }
+.home-session-context-value { min-width: 3ch; text-align: right; font-variant-numeric: tabular-nums; }
 .home-session-context[data-tone="caution"] { color: var(--yellow); }
 .home-session-context[data-tone="caution"] .home-session-context-fill { background: var(--yellow); }
 .home-session-context[data-tone="low"] { color: var(--orange); }
@@ -4045,14 +4610,39 @@ html.is-windows .settings-panel select option {
   white-space: nowrap;
 }
 .home-area-chart {
+  position: relative;
   width: 100%;
   height: 70px;
   min-height: 56px;
+  cursor: default;
 }
 .home-area-chart .area-line {
   display: block;
   width: 100%;
   height: 100%;
+}
+.home-trend-crosshair,
+.home-trend-marker {
+  position: absolute;
+  visibility: hidden;
+  pointer-events: none;
+}
+.home-area-chart[data-active="true"] .home-trend-crosshair,
+.home-area-chart[data-active="true"] .home-trend-marker {
+  visibility: visible;
+}
+.home-trend-crosshair {
+  top: 0;
+  bottom: 0;
+  border-left: 1px dashed rgba(var(--chart-rgb), 0.55);
+}
+.home-trend-marker {
+  width: 7px;
+  height: 7px;
+  border: 1px solid rgb(var(--panel-rgb));
+  border-radius: 50%;
+  background: var(--chart-color);
+  transform: translate(-50%, -50%);
 }
 .area-line-fill {
   fill: url(#area-line-grad);
@@ -4159,10 +4749,6 @@ html.is-windows .settings-panel select option {
   pointer-events: none;
   transition: opacity 180ms ease;
 }
-.home-activity-scroll.is-restoring-hover .heat,
-.home-activity-scroll.is-restoring-hover .heat-bright-layer {
-  transition: none;
-}
 .home-activity-scroll:hover .heat-bright-layer,
 .home-activity-scroll:focus-within .heat-bright-layer {
   opacity: 1;
@@ -4243,6 +4829,11 @@ html.is-windows .settings-panel select option {
   font-weight: 500;
 }
 .home-activity-tooltip-date {
+  font-size: 0.5625rem;
+}
+.home-trend-tooltip-cost {
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
   font-size: 0.5625rem;
 }
 .home-module-empty {
@@ -4475,16 +5066,11 @@ html.is-windows .settings-panel select option {
 }
 .session-tool-filter.has-overflow .session-tool-scroll { visibility: visible; }
 .session-tool-scroll .session-page-icon {
-  width: 5px;
-  height: 5px;
-  background: transparent;
-  -webkit-mask: none;
-  mask: none;
-  border-left: 1px solid currentColor;
-  border-bottom: 1px solid currentColor;
-  transform: rotate(45deg);
+  -webkit-mask: url("icons/actions/chevron-down.svg") center / contain no-repeat;
+  mask: url("icons/actions/chevron-down.svg") center / contain no-repeat;
+  transform: rotate(90deg);
 }
-.session-tool-scroll-next .session-page-icon { transform: rotate(225deg); }
+.session-tool-scroll-next .session-page-icon { transform: rotate(-90deg); }
 .session-tool-scroll:hover:not(:disabled) { color: var(--text); }
 .session-tool-scroll:disabled { opacity: 0; cursor: default; }
 .session-tool-scroll:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
@@ -4809,11 +5395,17 @@ html.is-windows .settings-panel select option {
   white-space: nowrap;
 }
 .row-context-meter {
+  flex: 0 0 20px;
   width: 20px;
   height: 3px;
   overflow: hidden;
   border-radius: 2px;
   background: rgba(var(--sunken-rgb), 0.46);
+}
+.row-context-meter:not(.hidden) + .row-context-value {
+  min-width: 3ch;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
 }
 
 .row-context-fill {
@@ -5094,6 +5686,86 @@ html.is-windows .settings-panel select option {
   line-height: 1.2;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+.limit-meta.has-refresh {
+  display: flex;
+  align-items: center;
+  /* One monospace space, as if the icon were the next word of the line. */
+  gap: 0.6em;
+  overflow: visible;
+}
+.limit-meta-text {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+/* Sized in the meta line's own em so it reads as part of that text: the icon's
+   ink sits a little under cap height and its stroke near the font's. It takes its space
+   whether or not it shows, so revealing it on hover never shifts the line; the
+   negative margin keeps the line's height. */
+.limit-refresh-button {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: center;
+  width: 1.4em;
+  height: 1.4em;
+  margin: -0.2em -0.2em;
+  padding: 0;
+  border: 0;
+  border-radius: 3px;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 120ms cubic-bezier(0.25, 1, 0.5, 1), color 120ms cubic-bezier(0.25, 1, 0.5, 1);
+}
+.limit-row:hover > .limit-head .limit-refresh-button,
+.limit-refresh-button:focus-visible,
+.limit-refresh-button.is-refreshing {
+  opacity: 1;
+  pointer-events: auto;
+}
+.limit-refresh-button:hover { color: var(--text); }
+/* The shared button reset drops focus outlines, and hover already reveals the
+   button, so keyboard focus needs a mark of its own: the limit rows' style. */
+.limit-refresh-button:focus-visible { outline: 1px solid var(--accent); outline-offset: 1px; }
+.limit-refresh-button.is-refreshing { cursor: default; }
+/* A click that brought nothing back stays visible, tinted, beside its reason,
+   so the button does not look like it silently did nothing. A cooldown is the
+   provider asking for patience rather than a fault, so it takes the warning
+   tone. */
+.limit-meta.has-refresh { --limit-refresh-failure: var(--red); }
+.limit-meta.has-refresh:has(.is-refresh-cooldown) { --limit-refresh-failure: var(--orange); }
+.limit-refresh-button.is-refresh-error {
+  opacity: 1;
+  pointer-events: auto;
+  color: var(--limit-refresh-failure);
+}
+/* Empty, it stays in the DOM as the live region but takes no gap after the button. */
+.limit-refresh-status:empty { margin-left: -0.6em; }
+.limit-refresh-status {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--limit-refresh-failure);
+  text-overflow: ellipsis;
+}
+.limit-refresh-icon {
+  width: 0.85em;
+  height: 0.85em;
+  background: currentColor;
+  -webkit-mask: url("icons/actions/rotate-cw.svg") center / contain no-repeat;
+  mask: url("icons/actions/rotate-cw.svg") center / contain no-repeat;
+}
+.limit-refresh-button.is-refreshing .limit-refresh-icon {
+  -webkit-mask-image: url("icons/actions/spinner.svg");
+  mask-image: url("icons/actions/spinner.svg");
+}
+.limit-refresh-button:active:not(.is-refreshing) .limit-refresh-icon { transform: scale(0.88); }
+@media (prefers-reduced-motion: reduce) {
+  :root:not([data-reduce-motion="off"]) .limit-refresh-button { transition-duration: 0.01ms; }
 }
 .limit-plan {
   flex: 0 0 auto;
@@ -6418,15 +7090,15 @@ html.is-windows .limit-live-badge {
 }
 .view-switcher-disclosure::before {
   content: '';
-  width: 6px;
-  height: 6px;
-  border-right: 1.5px solid currentColor;
-  border-bottom: 1.5px solid currentColor;
-  transform: translateY(-2px) rotate(45deg);
+  width: 12px;
+  height: 12px;
+  background: currentColor;
+  -webkit-mask: url("icons/actions/chevron-down.svg") center / contain no-repeat;
+  mask: url("icons/actions/chevron-down.svg") center / contain no-repeat;
   transition: transform 140ms ease;
 }
 .view-switcher.is-open .view-switcher-disclosure::before {
-  transform: translateY(2px) rotate(225deg);
+  transform: rotate(180deg);
 }
 .view-switcher-icon {
   display: inline-block;
@@ -6592,6 +7264,7 @@ html.native-liquid-glass .select-control-popup,
 html.native-liquid-glass .view-switcher-menu { padding: 5px; }
 html.native-liquid-glass .plugin-menu,
 html.native-liquid-glass .select-control-popup,
+html.native-liquid-glass .appearance-color-picker,
 html.native-liquid-glass .view-switcher-menu,
 html.native-liquid-glass .sync-content-dialog,
 html.native-liquid-glass .plugin-catalog-dialog,
@@ -7134,6 +7807,9 @@ html.native-liquid-glass .view-switcher-menu-item { border-radius: 9px; }
 .settings-note.error {
   color: var(--red);
 }
+.settings-note.warning {
+  color: var(--orange);
+}
 .client-checkbox.disabled,
 .tool-preference-row.disabled .tool-preference-name {
   opacity: 0.5;
@@ -7144,10 +7820,10 @@ html.native-liquid-glass .view-switcher-menu-item { border-radius: 9px; }
 .session-detail { display: flex; flex: 1; min-height: 0; flex-direction: column; gap: 6px; overflow: hidden auto; scrollbar-width: none; font-size: 0.75rem; }
 .session-detail::-webkit-scrollbar { width: 0; height: 0; }
 .detail-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; font-size: 0.75rem; }
-.detail-back { flex-shrink: 0; background: transparent; border: 0; color: var(--muted, #8a8a90); font: inherit; cursor: pointer; padding: 0; }
-/* The whole title is a back target; retain the original `‹ Sessions` spacing. */
-.detail-back-titled { display: flex; align-items: baseline; gap: 1ch; flex: 1; min-width: 0; text-align: start; }
-.detail-back-arrow { flex: 0 0 auto; font: inherit; }
+.detail-back { display: inline-flex; align-items: center; gap: 4px; flex-shrink: 0; background: transparent; border: 0; color: var(--muted, #8a8a90); font: inherit; cursor: pointer; padding: 0; }
+/* The whole title is a back target. */
+.detail-back-titled { display: flex; flex: 1; min-width: 0; text-align: start; }
+.detail-back-arrow { width: 12px; height: 12px; flex: 0 0 12px; background: currentColor; -webkit-mask: url("icons/actions/chevron-down.svg") center / contain no-repeat; mask: url("icons/actions/chevron-down.svg") center / contain no-repeat; transform: rotate(90deg); }
 .detail-heading { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font: inherit; color: var(--muted, #8a8a90); }
 .fade-overflow.is-overflow-enabled { text-overflow: clip; scrollbar-width: none; }
 .fade-overflow.is-overflow-enabled.is-overflow-static { overflow-x: auto; }
@@ -7163,7 +7839,8 @@ html.native-liquid-glass .view-switcher-menu-item { border-radius: 9px; }
 .detail-exchange { border-bottom: 1px dashed rgba(255,255,255,0.08); padding: 6px 0; }
 .detail-exchange .bar { height: 3px; margin-left: 20px; width: auto; }
 .detail-ex-head { display: flex; align-items: baseline; gap: 8px; cursor: pointer; }
-.detail-chev { width: 12px; flex: 0 0 12px; color: var(--muted, #8a8a90); }
+.detail-chev { align-self: flex-start; width: 12px; height: 12px; flex: 0 0 12px; margin-top: 2px; background: var(--muted, #8a8a90); -webkit-mask: url("icons/actions/chevron-down.svg") center / contain no-repeat; mask: url("icons/actions/chevron-down.svg") center / contain no-repeat; transform: rotate(-90deg); transition: transform 140ms ease; }
+.detail-exchange.expanded .detail-chev { transform: none; }
 .detail-ex-label { display: flex; flex-direction: column; gap: 2px; flex: 1; min-width: 0; }
 .detail-ex-title { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .detail-ex-sub { font-size: 0.625rem; color: var(--muted, #8a8a90); }
@@ -7187,9 +7864,6 @@ html.native-liquid-glass .view-switcher-menu-item { border-radius: 9px; }
 .detail-session-id-text { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; user-select: text; }
 .detail-session-id-copy { flex-shrink: 0; padding: 0 2px; border: 0; background: transparent; color: inherit; font: inherit; cursor: pointer; opacity: 0.72; }
 .detail-session-id-copy:hover, .detail-session-id-copy:focus-visible { color: var(--text); opacity: 1; }
-.view-preference-row.has-subgroup {
-  grid-template-columns: minmax(0, 1fr) repeat(3, 22px);
-}
 .view-subgroup-toggle {
   display: inline-grid;
   place-items: center;
@@ -7263,9 +7937,6 @@ html.native-liquid-glass .view-switcher-menu-item { border-radius: 9px; }
   min-width: 0;
   transition: background 120ms ease, box-shadow 120ms ease, opacity 120ms ease;
 }
-.home-module-preference-row:has(.view-subgroup-toggle) {
-  grid-template-columns: minmax(0, 1fr) repeat(3, 22px);
-}
 .settings-panel .home-module-count-setting > input[type="number"],
 .settings-panel .home-limit-account-count-setting > input[type="number"] {
   height: 20px;
@@ -7307,6 +7978,271 @@ html.native-liquid-glass .view-switcher-menu-item { border-radius: 9px; }
   gap: 8px;
 }
 .status-provider-row.is-hidden .tool-preference-name { opacity: 0.45; }
+
+/* Main Screen pairs the view switcher's own items (in its order, hidden views
+   in a group below) with the selected view's settings beside them. The nav
+   items reuse the switcher menu's current-item tint so the two read as the
+   same list. */
+.main-view-layout {
+  display: grid;
+  grid-template-columns: 96px minmax(0, 1fr);
+  align-items: start;
+  gap: 8px;
+  min-width: 0;
+}
+.main-view-nav,
+.main-view-list,
+.main-view-hidden-group {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+.main-view-hidden-group { margin-top: 6px; }
+.main-view-hidden-label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 2px 2px 8px;
+  color: var(--muted);
+  font-size: 0.5625rem;
+}
+.main-view-hidden-label::after {
+  content: "";
+  flex: 1 1 auto;
+  height: 1px;
+  background: rgba(var(--line-rgb), 0.14);
+}
+.main-view-nav-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 4px;
+  padding: 6px 0 0 8px;
+}
+.main-view-hint {
+  min-width: 0;
+  color: var(--muted);
+  font-size: 0.5625rem;
+  line-height: 1.3;
+  opacity: 0.8;
+}
+.main-view-nav-footer .tool-header-action { width: 22px; height: 22px; font-size: 14px; }
+.main-view-tab {
+  display: flex;
+  flex: 1 1 auto;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  height: 28px;
+  padding: 0 2px 0 8px;
+  border: 0;
+  border-radius: 7px;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.main-view-tab .view-switcher-icon { width: 13px; height: 13px; }
+.main-view-tab .tool-preference-name { color: inherit; font-weight: 400; }
+.main-view-tab:focus-visible { outline: none; }
+.view-preference-row:hover { background: rgba(var(--overlay-rgb), 0.05); color: var(--text); }
+.view-preference-row.is-current { background: rgba(var(--accent-rgb), 0.12); color: var(--accent); }
+.view-preference-row.is-hidden:not(.is-current) { box-shadow: inset 0 0 0 1px rgba(var(--line-rgb), 0.16); }
+.view-preference-row:has(.main-view-tab:focus-visible) { box-shadow: inset 0 0 0 1px rgba(var(--accent-rgb), 0.72); }
+.view-preference-row.is-hidden .tool-preference-name,
+.view-preference-row.is-disabled .tool-preference-name { opacity: 0.72; }
+.view-preference-row.is-current .tool-preference-name { opacity: 1; }
+.view-preference-row .preference-order-handle {
+  flex: 0 0 18px;
+  width: 18px;
+  opacity: 0;
+  transition: opacity 120ms ease;
+}
+.main-view-add {
+  position: relative;
+  flex: 0 0 22px;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+}
+.main-view-add::before,
+.main-view-add::after {
+  content: "";
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 9px;
+  height: 1.5px;
+  border-radius: 1px;
+  background: currentColor;
+  transform: translate(-50%, -50%);
+}
+.main-view-add::after { transform: translate(-50%, -50%) rotate(90deg); }
+.main-view-add:hover,
+.main-view-add:focus-visible { border-color: var(--line-strong); background: rgba(var(--overlay-rgb), var(--control-alpha)); color: var(--text); }
+.main-view-add:focus-visible { outline: 1px solid rgba(var(--accent-rgb), 0.5); outline-offset: 1px; }
+.main-view-inspector {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  min-width: 0;
+  padding: 10px 10px 6px;
+  border: 1px solid rgba(var(--line-rgb), 0.13);
+  border-radius: 10px;
+  background: rgba(var(--overlay-rgb), 0.035);
+}
+.main-view-header {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  min-width: 0;
+  margin-bottom: 4px;
+}
+.main-view-badge {
+  display: grid;
+  place-items: center;
+  flex: 0 0 26px;
+  width: 26px;
+  height: 26px;
+  border-radius: 8px;
+  background: rgba(var(--accent-rgb), 0.12);
+  color: var(--accent);
+}
+.main-view-badge .view-switcher-icon { width: 14px; height: 14px; }
+.main-view-heading { display: grid; gap: 1px; min-width: 0; }
+.main-view-heading strong { overflow: hidden; color: var(--text); font-size: 0.8125rem; font-weight: 600; text-overflow: ellipsis; white-space: nowrap; }
+.main-view-subtitle { color: var(--muted); font-size: 0.5625rem; }
+.settings-panel .main-view-visibility { min-height: 32px; }
+.settings-panel .main-view-inspector > .settings-nested-list {
+  margin: 0;
+  padding: 0;
+  border-left: 0;
+  border-top: 1px solid rgba(var(--line-rgb), 0.1);
+}
+/* The inspector column is narrow; a long provider name must ellipsize rather
+   than widen the list past the card. */
+.main-view-inspector .settings-nested-list { grid-template-columns: minmax(0, 1fr); }
+.main-view-inspector .status-provider-row .tool-preference-actions { flex: 0 0 auto; }
+.settings-panel .main-view-inspector .settings-nested-list .settings-nested-list {
+  margin: 0 0 4px;
+  padding: 0 0 0 8px;
+}
+.settings-panel .main-view-inspector .home-settings-header { margin: 6px 0 0; min-height: 22px; }
+.main-view-caption { color: var(--muted); font-size: 0.5625rem; }
+.settings-panel .main-view-inspector .home-settings-header .tool-header-action { width: 22px; height: 22px; font-size: 14px; }
+.settings-panel .main-view-inspector .home-module-preference-row {
+  grid-template-columns: minmax(0, 1fr) auto;
+  min-height: 36px;
+  margin: 0;
+  padding: 0;
+  border-top: 1px solid rgba(var(--line-rgb), 0.08);
+  border-radius: 0;
+}
+.settings-panel .main-view-inspector .home-settings-header + .home-module-preference-row { border-top: 0; }
+.home-module-disclosure,
+.home-module-static {
+  display: grid;
+  grid-template-columns: 9px minmax(0, 1fr);
+  align-content: center;
+  justify-items: start;
+  column-gap: 5px;
+  min-width: 0;
+  min-height: 34px;
+  padding: 2px 0;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  text-align: left;
+}
+.home-module-disclosure { cursor: pointer; }
+.home-module-disclosure:focus-visible { outline: 1px solid rgba(var(--accent-rgb), 0.72); outline-offset: 1px; }
+.home-module-disclosure .tool-preference-name,
+.home-module-static .tool-preference-name { grid-column: 2; grid-row: 1; max-width: 100%; }
+.main-view-inspector .home-module-meta {
+  grid-column: 2;
+  grid-row: 2;
+  max-width: 100%;
+  overflow: hidden;
+  color: var(--muted);
+  font-size: 0.5625rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.home-module-disclosure::after {
+  content: "";
+  grid-column: 1;
+  grid-row: 1;
+  align-self: center;
+  width: 9px;
+  height: 9px;
+  background: var(--muted);
+  -webkit-mask: url("icons/actions/chevron-down.svg") center / contain no-repeat;
+  mask: url("icons/actions/chevron-down.svg") center / contain no-repeat;
+  transform: rotate(-90deg);
+  transition: transform 160ms ease;
+}
+.home-module-disclosure.is-expanded::after { transform: none; }
+.home-module-preference-row .tool-preference-actions { display: flex; align-items: center; gap: 4px; }
+.home-module-preference-row .preference-order-handle {
+  width: 18px;
+  opacity: 0;
+  transition: opacity 120ms ease;
+}
+:is(.view-preference-row, .home-module-preference-row):is(:hover, :has(:focus-visible), .dragging) .preference-order-handle { opacity: 1; }
+.main-view-link {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  min-height: 28px;
+  margin-inline: -4px;
+  padding: 0 4px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  font-size: 0.6875rem;
+  text-align: left;
+  cursor: pointer;
+}
+.main-view-link-title { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.main-view-link-meta { color: var(--muted); font-size: 0.625rem; font-variant-numeric: tabular-nums; }
+.main-view-link::after {
+  content: "";
+  flex: 0 0 9px;
+  width: 9px;
+  height: 9px;
+  background: var(--muted);
+  -webkit-mask: url("icons/actions/chevron-down.svg") center / contain no-repeat;
+  mask: url("icons/actions/chevron-down.svg") center / contain no-repeat;
+  transform: rotate(-90deg);
+}
+.main-view-link:hover,
+.main-view-link:focus-visible {
+  background: rgba(var(--overlay-rgb), 0.05);
+  color: var(--accent);
+}
+.main-view-link:is(:hover, :focus-visible)::after { background: currentColor; }
+:is(.main-view-link, .main-view-back):focus-visible { outline: 1px solid rgba(var(--accent-rgb), 0.72); outline-offset: 1px; }
+.main-view-subpage { display: grid; grid-template-columns: minmax(0, 1fr); min-width: 0; }
+.main-view-inspector .main-view-back { justify-self: start; margin: -4px 0 6px -6px; }
+.main-view-subpage-title { margin: 0 0 4px; color: var(--text); font-size: 0.75rem; font-weight: 600; }
+.settings-panel .main-view-subpage > .settings-nested-list { margin: 0; padding: 0; border-left: 0; }
+/* Range and currency apply across views, so they sit under the
+   views as one titled group. */
+.main-numbers-group {
+  margin-block: 10px;
+}
+.settings-section-details-inner > .main-numbers-group:last-child { padding-bottom: 8px; }
+.main-numbers-title + .settings-item { margin-top: 4px; }
 
 /* Main Screen starts pointer reordering from the six-dot handles, while the
    rows use the same transform choreography as Collection and AI Tool Limits. */
@@ -7355,7 +8291,6 @@ html.native-liquid-glass .view-switcher-menu-item { border-radius: 9px; }
 .home-settings-list.drag-active > .home-module-preference-row:not(.dragging),
 .home-limit-provider-list.drag-active > .home-limit-provider-row:not(.dragging),
 .status-provider-list.drag-active > .status-provider-row:not(.dragging) { opacity: 0.78; }
-#viewDisplayList.is-reordering > .accordion-animated-container,
 .home-settings-list.is-reordering > .accordion-animated-container { transition: none; }
 .service-status-empty {
   padding: 12px 0;
@@ -7593,7 +8528,7 @@ html.native-liquid-glass .view-switcher-menu-item { border-radius: 9px; }
 .model-alias-form .model-alias-form { margin-top: 0; }
 .model-alias-source { display: flex; align-items: end; gap: 8px; }
 .model-alias-source .model-alias-field { flex: 1; }
-.model-alias-source button { flex: 0 0 auto; }
+.model-alias-source > .settings-actions { flex: 0 0 auto; }
 
 
 
@@ -7609,7 +8544,6 @@ html.native-liquid-glass .view-switcher-menu-item { border-radius: 9px; }
   box-sizing: border-box;
 }
 
-.custom-pricing-rate-wide { grid-column: 1 / -1; }
 .custom-pricing-rate-heading { margin: 0; color: var(--muted); font-size: 0.625rem; line-height: 1.45; }
 
 .custom-pricing-advanced { min-width: 0; }
@@ -7638,43 +8572,8 @@ html.native-liquid-glass .view-switcher-menu-item { border-radius: 9px; }
 .cursor-account-group .custom-pricing-advanced > summary .cursor-disclosure-icon { transform: rotate(0deg); }
 .cursor-account-group .custom-pricing-advanced[open] > summary .cursor-disclosure-icon { transform: rotate(180deg); }
 .custom-pricing-advanced-body { display: grid; gap: 8px; padding-top: 8px; }
-.custom-pricing-help-row { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 10px; }
-.custom-pricing-help-row > .settings-note { flex: 1 1 200px; }
-.custom-pricing-help-button {
-  flex: 0 0 auto;
-  padding: 0;
-  border: 0;
-  border-radius: 3px;
-  background: transparent;
-  color: var(--blue);
-  font-size: 0.625rem;
-  line-height: 1.45;
-  cursor: pointer;
-}
-.custom-pricing-help-button:hover { text-decoration: underline; }
-.custom-pricing-help-button:focus-visible,
-.custom-pricing-help button:focus-visible { outline: 1px solid rgba(115, 189, 245, 0.72); outline-offset: 3px; }
-.custom-pricing-help {
-  --popup-surface-alpha: 1;
-  position: fixed;
-  inset: auto;
-  position-area: top span-left;
-  position-try-fallbacks: flip-block, flip-inline;
-  width: min(300px, calc(100vw - 32px));
-  max-height: calc(100vh - 32px);
-  box-sizing: border-box;
-  margin: 8px 0;
-  padding: 12px;
-  overflow: auto;
-  border: 1px solid rgba(var(--line-rgb), 0.22);
-  border-radius: 10px;
-  background: rgb(var(--glass-rgb));
-  color: var(--text);
-  font-size: 0.625rem;
-}
-.custom-pricing-help:popover-open { display: grid; gap: 10px; }
-.custom-pricing-help::backdrop { background: transparent; }
-.custom-pricing-help-header { display: flex; justify-content: space-between; align-items: center; gap: 12px; }
+.custom-pricing-list-heading { margin-bottom: 6px; }
+.custom-pricing-help-content { display: grid; gap: 6px; margin-top: 6px; }
 
 .custom-pricing-approx {
   color: var(--muted);
@@ -7714,14 +8613,32 @@ html.native-liquid-glass .view-switcher-menu-item { border-radius: 9px; }
   font-variant-numeric: tabular-nums;
 }
 
-.custom-pricing-row .custom-pricing-remove {
-  width: auto;
-  height: 24px;
-  padding: 0 8px;
-  font-size: 0.625rem;
-  line-height: 24px;
-  opacity: 0.72;
+.model-settings-list {
+  gap: 0;
 }
+.model-settings-list > .custom-pricing-row {
+  border: 0;
+  border-radius: 0;
+  background: none;
+}
+.model-settings-list-panel:has(> .slot-add:not(.hidden)) .custom-pricing-row:last-child {
+  border-bottom: 1px solid var(--line);
+}
+.model-settings-list > .custom-pricing-row + .custom-pricing-row {
+  border-top: 1px solid var(--line);
+}
+.model-settings-list-panel > .slot-add::before { content: '+ '; }
+.model-settings-list-panel .managed-account-list > .settings-note { padding: 7px 8px; }
+.model-settings-list .custom-pricing-edit > :is(.managed-account-email, .managed-account-meta) {
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+.model-settings-actions { justify-content: flex-end; }
+.model-settings-editor {
+  padding: 7px 0 8px;
+}
+.model-settings-editor-title { margin: 0; color: var(--text); font-size: .6875rem; }
+.model-alias-note { margin-bottom: 6px; }
 
 .opencode-profile-list {
   margin-bottom: 4px;
@@ -7823,22 +8740,8 @@ html.native-liquid-glass .view-switcher-menu-item { border-radius: 9px; }
   height: 9px;
 }
 .opencode-profile-item .profile-detail .cursor-disclosure-icon::before {
-  width: 4px;
-  height: 4px;
-  border-width: 0 1.2px 1.2px 0;
-}
-#opencodeLocalFallbackAccountGroup > .settings-group-header .cursor-disclosure-icon {
-  transform: rotate(-90deg);
-}
-#opencodeLocalFallbackAccountGroup.expanded > .settings-group-header .cursor-disclosure-icon {
-  transform: rotate(0deg);
-}
-/* The relocated toggle keeps only its description, and a paragraph's
-   content-based flex basis is wide enough to claim the whole line on its own,
-   pushing the switch to a second row. A zero basis lets both share the line and
-   the text reflow into the space that is left. */
-#opencodeLocalFallbackInner .settings-item > .settings-item-text {
-  flex: 1 1 0;
+  width: 9px;
+  height: 9px;
 }
 /* Animated like every other disclosure in the panel rather than snapping from
    `display: none`; the container squeezes a single inner wrapper, so the rows
@@ -8664,7 +9567,7 @@ html.native-liquid-glass .view-switcher-menu-item { border-radius: 9px; }
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.tray-composer-picker-chevron { color: var(--muted); }
+.tray-composer-picker-chevron { width: 12px; height: 12px; flex: 0 0 12px; background: var(--muted); -webkit-mask: url("icons/actions/chevron-down.svg") center / contain no-repeat; mask: url("icons/actions/chevron-down.svg") center / contain no-repeat; }
 .tray-composer-picker-menu {
   position: fixed;
   inset: auto;
@@ -8863,6 +9766,8 @@ html.native-liquid-glass .view-switcher-menu-item { border-radius: 9px; }
 }
 @media (prefers-reduced-motion: reduce) {
   .tray-composer-item { transition: none; }
+  :is(.slot-editor-reveal, .legacy-editor-reveal), :is(.slot-editor-reveal, .legacy-editor-reveal) > .accordion-animation-inner { transition: none; }
+  :root:not([data-reduce-motion="off"]) .slot-row { transition: none; }
   .settings-panel .limit-provider-row { transition: none; }
   .tool-preference-row { transition: none; }
   .view-preference-row,
@@ -8870,6 +9775,8 @@ html.native-liquid-glass .view-switcher-menu-item { border-radius: 9px; }
   .home-limit-provider-row,
   .status-provider-row { transition: none; }
   .tool-preference-main .cursor-disclosure-icon { transition: none; }
+  :root:not([data-reduce-motion="off"]) .slot-device-list,
+  :root:not([data-reduce-motion="off"]) .slot-device-list > .accordion-animation-inner { transition: none; }
 }
 
 /* One rule for hiding. Before this, each hidden thing carried its own
@@ -8908,8 +9815,8 @@ html.native-liquid-glass .view-switcher-menu-item { border-radius: 9px; }
 .plugin-placement-summary { min-width: 0; font-size: .625rem; line-height: 1.5; color: var(--muted); overflow-wrap: anywhere; }
 .plugin-manage, .plugin-back { display: inline-flex; align-items: center; gap: 8px; flex-shrink: 0; min-height: 28px; padding: 4px 8px; border: 1px solid transparent; border-radius: 6px; background: transparent; color: var(--text); font: inherit; font-size: .6875rem; cursor: pointer; }
 .plugin-manage { color: var(--muted); padding-right: 2px; }
-.plugin-manage::after, .plugin-back::before { content: ''; width: 5px; height: 5px; border-top: 1px solid currentColor; border-right: 1px solid currentColor; transform: rotate(45deg); }
-.plugin-back::before { transform: rotate(-135deg); }
+.plugin-manage::after, .plugin-back::before { content: ''; width: 12px; height: 12px; flex: 0 0 12px; background: currentColor; -webkit-mask: url("icons/actions/chevron-down.svg") center / contain no-repeat; mask: url("icons/actions/chevron-down.svg") center / contain no-repeat; transform: rotate(-90deg); }
+.plugin-back::before { transform: rotate(90deg); }
 .plugin-manage:hover, .plugin-back:hover { background: rgba(var(--overlay-rgb), .09); }
 .plugin-manage:focus-visible, .plugin-back:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 .plugin-manage:disabled, .plugin-back:disabled { opacity: .5; cursor: default; }
@@ -8917,6 +9824,9 @@ html.native-liquid-glass .view-switcher-menu-item { border-radius: 9px; }
 .plugin-detail-toolbar { border-bottom: 1px solid var(--line); padding-bottom: 8px; }
 .plugin-detail-section { display: flex; flex-direction: column; gap: 8px; border-top: 1px solid var(--line); padding-top: 14px; }
 .plugin-detail-heading { margin: 0; font-size: .6875rem; font-weight: 600; }
+.plugin-update-notes { display: flex; flex-direction: column; gap: 12px; min-width: 0; }
+.plugin-update-notes .plugin-description { white-space: pre-line; }
+.settings-panel label.plugin-auto-update { font-size: .75rem; line-height: 1.5; }
 .plugin-update-note { display: flex; flex-direction: column; gap: 4px; }
 .plugin-detail .settings-note { margin: 0; }
 .plugin-detail .plugin-views { gap: 10px; }
@@ -9119,6 +10029,10 @@ html.native-liquid-glass .view-switcher-menu-item { border-radius: 9px; }
 .plugin-menu .plugin-global-switch { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 5px 7px 9px; margin: 0 0 4px; border-bottom: 1px solid var(--line); color: var(--text); font-size: .6875rem; cursor: pointer; }
 .plugin-global-switch > span { min-width: 0; }
 
+/* The settings switch metrics would inset this row differently from the master switch above it. */
+.settings-panel .plugin-menu label.plugin-auto-update { gap: 16px; padding: 5px 7px; margin: 0; min-height: 28px; font-size: .6875rem; line-height: 1.4; }
+.plugin-menu label.plugin-auto-update > span { min-width: 0; }
+
 /* Wrapped Notch chips use the same drag controller as the other settings lists. */
 .notch-page-chips.is-reordering { overflow-anchor: none; }
 .notch-page-chip { touch-action: none; }
@@ -9165,6 +10079,7 @@ html.native-liquid-glass .view-switcher-menu-item { border-radius: 9px; }
 .display-settings-thumb { flex: 0 0 66px; height: 43px; position: relative; border: 1px solid rgba(var(--line-rgb), .3); border-radius: 5px; background: rgba(var(--line-rgb), .05); overflow: hidden; }
 .display-settings-thumb::before { content: ''; position: absolute; inset: 0 0 auto; height: 4px; background: rgba(var(--line-rgb), .12); }
 .display-settings-thumb i { position: absolute; background: var(--text); opacity: .65; }
+.display-settings-thumb-main i { inset: 12px 14px 8px; border-radius: 3px; }
 .display-settings-thumb-edge i { width: 7px; height: 27px; top: 9px; right: 0; border-radius: 4px 0 0 4px; }
 .display-settings-thumb-notch i { width: 30px; height: 8px; top: 0; left: 18px; border-radius: 0 0 5px 5px; }
 .display-settings-thumb-bubble i { width: 25px; height: 10px; left: 50%; top: 50%; transform: translate(-50%, -50%); border-radius: 8px; }
@@ -9176,7 +10091,7 @@ html.native-liquid-glass .view-switcher-menu-item { border-radius: 9px; }
 .display-settings[data-platform=linux] .display-settings-thumb-tray i { width: 10px; height: 10px; top: 50%; right: auto; left: 50%; transform: translate(-50%, -50%); border-radius: 2px; }
 /* Match the plugin settings' back action and category-tab typography. */
 .display-settings-back { display: inline-flex; align-items: center; gap: 8px; min-height: 28px; padding: 4px 8px; margin: 0 0 12px; border: 1px solid transparent; border-radius: 6px; background: transparent; color: var(--text); font: inherit; font-size: .6875rem; cursor: pointer; }
-.display-settings-back::before { content: ''; width: 5px; height: 5px; border-top: 1px solid currentColor; border-right: 1px solid currentColor; transform: rotate(-135deg); }
+.display-settings-back::before { content: ''; width: 12px; height: 12px; flex: 0 0 12px; background: currentColor; -webkit-mask: url("icons/actions/chevron-down.svg") center / contain no-repeat; mask: url("icons/actions/chevron-down.svg") center / contain no-repeat; transform: rotate(90deg); }
 .display-settings-back:hover { background: rgba(var(--overlay-rgb), .09); }
 .display-settings-quick, .display-settings-states { display: flex; gap: 3px; padding: 3px; border-radius: 8px; background: rgba(var(--line-rgb), .06); }
 .display-settings-quick { margin-bottom: 16px; }
@@ -9208,7 +10123,7 @@ html.native-liquid-glass .view-switcher-menu-item { border-radius: 9px; }
 
 .display-settings-open { font-size: .6875rem; cursor: pointer; }
 .display-settings-switch { flex: 0 0 34px; }
-.display-settings-open::after { content: ''; width: 5px; height: 5px; flex: 0 0 5px; border-right: 1px solid var(--muted); border-top: 1px solid var(--muted); transform: rotate(45deg); margin-left: auto; }
+.display-settings-open::after { content: ''; width: 12px; height: 12px; flex: 0 0 12px; background: var(--muted); -webkit-mask: url("icons/actions/chevron-down.svg") center / contain no-repeat; mask: url("icons/actions/chevron-down.svg") center / contain no-repeat; transform: rotate(-90deg); margin-left: auto; }
 .display-settings button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 
 .display-settings-preview[data-surface=notch] { height: 100px; }
@@ -9274,3 +10189,171 @@ html.native-liquid-glass .view-switcher-menu-item { border-radius: 9px; }
 
 .plugin-author-heading { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
 .plugin-author-heading .plugin-detail-heading { margin: 0; }
+
+/* Qoder edition controls live directly in the standard collection section. */
+.qoder-collection-settings { display: grid; gap: 5px; }
+.qoder-edition-control { display: flex; align-items: center; gap: 5px; }
+.qoder-edition-control > .checkbox-label { flex: 1; }
+.qoder-edition-controls { display: flex; align-items: center; gap: 4px; }
+.qoder-edition-controls button { flex: 0 0 22px; }
+.qoder-collection-settings > .settings-note { margin: 0; }
+
+/* Local account slots keep live controls mounted across provider redraws. */
+.slot-panel { min-width: 0; max-width: 100%; margin-bottom: 0; }
+.slot-list { min-width: 0; border: 1px solid var(--line); border-radius: 12px; background: rgba(var(--panel-rgb), .15); overflow: clip; }
+.slot-row { display: grid; grid-template-columns: 20px minmax(0, 1fr) minmax(0, max-content) 28px; align-items: center; gap: 8px; min-height: 44px; box-sizing: border-box; padding: 6px 10px; border-bottom: 1px solid var(--line); }
+.slot-copy { min-width: 0; }
+.slot-copy .slot-detail { margin: 2px 0 0; font-size: .59375rem; line-height: 1.4; }
+.slot-name { overflow-wrap: anywhere; white-space: normal; text-wrap: balance; font-size: .6875rem; font-weight: 500; color: var(--text); }
+.slot-name-line { display: flex; align-items: center; gap: 4px; min-width: 0; }
+.slot-name-line .slot-name { min-width: 0; }
+.slot-name-line.is-editing .slot-name { flex: 1; }
+.slot-rename-button { opacity: 0; display: inline-flex; align-items: center; justify-content: center; flex: 0 0 24px; width: 24px; height: 24px; margin-block: -4px; padding: 0; border: 0; border-radius: 4px; background: transparent; color: var(--muted); cursor: pointer; }
+.slot-row:is(:hover, :focus-visible, :has(:focus-visible)) .slot-rename-button { opacity: 1; }
+.slot-rename-button::before { content: ''; width: 12px; height: 12px; background: currentColor; mask: url("icons/actions/pencil-line.svg") center / contain no-repeat; }
+.slot-rename-button:hover { color: var(--text); background: rgba(var(--overlay-rgb), .06); }
+.slot-rename-button:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+.slot-status { min-width: 0; max-width: 150px; overflow: hidden; text-overflow: ellipsis; font-size: .6875rem; color: var(--muted); text-align: right; white-space: nowrap; }
+.slot-connected { color: var(--success); }
+.slot-status::before { content: ''; display: inline-block; width: 12px; height: 12px; margin-inline-end: 4px; vertical-align: -2px; background: currentColor; mask: var(--slot-status-icon) center / contain no-repeat; }
+.slot-status:empty::before { content: none; }
+.slot-connected { --slot-status-icon: url("icons/actions/check.svg"); }
+.slot-status.slot-paused { --slot-status-icon: url("icons/actions/pause.svg"); }
+.slot-invalid, .slot-unavailable { --slot-status-icon: url("icons/actions/circle-exclamation-point.svg"); }
+.slot-checking { --slot-status-icon: url("icons/actions/spinner.svg"); }
+.slot-stale { --slot-status-icon: url("icons/actions/clock.svg"); }
+.slot-disabled { --slot-status-icon: url("icons/actions/circle-minus.svg"); }
+.slot-invalid { color: var(--red); }
+.slot-limited, .slot-usageApiLimited { color: var(--yellow); }
+.slot-stale { color: var(--yellow); }
+.slot-paused .slot-name { color: var(--muted); }
+.slot-fix.plugin-inline-action { display: block; margin-top: 4px; padding: 2px 0; color: var(--accent); text-align: left; }
+/* Decorative masks survive translation updates to each button's text. */
+.plugin-menu button[data-slot-action] { grid-template-columns: 15px minmax(0, 1fr); }
+.plugin-menu button[data-slot-action]::before { content: ''; width: 15px; height: 15px; background: currentColor; mask: var(--slot-action-icon) center / contain no-repeat; }
+.plugin-menu button[data-slot-action="rename"] { --slot-action-icon: url("icons/actions/pencil-line.svg"); }
+.plugin-menu button[data-slot-action^="replace"] { --slot-action-icon: url("icons/actions/key.svg"); }
+.plugin-menu button[data-slot-action="pause"] { --slot-action-icon: url("icons/actions/pause.svg"); }
+.plugin-menu button[data-slot-action="resume"] { --slot-action-icon: url("icons/actions/play.svg"); }
+.plugin-menu button[data-slot-action="up"], .plugin-menu button[data-slot-action="down"] { --slot-action-icon: url("icons/actions/arrow-left.svg"); }
+.plugin-menu button[data-slot-action="up"]::before { transform: rotate(90deg); }
+.plugin-menu button[data-slot-action="down"]::before { transform: rotate(-90deg); }
+.plugin-menu button[data-slot-action="remove"] { --slot-action-icon: url("icons/actions/trash.svg"); }
+.plugin-menu button.menu-destructive { color: var(--red); }
+/* Armed removal reads as a different state, not just the same red item: the
+   tint matches the app's other inline remove confirmations. */
+.plugin-menu button.menu-destructive.confirming { color: var(--red); background: rgba(255, 91, 91, 0.12); font-weight: 600; }
+.plugin-menu button.menu-destructive.confirming:hover, .plugin-menu button.menu-destructive.confirming:focus-visible { color: var(--red); background: rgba(255, 91, 91, 0.2); }
+.plugin-menu button:disabled { opacity: .35; cursor: default; }
+.action-menu-separator { border: 0; border-top: 1px solid var(--line); margin: 4px 0; width: 100%; }
+.slot-add { display: block; width: calc(100% - 16px); min-height: 30px; margin: 6px 8px; padding: 6px; border: 1px dashed var(--line); border-radius: 7px; background: transparent; color: var(--muted); font: inherit; font-size: .6875rem; text-align: center; cursor: pointer; }
+.slot-add:hover { color: var(--text); background: rgba(var(--overlay-rgb), .04); }
+.slot-rename { width: 100%; min-width: 0; box-sizing: border-box; font: inherit; }
+.slot-editor { padding: 14px 12px; border-bottom: 1px solid var(--line); }
+.slot-editor > strong { display: block; font-size: .75rem; font-weight: 600; margin-bottom: 12px; }
+.slot-editor > .credential-input { margin-bottom: 12px; }
+.slot-editor .cursor-account-group { border: 0; background: transparent; margin: 0; padding: 0; }
+.slot-editor .cursor-settings-details { padding: 0; }
+.slot-editor .settings-note { line-height: 1.65; margin: 10px 0; }
+.slot-editor .settings-row { margin: 12px 0; }
+.slot-editor .credential-input { box-sizing: border-box; max-width: 100%; }
+.settings-panel .slot-editor .settings-row select { width: auto; max-width: 60%; }
+.slot-editor .settings-actions { margin-top: 12px; }
+.slot-editor .cursor-settings-details > .settings-actions:first-child { margin-top: 0; }
+.limit-provider-options-inner .settings-actions button {
+  max-width: 100%;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+.slot-editor .settings-actions button:last-child:not(:first-child) { background: rgba(var(--overlay-rgb), .06); color: var(--muted); }
+.slot-message:empty { display: none; }
+.slot-panel .plugin-more:focus-visible, .slot-fix:focus-visible, .slot-add:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; border-radius: 4px; }
+
+.slot-editor [id$="LogoutButton"], .slot-editor [id$="RefreshButton"] { display: none !important; }
+
+.slot-editor .settings-actions button.slot-save { color: var(--accent); border-color: rgba(var(--accent-rgb), .3); background: rgba(var(--accent-rgb), .12); }
+
+/* Account rows share the settings-list drag transforms and six-dot grip. */
+.slot-row { position: relative; transform: translateY(calc(var(--drag-y, 0px) + var(--drag-shift, 0px))); transition: transform 170ms cubic-bezier(0.22, 1, 0.36, 1), opacity 120ms ease; }
+.slot-drag-handle { grid-row: 1; grid-column: 1; justify-self: center; width: 14px; opacity: 0; }
+.slot-row:is(:hover, :focus-visible, :has(:focus-visible), .dragging) .slot-drag-handle { opacity: 1; }
+.slot-row[data-slot-draggable="false"] .slot-drag-handle { visibility: hidden; }
+.slot-source-icon { grid-row: 1; grid-column: 1; display: flex; align-items: center; justify-content: center; width: 20px; height: 20px; box-sizing: border-box; border-radius: 6px; background: rgba(var(--overlay-rgb), .045); box-shadow: inset 0 0 0 1px var(--line); color: var(--muted); pointer-events: none; }
+.slot-source-icon:not([data-kind]) { visibility: hidden; }
+.slot-source-icon::before { content: ''; }
+.slot-source-icon.is-live { color: var(--accent); background: rgba(var(--accent-rgb), .08); box-shadow: inset 0 0 0 1px rgba(var(--accent-rgb), .22); }
+.slot-row[data-slot-draggable="true"]:is(:hover, :focus-visible, :has(:focus-visible), .dragging) .slot-source-icon { visibility: hidden; }
+.slot-row.dragging { z-index: 2; background: rgba(var(--panel-rgb), .96); box-shadow: inset 0 0 0 1px rgba(var(--accent-rgb), .62); cursor: grabbing; transition: none; will-change: transform; }
+.slot-row.dragging .slot-drag-handle { cursor: grabbing; }
+.slot-list.drag-active .slot-row:not(.dragging) { opacity: .78; }
+.slot-list.is-landing .slot-row { transition: none; }
+:root[data-reduce-motion="on"] .slot-row { transition: none; }
+
+.slot-remote-note { max-width: 190px; padding: 6px 10px; white-space: normal; }
+/* Connection metadata stays compact; explanations belong to the source menu. */
+.limit-provider-connection-sources { min-width: 0; container-type: inline-size; }
+.connection-source-card { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 9px 12px; border: 1px solid var(--line); border-radius: 12px; background: rgba(var(--overlay-rgb), .025); }
+.connection-source-copy { flex: 1; min-width: 0; }
+.connection-source-copy .settings-item-title { font-size: .6875rem; font-weight: 500; line-height: 1.4; }
+.connection-source-copy .settings-item-title, .connection-source-copy .settings-item-desc { display: block; }
+.connection-source-copy .settings-item-desc { margin-top: 3px; font-size: .59375rem; line-height: 1.4; }
+.connection-source-actions > .settings-item-desc:empty { display: none; }
+.connection-source-actions { display: flex; flex-direction: column; align-items: flex-end; gap: 3px; min-width: 0; max-width: 52%; text-align: right; overflow-wrap: anywhere; }
+.connection-source-list { display: inline-flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: 2px 5px; color: var(--readable-muted); font-size: .65625rem; font-weight: 500; line-height: 1.4; }
+.connection-source-list.is-idle { color: var(--muted); }
+.connection-source-list:has(.is-live) .connection-source-item:not(.is-live) { color: var(--muted); opacity: .72; }
+.connection-source-segment { display: inline-flex; align-items: center; gap: 5px; white-space: nowrap; }
+.connection-source-item { display: inline-flex; align-items: center; gap: 4px; white-space: nowrap; }
+.connection-source-item.is-live { color: var(--accent); }
+.connection-source-joint { opacity: .45; }
+.connection-source-icon-glyph, .slot-source-icon::before { width: 11px; height: 11px; flex-shrink: 0; background: currentColor; mask: var(--source-icon, none) center / contain no-repeat; }
+:is(.connection-source-item, .slot-source-icon)[data-kind="cli"] { --source-icon: url("icons/sources/terminal.svg"); }
+:is(.connection-source-item, .slot-source-icon)[data-kind="desktop"] { --source-icon: url("icons/sources/monitor.svg"); }
+:is(.connection-source-item, .slot-source-icon)[data-kind="web"] { --source-icon: url("icons/sources/globe.svg"); }
+:is(.connection-source-item, .slot-source-icon)[data-kind="apiKey"] { --source-icon: url("icons/actions/key.svg"); }
+:is(.connection-source-item, .slot-source-icon)[data-kind="env"] { --source-icon: url("icons/sources/variable.svg"); }
+:is(.connection-source-item, .slot-source-icon)[data-kind="file"] { --source-icon: url("icons/sources/file.svg"); }
+:is(.connection-source-item, .slot-source-icon)[data-kind="oauth"] { --source-icon: url("icons/sources/lock.svg"); }
+@container (max-width: 300px) {
+  .connection-source-card { align-items: flex-start; flex-direction: column; gap: 8px; }
+  .connection-source-actions { align-items: flex-start; max-width: 100%; text-align: left; }
+  .connection-source-list { justify-content: flex-start; }
+}
+
+/* Provider editors retain their own controls inside the shared account card. */
+.legacy-editor-reveal .legacy-editor-content.hidden { display: block !important; }
+.legacy-editor-reveal .legacy-editor-content.accordion-animated-container { grid-template-rows: 1fr; }
+.legacy-editor-reveal .legacy-editor-content > .accordion-animation-inner { opacity: 1; }
+.legacy-slot-editor .opencode-add-body { padding: 0; }
+.legacy-slot-editor :is(input, textarea, select) { box-sizing: border-box; max-width: 100%; }
+.legacy-slot-editor textarea { width: 100%; }
+.legacy-slot-editor > .settings-actions:last-child { margin-top: 12px; }
+.limit-provider-account-group > .cursor-settings-details > .cursor-settings-details-inner > .settings-actions:not(:has(> :not(.hidden))) { display: none; }
+.slot-editor-reveal.hidden, .legacy-editor-reveal.hidden { border: 0; }
+.settings-panel .plugin-menu button { height: 28px; min-height: 28px; padding: 0 7px; font-size: .6875rem; line-height: normal; border: 0; border-radius: 5px; }
+
+.legacy-slot-editor :is(#codexCancelLoginButton, #antigravityCancelLoginButton, #workbuddyCancelLoginButton) { display: none; }
+
+.legacy-slot-editor.is-replacing > .legacy-editor-content { display: none !important; }
+.legacy-slot-editor.is-replacing > .legacy-replacement-content.hidden { display: block !important; }
+
+/* Account identity, plan and device provenance share one compact rhythm. */
+.slot-row { row-gap: 0; }
+.slot-name-line { min-height: 16px; }
+.slot-name-line.is-editing { height: auto; min-height: 24px; }
+.slot-device-summary { grid-column: 2 / -1; display: flex; align-items: center; flex-wrap: wrap; gap: 4px 12px; margin-top: 4px; line-height: 1.4; white-space: normal; }
+button.slot-device-toggle { width: 100%; min-height: 0; padding: 0; border: 0; border-radius: 3px; background: transparent; color: var(--muted); font: inherit; font-size: .59375rem; text-align: left; cursor: pointer; }
+.slot-device-toggle:hover { color: var(--text); }
+.slot-device-toggle:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
+.slot-device-token { display: inline-flex; align-items: center; min-width: 0; gap: 4px; overflow-wrap: anywhere; }
+.slot-device-token .device-kind-icon { margin-right: 0; }
+.slot-device-list { margin-top: 8px; grid-column: 2 / -1; }
+.slot-device-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 4px 8px; padding: 8px 0; }
+.slot-device-row { border-top: 1px solid var(--line); }
+:root[data-reduce-motion="on"] .slot-device-list,
+:root[data-reduce-motion="on"] .slot-device-list > .accordion-animation-inner { transition: none; }
+.slot-device-name { min-width: 0; font-size: .625rem; }
+.slot-device-note { grid-column: 1 / -1; color: var(--muted); font-size: .59375rem; line-height: 1.4; overflow-wrap: anywhere; }
+.slot-device-fix { grid-column: 1 / -1; justify-self: start; }
+.slot-devices-expanded > .slot-status { visibility: hidden; }
+.slot-devices-expanded > .slot-copy > .slot-fix { display: none; }

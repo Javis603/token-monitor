@@ -1,8 +1,14 @@
+// @ts-check
 'use strict';
 
 // Qoder limits account wiring. Leaf module: no requires.
-module.exports = {
+module.exports = /** @satisfies {import('../../limits/accounts').AccountDeclaration} */ ({
   id: 'qoder',
+  sources: [
+    { id: 'web', kind: 'web', relation: 'single', products: ['qoder'], labelKey: 'settings.limits.sources.web', descriptionKey: 'settings.limits.sources.webDescription' }
+  ],
+  accountSlots: true,
+  serverAccountKey: 'isQoderServerAccountKey',
   fetch: 'fetchQoderLimits',
   fields: [
     {
@@ -73,4 +79,4 @@ module.exports = {
   urlPolicy: [
     { hosts: ['qoder.com', 'www.qoder.com', 'qoder.com.cn', 'www.qoder.com.cn'] }
   ]
-};
+});

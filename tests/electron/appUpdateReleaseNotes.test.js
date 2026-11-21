@@ -300,8 +300,11 @@ test('release-note disclosure has keyboard focus and compact reading styles', ()
   const app = read('app.js');
   assert.match(html, /id="appUpdateNotesToggle"[\s\S]*settings-section-disclosure[\s\S]*id="appUpdateNotesTitle"/);
   assert.match(css, /\.app-update-notes-toggle \{[\s\S]*justify-content: flex-start;[\s\S]*gap: 5px;/);
-  assert.match(css, /\.app-update-notes-disclosure::before \{[\s\S]*border-left: 5px solid currentColor;[\s\S]*transform: none;/);
-  assert.match(css, /\.app-update-notes\.expanded \.app-update-notes-disclosure \{[\s\S]*transform: rotate\(90deg\)/);
+  // The shared chevron mask: a border triangle here would be masked away by it.
+  const disclosure = css.slice(css.indexOf('.app-update-notes-disclosure {'), css.indexOf('.app-update-notes-details'));
+  assert.doesNotMatch(disclosure, /border-left|width: 0/);
+  assert.match(disclosure, /\.app-update-notes-disclosure \{[^}]*transform: rotate\(-90deg\)/);
+  assert.match(disclosure, /\.app-update-notes\.expanded \.app-update-notes-disclosure \{\s*transform: none;/);
   assert.match(css, /\.app-update-notes-toggle:focus-visible/);
   assert.match(css, /\.app-update-note-group ul[\s\S]*line-height: 1\.45/);
   assert.match(html, /id="appUpdateNotes" class="app-update-notes hidden"/);

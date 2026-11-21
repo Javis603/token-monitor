@@ -223,3 +223,29 @@ test('TypeSafe reports a Cloudflare challenge as unavailable, not expired', asyn
   });
   assert.equal(provider.status, 'unauthorized');
 });
+
+test('TypeSafe billing discovery and rates belong to the normalized cookie', async () => {
+  resetBillingCache();
+  const discoveries = [];
+  const fetch = async (url, init) => {
+    const n = init.headers.Cookie.slice(-1);
+    const action = n.repeat(40);
+    if (url.includes('/api/usage')) return new Response(JSON.stringify({ buckets: [
+      { day: '2026-09-21T05:00:00Z', inputTokens: 1000000, outputTokens: 0, requests: 1 }
+    ] }));
+    if (url.endsWith('/chunk.js')) return new Response(`t.s(["INPUT_TOKEN_COST_USD",0,${n === 'a' ? '1e-8' : '2e-8'}]);"${action}","getBillingOverviewResult"`);
+    if (init.method === 'POST') {
+      assert.equal(init.headers['Next-Action'], action);
+      return new Response(`0:${JSON.stringify({ ok: true, data: { billing: { balance: 5 } } })}`);
+    }
+    discoveries.push(n);
+    return new Response('<script src="/chunk.js"></script>');
+  };
+  for (const n of ['a', 'a', 'b', 'b', 'a']) {
+    const row = await fetchTypesafeLimits({ typesafeCookie: `Cookie: session=${n}; ` }, { env: {}, fetch, now: () => now });
+    assert.equal(row.status, 'ok');
+    assert.equal(row.balance.monthSpend, n === 'a' ? 0.01 : 0.02);
+  }
+  // Each account keeps its own discovery, so alternating accounts never rescan the bundle.
+  assert.deepEqual(discoveries, ['a', 'b']);
+});

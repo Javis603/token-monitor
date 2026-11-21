@@ -24,7 +24,7 @@ const group = markup.slice(groupStart, markup.indexOf('\n        </div>', groupS
   .replace('settings-section-details hidden', 'settings-section-details').replace('aria-expanded="false"', 'aria-expanded="true"');
 const notch = markup.match(/<div class="notch-page-settings">.*?<\/p><\/div>/)[0];
 const appearanceStart = markup.indexOf('            <div class="settings-subgroup settings-theme-group">');
-const appearanceEnd = markup.indexOf('              <div class="settings-field theme-code-field">', appearanceStart);
+const appearanceEnd = markup.indexOf('              <div id="themeAdvancedGroup"', appearanceStart);
 const appearance = markup.slice(appearanceStart, appearanceEnd) + '</div>';
 const pageMarkup = markup.match(/<section id="pluginMainPanel".*?<\/section>/)[0];
 const skinCallback = source.match(/onApplySkin: (.*),\n/)[1];
@@ -46,6 +46,7 @@ const applyPersistedSettings=next=>{state.settings=next;syncSettingsForm();};
 window.tokenMonitor={updateSettings:async patch=>{await failAction();return {...state.settings,...patch};},getSettings:async()=>structuredClone(state.settings)};
 const pluginApi={list:async()=>state.pluginCatalog,catalog:async()=>({sources:[],entries:[]}),place:async(ref,surface,value)=>{await failAction();state.pluginCatalog.plugins[0].views[0].placements[surface]=value;}};
 const pluginBridge={openPage:()=>failAction()};
+const queueAppearanceColorChange=write=>write();
 const themePresetsApi=TokenMonitorThemePresets,selectThemePreset=()=>{},buildAppearanceColorControls=()=>renderThemePresetChips(),renderSettingsSummaries=()=>{};
 const rowDragControllerApi={createRowDragController:()=>null},verticalDragSortApi={},preserveSettingsPanelScroll=fn=>fn();
 ${['saveSettings','setStatus','applyPluginSkin','matchingThemePresetId','renderThemePresetChips','renderNotchPageChoices'].map(name=>declaration(name)).join('\n')}

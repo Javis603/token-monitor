@@ -1,8 +1,13 @@
+// @ts-check
 'use strict';
 
 // Devin limits account wiring. Leaf module: no requires.
-module.exports = {
+module.exports = /** @satisfies {import('../../limits/accounts').AccountDeclaration} */ ({
   id: 'devin',
+  accountSlots: true,
+  sources: [
+    { id: 'web', kind: 'web', relation: 'single', products: ['devin'], labelKey: 'settings.limits.sources.web', descriptionKey: 'settings.limits.sources.webDescription' }
+  ],
   fetch: 'fetchDevinLimits',
   fields: [
     {
@@ -14,6 +19,7 @@ module.exports = {
     },
     {
       key: 'devinOrganization',
+      resolve: 'devinOrganization',
       kind: 'setting',
       normalize: { fn: 'normalizeDevinOrganization', style: 'value' },
       project: 'value'
@@ -22,6 +28,7 @@ module.exports = {
   // The bearer token alone is not enough: Devin also needs an organization,
   // which may come from settings or the env lanes the resolver reads.
   status: {
+    credential: 'devinBearerToken',
     configuredKey: 'devinBearerTokenConfigured',
     sourceKey: 'devinBearerTokenSource',
     pendingKey: 'devinPendingCheckSince'
@@ -60,6 +67,7 @@ module.exports = {
       {
         key: 'devinOrganization',
         input: 'text',
+        secret: false,
         labelKey: 'settings.devin.organization',
         placeholderKey: 'settings.devin.organizationPlaceholder',
         required: true,
@@ -78,4 +86,4 @@ module.exports = {
   urlPolicy: [
     { hosts: ['app.devin.ai'], pathPrefixes: ['/settings/usage'] }
   ]
-};
+});

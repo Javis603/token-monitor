@@ -1,5 +1,6 @@
 'use strict';
 
+
 // Cursor limits provider: per-account billing and on-demand windows, using the
 // session/auth helpers in this folder. Reached through providerFetchers() in
 // src/shared/limits/collector.js.
@@ -300,7 +301,11 @@ async function fetchCursorLimits(options = {}, deps = {}) {
   const rows = providers.map((provider, index) => provider.removed
     || current(enabledAccounts[index], provider.status === 'unauthorized')
     ? provider : removed(enabledAccounts[index]));
-  return rows.length === 1 ? rows[0] : rows;
+  // Two stored tokens can resolve to one identity. A stale token must not
+  // retire a row still collected through the current ownership lane.
+  const collectedKeys = new Set(rows.filter(row => !row.removed).map(row => row.accountKey));
+  const retainedRows = rows.filter(row => !row.removed || !collectedKeys.has(row.accountKey));
+  return retainedRows.length === 1 ? retainedRows[0] : retainedRows;
 }
 
 module.exports = {

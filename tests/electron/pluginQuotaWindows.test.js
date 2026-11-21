@@ -13,7 +13,7 @@ const extract = name => source.match(new RegExp(`  function ${name}\\([^]*?\\n  
 function render(windows, { showLimitUsed = false, native = false, details = false, notes } = {}) {
   const context = vm.createContext({
     document: { createElement: tag => new Element(tag) },
-    settings: () => ({ showLimitUsed }), usageItems: { hiddenUsageItemSet: () => new Set(), limitUsageItemId: () => 'credits' }, hideUsageItems() {},
+    windowOwners: {}, settings: () => ({ showLimitUsed }), usageItems: { hiddenUsageItemSet: () => new Set(), limitUsageItemId: () => 'credits' }, hideUsageItems() {},
     ...balance,
     windowForKind: (provider, kind) => provider.windows.find(window => window.kind === kind),
     windowsForKind: (provider, kind) => provider.windows.filter(window => window.kind === kind),

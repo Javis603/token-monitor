@@ -1,4 +1,6 @@
 'use strict';
+// Presentation doubles delegate child commits; native fixtures exercise reconciliation.
+const rendererDom = { clear: node => node.replaceChildren(), reconcileChildren: (node, nodes) => node.replaceChildren(...nodes), placeChildren: (node, nodes) => node.replaceChildren(...nodes) };
 
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
@@ -10,6 +12,7 @@ const { exchangeRows, formatToolList } = require('../../src/electron/renderer/se
 const { translate } = require('../../src/electron/renderer/i18n');
 
 const rendererSource = fs.readFileSync(path.join(__dirname, '../../src/electron/renderer/app.js'), 'utf8');
+const backArrowSource = rendererSource.slice(rendererSource.indexOf('function sessionDetailBackArrow('), rendererSource.indexOf('function sessionDetailBack('));
 
 function deferred() {
   let resolve;
@@ -63,6 +66,7 @@ test('session detail renders its heading before loading, errors and empty result
   const end = rendererSource.indexOf('function sessionGroupRunNode(', start);
   let render;
   const context = {
+    rendererDom,
     els, state, document: { createElement: element, querySelectorAll: () => [els.sessionDetailHead.querySelector('.detail-heading')].filter(Boolean) }, window: { addEventListener() {} }, t: (key, params) => translate('en', key, params),
     sessionDetailBack() { state.backClicked = true; },
     detailNote: text => ({ textContent: text }),
@@ -90,7 +94,7 @@ test('session detail renders its heading before loading, errors and empty result
     prefersReducedMotion: context.prefersReducedMotion
   });
   context.bindHoverMarquee = overflowText.bind;
-  vm.runInNewContext(`${rendererSource.slice(start, end)}\nglobalThis.render = renderSessionDetail;`, context);
+  vm.runInNewContext(`${backArrowSource}${rendererSource.slice(start, end)}\nglobalThis.render = renderSessionDetail;`, context);
   render = context.render;
   for (const [options, expected] of [
     [{ error: true }, 'Could not read the transcript. Please try again.'],
@@ -113,8 +117,8 @@ test('session detail renders its heading before loading, errors and empty result
       assert.equal(back.className, 'detail-back detail-back-titled');
       assert.equal(back.type, 'button');
       assert.equal(back.title, undefined, 'the parent button does not reintroduce a native tooltip');
-      assert.equal(back.textContent, `‹${title}`);
-      assert.equal(back.querySelector('.detail-back-arrow').textContent, '‹');
+      assert.equal(back.textContent, title);
+      assert.equal(back.querySelector('.detail-back-arrow').textContent, '', 'the chevron is drawn, not a glyph');
       assert.equal(back.querySelector('.detail-back-arrow').attributes['aria-hidden'], 'true');
       assert.equal(heading.parentElement, back);
       assert.equal(back.attributes['aria-label'], `${title} — Back to sessions`);
@@ -276,7 +280,7 @@ test('session detail renders its heading before loading, errors and empty result
   assert.match(els.sessionDetailHead.children[0].attributes['aria-label'], /Back to Parent title/);
   context.setSettings({ sessionTitlesEnabled: false });
   assert.equal(els.sessionDetailHead.querySelector('.detail-heading'), null, 'the child title hides with titles');
-  assert.equal(els.sessionDetailHead.children[0].textContent, '‹ Codex · gpt-5');
+  assert.equal(els.sessionDetailHead.children[0].textContent, 'Codex · gpt-5');
   assert.doesNotMatch(JSON.stringify(els.sessionDetailHead.children[0].attributes), /Parent title|Child title/);
   assert.equal(subagentGroup.summary.name, 'Codex · gpt-5', 'returning to the group shows the titleless parent name');
   await childOpening;
@@ -317,10 +321,10 @@ test('session detail renders its heading before loading, errors and empty result
     assert.doesNotMatch(`${back.textContent} ${JSON.stringify(back.attributes)}`, /Parent title|Child title|Other parent/);
     if (regrouped) {
       assert.equal(state.openSession.returnTo.summary.key, newGroup.key, 'Back returns to the group that holds the session now');
-      assert.equal(back.textContent, '‹ Codex · gpt-5.6');
+      assert.equal(back.textContent, 'Codex · gpt-5.6');
     } else {
       assert.equal(state.openSession.returnTo, null, 'with no group left, Back returns to Sessions');
-      assert.equal(back.textContent, '‹ sessions');
+      assert.equal(back.textContent, 'sessions');
     }
     assert.doesNotMatch(JSON.stringify(state.openSession.returnTo || {}), /Parent title|Child title/,
       'no cached member keeps the old titles');
@@ -366,7 +370,7 @@ test('session detail renders its heading before loading, errors and empty result
   render({ loading: true });
   assert.equal(els.sessionDetail.children[0].className, undefined, 'no id, no line');
   assert.equal(els.sessionDetailHead.querySelector('.detail-heading'), null);
-  assert.equal(els.sessionDetailHead.children[0].textContent, '‹ sessions');
+  assert.equal(els.sessionDetailHead.children[0].textContent, 'sessions');
   assert.equal(els.sessionDetailHead.children[0].attributes['aria-label'], 'Back to sessions');
   state.openSession = { title: 'gpt-5.6-sol · 12:34', returnTo: { kind: 'session-group' } };
   render({ loading: true });
@@ -374,10 +378,10 @@ test('session detail renders its heading before loading, errors and empty result
   context.closeSessionDetail = () => { state.backClicked = true; };
   const groupStart = rendererSource.indexOf('function renderSessionGroupDetail(');
   const groupEnd = rendererSource.indexOf('function detailNote(', groupStart);
-  vm.runInNewContext(`${rendererSource.slice(groupStart, groupEnd)}\nglobalThis.renderGroup = renderSessionGroupDetail;`, context);
+  vm.runInNewContext(`${backArrowSource}${rendererSource.slice(groupStart, groupEnd)}\nglobalThis.renderGroup = renderSessionGroupDetail;`, context);
   context.renderGroup({ summary: { groupRows: [] } });
   const groupBack = els.sessionDetailHead.children[0];
-  assert.equal(groupBack.textContent, '‹Codex Auto Review');
+  assert.equal(groupBack.textContent, 'Codex Auto Review');
   assert.equal(groupBack.attributes['aria-label'], 'Codex Auto Review — Back to sessions');
   const groupHeading = els.sessionDetailHead.querySelector('.detail-heading');
   assert.equal(groupHeading.textContent, 'Codex Auto Review');
@@ -441,6 +445,7 @@ function sessionDetailHarness(getSessionDetail) {
   const renders = [];
   const state = { period: 'today', openSession: null };
   const context = {
+    rendererDom,
     state,
     visibleStatsSurface: () => 'main',
     isRendererWindowHidden: () => false,
@@ -622,10 +627,10 @@ for (const scenario of ['catch-up', 'hover', 'unchanged', 'hidden', 'closed', 'r
     else initialRead.resolve(scenario === 'initial failure' ? { found: false, error: 'read-failed' } : { found: true, marker: 100 });
     await opening;
     await new Promise(resolve => setImmediate(resolve));
-    const shouldCatchUp = ['catch-up', 'catch-up failure', 'catch-up rejection'].includes(scenario);
+    const shouldCatchUp = ['catch-up', 'hover', 'catch-up failure', 'catch-up rejection'].includes(scenario);
     assert.equal(reads, shouldCatchUp ? 2 : 1);
     if (shouldCatchUp) {
-      const succeeded = scenario === 'catch-up';
+      const succeeded = scenario === 'catch-up' || scenario === 'hover';
       assert.equal(request.detail.marker, succeeded ? 200 : 100);
       assert.equal(request.liveSignature, JSON.stringify(succeeded ? [200, 2, 0] : [100, 1, 0]));
       assert.equal(request.detailLiveBusy, false);
@@ -634,7 +639,7 @@ for (const scenario of ['catch-up', 'hover', 'unchanged', 'hidden', 'closed', 'r
       assert.equal(reads, 2, 'a failed catch-up does not spin');
     }
     if (scenario === 'closed' || scenario === 'replaced') assert.equal(renders.length, 1, 'stale initial reads cannot paint');
-    if (scenario === 'hover' || scenario === 'hidden') {
+    if (scenario === 'hidden') {
       context.sessionTooltipShouldHoldRender = () => false;
       context.visibleStatsSurface = () => 'main';
       await refreshOpenSessionDetail(); // Existing leave/visibility catch-up, not a stats tick.
@@ -644,7 +649,7 @@ for (const scenario of ['catch-up', 'hover', 'unchanged', 'hidden', 'closed', 'r
   });
 }
 
-test('an open session detail re-reads only when its usage moved, and never mid-hover', async () => {
+test('an open session detail re-reads only when its usage moved, including while a label is being read', async () => {
   const requests = [];
   const pending = [];
   let holdRead = false;              // defer the next getSessionDetail by hand
@@ -681,7 +686,7 @@ test('an open session detail re-reads only when its usage moved, and never mid-h
   state.stats.periods.today.sessions['claude:s'] = { client: 'claude', totalTokens: 400, costUsd: 2 };
   context.sessionTooltipShouldHoldRender = () => true;
   await refreshOpenSessionDetail();
-  assert.equal(requests.length, 2, 'a held tooltip defers the rebuild');
+  assert.equal(requests.length, 3, 'hover does not defer an in-place update');
   context.sessionTooltipShouldHoldRender = () => false;
   await refreshOpenSessionDetail();
   assert.equal(requests.length, 3);
@@ -696,7 +701,7 @@ test('an open session detail re-reads only when its usage moved, and never mid-h
   await inFlight;
   holdRead = false;
   assert.equal(state.openSession.detail.marker, 4, 'the read still lands');
-  assert.equal(renders.at(-1).detail.marker, 3, 'but the paint waits for the hover to end');
+  assert.equal(renders.at(-1).detail.marker, 4, 'the paint also lands during hover');
   context.sessionTooltipShouldHoldRender = () => false;
   await refreshOpenSessionDetail();
   assert.equal(requests.length, 4, 'the deferred paint does not read again');
@@ -801,7 +806,7 @@ test('live detail anchors the visible turn across growth and exchange reordering
     children: [], scrollTop: 0, clientTop: 0,
     classList: { add() {}, remove() {} },
     getBoundingClientRect: () => ({ top: 20 }),
-    replaceChildren() { this.children = []; this.scrollTop = 0; },
+    replaceChildren(...nodes) { this.children = nodes; this.scrollTop = 0; },
     append(node) { this.children.push(node); }
   };
   function exchangeNode(row, max, expanded) {
@@ -829,17 +834,18 @@ test('live detail anchors the visible turn across growth and exchange reordering
     return exchange;
   }
   const context = {
+    rendererDom,
     els: { sessionToolFilter: {classList: container.classList}, breakdown: { classList: container.classList }, sessionDetail: container,
       sessionDetailHead: { classList: container.classList, replaceChildren() {}, append() {} } },
     state: { detailSort: 'time', openSession: {} },
-    document: { createElement: () => ({ addEventListener() {} }) },
+    document: { createElement: () => ({ children: [], get childNodes() { return this.children; }, append(...nodes) { this.children.push(...nodes); }, addEventListener() {} }) },
     t: () => '', sessionDetailBackButton: () => ({}), toggleDetailSort() {},
     sessionRowsApi: { sessionDetailIdLabel: () => '' },
     sessionDetailApi: { exchangeRows: detail => detail.exchanges }, exchangeNode
   };
   const start = rendererSource.indexOf('function renderSessionDetail(');
   const end = rendererSource.indexOf('function sessionDetailTitle(', start);
-  vm.runInNewContext(`${rendererSource.slice(start, end)}\nglobalThis.render = renderSessionDetail;`, context);
+  vm.runInNewContext(`${backArrowSource}${rendererSource.slice(start, end)}\nglobalThis.render = renderSessionDetail;`, context);
   const active = { key: 'active', startTime: 111, value: 100, turnHeights: Array(10).fill(40) };
   const older = { key: 'older', startTime: 100, value: 10, turnHeights: [] };
   container.children = [exchangeNode(active, 100, true), exchangeNode(older, 100, false)];

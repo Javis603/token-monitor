@@ -75,9 +75,11 @@ test('the widget palette omits entries that restate the defaults', () => {
   assert.deepEqual(palette.hermes, { color: '#d4af37', icon: 'hermes-agent' });
 });
 
-test('each mark has one rule plus model overrides for distinct client artwork', () => {
+test('each mark has one rule plus model and ink overrides for distinct client artwork', () => {
   const rules = rowIconMaskRules('../../../assets/icons/').split('\n');
-  assert.equal(rules.length, MARK_IDS.length + Object.values(CLIENT_PRESENTATION).filter(style => style.fullColor).length);
+  assert.equal(rules.length, MARK_IDS.length + 2 * Object.values(CLIENT_PRESENTATION).filter(style => style.fullColor).length);
+  // Monochrome lists paint Gemini CLI's own artwork in the text colour.
+  assert.ok(rules.includes('.row-icon-gemini.ink-icon { background: currentColor; -webkit-mask-image: url("../../../assets/icons/gemini-cli.svg"); mask-image: url("../../../assets/icons/gemini-cli.svg"); }'));
   assert.ok(rules.includes('.row-icon-grok { -webkit-mask-image: url("../../../assets/icons/xai.svg"); mask-image: url("../../../assets/icons/xai.svg"); }'));
 });
 
@@ -88,7 +90,7 @@ test('a mask url survives an install path with parentheses', () => {
   // invalid CSS and every vendor mark degrades to a solid currentColor square.
   const base = 'file:///C:/Program%20Files%20(x86)/Token%20Monitor/resources/app.asar/assets/icons/';
   const rules = rowIconMaskRules(base).split('\n');
-  assert.equal(rules.length, MARK_IDS.length + Object.values(CLIENT_PRESENTATION).filter(style => style.fullColor).length);
+  assert.equal(rules.length, MARK_IDS.length + 2 * Object.values(CLIENT_PRESENTATION).filter(style => style.fullColor).length);
   assert.ok(
     rules.includes(`.row-icon-grok { -webkit-mask-image: url("${base}xai.svg"); mask-image: url("${base}xai.svg"); }`)
   );

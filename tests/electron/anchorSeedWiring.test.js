@@ -71,3 +71,56 @@ test('the seed runs before the collector and only on a cold start', () => {
   assert.match(prime, /if \(lastCollectedDevice\) return;/);
   assert.doesNotMatch(prime, /lastCollectedDevice =/);
 });
+
+test('first-scan previews are shown, over the seed when there is one, and never exported', () => {
+  const publish = functionSource('function publishColdPreview(');
+  // A collected record means the first scan has already finished.
+  assert.match(publish, /if \(lastCollectedDevice\) return;/);
+  assert.match(publish, /seedWithColdPreview\(anchorSeedDevice \|\| preview, preview\)/);
+  assert.match(publish, /sendPush\(/);
+  assert.match(publish, /skipExport: true/);
+
+  const localCollector = functionSource('function startLocalCollector()');
+  assert.match(localCollector, /onColdPreview: \(preview, meta\) => publishColdPreview\(/);
+  // The first complete record retires the seed, so a later cold runtime (a
+  // settings restart) cannot lay its previews over a stale snapshot.
+  assert.match(localCollector, /onRecord: \(summary, meta\) => \{\n\s+anchorSeedDevice = null;/);
+  assert.match(functionSource('function stopLocalCollector('), /anchorSeedDevice = null;/);
+  assert.match(functionSource('function primeLocalStatsFromAnchor('), /anchorSeedDevice = visible;/);
+});
+
+test('a client removed during the first scan is archived from the seed, never a preview', () => {
+  const update = functionSource('function updateArchivedClientUsage(');
+  // A preview's unscanned windows would be archived as zero for that client.
+  assert.match(update, /mode === 'local' && !lastCollectedDevice\s*\? anchorSeedDevice\s*:\s*localDeviceRecord\(\{ forClientArchive: settings\.sessionUsageArchiveEnabled !== false \}\)/);
+  assert.match(update, /captureArchivedClientUsage\(archive, source, removedClients\)/);
+});
+
+test('untracking with only a Hub snapshot retries after the first complete scan', () => {
+  const vm = require('node:vm');
+  const deviceId = 'here';
+  const context = {
+    settings: { deviceId, clients: 'codex,claude', hubMode: 'client', sessionUsageArchiveEnabled: false },
+    mode: 'sync',
+    lastCollectedDevice: null,
+    isExternalAgentActive: () => false,
+    localDeviceRecord: () => ({ deviceId, periods: { allTime: { sessions: {} } } })
+  };
+  vm.runInNewContext(
+    functionSource('function trackedClientSet(')
+      + functionSource('function removedTrackedClients(')
+      + functionSource('function assertClientArchiveCaptureReady('),
+    context
+  );
+  const validate = context.assertClientArchiveCaptureReady;
+  assert.throws(() => validate('codex', true), /tracking-scan-pending/);
+  context.settings.sessionUsageArchiveEnabled = true;
+  assert.doesNotThrow(() => validate('codex', false));
+  assert.doesNotThrow(() => validate('codex,claude,gemini', true));
+  context.lastCollectedDevice = { deviceId };
+  assert.doesNotThrow(() => validate('codex', true));
+
+  const apply = functionSource('function applySettingsPatch(');
+  assert.ok(apply.indexOf('assertClientArchiveCaptureReady(normalizedPatch.clients, sessionUsageArchiveEnabled)') >= 0);
+  assert.ok(apply.indexOf('const nextSettingsState = settings;') > apply.indexOf('assertClientArchiveCaptureReady(normalizedPatch.clients, sessionUsageArchiveEnabled)'));
+});

@@ -41,14 +41,14 @@ function parseMuseWebSubscription(text) {
   if (typeof resetsAt !== 'number' || resetsAt <= 0 || !Number.isFinite(new Date(resetsAt * 1000).getTime())) throw invalidResponse();
   const tokensLeft = (label) => typeof label === 'string' ? /\(([^()]+ tokens left)\)/u.exec(label)?.[1] || '' : '';
   const windows = [{
-    kind: 'weekly', label: 'Weekly', usedPercent: percent,
+    productId: 'web', kind: 'weekly', label: 'Weekly', usedPercent: percent,
     windowMinutes: 10080, resetsAt: new Date(resetsAt * 1000).toISOString(),
     resetDescription: tokensLeft(sub.usageRowValueLabel)
   }];
   // Top-ups are micro-dollars, not raw token counts or part of the weekly quota.
   if (Number.isFinite(sub.topupBalance) && sub.topupBalance >= 0 && Number.isFinite(sub.topupTotal) && sub.topupTotal > 0) {
     windows.push({
-      kind: 'billing', metric: 'credits', label: 'Additional balance',
+      productId: 'web', kind: 'billing', metric: 'credits', label: 'Additional balance',
       remaining: sub.topupBalance / 1e6, currency: 'USD', showMeter: false,
       resetDescription: tokensLeft(sub.topupRowValueLabel)
     });
@@ -56,7 +56,7 @@ function parseMuseWebSubscription(text) {
   return { planLabel: typeof sub.tier?.name === 'string' ? sub.tier.name : '', windows };
 }
 
-const chunkPaths = (text) => [...new Set((text.match(/static\/chunks\/[\w~.-]+\.js/gu) || []).map((path) => `/_next/${path}`))];
+const chunkPaths = (text) => [...new Set((text.match(/static\/(?:immutable\/)?chunks\/[\w~.-]+\.js/gu) || []).map((path) => `/_next/${path}`))];
 
 async function fetchMuseWebLimits(options = {}, deps = {}) {
   const base = { provider: 'muse', source: 'web', accountLabel: 'Muse (Meta)', updatedAt: new Date((deps.now || Date.now)()).toISOString(), windows: [] };
@@ -122,10 +122,13 @@ async function fetchMuseWebLimits(options = {}, deps = {}) {
       });
       let actionID = state?.get(cacheKey);
       let response = actionID ? await post(actionID) : null;
-      if (!response || (response.status === 404 && /server action not found/iu.test(response.text))) {
+      // A redeployed muse.ai answers a stale action with 400, 404 or 409.
+      const staleAction = (result) => [400, 404, 409].includes(result.status);
+      if (!response || staleAction(response)) {
         state?.delete(cacheKey);
         actionID = await discover();
         response = await post(actionID);
+        if (staleAction(response)) throw invalidResponse();
       }
       if (response.status !== 200) throw errorWithStatus(statusForHttp(response.status), 'Muse subscription unavailable');
       const result = parseMuseWebSubscription(response.text);

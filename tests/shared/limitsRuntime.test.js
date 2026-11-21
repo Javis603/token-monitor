@@ -171,6 +171,27 @@ test('different account scopes stay independent inside one provider lane', async
   runtime.stop();
 });
 
+test('probe events list every probe in flight by the account it is for', async () => {
+  const events = [];
+  const runtime = createLimitsRuntime({ limitProviders: ['kimi'] }, runtimeDeps({
+    onEvent: (event) => events.push(event),
+    probeProvider: async () => [providerRow('kimi', 'account', 'Kimi')]
+  }));
+
+  await runtime.refresh({ provider: 'kimi', accountKey: 'Key-1', credential: 'secret-cookie' }, 'credential-edit');
+  await runtime.refresh({ provider: 'kimi' }, 'manual');
+
+  const probes = events.map((event) => [event.type, event.probes]);
+  assert.deepEqual(probes, [
+    ['probe-start', [{ provider: 'kimi', account: { field: 'accountKey', value: 'key-1' } }]],
+    ['probe-finish', []],
+    ['probe-start', [{ provider: 'kimi', account: null }]],
+    ['probe-finish', []]
+  ]);
+  assert.ok(!JSON.stringify(events).includes('secret-cookie'));
+  runtime.stop();
+});
+
 test('diagnostic events expose queue state without leaking scoped credentials', async () => {
   const events = [];
   const runtime = createLimitsRuntime({ limitProviders: ['kimi'] }, runtimeDeps({
@@ -200,7 +221,8 @@ test('diagnostic events expose queue state without leaking scoped credentials', 
     retryAt: null,
     lastAttemptAt: diagnostics.providers[0].lastAttemptAt,
     lastSuccessAt: '2026-07-21T00:00:00.000Z',
-    lastFailureCode: null
+    lastFailureCode: null,
+    lastFailureDetail: null
   });
   assert.match(diagnostics.providers[0].lastAttemptAt, /^\d{4}-\d{2}-\d{2}T/);
   runtime.stop();
@@ -354,6 +376,42 @@ test('a fast provider publishes before a slower provider finishes', async () => 
   await refresh;
   assert.deepEqual(runtime.getSnapshot().providers.map((row) => row.provider).sort(), ['claude', 'kimi']);
   runtime.stop();
+});
+
+test('a quota row refresh during a cooldown or a failed probe reports why nothing new is coming', async () => {
+  const { limitRefreshOutcome } = require('../../src/electron/deviceRuntimeCoordinator');
+  const clock = fakeClock(10_000);
+  let mode = 'rate-limited';
+  const runtime = createLimitsRuntime({ limitProviders: ['kimi'] }, runtimeDeps({
+    now: clock.now,
+    setTimeout: clock.setTimeout,
+    clearTimeout: clock.clearTimeout,
+    random: () => 0,
+    probeProvider: async (_provider, _config, context) => {
+      if (mode === 'throws') throw new Error('socket hang up');
+      if (mode === 'rate-limited') {
+        context.onRetryAfter(30_000);
+        return [{ provider: 'kimi', status: 'sourceRateLimited', windows: [] }];
+      }
+      return [providerRow('kimi', 'account', 'Kimi')];
+    }
+  }));
+
+  await runtime.refresh({ provider: 'kimi' }, 'interval');
+  // The row button's reason does not bypass a provider's Retry-After.
+  assert.deepEqual(limitRefreshOutcome(await runtime.refresh({ provider: 'kimi', accountKey: 'account' }, 'account-panel')), {
+    ok: false, reason: 'cooldown', retryAt: new Date(40_000).toISOString()
+  });
+  clock.advance(30_000);
+  mode = 'ok';
+  await waitFor(() => runtime.getSnapshot().providers.some((row) => row.status === 'ok'), 'cooldown retry');
+  assert.deepEqual(limitRefreshOutcome(await runtime.refresh({ provider: 'kimi', accountKey: 'account' }, 'account-panel')), { ok: true });
+  mode = 'throws';
+  const failed = limitRefreshOutcome(await runtime.refresh({ provider: 'kimi', accountKey: 'account' }, 'account-panel'));
+  assert.equal(failed.ok, false);
+  assert.equal(failed.reason, 'failed');
+  runtime.stop();
+  assert.deepEqual(limitRefreshOutcome(false), { ok: false, reason: 'unavailable' });
 });
 
 test('Retry-After defers the provider retry and manual refresh does not bypass it', async () => {
@@ -1512,6 +1570,34 @@ test('clearing MiniMax API preserves a Code lane whose last good result was API'
   runtime.stop();
 });
 
+test('a MiniMax API placeholder that hides itself clears the previous failure detail', async () => {
+  let apiOutcome = 'error';
+  const runtime = createLimitsRuntime({ limitProviders: ['minimax'] }, runtimeDeps({
+    probeProvider: async (_provider, _config, context) => {
+      if (context.scope.source === 'oauth') {
+        return [{ ...providerRow('minimax', 'shared', 'MiniMax Code', { windows: [] }), source: 'oauth' }];
+      }
+      if (apiOutcome === 'error') {
+        const error = new Error('api offline');
+        error.status = 'unavailable';
+        throw error;
+      }
+      return [{ provider: 'minimax', status: 'notConfigured' }];
+    }
+  }));
+  try {
+    await runtime.refresh({ provider: 'minimax', accountKey: 'shared', source: 'oauth' }, 'login');
+    await runtime.refresh({ provider: 'minimax', source: 'api' }, 'settings-change');
+    assert.ok(runtime.getDiagnostics().providers[0].lastFailureDetail, 'the API outage is on record');
+
+    apiOutcome = 'placeholder';
+    await runtime.refresh({ provider: 'minimax', source: 'api' }, 'settings-change');
+    assert.equal(runtime.getDiagnostics().providers[0].lastFailureDetail, null);
+  } finally {
+    runtime.stop();
+  }
+});
+
 test('Muse anonymous source reset refreshes stay provider-wide without duplicate or retained identities', async () => {
   for (const sources of [['web'], ['cli', 'web']]) {
     const clock = fakeClock(Date.parse('2026-11-01T00:00:00Z'));
@@ -1545,4 +1631,46 @@ test('Muse anonymous source reset refreshes stay provider-wide without duplicate
       runtime.stop();
     }
   }
+});
+
+test('anonymous removal markers cannot erase provider-wide state on failed or account-scoped probes', async () => {
+  for (const accountScoped of [false, true]) {
+    const runtime = createLimitsRuntime({ limitProviders: ['kimi'], previousLimits: { providers: [{
+      provider: 'kimi', source: 'api', status: 'unavailable', updatedAt: new Date().toISOString(), windows: []
+    }] } }, runtimeDeps({
+      probeProvider: async () => [
+        providerRow('kimi', 'A', 'Account A', { status: accountScoped ? 'ok' : 'unavailable' }),
+        { provider: 'kimi', removed: true }
+      ]
+    }));
+    try {
+      await runtime.refresh(accountScoped ? { provider: 'kimi', accountKey: 'A' } : { provider: 'kimi' }, 'manual');
+      const rows = runtime.getSnapshot().providers;
+      assert.equal(rows.length, 2);
+      assert.ok(rows.some(row => !row.accountKey && row.status === 'unavailable'));
+      assert.equal(JSON.stringify(rows).includes('removed'), false);
+    } finally { runtime.stop(); }
+  }
+});
+
+
+test('anonymous quota remains when its successful replacement was cleared during the probe', async () => {
+  const job = deferred();
+  let started = false;
+  const runtime = createLimitsRuntime({ limitProviders: ['kimi'], previousLimits: { providers: [{
+    provider: 'kimi', source: 'api', status: 'ok', updatedAt: new Date().toISOString(),
+    windows: [{ kind: 'session', usedPercent: 25 }]
+  }] } }, runtimeDeps({ probeProvider: async () => { started = true; return job.promise; } }));
+  try {
+    const pending = runtime.refresh({ provider: 'kimi' }, 'manual');
+    await waitFor(() => started);
+    runtime.clear({ provider: 'kimi', accountKey: 'A' });
+    job.resolve([providerRow('kimi', 'A', 'Account A'), { provider: 'kimi', removed: true }]);
+    await pending;
+    const rows = runtime.getSnapshot().providers;
+    assert.equal(rows.length, 1);
+    assert.equal(rows[0].accountKey, '');
+    assert.equal(rows[0].status, 'unavailable');
+    assert.equal(rows[0].windows[0].usedPercent, 25);
+  } finally { runtime.stop(); }
 });

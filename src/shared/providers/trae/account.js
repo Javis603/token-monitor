@@ -1,8 +1,14 @@
+// @ts-check
 'use strict';
 
 // Trae CN limits account wiring. Leaf module: no requires.
-module.exports = {
+module.exports = /** @satisfies {import('../../limits/accounts').AccountDeclaration} */ ({
   id: 'trae',
+  accountSlots: true,
+  sources: [
+    { id: 'web', kind: 'web', relation: 'alternative', products: ['trae'], labelKey: 'settings.limits.sources.web', descriptionKey: 'settings.limits.sources.webDescription' },
+    { id: 'ide', kind: 'cli', relation: 'alternative', products: ['trae'], labelKey: 'settings.trae.token', descriptionKey: 'settings.trae.deviceIdNote' }
+  ],
   fetch: 'fetchTraeLimits',
   fields: [
     {
@@ -31,6 +37,7 @@ module.exports = {
     }
   ],
   status: {
+    credential: 'traeCookie',
     configuredKey: 'traeAccessTokenConfigured',
     sourceKey: 'traeAccessTokenSource',
     pendingKey: 'traePendingCheckSince'
@@ -57,7 +64,7 @@ module.exports = {
     fields: [
       { key: 'traeCookie', input: 'textarea', ariaLabelKey: 'settings.trae.cookie', configuredKey: 'traeCookieConfigured', placeholder: 'sessionid=...' },
       { key: 'traeAccessToken', input: 'password', labelKey: 'settings.trae.token', configuredKey: 'traeTokenConfigured', placeholder: 'Cloud-IDE-Token' },
-      { key: 'traeDeviceId', input: 'text', labelKey: 'settings.trae.deviceId', placeholderKey: 'settings.trae.deviceIdPlaceholder' }
+      { key: 'traeDeviceId', input: 'text', secret: false, labelKey: 'settings.trae.deviceId', placeholderKey: 'settings.trae.deviceIdPlaceholder' }
     ],
     credentialChoice: {
       key: 'traeCredentialKind',
@@ -86,4 +93,4 @@ module.exports = {
   urlPolicy: [
     { hosts: ['trae.cn', 'www.trae.cn'] }
   ]
-};
+});

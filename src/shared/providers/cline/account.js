@@ -1,8 +1,14 @@
+// @ts-check
 'use strict';
 
 // Cline limits account wiring. Leaf module: no requires.
-module.exports = {
+module.exports = /** @satisfies {import('../../limits/accounts').AccountDeclaration} */ ({
   id: 'cline',
+  accountSlots: true,
+  sources: [
+    { id: 'api', kind: 'apiKey', relation: 'alternative', products: ['cline'], labelKey: 'settings.limits.sources.apiKey', descriptionKey: 'settings.cline.note' },
+    { id: 'oauth', kind: 'file', relation: 'alternative', products: ['cline'], labelKey: 'settings.limits.sources.file', descriptionKey: 'settings.limits.sources.fileDescription' }
+  ],
   fetch: 'fetchClineLimits',
   fields: [
     {
@@ -17,7 +23,9 @@ module.exports = {
   // login: otherwise the pill reads "Not configured" on the machine this
   // provider is built for. The source label then says which lane it is.
   discover: (env, limits) => limits.resolveClineAutomaticCredential(env),
+  discoveredAccounts: (_env, limits, deps) => limits.discoverAccountSlots(deps),
   status: {
+    credential: 'clineApiKey',
     configuredKey: 'clineCredentialConfigured',
     sourceKey: 'clineCredentialSource',
     pendingKey: 'clinePendingCheckSince'
@@ -46,4 +54,4 @@ module.exports = {
   urlPolicy: [
     { hosts: ['app.cline.bot'], pathPrefixes: ['/dashboard'] }
   ]
-};
+});

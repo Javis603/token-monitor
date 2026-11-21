@@ -1,8 +1,13 @@
+// @ts-check
 'use strict';
 
 // Zed limits account wiring. Leaf module: no requires.
-module.exports = {
+module.exports = /** @satisfies {import('../../limits/accounts').AccountDeclaration} */ ({
   id: 'zed',
+  accountSlots: true,
+  sources: [
+    { id: 'web', kind: 'web', relation: 'single', products: ['zed'], labelKey: 'settings.limits.sources.web', descriptionKey: 'settings.limits.sources.webDescription' }
+  ],
   fetch: 'fetchZedLimits',
   fields: [
     {
@@ -41,4 +46,4 @@ module.exports = {
   urlPolicy: [
     { hosts: ['dashboard.zed.dev'] }
   ]
-};
+});

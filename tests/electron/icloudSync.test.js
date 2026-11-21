@@ -1194,3 +1194,21 @@ test('an unchanged device is republished when its cloud file disappears or becom
     fixture.cleanup();
   }
 });
+
+test('iCloud device write and read preserve the normalized multi-account signal', async () => {
+  const root = makeRoot();
+  const writer = storeFor(root.root, 'multi-writer');
+  const reader = storeFor(root.root, 'multi-reader');
+  try {
+    fs.mkdirSync(path.join(root.root, 'CloudDocs'), { recursive: true });
+    const record = device('multi-device');
+    record.limits = { multiAccountProviders: ['deepseek', 'unknown', 'deepseek'], providers: [] };
+    await writer.writeDevice(record);
+    const discovered = await reader.discoverDevices();
+    assert.deepEqual(discovered.records[0].limits.multiAccountProviders, ['deepseek']);
+  } finally {
+    await writer.close();
+    await reader.close();
+    root.cleanup();
+  }
+});

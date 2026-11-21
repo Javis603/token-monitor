@@ -24,15 +24,12 @@ test('custom pricing rows keep their two-column layout contract', () => {
 
   assert.match(render, /row\.className = 'managed-account-row custom-pricing-row'/);
   assert.match(render, /const main = document\.createElement\('button'\);\s*main\.type = 'button'/);
-  assert.match(render, /remove\.className = 'managed-account-remove custom-pricing-remove'/);
+  assert.match(render, /createModelSettingsMenu\(document,/);
+  assert.match(render, /row\.append\(main, menu\)/);
   assert.match(cssBlock('.custom-pricing-row'), /grid-template-columns: minmax\(0, 1fr\) auto/);
 });
 
-test('custom pricing metadata wraps all rates while the localized remove action keeps its width', () => {
+test('custom pricing metadata wraps all rates', () => {
   assert.match(cssBlock('.custom-pricing-row .managed-account-meta'), /overflow-wrap: anywhere/);
   assert.doesNotMatch(cssBlock('.custom-pricing-row .managed-account-meta'), /white-space: nowrap|text-overflow: ellipsis/);
-
-  const remove = cssBlock('.custom-pricing-row .custom-pricing-remove');
-  assert.match(remove, /width: auto/);
-  assert.match(remove, /padding: 0 8px/);
 });

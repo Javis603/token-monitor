@@ -1026,3 +1026,26 @@ test('active account window choices exclude managed-only Codex windows', () => {
   assert.deepEqual(choices.map((option) => option.kind), ['session', 'weekly']);
   assert.ok(choices.every((option) => option.selection.providerRecord.accountKey === 'active'));
 });
+
+test('tray selection distinguishes Alibaba plans sharing an account key', () => {
+  const reading = (region, remainingPercent) => ({
+    provider: 'alibaba', accountKey: 'same-uid', region, status: 'ok',
+    windows: [{ kind: 'session', remainingPercent }]
+  });
+  const team = reading('cn', 80);
+  const personal = reading('cn-personal', 10);
+  const snapshot = { limits: { providers: [team, personal] } };
+  const options = accountOptions(snapshot, 'alibaba');
+  assert.equal(options.length, 2);
+  assert.notEqual(options[0].label, options[1].label);
+  const { translate } = require('../../src/electron/renderer/i18n');
+  const localized = accountOptions(snapshot, 'alibaba', key => translate('zh-TW', key));
+  assert.deepEqual(localized.map(option => option.label), ['中國站 · 團隊版', '中國站 · 個人版']);
+  for (const [index, row] of [team, personal].entries()) {
+    const selected = selectSource(snapshot, {
+      provider: 'alibaba', accountMode: 'specific', accountKey: options[index].value, window: 'primary'
+    });
+    assert.equal(selected.providerRecord.region, row.region);
+    assert.equal(selected.window.remainingPercent, row.windows[0].remainingPercent);
+  }
+});

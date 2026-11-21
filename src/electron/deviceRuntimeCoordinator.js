@@ -20,6 +20,22 @@ async function runLimitInvalidation(runtime, scope, reason = 'credential-change'
   return runtime.refreshLimits(scope, reason);
 }
 
+// What a user-started limits refresh came to, from LimitsRuntime's answer.
+// `reason` says why nothing new will arrive, for a button that would
+// otherwise just stop: 'cooldown' (the provider asked us to back off),
+// 'unavailable' (the runtime is stopped or the provider is off) or 'failed'
+// (the probe itself threw).
+function limitRefreshOutcome(result) {
+  if (result === false) return { ok: false, reason: 'unavailable' };
+  if (result?.deferred) return { ok: false, reason: 'cooldown', retryAt: result.retryAt || '' };
+  if (result?.superseded && result.reason === 'disabled') return { ok: false, reason: 'unavailable' };
+  // Superseded by a newer refresh of the row, whose answer stands for this one
+  // (an aborted probe reports an error too, so this check comes first).
+  if (result?.superseded) return { ok: true };
+  if (result?.error) return { ok: false, reason: 'failed', error: result.error.message || String(result.error) };
+  return { ok: true };
+}
+
 async function runManualDeviceRefresh(runtime, options = {}) {
   if (!runtime) return;
   const limitsTask = Promise.resolve(runtime.refreshLimits({ all: true }, 'manual'));
@@ -57,6 +73,7 @@ function drainPendingUsageClientRefreshes(pendingRefreshes, runtime, onError, op
 module.exports = {
   canRefreshUsageRuntime,
   drainPendingUsageClientRefreshes,
+  limitRefreshOutcome,
   runLimitInvalidation,
   runManualDeviceRefresh,
   settingsLimitInvalidationPlan

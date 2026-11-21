@@ -1,9 +1,19 @@
+// @ts-check
 'use strict';
 
 // Account declarations must remain require-free for renderer-safe projection.
-module.exports = {
+module.exports = /** @satisfies {import('../../limits/accounts').AccountDeclaration} */ ({
   id: 'minimax',
+  accountSlots: true,
+  accountSlotOwner: true,
+  environmentWhenSaved: false,
+  accountCredentialKeys: ['minimaxApiKey'],
+  sources: [
+    { id: 'api', kind: 'apiKey', relation: 'complement', products: ['api'], labelKey: 'settings.limits.sources.apiKey', descriptionKey: 'settings.limits.sources.apiKeyDescription' },
+    { id: 'oauth', kind: 'cli', relation: 'complement', products: ['mcode'], labelKey: 'settings.limits.sources.cli', descriptionKey: 'settings.minimax.codeNote' }
+  ],
   fetch: 'fetchMinimaxLimits',
+  accountRefresh: true,
   fields: [
     { key: 'minimaxApiProfiles', kind: 'profiles',
       storePath: ['providers', 'minimax', 'profiles'], configDefault: {}, persist: 'never' },
@@ -47,7 +57,7 @@ module.exports = {
     const accounts = limits.configuredMinimaxAccounts(settings, { env });
     return {
       minimaxApiKeyConfigured: accounts.length > 0,
-      minimaxApiKeySource: accounts.some(account => account.name !== 'environment') ? 'settings' : accounts.length ? 'env' : ''
+      minimaxApiKeySource: accounts.some(/** @param {{name: string}} account */ account => account.name !== 'environment') ? 'settings' : accounts.length ? 'env' : ''
     };
   },
   form: {
@@ -62,4 +72,4 @@ module.exports = {
     { hosts: ['platform.minimaxi.com'] },
     { hosts: ['platform.minimax.io'] }
   ]
-};
+});

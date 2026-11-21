@@ -28,6 +28,7 @@ function resolveHomeRows(providers, settings = {}) {
   const start = app.indexOf('function homeLimitRows()');
   const end = app.indexOf('function homeLimitWindowLabel(', start);
   return vm.runInNewContext(`${app.slice(start, end)}; homeLimitRows();`, {
+    accountSlotLists: {},
     state: { stats: { limits: { providers } }, settings: { homeLimitAccountCount: 20, ...settings } },
     enabledLimitProviderSet: () => new Set(ids),
     hiddenHomeLimitProviderSet: () => new Set(),
@@ -64,7 +65,8 @@ test('Home uses account-row plan policies for grouped titles and adapter identit
     ...['Work profile', 'Personal profile'].map((accountLabel) => ({ provider: 'opencode', status: 'ok', accountLabel, windows: [window] })),
     ...['newapi-account', 'sub2api'].map((adapterId) => ({ provider: 'thirdparty', status: 'ok', adapterId, planLabel: 'Account', windows: [window] }))
   ]);
-  for (const name of ['Coding Plan', 'Agent Plan Pro', 'Work profile', 'Personal profile']) {
+  assert.deepEqual(rows.filter(row => row.providerId === 'volcengine').map(row => row.plan), ['Coding Plan', 'Agent Plan Pro']);
+  for (const name of ['Work profile', 'Personal profile']) {
     assert.equal(rows.find((row) => row.name === name).plan, '');
   }
   const adapters = rows.filter((row) => row.providerId === 'thirdparty');
@@ -192,6 +194,7 @@ test('Home OpenRouter credits-only success does not repeat grouped profile names
 function renderHomeWindows(windows, settings = {}, plan = '', providerId = '', locale = 'en') {
   class Element {
     constructor() {
+      this.dataset = {};
       this.children = [];
       this.style = { setProperty(name, value) { this[name] = value; } };
       this.attributes = {};
@@ -374,7 +377,9 @@ test('Home display mode persists separately from low-limit highlighting and is t
   assert.match(main, /homeLimitDisplayMode: 'text'/);
   assert.match(main, /merged\.homeLimitDisplayMode = normalizeHomeLimitDisplayMode\(merged\.homeLimitDisplayMode\)/);
   assert.match(main, /homeLimitDisplayMode: normalizeHomeLimitDisplayMode\(patch\.homeLimitDisplayMode \?\? settings\.homeLimitDisplayMode\)/);
-  assert.match(app, /saveSettings\(\{ homeLimitDisplayMode: displayInput\.value \}\)/);
+  assert.match(app, /const displayInput = document\.createElement\('select'\)/);
+  assert.match(app, /displayInput\.value = homeModulePreferencesApi\.normalizeHomeLimitDisplayMode\(state\.settings\?\.homeLimitDisplayMode\)/);
+  assert.match(app, /displayInput\.addEventListener\('change', \(\) => void saveSettings\(\{ homeLimitDisplayMode: displayInput\.value \}\)\)/);
   assert.equal(preferences.normalizeHomeLimitDisplayMode('bars'), 'bars');
   assert.equal(preferences.normalizeHomeLimitDisplayMode('invalid'), 'text');
   const { MESSAGES } = require('../../src/electron/renderer/i18n');
@@ -477,7 +482,7 @@ test('Home account display count defaults to three and is configurable', () => {
   assert.match(main, /merged\.homeLimitAccountCount = normalizeHomeLimitAccountCount\(merged\.homeLimitAccountCount\)/);
   assert.match(main, /homeLimitAccountCount: normalizeHomeLimitAccountCount\(patch\.homeLimitAccountCount \?\? settings\.homeLimitAccountCount\)/);
   assert.match(app, /limit: state\.settings\?\.homeLimitAccountCount \?\? 3/);
-  const renderSettings = app.slice(app.indexOf('function renderHomeLimitProviderList'), app.indexOf('function renderHomeSettingsList'));
+  const renderSettings = app.slice(app.indexOf('function renderHomeLimitSettings'), app.indexOf('function renderHomeLimitProviderList'));
   assert.match(renderSettings, /countInput\.type = 'number'/);
   assert.match(renderSettings, /countInput\.min = '1'/);
   assert.match(renderSettings, /countInput\.max = '12'/);

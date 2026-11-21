@@ -5,13 +5,16 @@ const fs = require('node:fs');
 const path = require('node:path');
 const test = require('node:test');
 const vm = require('node:vm');
+const { limitProviderEntry } = require('../../src/shared/limits/registry');
 const { normalizePluginAuthorSkin } = require('../../src/electron/plugins/runtime');
 const { networkProxySource } = require('../../src/electron/networkProxy');
+const { hubProfilesForRenderer } = require('../../src/electron/hubProfiles');
 const { CREDENTIAL_SETTING_PATHS, credentialSettingsForRenderer } = require('../../src/shared/credentialStore');
 const {
   accountFieldProjection,
   accountStatusProjection,
   limitAccountFormsForRenderer,
+  limitConnectionSourcesForRenderer,
   rendererOmittedAccountKeys
 } = require('../../src/electron/limits/accountSettings');
 
@@ -22,15 +25,26 @@ test('the main settings IPC projection hides provider secrets while retaining co
     if (key === 'hubHostSecret' || key === 'secret') continue;
     const value = `private-${key}-sentinel`;
     secrets.push(value);
-    settings[key] = key.endsWith('Profiles')
+    settings[key] = key === 'hubProfiles'
+      ? [{ id: 'home', name: 'Home', hubUrl: 'https://home.example/private?token=hidden', secret: value, deviceId: 'laptop' }]
+      : key.endsWith('AccountSlots')
+      ? [limitProviderEntry(key.replace(/AccountSlots$/, ''))?.accountSlotOwner
+        ? { id: 'saved', owner: { credential: { apiKey: value }, metadata: {} } }
+        : { id: 'saved', values: Object.fromEntries((limitProviderEntry(key.replace(/AccountSlots$/, ''))?.fields || [])
+          .filter(field => field.kind === 'credential').map(field => [field.key, value])) }]
+      : key.endsWith('Profiles')
       ? { work: { enabled: true, cookie: value, apiKey: value, accessToken: value, futureSecret: value } }
       : value;
+  }
+  for (const [key, slots] of Object.entries(settings)) {
+    if (key.endsWith('AccountSlots')) assert.ok(JSON.stringify(slots).includes(`private-${key}-sentinel`), `${key} fixture contains its credential`);
   }
   for (const key of rendererOmittedAccountKeys()) {
     const value = `private-${key}-sentinel`;
     secrets.push(value);
     settings[key] = value;
   }
+  settings.deepseekAccountSlots = [{ id: 'migrated', values: { deepseekApiKey: 'fixture' } }];
   settings.icloudWriterId = 'private-writer-id';
   settings.icloudRetiredDeviceIds = ['private-retired-device'];
   settings.syncContentState = { privateCleanupState: true };
@@ -46,15 +60,16 @@ test('the main settings IPC projection hides provider secrets while retaining co
   // no source map and deliberately receives no credit against main.js coverage.
   const project = vm.runInNewContext(`${main.slice(start, end)}; settingsForRenderer`, {
     settings, mainWindow: null, windowsBackdropFallback: () => false,
-    networkProxySource, normalizePluginAuthorSkin, credentialSettingsForRenderer, accountFieldProjection, accountStatusProjection,
-    limitAccountFormsForRenderer, rendererOmittedAccountKeys, process: { env: {} },
+    networkProxySource, normalizePluginAuthorSkin, credentialSettingsForRenderer, hubProfilesForRenderer, accountFieldProjection, accountStatusProjection,
+    limitAccountFormsForRenderer,
+  limitConnectionSourcesForRenderer, rendererOmittedAccountKeys, process: { env: {} },
     getSyncContentRuntime: () => ({ status: () => ({ enabled: {} }) }),
     trayMenuLocale: () => 'en', effectiveSubscriptions: () => [], subscriptionsAreShared: () => false,
     currentHubIdentity: () => 'local', subscriptionDocumentVersion: () => 0,
     subscriptionsDocumentFor: () => null, pendingOrphanedSubscriptions: () => [],
     codexAccountsForRenderer: () => [], antigravityAccountsForRenderer: () => [],
     workbuddyAccountsForRenderer: () => [], mimoAccountsForRenderer: () => [],
-    claudeAccountService: () => ({ legacyAccount: () => null, loginStatuses: () => [] }),
+    claudeAccountService: () => ({ accounts: () => [], legacyAccount: () => null, loginStatuses: () => [] }),
     effectiveRates: {}, rateCache: null, currentWindowToggleShortcutStatus: () => ({})
   });
   const projected = structuredClone(project());
@@ -62,6 +77,7 @@ test('the main settings IPC projection hides provider secrets while retaining co
   for (const secret of secrets) assert.ok(!encoded.includes(secret), secret);
   assert.equal(projected.hubHostSecret, settings.hubHostSecret);
   assert.equal(projected.secret, settings.secret);
+  assert.deepEqual(projected.hubProfiles, [{ id: 'home', name: 'Home', endpoint: 'home.example' }]);
   assert.equal(projected.deepseekApiKeyConfigured, true);
   assert.equal(projected.deepseekApiKey, '');
   assert.equal(projected.opencodeProfiles.work.cookie, 'set');

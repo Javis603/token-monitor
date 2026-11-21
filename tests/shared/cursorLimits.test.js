@@ -538,3 +538,18 @@ test('Cursor limits checks ownership after a slower sibling probe finishes', asy
     assert.equal(rows[1].status, 'ok');
   }
 });
+
+test('Cursor collects desktop and manual accounts together, even with a stale source preference', async () => {
+  for (const cursorSourcePreference of [undefined, 'desktop', 'web']) {
+    const accounts = [{ id: 'user_desktop', sessionToken: 'desktop' }, { id: 'user_manual', sessionToken: 'web' }];
+    const calls = [];
+    const rows = await fetchCursorLimits({ cursorSourcePreference, cursorManualAccountIds: ['user_manual'] }, {
+      listAccounts: () => accounts,
+      readCursorDesktopSignIn: () => ({ state: 'unknown' }),
+      probe: async token => { calls.push(token); return { ok: false, error: { kind: 'network', message: 'offline' } }; }
+    });
+    assert.deepEqual(calls, ['desktop', 'web']);
+    assert.equal(rows.length, 2);
+    assert.equal(rows.filter(row => row.removed).length, 0);
+  }
+});

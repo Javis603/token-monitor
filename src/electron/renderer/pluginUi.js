@@ -229,12 +229,18 @@
         && (!content || content.some(item => item.ref === record.descriptor.ref && item.target === record.context.target))
         && record.instance?.hasUnsavedChanges?.() === true);
     }
-    async function release(ids) {
+    async function release(ids, automatic = false) {
       for (const id of ids) blocked.add(id);
       // Let in-flight activation/mount/update settle before disposal, so an
       // asynchronous update cannot recreate resources after its cleanup ran.
       // Main bounds this wait; hung author code requires renderer recovery.
       for (const id of ids) while (jobs.has(id)) await Promise.all([...jobs.get(id)]);
+      const priorErrors = ids.flatMap(id => failures.has(id) ? [`${id}: ${failures.get(id)}`] : []);
+      if (automatic && priorErrors.length) throw new Error(priorErrors.join('; '));
+      // Inspection is an earlier IPC round trip. Input or settings edits can
+      // arrive while other hosts or author jobs settle; do not discard them.
+      if (automatic && (hasUnsavedChanges(ids) || services.updatesBlocked?.(ids) === true)) return { deferred: true };
+      if (automatic) services.setUpdatingPlugins?.(ids, true);
       for (const [container, record] of mounts) if (ids.includes(record.descriptor.pluginId)) unmount(container);
       for (const id of ids) while (jobs.has(id)) await Promise.all([...jobs.get(id)]);
       for (const [key, promise] of modules) {
@@ -250,10 +256,15 @@
       const errors = ids.flatMap(id => failures.has(id) ? [`${id}: ${failures.get(id)}`] : []);
       if (errors.length) throw new Error(errors.join('; '));
     }
-    const offLifecycle = bridge.onLifecycle?.(async ({ action, ids, content }) => {
+    const offLifecycle = bridge.onLifecycle?.(async ({ action, ids, content, automatic }) => {
+      if (action === 'inspect-update') return { blocked: services.updatesBlocked?.(ids) === true };
       if (action === 'inspect') return { loaded: [...modules.keys()].some(key => ids.some(id => key.startsWith(id + ':'))), unsaved: hasUnsavedChanges(ids, content) };
-      if (action === 'release') { await release(ids); return {}; }
-      if (action === 'resume') { for (const id of ids) if (!failures.has(id)) blocked.delete(id); return {}; }
+      if (action === 'release') return await release(ids, automatic) || {};
+      if (action === 'resume') {
+        await services.setUpdatingPlugins?.(ids, false);
+        for (const id of ids) if (!failures.has(id)) blocked.delete(id);
+        return {};
+      }
       throw new Error('Unknown plugin lifecycle operation');
     });
     return { mount, unmount, release,

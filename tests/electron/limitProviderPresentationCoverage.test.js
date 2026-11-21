@@ -170,7 +170,7 @@ test('sharing one mask table keeps Grok the mark that differs between the two', 
   assert.match(shared[1], /icons\/xai\.svg/, 'the client row should stay the vendor mark');
 });
 
-test('every catalog provider has capability tags', () => {
+test('every catalog provider has one derived connection tag', () => {
   // Read through the accessor rather than the table behind it: a missing entry
   // is not an error there, it returns an empty list, so the settings row simply
   // renders without the tags that say how the provider is collected. Nothing
@@ -178,8 +178,8 @@ test('every catalog provider has capability tags', () => {
   for (const id of LIMIT_PROVIDER_IDS) {
     const tags = limitProviderCapabilityTags(id);
     assert.ok(
-      Array.isArray(tags) && tags.length > 0,
-      `${id} needs a CAPABILITY_TAGS entry in limits/providerPresentation.js`
+      Array.isArray(tags) && tags.length === 1,
+      `${id} needs one tag derived from its sources`
     );
   }
 });

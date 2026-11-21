@@ -3,7 +3,7 @@
 const crypto = require('node:crypto');
 const fs = require('node:fs');
 const path = require('node:path');
-const { providerCredentialSettingPaths } = require('./limits/accounts');
+const { LIMIT_PROVIDER_ACCOUNTS, providerCredentialSettingPaths } = require('./limits/accounts');
 
 const CREDENTIALS_VERSION = 1;
 const SETTINGS_MIGRATION_VERSION = 1;
@@ -17,6 +17,7 @@ const MIMO_MIGRATION_VERSION = 1;
 const CREDENTIAL_SETTING_PATHS = Object.freeze({
   hubHostSecret: ['hub', 'hostSecret'],
   secret: ['hub', 'clientSecret'],
+  hubProfiles: ['hub', 'profiles'],
   ...providerCredentialSettingPaths()
 });
 
@@ -202,8 +203,10 @@ function hasCredentialSettings(settings) {
 
 function credentialSettingsForRenderer(settings, options = {}) {
   const exposed = new Set(options.expose || []);
+  const omitted = new Set(LIMIT_PROVIDER_ACCOUNTS.flatMap(entry => entry.fields.filter(field => field.rendererOmit).map(field => field.key)));
   const out = {};
   for (const key of Object.keys(CREDENTIAL_SETTING_PATHS)) {
+    if (omitted.has(key)) continue;
     out[key] = exposed.has(key) ? cloneJson(settings?.[key]) : '';
   }
   return out;

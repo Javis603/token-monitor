@@ -1,8 +1,13 @@
+// @ts-check
 'use strict';
 
 // TypeSafe limits account wiring. Leaf module: no requires.
-module.exports = {
+module.exports = /** @satisfies {import('../../limits/accounts').AccountDeclaration} */ ({
   id: 'typesafe',
+  accountSlots: true,
+  sources: [
+    { id: 'web', kind: 'web', relation: 'single', products: ['typesafe'], labelKey: 'settings.limits.sources.web', descriptionKey: 'settings.limits.sources.webDescription' }
+  ],
   fetch: 'fetchTypesafeLimits',
   fields: [
     {
@@ -41,4 +46,4 @@ module.exports = {
   urlPolicy: [
     { hosts: ['console.typesafe.ai'], exactPaths: ['/settings/billing'] }
   ]
-};
+});

@@ -57,7 +57,11 @@ for (const platform of ['darwin', 'linux', 'win32']) {
         assert.equal(ignored(path.join(root, relative)), true, relative);
       }
     }
-    assert.equal(f.collector.watchIgnoreMatcher('claude', f), undefined);
+    const withoutCursor = f.collector.watchIgnoreMatcher('claude', f);
+    for (const root of f.roots) {
+      assert.equal(withoutCursor?.(path.join(root, 'extension', 'state.vscdb')) ?? false, false,
+        'an untracked Cursor must not contribute its policy');
+    }
     assert.deepEqual(f.collector.watchPathsForClients('cursor', {
       ...f, customScanPaths: { cursor: [cache] }
     }), f.roots, 'unsupported Cursor custom paths cannot re-enable the generated cache watcher');

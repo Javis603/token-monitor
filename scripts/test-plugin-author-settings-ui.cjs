@@ -38,11 +38,12 @@ async function main() {
     const checks = []; const check = (name, condition) => checks.push({ name, ok: Boolean(condition) });
     const box = document.getElementById('settings');
     const tick = () => new Promise(resolve => setTimeout(resolve, 25));
-    let mode = 'ok', resolveSave, writes = 0, reads = 0, reloads = 0; const mounts = [];
+    let mode = 'ok', resolveSave, writes = 0, reads = 0, reloads = 0, recoveries = 0; const mounts = [];
     let saved = { pluginId: 'demo', schema, schemaVersion: 1, storedSchemaVersion: 1, revision: 0, values: {grid:true,width:2,note:'Saved title',mode:'pen'}, errors:{}, readOnly:false,status:'ready' };
     const data = {enabled:false, safeMode:true, plugins:[{id:'demo',name:'Preferences fixture',author:'Fixture author',version:'1.0.0',source:'user',status:'disabled',enabled:false,settings:true,views:[]}]};
-    const panel = TokenMonitorPluginSettings.createPluginSettingsPanel({document,container:box,mountSettings:(container,view)=>{mounts.push(view.ref);if(!container.firstChild){const marker=document.createElement('span');marker.textContent='Custom settings';container.append(marker)}},t:key=>copy[key.replace('plugins.authorSettings.','')] || ({'plugins.ui.back':'Back','plugins.ui.manage':'Manage','plugins.catalog.installed':'Installed','plugins.catalog.official':'Official','plugins.catalog.community':'Community','plugins.ui.noPlacements':'No selected locations','plugins.ui.selectedLocations':'Selected locations','settings.plugins.source.user':'Local plugin'})[key] || key,api:{
+    const panel = TokenMonitorPluginSettings.createPluginSettingsPanel({document,container:box,mountSettings:(container,view)=>{mounts.push(view.ref);if(!container.firstChild){const marker=document.createElement('span');marker.textContent='Custom settings';container.append(marker)}},t:(key,params)=>key==='settings.plugins.actionFailed'?params.error:copy[key.replace('plugins.authorSettings.','')] || ({'plugins.ui.back':'Back','plugins.ui.manage':'Manage','plugins.catalog.installed':'Installed','plugins.catalog.official':'Official','plugins.catalog.community':'Community','plugins.ui.noPlacements':'No selected locations','plugins.ui.selectedLocations':'Selected locations','settings.plugins.source.user':'Local plugin'})[key] || key,api:{
       list:async()=>structuredClone(data),
+      recover:async()=>{recoveries++;return structuredClone(data)},
       reload:async()=>{reloads++;data.plugins[0].settingsIdentity='reload-'+reloads;return structuredClone(data)},
       getSettings:async()=>{reads++;if(mode==='load-error')throw Error('read failed');return structuredClone(saved)},
       updateSettings:async(id,request)=>{
@@ -112,6 +113,21 @@ async function main() {
     check('reinstall-identity-invalidates-draft',reads===readsBefore+1&&control('note').value===saved.values.note);
     edit('note','Uninstalled draft');const plugin=data.plugins.pop();await panel.refresh();data.plugins.push(plugin);await panel.refresh();box.querySelector('.plugin-manage').click();await tick();
     check('uninstall-invalidates-draft-even-same-id',control('note').value===saved.values.note);
+    box.querySelector('.plugin-back').click();
+    panel.setUpdatingPlugins?.(['demo'],true);
+    check('automatic-update-disables-settings-entry',box.querySelector('.plugin-manage').disabled);
+    box.querySelector('.plugin-location-count').click();await tick();
+    check('automatic-update-blocks-alternative-editor-entry',!box.querySelector('.plugin-author-settings'));
+    await panel.setUpdatingPlugins?.(['demo'],false);
+    box.querySelector('.plugin-manage')?.click();await tick();
+    check('automatic-update-unlocks-settings-after-resume',Boolean(control('note')));
+    mode='failure';edit('note','Retained failed draft');control('note').dispatchEvent(new Event('change'));await tick();
+    data.plugins.push({id:'other',name:'Recovery fixture',version:'1.0.0',source:'user',status:'disabled',enabled:false,recoveryRequired:true,views:[]});
+    box.querySelector('.plugin-back').click();await panel.refresh();
+    box.querySelector('[data-plugin-id=other] .plugin-recover').click();await tick();
+    check('recovery-blocks-unrelated-retained-drafts',recoveries===0&&box.querySelector('.plugin-action-error')?.textContent.includes(copy.pendingChanges));
+    box.querySelector('[data-plugin-id=demo] .plugin-manage').click();await tick();
+    check('blocked-recovery-retains-failed-draft',control('note').value==='Retained failed draft');
     window.fixturePanel=panel;
     return checks;
   })()`);

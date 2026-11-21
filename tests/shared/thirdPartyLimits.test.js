@@ -24,6 +24,7 @@ const {
   THIRD_PARTY_ENV_ACCOUNT_NAME,
   configuredAccounts,
   customBalanceQuota,
+  fetchThirdPartyAccount,
   fetchThirdPartyLimits,
   newapiAccessToken,
   newapiApiKey,
@@ -50,6 +51,32 @@ function response(status, body) {
     json: async () => body,
     headers: { get: () => null }
   };
+}
+
+function errorResponse(status, code, declaredLength = true) {
+  const bytes = new TextEncoder().encode(JSON.stringify({ success: false, code, message: 'rejected' }));
+  let sent = false;
+  return {
+    ok: false,
+    status,
+    headers: {
+      get: (name) => (declaredLength && name === 'content-length' ? String(bytes.byteLength) : null)
+    },
+    body: {
+      getReader: () => ({
+        read: async () => {
+          if (sent) return { done: true };
+          sent = true;
+          return { done: false, value: bytes };
+        },
+        cancel: async () => {}
+      })
+    }
+  };
+}
+
+function streamedErrorResponse(status, code) {
+  return errorResponse(status, code, false);
 }
 
 function fixtureTimezone(t, zone = 'UTC') {
@@ -1334,6 +1361,199 @@ test('invalid or unauthorized adapter responses fail closed', async () => {
     { data: { remaining: [12] } },
     { divisor: 1, remainingPath: 'data.remaining' }
   ), null);
+});
+
+test('New API save probes surface retired legacy tokens and missing scopes', async () => {
+  const failureFor = async (status, code, errorBody = errorResponse) => {
+    try {
+      await fetchThirdPartyAccount({
+        name: 'production',
+        adapter: NEWAPI_ACCOUNT_ADAPTER,
+        baseUrl: 'https://api.example.com',
+        accessToken: 'nap_token',
+        enabled: true
+      }, {
+        env: {},
+        surfaceAccessTokenErrors: true,
+        now: () => Date.parse('2026-07-24T08:00:00Z'),
+        fetch: async (url) => {
+          const parsed = new URL(url);
+          if (parsed.pathname.endsWith(NEWAPI_STATUS_PATH)) {
+            return response(200, { data: { quota_per_unit: DEFAULT_QUOTA_PER_UNIT } });
+          }
+          if (parsed.pathname.endsWith(NEWAPI_ACCOUNT_PATH)) return errorBody(status, code);
+          return response(200, { data: [] });
+        }
+      });
+    } catch (error) {
+      return error;
+    }
+    assert.fail('expected the New API quota error to be rethrown');
+  };
+
+  const retired = await failureFor(401, 'ACCESS_TOKEN_LEGACY_RETIRED');
+  assert.equal(retired.status, 'unauthorized');
+  assert.equal(retired.code, 'ACCESS_TOKEN_LEGACY_RETIRED');
+
+  const denied = await failureFor(403, 'ACCESS_TOKEN_SCOPE_DENIED');
+  assert.equal(denied.status, 'unauthorized');
+  assert.equal(denied.code, 'ACCESS_TOKEN_SCOPE_DENIED');
+
+  // A reverse proxy can drop Content-Length while keeping the same envelope.
+  const chunked = await failureFor(401, 'ACCESS_TOKEN_LEGACY_RETIRED', streamedErrorResponse);
+  assert.equal(chunked.code, 'ACCESS_TOKEN_LEGACY_RETIRED');
+});
+
+test('New API save probes warn about a token that cannot read the usage dashboard', async (t) => {
+  fixtureTimezone(t);
+  const account = {
+    name: 'production',
+    adapter: NEWAPI_ACCOUNT_ADAPTER,
+    baseUrl: 'https://api.example.com',
+    accessToken: 'nap_token',
+    enabled: true
+  };
+  const fetch = async (url) => {
+    const parsed = new URL(url);
+    if (parsed.pathname.endsWith(NEWAPI_STATUS_PATH)) {
+      return response(200, { data: { quota_per_unit: DEFAULT_QUOTA_PER_UNIT } });
+    }
+    if (parsed.pathname.endsWith(NEWAPI_ACCOUNT_PATH)) {
+      return response(200, {
+        success: true,
+        data: { quota: 25_000_000, used_quota: 5_000_000, request_count: 12 }
+      });
+    }
+    return errorResponse(403, 'ACCESS_TOKEN_SCOPE_DENIED');
+  };
+  const now = () => Date.parse('2026-07-24T08:00:00Z');
+  const enrichmentErrors = [];
+
+  const saved = await fetchThirdPartyAccount(account, {
+    env: {},
+    now,
+    fetch,
+    surfaceAccessTokenErrors: true,
+    onEnrichmentAccessTokenError: (error) => enrichmentErrors.push(error)
+  });
+  assert.equal(saved.status, 'ok');
+  assert.equal(saved.balance.amount, 50);
+  assert.equal(saved.balance.todaySpend, null);
+  assert.ok(enrichmentErrors.length > 0);
+  assert.ok(enrichmentErrors.every((error) => error.code === 'ACCESS_TOKEN_SCOPE_DENIED'));
+
+  // Normal collection keeps the balance and treats every period as optional.
+  const [provider] = await fetchThirdPartyLimits({ thirdPartyProfiles: { production: account } }, {
+    env: {},
+    now,
+    fetch
+  });
+  assert.equal(provider.status, 'ok');
+  assert.equal(provider.balance.amount, 50);
+  assert.equal(provider.balance.todaySpend, null);
+});
+
+test('New API error bodies cannot consume the save budget when the stream stalls', async () => {
+  const stalled = {
+    ok: false,
+    status: 401,
+    headers: { get: (name) => (name === 'content-length' ? '64' : null) },
+    body: {
+      getReader: () => ({ read: () => new Promise(() => {}), cancel: async () => {} })
+    }
+  };
+  const [provider] = await fetchThirdPartyLimits({
+    thirdPartyProfiles: {
+      production: {
+        adapter: NEWAPI_ACCOUNT_ADAPTER,
+        baseUrl: 'https://api.example.com',
+        accessToken: 'nap_token'
+      }
+    }
+  }, {
+    env: {},
+    signal: AbortSignal.timeout(5000),
+    fetch: async (url) => (new URL(url).pathname.endsWith(NEWAPI_STATUS_PATH)
+      ? response(200, { data: { quota_per_unit: DEFAULT_QUOTA_PER_UNIT } })
+      : stalled)
+  });
+
+  assert.equal(provider.status, 'unauthorized');
+});
+
+test('a stalled error-body cancel does not block the refusal', async () => {
+  const stalled = {
+    ok: false,
+    status: 401,
+    headers: { get: (name) => (name === 'content-length' ? '64' : null) },
+    body: {
+      getReader: () => ({
+        read: () => new Promise(() => {}),
+        cancel: () => new Promise(() => {})
+      })
+    }
+  };
+  let timer;
+  try {
+    const provider = await Promise.race([
+      fetchThirdPartyLimits({
+        thirdPartyProfiles: {
+          production: {
+            adapter: NEWAPI_ACCOUNT_ADAPTER,
+            baseUrl: 'https://api.example.com',
+            accessToken: 'nap_token'
+          }
+        }
+      }, {
+        env: {},
+        signal: AbortSignal.timeout(5000),
+        fetch: async (url) => (new URL(url).pathname.endsWith(NEWAPI_STATUS_PATH)
+          ? response(200, { data: { quota_per_unit: DEFAULT_QUOTA_PER_UNIT } })
+          : stalled)
+      }).then(([row]) => row),
+      new Promise((_, reject) => {
+        timer = setTimeout(() => reject(new Error('error-body cancel blocked the refusal')), 4000);
+      })
+    ]);
+    assert.equal(provider.status, 'unauthorized');
+  } finally {
+    clearTimeout(timer);
+  }
+});
+
+test('New API save probes keep a token refusal when the status request stalls', async () => {
+  const signal = AbortSignal.timeout(500);
+  await assert.rejects(
+    fetchThirdPartyAccount({
+      name: 'production',
+      adapter: NEWAPI_ACCOUNT_ADAPTER,
+      baseUrl: 'https://api.example.com',
+      accessToken: 'nap_token',
+      enabled: true
+    }, {
+      env: {},
+      signal,
+      surfaceAccessTokenErrors: true,
+      fetch: async (url) => {
+        const parsed = new URL(url);
+        if (parsed.pathname.endsWith(NEWAPI_STATUS_PATH)) {
+          return {
+            ok: true,
+            status: 200,
+            headers: { get: () => null },
+            json: () => new Promise((_, reject) => {
+              signal.addEventListener('abort', () => reject(signal.reason), { once: true });
+            })
+          };
+        }
+        if (parsed.pathname.endsWith(NEWAPI_ACCOUNT_PATH)) {
+          return errorResponse(401, 'ACCESS_TOKEN_LEGACY_RETIRED');
+        }
+        return response(200, { data: [] });
+      }
+    }),
+    (error) => error.code === 'ACCESS_TOKEN_LEGACY_RETIRED'
+  );
 });
 
 test('configured accounts deduplicate exact adapter identities but keep distinct modes', () => {

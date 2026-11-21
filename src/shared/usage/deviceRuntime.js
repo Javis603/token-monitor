@@ -35,6 +35,23 @@ function createDeviceRuntime(options = {}, deps = {}) {
     ...(Object.prototype.hasOwnProperty.call(options, 'initialLimits')
       ? { initialLimits: options.initialLimits }
       : {}),
+    // Only when someone listens: each call copies the partial record.
+    ...(typeof options.onColdPreview === 'function'
+      ? {
+          onColdPreview(record, meta) {
+            if (!active) return;
+            try {
+              options.onColdPreview(record, meta);
+            } catch (error) {
+              try {
+                options.onError?.(error, 'cold-preview');
+              } catch {
+                // Optional observers must never block the delivery path.
+              }
+            }
+          }
+        }
+      : {}),
     onRecord(record, meta) {
       if (!active) return;
       try {
@@ -71,7 +88,7 @@ function createDeviceRuntime(options = {}, deps = {}) {
         const transformed = options.transformUsage && meta?.transformed !== true
           ? options.transformUsage(summary, reason, { preview: false })
           : summary;
-        deviceState.updateUsage(transformed, reason, { epoch, preview: false });
+        deviceState.updateUsage(transformed, reason, { epoch, preview: false, ownsSummary: meta?.ownsSummary === true });
         return transformed;
       },
       onDiagnosticEvent(event) {
@@ -94,7 +111,7 @@ function createDeviceRuntime(options = {}, deps = {}) {
         const transformed = options.transformUsage && meta?.transformed !== true
           ? options.transformUsage(summary, reason, { preview: true })
           : summary;
-        deviceState.updateUsage(transformed, reason, { epoch, preview: true });
+        deviceState.updateUsage(transformed, reason, { epoch, preview: true, ownsSummary: meta?.ownsSummary === true });
       };
     } else {
       delete configured.onPreview;
@@ -112,6 +129,11 @@ function createDeviceRuntime(options = {}, deps = {}) {
     ...(deps.limitsDeps || {}),
     onUpdate(summary) {
       if (!active) return;
+      try {
+        deps.limitsDeps?.onUpdate?.(summary);
+      } catch (error) {
+        try { options.onError?.(error, 'limits-observer'); } catch (_) {}
+      }
       deviceState.updateLimits(summary, 'limits', { epoch });
     },
     onEvent(event) {

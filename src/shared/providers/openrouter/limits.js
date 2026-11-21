@@ -191,26 +191,33 @@ function configuredAccounts(options = {}, deps = {}) {
   for (const [name, profile] of Object.entries(options.openrouterProfiles || {})) {
     const profileName = openrouterProfileName(name);
     const apiKey = cleanSecret(profile?.apiKey);
-    if (profile?.enabled !== false && profileName && apiKey && !seenKeys.has(apiKey)) {
+    if (profile?.enabled !== false && profileName && apiKey && !seenKeys.has(hashKey('openrouter', apiKey))) {
       accounts.push({ name: profileName, apiKey });
-      seenKeys.add(apiKey);
+      seenKeys.add(hashKey('openrouter', apiKey));
     }
   }
+  const fixedKey = openrouterToken({}, options.openrouterApiKey);
+  if (fixedKey && !seenKeys.has(hashKey('openrouter', fixedKey))) {
+    accounts.push({ name: '', apiKey: fixedKey });
+    seenKeys.add(hashKey('openrouter', fixedKey));
+  }
   const envKey = openrouterToken(deps.env || process.env);
-  if (envKey && !seenKeys.has(envKey)) {
+  if (envKey && !seenKeys.has(hashKey('openrouter', envKey))) {
     accounts.push({ name: OPENROUTER_ENV_ACCOUNT_NAME, apiKey: envKey });
   }
-  return accounts.filter((account) => account.name);
+  return accounts;
 }
 
-async function fetchOpenRouterLimits(options = {}, deps = {}) {
+async function fetchOpenRouterProfiles(options = {}, deps = {}) {
   let accounts = configuredAccounts(options, deps);
   const scope = options.limitRefreshScope?.provider === 'openrouter'
     ? options.limitRefreshScope
     : null;
   if (scope) {
     const name = String(scope.accountName || scope.accountLabel || '').trim();
-    accounts = name ? accounts.filter((account) => account.name === name) : [];
+    accounts = scope.accountKey
+      ? accounts.filter(account => hashKey('openrouter', account.apiKey) === scope.accountKey)
+      : accounts.filter(account => name && account.name === name);
   }
   if (accounts.length === 0) {
     return normalizeLimitProvider({
@@ -222,6 +229,18 @@ async function fetchOpenRouterLimits(options = {}, deps = {}) {
     });
   }
   return Promise.all(accounts.map((account) => fetchOpenRouterAccount(account.name, account.apiKey, deps)));
+}
+
+// Raw single-account adapter: slots supply an explicit key and an isolated env.
+async function fetchOpenRouterLimits(options = {}, deps = {}) {
+  // Keep collecting the source if a startup migration could not finish.
+  if (!deps.probe && !deps.accountSlotSaved && Object.keys(options.openrouterProfiles || {}).length) return fetchOpenRouterProfiles(options, deps);
+  const apiKey = openrouterToken(deps.env || process.env, options.openrouterApiKey);
+  if (!apiKey) return normalizeLimitProvider({ provider: 'openrouter', source: 'api', status: 'notConfigured', windows: [], updatedAt: new Date((deps.now || Date.now)()).toISOString() });
+  const row = await fetchOpenRouterAccount('', apiKey, deps);
+  delete row.accountName;
+  delete row.accountLabel;
+  return row;
 }
 
 module.exports = {

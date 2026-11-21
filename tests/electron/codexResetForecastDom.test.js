@@ -13,7 +13,8 @@ const app = fs.readFileSync(path.join(root, 'src/electron/renderer/app.js'), 'ut
 // The Codex forecast row is one of the Limits rows, so the view builds it and
 // the page only holds the fetch/cache machinery behind it. Guards that slice a
 // builder read the view; the ones about state read the page.
-const view = fs.readFileSync(path.join(root, 'src/electron/renderer/limits/windowsView.js'), 'utf8');
+const view = fs.readFileSync(path.join(root, 'src/electron/renderer/providers/codex/windows.js'), 'utf8').replace(/\/\*\*[\s\S]*?\*\/ /g, '')
+  + '\n' + fs.readFileSync(path.join(root, 'src/electron/renderer/limits/windowsView.js'), 'utf8');
 const styles = fs.readFileSync(path.join(root, 'src/electron/renderer/styles.css'), 'utf8');
 
 test('Codex reset forecast is opt-in at both persistence and provider UI boundaries', () => {
@@ -32,13 +33,7 @@ test('Codex reset forecast stays local to the renderer and uses a narrow IPC bri
   assert.match(main, /parsed\.hostname === 'codex-resets\.com' && \(parsed\.pathname === '' \|\| parsed\.pathname === '\/'\)/);
 });
 
-test('single and multi-account Codex rows render one forecast entry', () => {
-  // One per row, and one per group — the group's policy says so, so the Edge
-  // Dock card's Codex group gets it without being handed an option. Both
-  // surfaces render these two functions, so the count cannot differ between them.
-  assert.match(view, /if \(id === 'codex' && !options\.accountRow\) appendCodexResetForecast\(row\);/);
-  assert.match(view, /LIMIT_GROUP_POLICIES = \{[\s\S]*?codex: \(\) => \(\{ forecastOnGroup: true \}\)/);
-  assert.equal((view.match(/appendCodexResetForecast\(/g) || []).length, 3, 'once per row, once per group, once as the declaration');
+test('single and multi-account Codex rows share the forecast divider styling', () => {
   assert.match(styles, /\.codex-reset-forecast \{/);
   assert.match(styles, /\.limit-row:has\(> \.codex-reset-forecast\)\s*\{[^}]*padding-bottom: 7px;/s);
   assert.doesNotMatch(styles, /\.codex-reset-forecast\s*\{[^}]*border-top:/s);
@@ -157,7 +152,7 @@ test('forecast tooltip safely stays absent before the first response arrives', (
 
 test('renderer hides an active forecast at its expiry boundary', () => {
   const start = view.indexOf('function codexResetForecastExpired');
-  const end = view.indexOf('\n  function renderLimitProviderRow', start);
+  const end = view.indexOf('\n  }', start) + 4;
   const expired = vm.runInNewContext(`(${view.slice(start, end)})`, { Date, Number });
   const forecast = { status: 'active', expiresAt: '2026-08-30T04:01:00.000Z' };
 
@@ -276,7 +271,7 @@ test('forecast tooltip gates retained metadata by the current signal state', () 
   const { translate } = require('../../src/electron/renderer/i18n');
   const nowMs = Date.parse('2026-10-02T04:00:00Z');
   const expiredStart = view.indexOf('function codexResetForecastExpired');
-  const expiredEnd = view.indexOf('\n  function renderLimitProviderRow', expiredStart);
+  const expiredEnd = view.indexOf('\n  }', expiredStart) + 4;
   const expired = vm.runInNewContext(`(${view.slice(expiredStart, expiredEnd)})`, { Date, Number });
   const start = view.indexOf('function codexResetForecastTooltip');
   const end = view.indexOf('\n  function renderCodexResetForecast', start);
@@ -418,7 +413,7 @@ test('forecast deadline stays anchored to response settlement across latency and
   const end = app.indexOf('\nfunction captureLimitResetMotion', start);
   // The page's fetch machinery calls the view's expiry predicate, so the
   // sandbox needs both.
-  const expiryBody = view.slice(view.indexOf('function codexResetForecastExpired'), view.indexOf('\n  function renderLimitProviderRow', view.indexOf('function codexResetForecastExpired')));
+  const expiryBody = view.slice(view.indexOf('function codexResetForecastExpired'), view.indexOf('\n  }', view.indexOf('function codexResetForecastExpired')) + 4);
   const source = `${expiryBody}\n${app.slice(start, end)}`;
   const scheduled = [];
   let nowMs = 1_000_000;

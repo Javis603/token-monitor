@@ -7,7 +7,7 @@
   if (typeof module === 'object' && module.exports) module.exports = api;
   if (root) root.TokenMonitorAccountShell = api;
 })(typeof window !== 'undefined' ? window : null, function createAccountShellApi() {
-  function render({ status, statusText, error, errorText = '', progress, progressText = '' }) {
+  function render({ status, statusText, error, errorText = '', errorTone = 'error', progress, progressText = '' }) {
     if (status && statusText !== undefined) {
       if (status.textContent !== statusText) status.textContent = statusText;
       status.setAttribute('aria-label', statusText);
@@ -15,6 +15,8 @@
     if (error) {
       if (error.textContent !== errorText) error.textContent = errorText;
       error.classList.toggle('hidden', !errorText);
+      error.classList.toggle('error', errorTone !== 'warning');
+      error.classList.toggle('warning', errorTone === 'warning');
     }
     if (progress) {
       if (progress.textContent !== progressText) progress.textContent = progressText;
@@ -22,11 +24,34 @@
     }
   }
 
+  function setDisclosureBody(toggle, details, open) {
+    if (!open && details.contains(details.ownerDocument?.activeElement)) toggle?.focus({ preventScroll: true });
+    details.inert = !open;
+    details.classList.toggle('hidden', !open);
+  }
+
+  function focusDisclosureControl(details, control) {
+    control.focus({ preventScroll: true });
+    const document = details.ownerDocument;
+    const focused = document?.activeElement;
+    document?.defaultView?.requestAnimationFrame(() => {
+      const animations = details.getAnimations();
+      void Promise.allSettled(animations.map(animation => animation.finished)).then(() => {
+        if (details.inert || document.activeElement !== focused || !details.contains(focused)) return;
+        const panel = details.closest('.settings-panel')?.getBoundingClientRect();
+        const field = focused.getBoundingClientRect();
+        if (panel && (field.top < panel.top || field.bottom > panel.bottom)) {
+          focused.scrollIntoView({ block: 'nearest' });
+        }
+      });
+    });
+  }
+
   function setExpanded({ toggle, details, group, expanded, onChange }) {
     if (!toggle || !details) return;
     const open = Boolean(expanded);
     toggle.setAttribute('aria-expanded', String(open));
-    details.classList.toggle('hidden', !open);
+    setDisclosureBody(toggle, details, open);
     group?.classList.toggle('expanded', open);
     onChange?.(open);
   }
@@ -62,5 +87,5 @@
     };
   }
 
-  return { render, setExpanded, createBusyGuard, createRequestGuard };
+  return { render, setDisclosureBody, focusDisclosureControl, setExpanded, createBusyGuard, createRequestGuard };
 });

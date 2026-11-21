@@ -17,17 +17,20 @@ const accountProfileRequests = accountShellApi.createRequestGuard();
 const accountProfileStatuses = accountShellApi.createRequestGuard();
 const accountProfileSaves = accountShellApi.createBusyGuard();
 const accountShellErrors = Object.create(null);
+const accountShellErrorTones = Object.create(null);
 let syncContentForm = null;
 
-function setAccountShellError(id, message) {
+function setAccountShellError(id, message, tone = 'error') {
   accountShellErrors[id] = message || '';
+  accountShellErrorTones[id] = tone;
   renderAccountShellError(id);
 }
 
 function renderAccountShellError(id) {
   accountShellApi.render({
     error: document.getElementById(`${id}ErrorMessage`),
-    errorText: accountShellErrors[id] || ''
+    errorText: accountShellErrors[id] || '',
+    errorTone: accountShellErrorTones[id] || 'error'
   });
 }
 const { clientColors, fallbackModelColors, modelVendorFor, modelColor } = window.TokenMonitorUsageCharts;
@@ -97,25 +100,11 @@ const LIMIT_PROVIDER_ACCOUNT_NODES = {
   opencode: { group: 'opencodeCookieGroup', status: 'opencodeCookieStatus' },
   cursor: { group: 'cursorAccountGroup', status: 'cursorAccountStatus' },
   antigravity: { group: 'antigravityAccountGroup', status: 'antigravityAccountStatus' },
-  kimi: { group: 'kimiAccountGroup', status: 'kimiAccountStatus' },
-  copilot: { group: 'copilotAccountGroup', status: 'copilotApiTokenStatus' },
   mimo: { group: 'mimoAccountGroup', status: 'mimoAccountStatus' },
   workbuddy: { group: 'workbuddyAccountGroup', status: 'workbuddyAccountStatus' },
-  minimax: { group: 'minimaxAccountGroup', status: 'minimaxStatus' },
-  openrouter: { group: 'openrouterAccountGroup', status: 'openrouterStatus' },
-  volcengine: { group: 'volcengineAccountGroup', status: 'volcengineAccountStatus' },
+  // The only header still summarising this device; the others count every device's accounts.
+  minimax: { group: 'minimaxAccountGroup', status: 'minimaxStatus', localSummary: true },
   thirdparty: { group: 'thirdpartyAccountGroup', status: 'thirdpartyStatus' }
-};
-const LIMIT_PROVIDER_CONNECTION_DETAIL_KEYS = {
-  minimax: 'settings.minimax.codeNote',
-  antigravity: 'settings.limits.connection.antigravity',
-  cline: 'settings.limits.connection.cline',
-  grok: 'settings.limits.connection.grok',
-  kiro: 'settings.limits.connection.kiro',
-  manus: 'settings.limits.connection.manus',
-  hark: 'settings.limits.connection.hark',
-  muse: 'settings.limits.connection.muse',
-  workbuddy: 'settings.limits.connection.workbuddy'
 };
 const TRAY_ICON_VARIANTS = [
   { id: 'claude-brand', label: 'Claude', after: 'claude' },
@@ -170,6 +159,8 @@ const clientSourceCacheApi = window.TokenMonitorClientSourceCache;
 const clientRescanStateApi = window.TokenMonitorClientRescanState;
 const serviceStatusPresentationApi = window.TokenMonitorServiceStatusPresentation;
 const clientDisplayPreferencesApi = window.TokenMonitorClientDisplayPreferences;
+const qoderDisplayApi = window.TokenMonitorQoderDisplay;
+const qoderCollectionSettingsApi = window.TokenMonitorQoderCollectionSettings;
 const settingsListFilterApi = window.TokenMonitorSettingsListFilter;
 const customPricingFormApi = window.TokenMonitorCustomPricingForm;
 const viewDisplayPreferencesApi = window.TokenMonitorViewDisplayPreferences;
@@ -212,6 +203,8 @@ const LIMIT_REFRESH_OPTIONS = [60000, 120000, 300000, 900000, 1800000];
 const WINDOW_BEHAVIOR_VALUES = ['floating', 'normal', 'desktop'];
 const WINDOW_BEHAVIOR_ICONS = { floating: '⇧', normal: '○', desktop: '⇩' };
 const LIMIT_CAPABILITY_TAG_KEYS = {
+  CLI: 'settings.limits.sources.cli',
+  OAuth: 'settings.limits.sources.oauth',
   Auto: 'settings.limits.capability.auto',
   'OAuth/CLI': 'settings.limits.capability.oauthCli',
   'OAuth/App/CLI': 'settings.limits.capability.oauthAppCli',
@@ -230,6 +223,9 @@ const LIMIT_CAPABILITY_TAG_KEYS = {
   'Coding Plan': 'settings.limits.capability.codingPlan',
   Relay: 'settings.limits.capability.relay',
   'API key': 'settings.limits.capability.apiKey',
+  Environment: 'settings.limits.sources.env',
+  Local: 'settings.limits.sources.file',
+  'Desktop app': 'settings.limits.sources.desktop',
   'AK/SK': 'settings.limits.capability.akSk',
   'GitHub OAuth': 'settings.limits.capability.githubOAuth',
   API: 'settings.limits.capability.api',
@@ -341,10 +337,11 @@ function normalizeInitialViewValue(value, allowed, fallback) {
   return allowed.has(raw) || (allowed === viewBreakdownValues && pluginPlacementsApi.isHomeToken(raw)) ? raw : fallback;
 }
 
-const state = { period: normalizeInitialViewValue(initialViewState.period, viewPeriodValues, 'today'), appUpdate: null, breakdown: normalizeInitialViewValue(initialViewState.breakdown, viewBreakdownValues, 'home'), viewSwitcherOpen: false, viewSwitcherHasOpened: false, limitDetailTooltipHasOpened: false, limitDetailTooltipActive: false, limitDetailTooltipRenderPending: false, settings: null, windowVisible: new URLSearchParams(window.location.search).get('windowHidden') !== '1', stats: null, homeHistory: null, homeHistoryBusy: false, homeHistoryRequested: false, homeHistorySignature: '', homeHistoryRetries: 0, homeHistoryRetryTimer: null, homeActivityScrollLeft: null, homeActivityFollowEnd: true, homeActivityResizeObserver: null, serviceStatus: null, serviceStatusBusy: false, serviceProvidersExpanded: false, trendSettingsExpanded: false, trendsActivating: false, homeSettingsExpanded: false, homeLimitSettingsExpanded: false, limitProviderSettingsExpanded: '', clientHealthExpanded: '', clientSources: clientSourceCacheApi.createClientSourceCache(), clientSourcesKey: '', clientSourcesRequest: 0, subscriptionEditingId: '', subscriptionTopUps: [], subscriptionFormBase: null, subscriptionEditorTransitionId: 0, serviceStatusTicker: null, refreshTimer: null, refreshBusy: false, refreshFeedbackTimer: null, currentTotal: 0, rowSignature: '', streamConnected: false, streamFailure: null, mode: 'idle', appInfo: null, systemDarkUi: false, tokscaleStatus: null, hubInfo: null, hubBuildStatus: null, cursorAccount: { status: null, error: '' }, cursorAccountExpanded: false, codexAccountExpanded: false, codexAccountError: '', codexSignInBusy: false, codexSignInFlowId: '', codexLoginUrl: '', codexLoginStatus: '', codexLoginOutput: '', codexWorkspaceChoices: [], codexWorkspaceId: '', codexActiveAccount: null, codexPendingActiveAccount: null, codexPendingActiveAccountUntil: 0, codexPendingActiveAccountTimer: null, customPricingExpanded: false, claudeAccountExpanded: false, claudePendingCheckSince: 0, opencodeProfileCount: 0, opencodeCookieExpanded: false, openrouterProfileCount: 0, openrouterAccountExpanded: false, thirdPartyProfileCount: 0, thirdPartyAccountExpanded: false, deepseekAccountExpanded: false, deepseekPendingCheckSince: 0, minimaxAccountExpanded: false, factoryAccountExpanded: false, factoryPendingCheckSince: 0, clineAccountExpanded: false, clinePendingCheckSince: 0, zaiAccountExpanded: false, zaiPendingCheckSince: 0, zaiteamAccountExpanded: false, zaiteamPendingCheckSince: 0, volcengineAccountExpanded: false, volcenginePendingCheckSince: 0, volcengineAgentExpanded: false, qoderAccountExpanded: false, qoderPendingCheckSince: 0, kimiAccountExpanded: false, kimiPendingCheckSince: 0, ollamaAccountExpanded: false, ollamaPendingCheckSince: 0, mimoAccountExpanded: false, mimoAccountError: '', antigravityAccountExpanded: false, antigravityAccountError: '', antigravitySignInBusy: false, workbuddyAccountExpanded: false, workbuddyAccountError: '', workbuddySignInBusy: false, workbuddyCancelBusy: false, workbuddyMutationBusy: false, workbuddyLoginAttempt: 0, workbuddyLoginStatusKey: '', workbuddyAccountsRevision: 0, copilotAccountExpanded: false, copilotManualExpanded: false, copilotPendingCheckSince: 0, copilotSignInBusy: false, copilotSignInCancelable: false, copilotSignInFlowId: '', copilotAuthorizeMessage: '', copilotLoginStatus: '', copilotErrorMessage: '', floatingBubble: initialFloatingBubble, suppressInitialNumberAnimation: window.__TOKEN_MONITOR_SUPPRESS_INITIAL_NUMBER_ANIMATION__ === true, openSession: null, detailSort: 'time', recordingWindowShortcut: false, windowShortcutInvalid: false, toolSearchQuery: '', limitProviderSearchQuery: '', accountPanelMessages: {} };
+const state = { period: normalizeInitialViewValue(initialViewState.period, viewPeriodValues, 'today'), appUpdate: null, breakdown: normalizeInitialViewValue(initialViewState.breakdown, viewBreakdownValues, 'home'), viewSwitcherOpen: false, viewSwitcherHasOpened: false, limitDetailTooltipHasOpened: false, settings: null, windowVisible: new URLSearchParams(window.location.search).get('windowHidden') !== '1', stats: null, homeHistory: null, homeHistoryBusy: false, homeHistoryRequested: false, homeHistorySignature: '', homeHistoryRetries: 0, homeHistoryRetryTimer: null, homeActivityScrollLeft: null, homeActivityFollowEnd: true, homeActivityResizeObserver: null, serviceStatus: null, serviceStatusBusy: false, trendsActivating: false, mainSettingsView: 'home', homeLimitProvidersOpen: false, homeLimitSettingsExpanded: false, limitProviderSettingsExpanded: '', clientHealthExpanded: '', clientSources: clientSourceCacheApi.createClientSourceCache(), clientSourcesKey: '', clientSourcesRequest: 0, subscriptionEditingId: '', subscriptionTopUps: [], subscriptionFormBase: null, subscriptionEditorTransitionId: 0, serviceStatusTicker: null, refreshTimer: null, refreshBusy: false, refreshFeedbackTimer: null, currentTotal: 0, rowSignature: '', streamConnected: false, streamFailure: null, mode: 'idle', appInfo: null, systemDarkUi: false, tokscaleStatus: null, hubInfo: null, hubBuildStatus: null, cursorAccount: { status: null, error: '' }, cursorAccountExpanded: false, codexAccountExpanded: false, codexAccountError: '', codexSignInBusy: false, codexSignInFlowId: '', codexLoginUrl: '', codexLoginStatus: '', codexLoginOutput: '', codexWorkspaceChoices: [], codexWorkspaceId: '', codexActiveAccount: null, codexPendingActiveAccount: null, codexPendingActiveAccountUntil: 0, codexPendingActiveAccountTimer: null, customPricingExpanded: false, claudeAccountExpanded: false, claudePendingCheckSince: 0, opencodeProfileCount: 0, opencodeCookieExpanded: false, thirdPartyProfileCount: 0, thirdPartyAccountExpanded: false, deepseekAccountExpanded: false, deepseekPendingCheckSince: 0, minimaxAccountExpanded: false, factoryAccountExpanded: false, factoryPendingCheckSince: 0, clineAccountExpanded: false, clinePendingCheckSince: 0, zaiAccountExpanded: false, zaiPendingCheckSince: 0, zaiteamAccountExpanded: false, zaiteamPendingCheckSince: 0, volcengineAccountExpanded: false, volcenginePendingCheckSince: 0, qoderAccountExpanded: false, qoderPendingCheckSince: 0, kimiAccountExpanded: false, kimiPendingCheckSince: 0, ollamaAccountExpanded: false, ollamaPendingCheckSince: 0, mimoAccountExpanded: false, mimoAccountError: '', antigravityAccountExpanded: false, antigravityAccountError: '', antigravitySignInBusy: false, workbuddyAccountExpanded: false, workbuddyAccountError: '', workbuddySignInBusy: false, workbuddyCancelBusy: false, workbuddyMutationBusy: false, workbuddyLoginAttempt: 0, workbuddyLoginStatusKey: '', workbuddyAccountsRevision: 0, floatingBubble: initialFloatingBubble, suppressInitialNumberAnimation: window.__TOKEN_MONITOR_SUPPRESS_INITIAL_NUMBER_ANIMATION__ === true, openSession: null, detailSort: 'time', recordingWindowShortcut: false, windowShortcutInvalid: false, toolSearchQuery: '', limitProviderSearchQuery: '', accountPanelMessages: {} };
 state.devinAccountExpanded = false;
 state.devinPendingCheckSince = 0;
 state.icloudStatus = null;
+state.repositoryStars = null;
 state.zedAccountExpanded = false;
 state.zedPendingCheckSince = 0;
 state.toolDetailMode = 'tokens';
@@ -354,7 +351,7 @@ state.codexResetForecastRequestedAt = 0;
 state.codexResetForecastRetryTimer = null;
 state.clientRescans = clientRescanStateApi.createClientRescanState({
   onChange: (clientId) => {
-    if (state.clientHealthExpanded === clientId) refillOpenClientHealthPanel();
+    if (state.clientHealthExpanded === clientId || (state.clientHealthExpanded === 'qoder' && qoderDisplayApi.isQoder(clientId))) refillOpenClientHealthPanel();
   }
 });
 state.toolPreferenceRenderSignature = '';
@@ -392,8 +389,6 @@ state.sessionSearchOpen = false;
 state.sessionSearchQuery = '';
 state.sessionRowsCache = null;
 let directBreakdownOverride = null;
-state.projectSettingsExpanded = false;
-state.sessionSettingsExpanded = false;
 state.homeActivitySettingsExpanded = false;
 state.settingsSections = Object.fromEntries(SETTINGS_SECTION_IDS.map((id) => [id, false]));
 const defaultAppearance = { glassOpacity: 68, glassBlur: 32, backgroundImageOpacity: 28, zoomFactor: 1, systemGlass: true, windowsBackdrop: 'acrylic', macBackdrop: 'vibrancy', reduceMotion: 'system', tokenNumberAnimation: 'roll', showLiveDot: true, showToolIcons: true, titleIconOnly: true, showCompactTotalTokens: false, showLiveTokenRate: false, liveTokenRateScope: 'all', compactTokenUnits: 'western', settingsInTitlebar: false };
@@ -401,6 +396,7 @@ const nativeGlassTintSettings = [['macGlassTint', 'liquid-glass'], ['macClearGla
 let nativeMaterialState = glassRenderingApi.normalizeNativeMaterialState();
 let nativeMaterialRevision = 0;
 let appearancePreview = {};
+const appearanceColorPicker = window.TokenMonitorAppearanceColorPicker.create({ document, window, t });
 // Writes still in flight. Main applies the native material before it broadcasts
 // the saved settings, so a material push landing in between must not repaint
 // the appearance controls from the settings that write is replacing.
@@ -420,10 +416,10 @@ Object.assign(els, {
   sessionSearchClear: document.getElementById('sessionSearchClear'),
   sessionSearchStatus: document.getElementById('sessionSearchStatus'),
   glassInputNote: document.getElementById('glassInputNote'),
+  blurInputNote: document.getElementById('blurInputNote'),
   backgroundImageOpacityRow: document.getElementById('backgroundImageOpacityRow'),
   backgroundImageOpacityInput: document.getElementById('backgroundImageOpacityInput'),
   resetBackgroundImageOpacityButton: document.getElementById('resetBackgroundImageOpacityButton'),
-  blurInputNote: document.getElementById('blurInputNote'),
   fixedPeriodMessage: document.getElementById('fixedPeriodMessage'),
   toolDetailFooter: document.getElementById('toolDetailFooter'),
   toolDetailFooterTokens: document.getElementById('toolDetailFooterTokens'),
@@ -434,8 +430,7 @@ Object.assign(els, {
   monthPeriodMenu: document.getElementById('monthPeriodMenu'),
   monthPeriodTab: document.getElementById('monthPeriodTab'),
   periodMonthModeInput: document.getElementById('periodMonthModeInput'),
-  billingCycleStartDayInput: document.getElementById('billingCycleStartDayInput'),
-  modelRankingMetricInputs: Array.from(document.querySelectorAll('input[name="modelRankingMetric"]'))
+  billingCycleStartDayInput: document.getElementById('billingCycleStartDayInput')
 });
 Object.assign(els, {
   appTitleMark: document.querySelector('.app-title-mark'),
@@ -498,13 +493,16 @@ Object.assign(els, {
   trayOptions: document.getElementById('trayOptions'),
   hubModeOptions: document.getElementById('hubModeOptions'),
   icloudModeOption: document.querySelector('#hubModeOptions option[value="icloud"]'),
-  syncModeDescription: document.getElementById('syncModeDescription'),
   icloudFields: document.getElementById('icloudFields'),
   icloudStatus: document.getElementById('icloudStatus'),
   icloudRootStatus: document.getElementById('icloudRootStatus'),
   hubBuildStatus: document.getElementById('hubBuildStatus'),
   hubClientFields: document.getElementById('hubClientFields'),
   syncConnectionEditor: document.getElementById('syncConnectionEditor'),
+  hubProfileSelect: document.getElementById('hubProfileSelect'),
+  hubProfilePicker: document.getElementById('hubProfilePicker'),
+  hubProfileRemove: document.getElementById('hubProfileRemove'),
+  hubProfileNameInput: document.getElementById('hubProfileNameInput'),
   syncConnectionIdentity: document.getElementById('syncConnectionIdentity'),
   syncConnectionEndpoint: document.getElementById('syncConnectionEndpoint'),
   syncConnectionEdit: document.getElementById('syncConnectionEdit'),
@@ -562,6 +560,8 @@ Object.assign(els, {
   tokscaleBundledBuildRow: document.getElementById('tokscaleBundledBuildRow'),
   openTokscaleLinkButton: document.getElementById('openTokscaleLinkButton'),
   aboutVersion: document.getElementById('aboutVersion'),
+  aboutStarCount: document.getElementById('aboutStarCount'),
+  aboutStarCountValue: document.getElementById('aboutStarCountValue'),
   openRepositoryButton: document.getElementById('openRepositoryButton'),
   openWebsiteButton: document.getElementById('openWebsiteButton'),
   reportIssueButton: document.getElementById('reportIssueButton'),
@@ -574,6 +574,7 @@ Object.assign(els, {
   appUpdatePopoverBody: document.getElementById('appUpdatePopoverBody'),
   appUpdatePopoverDismiss: document.getElementById('appUpdatePopoverDismiss'),
   appUpdateInstalled: document.getElementById('appUpdateInstalled'),
+  appUpdateCheckedAt: document.getElementById('appUpdateCheckedAt'),
   automaticAppUpdatesRow: document.getElementById('automaticAppUpdatesRow'),
   automaticAppUpdatesInput: document.getElementById('automaticAppUpdatesInput'),
   automaticAppUpdatesNote: document.getElementById('automaticAppUpdatesNote'),
@@ -600,12 +601,13 @@ Object.assign(els, {
   compactTokenUnitsInput: document.getElementById('compactTokenUnitsInput'),
   swapSettingsRefreshInput: document.getElementById('swapSettingsRefreshInput'),
   resetClientDisplayOrderButton: document.getElementById('resetClientDisplayOrderButton'),
-  showAllClientsButton: document.getElementById('showAllClientsButton'),
   clientDisplaySearchInput: document.getElementById('clientDisplaySearchInput'),
   limitProviderSearchInput: document.getElementById('limitProviderSearchInput'),
   resetViewDisplayOrderButton: document.getElementById('resetViewDisplayOrderButton'),
-  showAllViewsButton: document.getElementById('showAllViewsButton'),
   viewDisplayList: document.getElementById('viewDisplayList'),
+  hiddenViewGroup: document.getElementById('hiddenViewGroup'),
+  hiddenViewList: document.getElementById('hiddenViewList'),
+  mainViewInspector: document.getElementById('mainViewInspector'),
   syncSettingsSummary: document.getElementById('syncSettingsSummary'),
   toolsSettingsSummary: document.getElementById('toolsSettingsSummary'),
   limitsSettingsSummary: document.getElementById('limitsSettingsSummary'),
@@ -624,6 +626,9 @@ Object.assign(els, {
   applyThemeCodeButton: document.getElementById('applyThemeCodeButton'),
   copyThemeCodeButton: document.getElementById('copyThemeCodeButton'),
   themeCodeStatus: document.getElementById('themeCodeStatus'),
+  appearanceLegacyGroup: document.getElementById('appearanceLegacyGroup'),
+  appearanceLegacyToggle: document.getElementById('appearanceLegacyToggle'),
+  appearanceLegacyDetails: document.getElementById('appearanceLegacyDetails'),
   themeAdvancedGroup: document.getElementById('themeAdvancedGroup'),
   themeAdvancedToggle: document.getElementById('themeAdvancedToggle'),
   themeAdvancedDetails: document.getElementById('themeAdvancedDetails'),
@@ -812,17 +817,20 @@ function applySettingsTranslations() {
   setThirdPartyAdapterFields();
   setSubscriptionFormMode();
   diagnosticsPanel?.render();
+  renderAboutStars();
 }
 
 let displaySettings = null;
 
 function applySettingsSectionDom(id, open) {
   if (id === 'sync' && !open) { syncModeSelect?.close(); syncContentForm?.closeHelp(); }
+  if (id === 'appearance' && !open) appearanceColorPicker.close();
+  if (id === 'window' && !open) stopWindowShortcutRecording();
   const toggle = document.querySelector(`[data-settings-section="${id}"]`);
   const details = document.getElementById(`${id}SettingsDetails`);
   const group = toggle?.closest('.settings-collapsible-group');
   toggle?.setAttribute('aria-expanded', open ? 'true' : 'false');
-  details?.classList.toggle('hidden', !open);
+  if (details) accountShellApi.setDisclosureBody(toggle, details, open);
   group?.classList.toggle('expanded', open);
 }
 
@@ -840,6 +848,7 @@ function setSettingsSectionExpanded(section, expanded) {
   state.settingsSections[id] = next;
   applySettingsSectionDom(id, next);
   if (id === 'sync' && next) void syncContentForm?.refresh();
+  if (id === 'general' && next) void refreshAboutStars();
   if (id === 'plugins' && next) void pluginSettingsPanel?.refresh().then(renderSettingsSummaries);
 }
 
@@ -852,6 +861,7 @@ const SETTINGS_SCROLL_ANCHOR_MS = 360;
 const SETTINGS_SCROLL_KEYS = new Set(['ArrowUp', 'ArrowDown', 'PageUp', 'PageDown', 'Home', 'End', ' ', 'Tab']);
 let settingsScrollAnchorFrame = null;
 let settingsScrollInteractionRevision = 0;
+let preservingSettingsPanelScroll = false;
 
 function cancelSettingsScrollAnchor() {
   if (settingsScrollAnchorFrame === null) return;
@@ -993,12 +1003,18 @@ function settingsSectionSummary(section) {
     return appearanceSummary();
   }
   if (section === 'general') {
-    const startup = state.appInfo?.loginItemSupported
-      ? (state.settings.startAtLogin ? t('settings.summary.on') : t('settings.summary.off'))
-      : t('settings.summary.unavailable');
-    return t('settings.summary.general', {
-      startup
-    });
+    // What is in effect, so the collapsed row answers "is it on?" without opening.
+    const autoUpdate = appUpdatePresentationApi.automaticAppUpdateControlState({
+      preferenceEnabled: state.settings.automaticAppUpdates,
+      updateState: state.appUpdate
+    }).checked;
+    const active = [
+      state.appInfo?.loginItemSupported && state.settings.startAtLogin ? t('settings.startup.startAtLogin') : '',
+      autoUpdate ? t('settings.summary.autoUpdate') : '',
+      String(state.settings.proxyUrl || '').trim() ? t('settings.summary.proxy') : ''
+    ].filter(Boolean);
+    if (active.length) return active.join(' · ');
+    return state.appInfo?.version ? `v${state.appInfo.version}` : '';
   }
   return '';
 }
@@ -1007,7 +1023,9 @@ function renderSettingsSummaries() {
   if (!isSettingsSurfaceVisible()) return;
   for (const section of SETTINGS_SECTION_IDS) {
     const el = els[`${section}SettingsSummary`];
-    if (el) el.textContent = settingsSectionSummary(section);
+    if (!el) continue;
+    const summary = settingsSectionSummary(section);
+    if (el.textContent !== summary) el.textContent = summary;
   }
 }
 
@@ -1771,6 +1789,8 @@ function renderSettingsAppUpdateRow() {
   if (!s) {
     els.appUpdateInstalled.textContent = '—';
     els.appUpdateLatest.textContent = t('settings.common.notChecked');
+    els.appUpdateLatest.classList.remove('is-available');
+    els.appUpdateCheckedAt.textContent = '';
     els.appUpdateCheckButton.disabled = false;
     els.appUpdateCheckButton.textContent = t('settings.appUpdate.check');
     els.appUpdateViewReleaseButton.classList.add('hidden');
@@ -1782,12 +1802,23 @@ function renderSettingsAppUpdateRow() {
   els.appUpdateInstalled.textContent = `v${s.currentVersion}`;
   const presentation = appUpdatePresentationApi.appUpdateStatusPresentation(s);
   const displayVersion = presentation.displayVersion;
+  const available = Boolean(displayVersion && (s.hasUpdate || s.downloaded));
+  els.appUpdateLatest.classList.toggle('is-available', available);
+  els.appUpdateCheckedAt.textContent = s.lastCheckedAt && !s.lastError
+    ? t('settings.appUpdate.lastChecked', { age: compactAge(s.lastCheckedAt) })
+    : '';
   if (displayVersion) {
     const status = presentation.latestStatusKey ? t(presentation.latestStatusKey) : '';
-    els.appUpdateLatest.textContent = status
-      ? t('settings.appUpdate.latestWithStatus', { version: displayVersion, status })
-      : `v${displayVersion}`;
+    // Beside the installed version, "up to date" needs no second version number.
+    els.appUpdateLatest.textContent = presentation.latestStatusKey === 'settings.appUpdate.upToDateShort'
+      ? status
+      : status
+        ? t('settings.appUpdate.latestWithStatus', { version: displayVersion, status })
+        : available
+          ? t('settings.appUpdate.availableShort', { version: displayVersion })
+          : `${t('settings.appUpdate.latest')} v${displayVersion}`;
     const actionMode = appUpdatePresentationApi.appUpdateActionMode(s);
+    els.appUpdateViewReleaseButton.classList.toggle('app-update-primary', actionMode === 'download' || actionMode === 'install');
     els.appUpdateViewReleaseButton.classList.toggle('hidden', !actionMode);
     els.appUpdateViewReleaseButton.disabled = Boolean(s.installBusy);
     els.appUpdateViewReleaseButton.textContent = actionMode === 'install'
@@ -1910,6 +1941,136 @@ function renderAutomaticAppUpdateControl() {
   }
 }
 
+// The About card's GitHub button shows the repository's star count beside its
+// label. Main caches the number, so this asks each time General opens and keeps
+// the button label-only until a count arrives. The first time the button is
+// actually on screen after launch, it breathes and the count rolls up, once.
+let aboutStarsRequest = null;
+let aboutStarsIntroPlayed = false;
+let aboutStarsIntroObserver = null;
+function formatAboutStars(stars) {
+  const locale = currentLocale();
+  return stars < 10_000
+    ? new Intl.NumberFormat(locale).format(stars)
+    : new Intl.NumberFormat(locale, { notation: 'compact', maximumFractionDigits: 1 }).format(stars);
+}
+function renderAboutStarOdometer(text) {
+  const reel = document.createElement('span');
+  reel.className = 'about-star-odometer';
+  reel.setAttribute('aria-hidden', 'true');
+  const columns = [];
+  for (const char of text) {
+    if (!/\d/.test(char)) {
+      reel.append(char);
+      continue;
+    }
+    const column = document.createElement('span');
+    column.className = 'about-star-odometer-digit';
+    for (let digit = 0; digit <= 9; digit += 1) {
+      const cell = document.createElement('span');
+      cell.textContent = String(digit);
+      column.append(cell);
+    }
+    reel.append(column);
+    columns.push([column, Number(char)]);
+  }
+  const label = document.createElement('span');
+  label.className = 'about-star-odometer-text';
+  label.textContent = text;
+  els.aboutStarCountValue.replaceChildren(reel, label);
+  // The columns rest at fractional offsets (n × 1.2em), and text under such a
+  // transform rounds to a different device pixel per digit, so once the last
+  // column stops the reel is swapped for the plain number.
+  const last = columns.at(-1)?.[0];
+  const settle = (event) => {
+    if (event.target !== last || event.propertyName !== 'transform') return;
+    last.removeEventListener('transitionend', settle);
+    last.removeEventListener('transitioncancel', settle);
+    if (els.aboutStarCountValue.contains(reel)) els.aboutStarCountValue.textContent = text;
+  };
+  last?.addEventListener('transitionend', settle);
+  last?.addEventListener('transitioncancel', settle);
+  // Two frames, so every column is laid out at 0 before it slides.
+  requestAnimationFrame(() => requestAnimationFrame(() => {
+    columns.forEach(([column, digit], index) => {
+      column.style.transitionDelay = `${index * 90}ms`;
+      column.style.transform = `translateY(calc(${-digit} * 1.2em))`;
+    });
+  }));
+}
+function renderAboutStars({ roll = false } = {}) {
+  const stars = state.repositoryStars;
+  const known = Number.isSafeInteger(stars) && stars >= 0;
+  els.aboutStarCount.hidden = !known;
+  const text = known ? formatAboutStars(stars) : '';
+  if (!roll && els.aboutStarCountValue.dataset.value === text) return;
+  els.aboutStarCountValue.dataset.value = text;
+  if (roll && known) renderAboutStarOdometer(text);
+  else els.aboutStarCountValue.textContent = text;
+}
+function playAboutStarsIntro() {
+  aboutStarsIntroPlayed = true;
+  if (prefersReducedMotion()) return;
+  const button = els.openRepositoryButton;
+  const settle = (event) => {
+    if (event.target !== button || event.animationName !== 'about-star-breathe') return;
+    button.classList.remove('is-arriving');
+    button.removeEventListener('animationend', settle);
+  };
+  button.addEventListener('animationend', settle);
+  button.classList.add('is-arriving');
+  renderAboutStars({ roll: true });
+}
+// The About card sits below the fold when General opens, so the intro waits
+// until the button scrolls into view rather than playing unseen.
+function scheduleAboutStarsIntro() {
+  if (aboutStarsIntroPlayed || aboutStarsIntroObserver || typeof IntersectionObserver !== 'function') return;
+  aboutStarsIntroObserver = new IntersectionObserver((entries) => {
+    // isIntersecting is also true for a partly clipped button on the first report.
+    if (!entries.some((entry) => entry.isIntersecting && entry.intersectionRatio >= 1)) return;
+    aboutStarsIntroObserver.disconnect();
+    aboutStarsIntroObserver = null;
+    playAboutStarsIntro();
+  }, { threshold: 1 });
+  aboutStarsIntroObserver.observe(els.openRepositoryButton);
+}
+function refreshAboutStars() {
+  aboutStarsRequest ||= Promise.resolve(window.tokenMonitor.getRepositoryStars?.())
+    .then((stars) => {
+      if (Number.isSafeInteger(stars)) state.repositoryStars = stars;
+    }, () => {})
+    .finally(() => {
+      aboutStarsRequest = null;
+      renderAboutStars();
+      // Only a real count is worth an intro; a failed lookup leaves it for a retry.
+      if (Number.isSafeInteger(state.repositoryStars)) scheduleAboutStarsIntro();
+    });
+  return aboutStarsRequest;
+}
+// Feedback for the click that opens the repository: the star pops and, with
+// motion allowed, throws a ring of sparks.
+function celebrateAboutStar() {
+  const button = els.openRepositoryButton;
+  button.classList.remove('is-popping');
+  void button.offsetWidth;
+  button.classList.add('is-popping');
+  setTimeout(() => button.classList.remove('is-popping'), 600);
+  if (prefersReducedMotion() || els.aboutStarCount.hidden) return;
+  const icon = els.aboutStarCount.querySelector('.about-settings-star-icon').getBoundingClientRect();
+  const box = button.getBoundingClientRect();
+  for (let index = 0; index < 8; index += 1) {
+    const spark = document.createElement('span');
+    const angle = (Math.PI * 2 * index) / 8;
+    const distance = 14 + (index % 3) * 3;
+    spark.className = 'about-settings-star-spark';
+    spark.style.left = `${icon.left - box.left + icon.width / 2 - 2}px`;
+    spark.style.top = `${icon.top - box.top + icon.height / 2 - 2}px`;
+    spark.style.setProperty('--spark-x', `${Math.cos(angle) * distance}px`);
+    spark.style.setProperty('--spark-y', `${Math.sin(angle) * distance}px`);
+    spark.addEventListener('animationend', () => spark.remove(), { once: true });
+    button.append(spark);
+  }
+}
 function compactAge(value) {
   const date = value ? new Date(value) : null;
   if (!date || Number.isNaN(date.getTime())) return '';
@@ -2440,18 +2601,10 @@ document.addEventListener('pointerdown', (event) => {
   }
 });
 
-let homeSessionRenderPending = false;
 const overflowText = window.TokenMonitorOverflowText.create({
   document, window, prefersReducedMotion,
   enabled: element => !element.classList.contains('has-subagent-count')
-    && Boolean(element.closest('.session-mode, .home-session-row') || element.id === 'syncConnectionEndpoint'),
-  onLeave: () => requestAnimationFrame(() => {
-    if (homeSessionRenderPending && state.breakdown === 'home'
-      && visibleStatsSurface() === 'main' && state.stats) renderHome();
-    // A final stats update may have been held before reading or before painting.
-    // Reuse the refresh guards to catch up without waiting for another push.
-    if (state.openSession?.kind === 'session') void refreshOpenSessionDetail();
-  })
+    && Boolean(element.closest('.session-mode, .home-session-row') || element.id === 'syncConnectionEndpoint')
 });
 
 function bindHoverMarquee(element) { overflowText.bind(element); }
@@ -2823,7 +2976,6 @@ function updateRow(row, { name, subtitle, subtitleIdentity, subagentCountLabel, 
     mark.style.background = color;
   }
   const titleEl = row.querySelector('.row-title');
-  setHoverMarqueeText(titleEl, name);
   const subtitleEl = row.querySelector('.row-subtitle');
   let subtitleTextEl = subtitleEl;
   const splitSubtitle = Boolean(subagentCountLabel);
@@ -2836,7 +2988,7 @@ function updateRow(row, { name, subtitle, subtitleIdentity, subagentCountLabel, 
       const count = document.createElement('span');
       count.className = 'session-subagent-count';
       const content = subtitleEl.querySelector('.overflow-text-content') || subtitleEl;
-      content.replaceChildren(subtitleTextEl, count);
+      rendererDom.reconcileChildren(content, [subtitleTextEl, count]);
       bindHoverMarquee(subtitleTextEl);
     }
   }
@@ -2859,28 +3011,31 @@ function updateRow(row, { name, subtitle, subtitleIdentity, subagentCountLabel, 
   const metadataRow = { client, modelLabel: modelLabel || '', modelTooltipEntries: modelTooltipEntries || [], reasoningEffort };
   const metadataLabel = sessionRowsApi.sessionModelMetadataLabel(metadataRow);
   const hasMetadata = Boolean(modelEntries || sessionRowsApi.sessionReasoningEffortForRow(metadataRow));
+  const replacePlain = (element, text) => {
+    const content = element.querySelector('.overflow-text-content') || element;
+    rendererDom.reconcileChildren(content, [document.createTextNode(text || '')]);
+    overflowText.update(element);
+  };
   const replaceMetadata = (element, text, start) => {
     const content = element.querySelector('.overflow-text-content') || element;
-    content.replaceChildren(document.createTextNode(text.slice(0, start)),
+    rendererDom.reconcileChildren(content, [document.createTextNode(text.slice(0, start)),
       sessionRowsApi.sessionModelMetadataNode(document, metadataRow, { translate: t, view: limitWindowsView }),
-      document.createTextNode(text.slice(start + metadataLabel.length)));
+      document.createTextNode(text.slice(start + metadataLabel.length))]);
     overflowText.update(element);
   };
   const subtitleShowsModel = Boolean(!titleModelLabel && hasMetadata && metadataLabel && String(subtitleText || '').endsWith(metadataLabel));
   if (subtitleShowsModel) {
     replaceMetadata(subtitleTextEl, subtitleText, subtitleText.length - metadataLabel.length);
   } else {
-    setHoverMarqueeText(subtitleTextEl, subtitleText);
+    replacePlain(subtitleTextEl, subtitleText);
   }
-  if (hasMetadata && titleModelLabel && metadataLabel && String(name || '').startsWith(metadataLabel)) {
-    replaceMetadata(titleEl, name, 0);
-  }
-  if (titleEl.classList.contains('limit-detail-tooltip-wrap')) {
-    limitWindowsView.setDetailTooltip(titleEl, null);
-  }
-  if (!subtitleShowsModel && !titleModelLabel && hasMetadata && metadataLabel && String(name || '').endsWith(metadataLabel)) {
-    replaceMetadata(titleEl, name, name.length - metadataLabel.length);
-  }
+  const titleShowsModel = hasMetadata && metadataLabel && (
+    titleModelLabel ? String(name || '').startsWith(metadataLabel)
+      : !subtitleShowsModel && String(name || '').endsWith(metadataLabel)
+  );
+  if (titleEl.classList.contains('limit-detail-tooltip-wrap')) limitWindowsView.setDetailTooltip(titleEl, null);
+  if (titleShowsModel) replaceMetadata(titleEl, name, titleModelLabel ? 0 : name.length - metadataLabel.length);
+  else replacePlain(titleEl, name);
   subtitleEl.classList.toggle('hidden', !subtitleText && !subagentCountLabel);
   // The activity line carries time, calls, cache hit and tok/s; a narrow window
   // fades and scrolls it on hover the way the title does rather than wrapping.
@@ -3238,7 +3393,6 @@ function renderSessionToolFilter(rows) {
 }
 
 function renderRows(rows, { incompleteHint = '', fromSearch = false, reuseToolFilter = false } = {}) {
-  if (!fromSearch && sessionTooltipShouldHoldRender()) return;
   const searchQuery = state.breakdown === 'session' ? sessionSearchQuery() : '';
   if (state.breakdown === 'session') {
     rows = reuseToolFilter
@@ -3319,7 +3473,7 @@ function renderRows(rows, { incompleteHint = '', fromSearch = false, reuseToolFi
       hint.textContent = hintText;
       nodes.unshift(hint);
     }
-    els.breakdown.replaceChildren(...nodes);
+    rendererDom.placeChildren(els.breakdown, nodes);
     state.rowSignature = signature;
   }
   const current = new Map(Array.from(els.breakdown.children)
@@ -3465,8 +3619,10 @@ function toolRowsForPeriod(period) {
   const clientRows = periodAttributionRows(period, period?.clients, period?.clientCosts, period?.clientUnpricedTokens)
     .map(({ key: client, value, cost, unpricedTokens }) => ({ key: client, unpricedTokens, name: client === usageAttributionRowsApi.UNATTRIBUTED_KEY ? t('dashboard.tooltip.unclassified') : clientLabels[client] || client, value, cost, color: clientColors[client] || clientColors.default, stale: false, cacheReadTokens: attributionComponent(period, 'clientCacheReads', client), cacheWriteTokens: attributionComponent(period, 'clientCacheWrites', client), outputTokens: attributionComponent(period, 'clientOutputs', client), unclassifiedTokens: attributionComponent(period, 'clientUnclassifiedTokens', client), modelRows: toolDetailsApi.visibleModelRowsForTool(period, client, formatCost) }));
   if (clientRows.length > 0) {
-    const usageSortedRows = clientRows.sort((a, b) => b.value - a.value);
-    return clientDisplayPreferencesApi.applyClientDisplayPreferences(usageSortedRows, state.settings?.clientDisplayOrder, state.settings?.hiddenClients, KNOWN_CLIENTS, state.settings?.pinnedClients);
+    const separate = state.settings?.separateQoderClients === true;
+    const visible = clientDisplayPreferencesApi.applyClientDisplayPreferences(clientRows, '', state.settings?.hiddenClients, KNOWN_CLIENTS, '');
+    const usageSortedRows = qoderDisplayApi.groupRows(visible, separate).sort((a, b) => b.value - a.value);
+    return clientDisplayPreferencesApi.applyClientDisplayPreferences(usageSortedRows, qoderDisplayApi.displayPreference(state.settings?.clientDisplayOrder, separate), '', KNOWN_CLIENTS, qoderDisplayApi.displayPreference(state.settings?.pinnedClients, separate));
   }
   if (Number(period?.totalTokens || 0) === 0) return [];
   return deviceRowsForPeriod();
@@ -3535,16 +3691,17 @@ function sessionPresentationOptions() {
   };
 }
 
-function rawSessionRowsForPeriod(period) {
-  return sessionRowsApi.sessionRowsForPeriod(period, sessionPresentationOptions());
+function rawSessionRowsForPeriod(period, options = sessionPresentationOptions()) {
+  return sessionRowsApi.sessionRowsForPeriod(period, options);
 }
 
+const sessionRowLabelCache = {};
+
 function sessionRowsForPeriod(period) {
-  const rows = rawSessionRowsForPeriod(period);
-  if (rows.length > 0) {
-    rows.sort((a, b) => b.sortTime - a.sortTime || b.value - a.value || b.cost - a.cost || a.name.localeCompare(b.name));
-    return sessionRowsApi.groupSessionRows(rows, sessionPresentationOptions());
-  }
+  const options = sessionPresentationOptions();
+  if (state.breakdown === 'session') options.rowLabelCache = sessionRowLabelCache;
+  const rows = rawSessionRowsForPeriod(period, options);
+  if (rows.length > 0) return sessionRowsApi.groupSessionRows(rows, options);
   if (Number(period?.totalTokens || 0) === 0) return [];
   return modelRowsForPeriod(period);
 }
@@ -4738,9 +4895,41 @@ function pluginLimitMetadata(id) {
 function desktopLimitProviders() {
   return [...LIMIT_PROVIDERS, ...(state.pluginCatalog?.limits?.modules || [])];
 }
+const accountSlotPanels = new Map();
+const automaticAccountPanels = new Map();
+const accountSlotLists = {};
+let accountSlotListPending = false;
+function limitAccountContext(providerId) {
+  return { settings: state.settings, records: state.stats?.limits?.providers || [],
+    devices: state.stats?.devices || [], localDeviceId: state.settings?.deviceId, probes: limitProbes,
+    providerEnabled: limitProviderEnabled(providerId), presentation: state.settings?.limitAccountPresentation?.[providerId] };
+}
+function renderAccountSlotPanels() {
+  for (const [id, panel] of accountSlotPanels) {
+    panel.update(accountSlotLists[id] || [], localProviderStatuses(id),
+      limitAccountContext(id));
+  }
+}
+
+function refreshAccountSlotPanels() {
+  if (accountSlotListPending) return;
+  accountSlotListPending = true;
+  const previousSlotLists = JSON.stringify(accountSlotLists);
+  return Promise.all((state.settings?.limitAccountForms || []).filter(form => form.accountSlots && !form.accountSlotOwner).map(async ({ id }) => {
+    const result = await window.tokenMonitor.limits.accountSlots.list(id);
+    if (result.ok) accountSlotLists[id] = result.accounts;
+  })).then(() => {
+    if (previousSlotLists === JSON.stringify(accountSlotLists)) return;
+    render();
+    preserveSettingsPanelScroll(() => {
+      renderAccountSlotPanels();
+      for (const id of accountSlotPanels.keys()) renderExternalProviderStatus(id);
+    });
+  }).catch(() => {}).finally(() => { accountSlotListPending = false; });
+}
 function desktopLimitRecords() {
   const modules = new Map((state.pluginCatalog?.limits?.modules || []).map(module => [module.id, module]));
-  return [...(state.stats?.limits?.providers || []), ...(state.pluginCatalog?.limits?.providers || []).filter(row => modules.has(row.provider)).map(row => ({ ...row, pluginQuota: modules.get(row.provider) }))];
+  return window.TokenMonitorAccountSlotsPanel.applyAccountOrder([...(state.stats?.limits?.providers || []), ...(state.pluginCatalog?.limits?.providers || []).filter(row => modules.has(row.provider)).map(row => ({ ...row, pluginQuota: modules.get(row.provider) }))], accountSlotLists, state.settings?.deviceId, state.settings?.limitAccountPresentation);
 }
 function desktopSurfaceStats() {
   return state.stats ? { ...state.stats, limits: { ...state.stats.limits, providers: desktopLimitRecords() }, pluginLimitModules: state.pluginCatalog?.limits?.modules || [] } : state.stats;
@@ -4775,44 +4964,6 @@ function missingLimitProviderStatus() {
   return state.mode === 'sync' || String(state.settings?.hubUrl || '').trim() ? 'noSyncedData' : 'notConfigured';
 }
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-function limitDetailTooltipShouldHoldRender() {
-  if (!state.limitDetailTooltipActive || !els.limitsPanel) return false;
-  return Boolean(els.limitsPanel.querySelector('.limit-detail-tooltip-wrap:hover, .limit-detail-tooltip-wrap:focus-within'));
-}
-
-function sessionTooltipShouldHoldRender() {
-  return Boolean(document.querySelector('.home-panel:not(.hidden) .home-session-row .is-hover-reading, .home-panel:not(.hidden) .home-session-meta .limit-detail-tooltip-wrap:hover, .home-panel:not(.hidden) .home-session-meta .limit-detail-tooltip-wrap:focus-within, .row-context.limit-detail-tooltip-wrap:hover, .row-context.limit-detail-tooltip-wrap:focus-within, .row-label .limit-detail-tooltip-wrap:hover, .row-label .limit-detail-tooltip-wrap:focus-within, .session-group-run .is-hover-reading, .session-group-run:focus-within, .session-group-run .limit-detail-tooltip-wrap:hover, .session-group-run .limit-detail-tooltip-wrap:focus-within, .detail-ex-title.is-hover-reading, .detail-heading.is-hover-reading, .detail-ex-title.limit-detail-tooltip-wrap:hover, .detail-ex-title.limit-detail-tooltip-wrap:focus-within'));
-}
-
-function flushPendingLimitDetailTooltipRender() {
-  if (!state.limitDetailTooltipRenderPending || state.breakdown !== 'limits') return;
-  state.limitDetailTooltipRenderPending = false;
-  renderLimits();
-}
-
-
-
-
-
-
-
-
-
 const {
   creditsAmount,
   creditsCurrency,
@@ -4832,8 +4983,25 @@ const { limitWindowText } = window.TokenMonitorLimitWindowText;
 // globals of its own.
 let limitsHistoryOpen = false;
 let limitsHistoryActiveKey = '';
+let pendingLimitsHistoryOpen = null;
+let limitsHistoryRequestId = 0;
+async function openLimitsHistory(key, rect, interactive) {
+  if (!interactive) return window.tokenMonitor.limits.openHistory(key, rect, false);
+  const requestId = ++limitsHistoryRequestId;
+  pendingLimitsHistoryOpen = requestId;
+  try {
+    return await window.tokenMonitor.limits.openHistory(key, rect, true, requestId);
+  } finally {
+    if (pendingLimitsHistoryOpen === requestId) pendingLimitsHistoryOpen = null;
+  }
+}
+function dismissLimitsHistory() {
+  const requestId = limitsHistoryOpen ? null : pendingLimitsHistoryOpen;
+  pendingLimitsHistoryOpen = null;
+  window.tokenMonitor.limits.closeHistory(requestId);
+}
 document.addEventListener('pointerdown', event => {
-  if (limitsHistoryOpen && !event.target.closest('[data-limit-history]')) window.tokenMonitor.limits.closeHistory();
+  if ((limitsHistoryOpen || pendingLimitsHistoryOpen) && !event.target.closest('[data-limit-history]')) dismissLimitsHistory();
 }, true);
 window.tokenMonitor?.limits?.onHistoryState?.((open, key) => {
   limitsHistoryOpen = open === true;
@@ -4843,17 +5011,21 @@ window.tokenMonitor?.limits?.onHistoryState?.((open, key) => {
   }
 });
 document.addEventListener('keydown', event => {
-  if (event.key !== 'Escape' || !limitsHistoryOpen) return;
+  if (event.key !== 'Escape' || !(limitsHistoryOpen || pendingLimitsHistoryOpen)) return;
   event.preventDefault();
-  window.tokenMonitor.limits.closeHistory();
+  dismissLimitsHistory();
 }, true);
+
+// Probes the limits runtime is running right now, whoever started them.
+let limitProbes = [];
+let settingsLocalLimits = null;
 
 const limitWindowsView = window.TokenMonitorLimitWindowsView.createLimitWindowsView({
   document,
   history: window.tokenMonitor?.limits?.openHistory ? {
     key: window.TokenMonitorLimitsHistoryIdentity.historyRowKey,
     activeKey: () => limitsHistoryActiveKey,
-    open: (key, rect, interactive) => window.tokenMonitor.limits.openHistory(key, rect, interactive),
+    open: openLimitsHistory,
     enter: key => window.tokenMonitor.limits.enterHistory(key),
     leave: key => window.tokenMonitor.limits.leaveHistory(key)
   } : null,
@@ -4874,16 +5046,8 @@ const limitWindowsView = window.TokenMonitorLimitWindowsView.createLimitWindowsV
     hasOpened: () => state.limitDetailTooltipHasOpened,
     markOpened() {
       state.limitDetailTooltipHasOpened = true;
-      state.limitDetailTooltipActive = true;
     },
-    release() {
-      requestAnimationFrame(() => {
-        if (limitDetailTooltipShouldHoldRender()) return;
-        state.limitDetailTooltipActive = false;
-        flushPendingLimitDetailTooltipRender();
-        if (state.breakdown === 'home' || state.breakdown === 'session') render();
-      });
-    }
+    release() {}
   },
   formatCompact,
   compactTokenThreshold: () => compactTokenApi.compactTokenUnitThreshold(
@@ -4937,8 +5101,62 @@ const limitWindowsView = window.TokenMonitorLimitWindowsView.createLimitWindowsV
   // matcher refuses to heal their tooltips onto another observed account.
   subscriptionAccounts: () => limitProvidersForSubscriptions(),
   monthClientCosts: () => state.stats?.periods?.month?.clientCosts,
-  resetForecast: () => ({ busy: state.codexResetForecastBusy, forecast: state.codexResetForecast })
+  resetForecast: () => ({ busy: state.codexResetForecastBusy, forecast: state.codexResetForecast }),
+  accountRefresh: {
+    available: (provider) => LIMIT_PROVIDER_IDS.includes(provider?.provider)
+      && typeof window.tokenMonitor?.limits?.refresh === 'function',
+    probes: () => limitProbes,
+    refresh: refreshLimitAccount
+  }
 });
+
+function setLimitProbes(probes, local = settingsLocalLimits) {
+  const previous = limitProbes;
+  const previousLocal = settingsLocalLimits;
+  limitProbes = Array.isArray(probes) ? probes : [];
+  settingsLocalLimits = local;
+  // Settings account rows without a reading say "Checking" while a probe for
+  // them runs, so a probe starting or finishing repaints its provider's rows.
+  if (isSettingsSurfaceVisible()) {
+    const changed = new Set();
+    const collectChanges = (before, after, sourceChanged = false) => {
+      const previousByProvider = Map.groupBy(before, row => row?.provider);
+      const nextByProvider = Map.groupBy(after, row => row?.provider);
+      for (const id of new Set([...previousByProvider.keys(), ...nextByProvider.keys()])) {
+        if (sourceChanged || JSON.stringify(previousByProvider.get(id)) !== JSON.stringify(nextByProvider.get(id))) {
+          changed.add(id);
+        }
+      }
+    };
+    collectChanges(previous, limitProbes);
+    if (previousLocal?.revision !== local?.revision) {
+      collectChanges(previousLocal?.limits.providers || [], local?.limits.providers || [],
+        previousLocal?.deviceId !== local?.deviceId);
+    }
+    if (changed.size) preserveSettingsPanelScroll(() => {
+      for (const [id, panel] of accountSlotPanels) {
+        if (!changed.has(id)) continue;
+        panel.update(accountSlotLists[id] || [], localProviderStatuses(id), limitAccountContext(id));
+        renderExternalProviderStatus(id);
+      }
+      for (const [id, panel] of automaticAccountPanels) {
+        if (changed.has(id)) panel.controller.update(strictLocalProviderStatuses(id));
+      }
+      for (const [id, owner] of Object.entries(legacyAccountOwners || {})) if (changed.has(id)) owner.refreshReadings?.();
+      if (changed.has('claude')) renderExternalProviderStatus('claude');
+    });
+  }
+  limitWindowsView.syncLimitRefreshButtons();
+}
+let limitProbesPushed = false;
+window.tokenMonitor?.limits?.onProbes?.(({ probes, local }) => {
+  limitProbesPushed = true;
+  setLimitProbes(probes, local);
+});
+// The probes already running when this page loaded; a push that arrived first is newer.
+void window.tokenMonitor?.limits?.probes?.().then(({ probes, local }) => {
+  if (!limitProbesPushed) setLimitProbes(probes, local);
+}, () => {});
 
 const {
   codexResetForecastExpired,
@@ -5166,13 +5384,7 @@ function animateLimitResets(snapshot) {
 
 function renderLimits() {
   if (!els.limitsPanel) return;
-  const holdLimitDetailTooltipRender = limitDetailTooltipShouldHoldRender();
-  const holdCodexSwitchPopoverRender = codexAccountControl.deferRender(els.limitsPanel);
-  if (holdLimitDetailTooltipRender || holdCodexSwitchPopoverRender) {
-    if (holdLimitDetailTooltipRender) state.limitDetailTooltipRenderPending = true;
-    return;
-  }
-  state.limitDetailTooltipRenderPending = false;
+  if (codexAccountControl.deferRender(els.limitsPanel)) return;
   const limitsEnabled = state.settings?.limitsEnabled !== false;
   const enabled = enabledLimitProviderSet();
   syncPluginLimitsDemand();
@@ -5231,7 +5443,7 @@ function renderLimits() {
   const nodes = [];
   const rows = orderedProviders;
   if (rows.length === 0) {
-    els.limitsPanel.replaceChildren();
+    rendererDom.reconcileChildren(els.limitsPanel, []);
     return;
   }
   for (const { id, label } of rows) {
@@ -5248,7 +5460,8 @@ function renderLimits() {
     const provider = Array.isArray(visibleProviders) ? visibleProviders[0] : visibleProviders;
     nodes.push(renderLimitProviderSolo(id, label, provider, color));
   }
-  els.limitsPanel.replaceChildren(...nodes);
+  nodes.forEach((node, index) => { node.dataset.key = rows[index].id; });
+  rendererDom.reconcileChildren(els.limitsPanel, nodes);
   animateLimitResets(resetMotionSnapshot);
 }
 
@@ -5520,19 +5733,12 @@ function sessionDetailLiveSignature() {
 // once per click, while the session keeps accruing usage through `stats:push`
 // and the refresh timer. Without a re-read, someone who opens a session mid-run
 // watches every other surface move while this one freezes until it is reopened.
-// Re-read only when the reported usage actually changed, and never mid-hover: a
-// rebuild replaces every row node, which would kill a tooltip or focus the
-// reader is using. The next tick picks it up once the hover ends.
+// Re-read only when the reported usage actually changed. Keyed updates retain
+// the controls being read while the new transcript snapshot is applied.
 async function refreshOpenSessionDetail() {
   const request = state.openSession;
   if (request?.kind !== 'session' || !request.detail || request.detailLiveBusy) return;
-  if (visibleStatsSurface() !== 'main' || sessionTooltipShouldHoldRender()) return;
-  // Paint a held result once, then check whether usage advanced during its read.
-  // An unchanged signature still avoids another transcript read.
-  if (request.detailRenderPending) {
-    request.detailRenderPending = false;
-    renderSessionDetail({ detail: request.detail, preserveScroll: true });
-  }
+  if (visibleStatsSurface() !== 'main') return;
   const signature = sessionDetailLiveSignature();
   if (!signature || signature === request.liveSignature) return;
   const sessionCost = sessionLiveCost(sessionLiveStatsEntry(request), request.client);
@@ -5550,16 +5756,13 @@ async function refreshOpenSessionDetail() {
     request.detail = detail;
     request.liveSignature = signature;
     readSucceeded = true;
-    // The reader can start a hover while the read is in flight, so the hold is
-    // rechecked here rather than trusted from the call site.
-    if (sessionTooltipShouldHoldRender()) { request.detailRenderPending = true; return; }
     renderSessionDetail({ detail, preserveScroll: true });
   } catch (_) {
     // Keep the last good reading; the next stats tick tries again.
   } finally {
     request.detailLiveBusy = false;
-    // Leave can run while busy. A successful read checks for a final push via
-    // the same visibility/hold/signature guards; failures wait for a later retry.
+    // A successful read checks for a final push via
+    // the same visibility/signature guards; failures wait for a later retry.
     if (readSucceeded && state.openSession === request
       && sessionDetailLiveSignature() !== request.liveSignature) void refreshOpenSessionDetail();
   }
@@ -5573,10 +5776,18 @@ function toggleDetailSort() {
 function closeSessionDetail() {
   state.openSession = null;
   els.sessionDetail.classList.add('hidden');
-  els.sessionDetail.replaceChildren();
+  rendererDom.clear(els.sessionDetail);
   els.sessionDetailHead.classList.add('hidden');
-  els.sessionDetailHead.replaceChildren();
+  rendererDom.clear(els.sessionDetailHead);
   render();
+}
+
+// The back chevron shared by every Session Details heading.
+function sessionDetailBackArrow() {
+  const arrow = document.createElement('span');
+  arrow.className = 'detail-back-arrow';
+  arrow.setAttribute('aria-hidden', 'true');
+  return arrow;
 }
 
 function sessionDetailBack() {
@@ -5596,21 +5807,19 @@ function renderSessionDetail({ detail, loading, error, preserveScroll = false } 
   els.breakdown.classList.add('hidden');
   els.sessionDetail.classList.remove('hidden');
   els.sessionDetailHead.classList.remove('hidden');
-  const head = els.sessionDetailHead;       // static layer — rows scroll independently below it
-  const container = els.sessionDetail;
-  container.classList.remove('session-group-list');
+  const head = document.createElement('div');       // static layer — rows scroll independently below it
+  const container = document.createElement('div');
+  els.sessionDetail.classList.remove('session-group-list');
   // Anchor the row being read: new content can grow above or below it, and
   // token sorting can reorder exchanges without changing the total height.
-  const previousScroll = preserveScroll ? captureSessionDetailScroll(container) : null;
-  // A reader who opened an exchange keeps it open; a rebuild that collapsed it
-  // would look like the page had reset itself under them.
+  const previousScroll = preserveScroll ? captureSessionDetailScroll(els.sessionDetail) : null;
+  // Preserve expansion presentation while rendering fresh exchange descriptions.
   const expandedKeys = preserveScroll
-    ? new Set([...container.children]
+    ? new Set([...els.sessionDetail.children]
       .filter((node) => node.classList.contains('expanded'))
       .map((node) => node.dataset.exchangeKey))
     : null;
-  head.replaceChildren();
-  container.replaceChildren();
+  try {
 
   head.append(sessionDetailBackButton());
 
@@ -5638,7 +5847,11 @@ function renderSessionDetail({ detail, loading, error, preserveScroll = false } 
 
   const max = Math.max(1, ...rows.map((row) => row.value));
   for (const row of rows) container.append(exchangeNode(row, max, expandedKeys?.has(row.key) === true));
-  if (previousScroll) restoreSessionDetailScroll(container, previousScroll);
+  } finally {
+    rendererDom.reconcileChildren(els.sessionDetailHead, [...head.childNodes]);
+    rendererDom.reconcileChildren(els.sessionDetail, [...container.childNodes]);
+    if (previousScroll) restoreSessionDetailScroll(els.sessionDetail, previousScroll);
+  }
 }
 
 function captureSessionDetailScroll(container) {
@@ -5717,7 +5930,7 @@ function refreshSessionDetailHeading() {
   if (state.openSession.headingSignature === sessionDetailHeadingSignature()) return;
   // Retain the body, loading/error state and sort control. Unchanged headings
   // also retain their hover-reading motion through periodic stats updates.
-  head.replaceChildren(sessionDetailBackButton(), ...Array.from(head.children).slice(1));
+  rendererDom.reconcileChildren(head, [sessionDetailBackButton(), ...Array.from(head.children).slice(1)]);
 }
 
 function sessionDetailBackLabel() {
@@ -5731,23 +5944,25 @@ function sessionDetailHeadingSignature() {
 
 function sessionDetailBackButton() {
   const back = document.createElement('button');
+  back.dataset.domKind = 'session-back';
   const title = sessionDetailTitle();
   const backLabel = sessionDetailBackLabel();
   // Every heading is built here, so the open request records what it shows.
   if (state.openSession) state.openSession.headingSignature = JSON.stringify([title, backLabel]);
   back.type = 'button';
   back.className = title ? 'detail-back detail-back-titled' : 'detail-back';
-  if (!title) back.textContent = `‹ ${backLabel}`;
+  if (!title) {
+    const label = document.createElement('span');
+    label.textContent = backLabel;
+    back.append(sessionDetailBackArrow(), label);
+  }
   back.setAttribute('aria-label', title
     ? t('sessions.backToWithTitle', { title, destination: backLabel })
     : t('sessions.backTo', { destination: backLabel }));
   back.addEventListener('click', sessionDetailBack);
 
   if (title) {
-    const arrow = document.createElement('span');
-    arrow.className = 'detail-back-arrow';
-    arrow.textContent = '‹';
-    arrow.setAttribute('aria-hidden', 'true');
+    const arrow = sessionDetailBackArrow();
     const heading = document.createElement('span');
     heading.className = 'detail-heading';
     heading.textContent = title;
@@ -5763,6 +5978,7 @@ function sessionDetailBackButton() {
 function sessionIdLine(idLabel) {
   const line = document.createElement('div');
   line.className = 'detail-session-id';
+  line.dataset.key = idLabel;
   const text = document.createElement('span');
   text.className = 'detail-session-id-text';
   text.textContent = idLabel;
@@ -5792,10 +6008,12 @@ function sessionGroupRunNode(row, max, parent) {
   }
   const wrap = rowTemplate(member);
   updateRow(wrap, { ...member, barValue: member.barValue ?? member.value, max });
-  // Keep the existing repaint guard for model hover and keyboard focus.
   wrap.classList.add('session-group-run');
+  window.TokenMonitorDomReconcile.data(wrap, { row, title, parent, namedGroup });
+  wrap.dataset.domKind = sessionRowsApi.sessionRowDetailAvailable(row) ? 'session-link' : 'session-static';
   if (sessionRowsApi.sessionRowDetailAvailable(row)) {
-    wrap.addEventListener('click', () => {
+    wrap.addEventListener('click', event => {
+      const { row, title, parent, namedGroup } = window.TokenMonitorDomReconcile.data(event.currentTarget);
       const sessionId = String(row.key || '').replace(/^session:[^:]+:/, '');
       openSessionDetail({
         client: row.client,
@@ -5818,24 +6036,21 @@ function renderSessionGroupDetail(request) {
   els.breakdown.classList.add('hidden');
   els.sessionDetail.classList.remove('hidden');
   els.sessionDetailHead.classList.remove('hidden');
-  const head = els.sessionDetailHead;
-  const container = els.sessionDetail;
-  head.replaceChildren();
-  container.classList.add('session-group-list');
-  container.replaceChildren();
+  const head = document.createElement('div');
+  const container = document.createElement('div');
+  els.sessionDetail.classList.add('session-group-list');
+  try {
 
   const label = request?.summary?.name || t('sessions.backgroundReviews');
   const back = document.createElement('button');
   back.type = 'button';
   back.className = 'detail-back detail-back-titled';
+  back.dataset.domKind = 'group-back';
   back.setAttribute('aria-label', t('sessions.backToWithTitle', {
     title: label, destination: t('sessions') || 'Sessions'
   }));
   back.addEventListener('click', closeSessionDetail);
-  const arrow = document.createElement('span');
-  arrow.className = 'detail-back-arrow';
-  arrow.textContent = '‹';
-  arrow.setAttribute('aria-hidden', 'true');
+  const arrow = sessionDetailBackArrow();
   const heading = document.createElement('span');
   heading.className = 'detail-heading';
   heading.textContent = label;
@@ -5877,6 +6092,11 @@ function renderSessionGroupDetail(request) {
   } else {
     for (const row of rows) container.append(sessionGroupRunNode(row, max, request));
   }
+  } finally {
+    rendererDom.reconcileChildren(els.sessionDetailHead, [...head.childNodes]);
+    rendererDom.reconcileChildren(els.sessionDetail, [...container.childNodes]);
+  }
+
 }
 
 function detailNote(text) {
@@ -5889,7 +6109,7 @@ function detailNote(text) {
 function exchangeNode(row, max, expanded = false) {
   const wrap = document.createElement('div');
   wrap.className = 'detail-exchange';
-  wrap.innerHTML = '<div class="detail-ex-head"><span class="detail-chev">▸</span>'
+  wrap.innerHTML = '<div class="detail-ex-head"><span class="detail-chev" aria-hidden="true"></span>'
     + '<div class="detail-ex-label"><span class="detail-ex-title"></span><span class="detail-ex-sub"></span></div>'
     + '<div class="detail-ex-metrics"><span class="detail-ex-value"></span><span class="detail-ex-cost"></span></div></div>'
     + '<div class="bar"><div class="bar-fill"></div></div>'
@@ -5923,7 +6143,6 @@ function exchangeNode(row, max, expanded = false) {
   const setExpanded = (open) => {
     turnsEl.classList.toggle('hidden', !open);
     wrap.classList.toggle('expanded', open);
-    wrap.querySelector('.detail-chev').textContent = open ? '▾' : '▸';
   };
   setExpanded(expanded);
   wrap.querySelector('.detail-ex-head').addEventListener('click', () => {
@@ -5973,13 +6192,13 @@ function hideTrendTooltip() {
 
 function handleTrendsWindowBlur() {
   hideTrendTooltip();
-  const spark = els.trendsPanel.querySelector('.trends-spark');
-  if (!spark?.dataset.renderPending) return;
-  delete spark.dataset.renderPending;
-  if (state.breakdown === 'trends') renderTrends();
 }
 
 function bindTrendTooltip(spark, model, points, labelKey, metric) {
+  if (state.trendTooltipBinding?.spark === spark) {
+    state.trendTooltipBinding.update(model, points, labelKey, metric);
+    return;
+  }
   const tooltip = homeActivityTooltipEl('trends-tooltip');
   tooltip.setAttribute('aria-live', 'polite');
   tooltip.setAttribute('aria-atomic', 'true');
@@ -5987,7 +6206,7 @@ function bindTrendTooltip(spark, model, points, labelKey, metric) {
   let focused = false;
   let pointerPoint = null;
   let selected = -1;
-  const bars = Array.from(spark.querySelectorAll('.spark-bar'));
+  let bars = Array.from(spark.querySelectorAll('.spark-bar'));
   const hide = () => {
     tooltip.dataset.visible = 'false';
     tooltip.setAttribute('aria-hidden', 'true');
@@ -6024,16 +6243,14 @@ function bindTrendTooltip(spark, model, points, labelKey, metric) {
     position();
   };
   const select = (index) => {
-    if (index !== selected) {
-      bars[selected]?.removeAttribute('data-active');
-      selected = index;
-      const point = points[index];
-      const date = String(point[labelKey] || '');
-      const value = `${formatNumber(point[metric])} tokens`;
-      spark.setAttribute('aria-label', `${t('trends.open')} · ${date} · ${value}`);
-      tooltip.querySelector('[data-home-activity-tooltip-count]').textContent = formatCompact(point[metric]);
-      tooltip.querySelector('[data-home-activity-tooltip-date]').textContent = date;
-    }
+    bars[selected]?.removeAttribute('data-active');
+    selected = index;
+    const point = points[index];
+    const date = String(point[labelKey] || '');
+    const value = `${formatNumber(point[metric])} tokens`;
+    spark.setAttribute('aria-label', `${t('trends.open')} · ${date} · ${value}`);
+    tooltip.querySelector('[data-home-activity-tooltip-count]').textContent = formatCompact(point[metric]);
+    tooltip.querySelector('[data-home-activity-tooltip-date]').textContent = date;
   };
   const pointAtPointer = (event) => {
     const rect = spark.querySelector('.sparkline').getBoundingClientRect();
@@ -6058,30 +6275,25 @@ function bindTrendTooltip(spark, model, points, labelKey, metric) {
     select(index);
     show();
   });
-  const flush = () => {
-    if (!spark.dataset.renderPending) return;
-    delete spark.dataset.renderPending;
-    requestAnimationFrame(renderTrends);
-  };
-  // Keep a live refresh from replacing the focused/hovered chart mid-read.
   spark.addEventListener('pointerleave', () => {
     hovered = false;
     pointerPoint = null;
     if (focused) position(); else hide();
-    flush();
   });
-  spark.addEventListener('focusout', () => { focused = false; if (!hovered) hide(); flush(); });
+  spark.addEventListener('focusout', () => { focused = false; if (!hovered) hide(); });
+  state.trendTooltipBinding = { spark, update(nextModel, nextPoints, nextLabelKey, nextMetric) {
+    const date = points[selected]?.[labelKey];
+    bars[selected]?.removeAttribute('data-active');
+    model = nextModel; points = nextPoints; labelKey = nextLabelKey; metric = nextMetric;
+    bars = Array.from(spark.querySelectorAll('.spark-bar'));
+    const index = points.findIndex(point => point[labelKey] === date);
+    select(index < 0 ? points.length - 1 : index);
+    if (tooltip.dataset.visible === 'true') show();
+  } };
   select(points.length - 1);
 }
 
 function renderTrends() {
-  const reading = document.hasFocus()
-    && els.trendsPanel.querySelector('.trends-spark:hover, .trends-spark:focus-within');
-  if (reading) {
-    reading.dataset.renderPending = 'true';
-    return;
-  }
-  hideTrendTooltip();
   const charts = window.TokenMonitorUsageCharts;
   const previousBars = captureTrendBarMotion();
   const preview = state.stats?.historyPreview || { daily: [], monthly: [], summary: {} };
@@ -6095,7 +6307,11 @@ function renderTrends() {
   const finalPoints = state.period === 'today' ? charts.patchTodayBar(points, todayTotal) : points;
 
   if (finalPoints.length === 0) {
-    els.trendsPanel.innerHTML = `<div class="trends-empty">${t('trends.empty')}</div>`;
+    hideTrendTooltip();
+    state.trendTooltipBinding = null;
+    const empty = document.createElement('div');
+    empty.className = 'trends-empty'; empty.textContent = t('trends.empty');
+    rendererDom.reconcileChildren(els.trendsPanel, [empty]);
     return;
   }
 
@@ -6125,16 +6341,18 @@ function renderTrends() {
     .map(([k, v]) => `<div class="trends-stat"><span class="trends-stat-v">${v}</span><span class="trends-stat-k">${k}</span></div>`)
     .join('');
 
-  els.trendsPanel.innerHTML =
+  const next = document.createElement('div');
+  next.innerHTML =
     `<div class="trends-cap"><span>${rangeLabel}</span><span class="trends-open-hint" aria-label="${t('trends.open')}">↗</span></div>`
     + `<div class="trends-spark" role="button" tabindex="0" aria-label="${t('trends.open')}">${svg}</div>`
     + `<div class="trends-axis"><span>${first}</span><span>${last}</span></div>`
     + `<div class="trends-stats">${statsHtml}</div>`;
-  bindTrendTooltip(els.trendsPanel.querySelector('.trends-spark'), model, finalPoints, labelKey, metric);
-  const bars = Array.from(els.trendsPanel.querySelectorAll('.spark-bar'));
-  bars.forEach((bar, index) => {
+  Array.from(next.querySelectorAll('.spark-bar')).forEach((bar, index) => {
+    bar.dataset.key = String(finalPoints[index]?.[labelKey] || index);
     bar.dataset.motionKey = String(finalPoints[index]?.[labelKey] || index);
   });
+  rendererDom.reconcileChildren(els.trendsPanel, [...next.childNodes]);
+  bindTrendTooltip(els.trendsPanel.querySelector('.trends-spark'), model, finalPoints, labelKey, metric);
   const fromZero = state.animateChartsOnRender;
   animateTrendBarsFrom(previousBars, { fromZero });
   if (fromZero) state.animateChartsOnRender = false;
@@ -6187,29 +6405,33 @@ function serviceStatusSurfaceVisible() {
 
 function openHomeSettings() {
   if (!els.settingsPanel) return;
+  hideHomeTrendTooltip();
   els.settingsPanel.classList.remove('hidden');
   els.shell.classList.add('settings-open');
   els.shell.style.transform = 'translateZ(0)';
   setSettingsSectionExpanded('main', true);
-  state.homeSettingsExpanded = true;
+  state.mainSettingsView = 'home';
+  state.homeLimitProvidersOpen = false;
   syncSettingsForm();
   ensureServiceStatusTicker();
   requestAnimationFrame(() => {
-    document.getElementById('homeSettingsContainer')?.scrollIntoView({ block: 'nearest' });
+    els.mainViewInspector?.scrollIntoView({ block: 'nearest' });
   });
 }
 
 function openTrendSettings() {
   if (!els.settingsPanel) return;
+  hideHomeTrendTooltip();
   els.settingsPanel.classList.remove('hidden');
   els.shell.classList.add('settings-open');
   els.shell.style.transform = 'translateZ(0)';
   setSettingsSectionExpanded('main', true);
-  state.trendSettingsExpanded = true;
+  state.mainSettingsView = 'trends';
+  state.homeLimitProvidersOpen = false;
   syncSettingsForm();
   ensureServiceStatusTicker();
   requestAnimationFrame(() => {
-    document.getElementById('trendSettingsContainer')?.scrollIntoView({ block: 'nearest' });
+    els.mainViewInspector?.scrollIntoView({ block: 'nearest' });
   });
 }
 
@@ -6223,14 +6445,24 @@ function resetSettingsListSearch() {
   if (els.limitProviderSearchInput) els.limitProviderSearchInput.value = '';
 }
 
+function resetMainViewSettings() {
+  state.mainSettingsView = 'home';
+  state.homeLimitProvidersOpen = false;
+}
+
 function openSettingsPanel(section) {
   if (!els.settingsPanel) return;
   if (state.viewSwitcherOpen) setViewSwitcherOpen(false);
+  hideHomeTrendTooltip();
   els.settingsPanel.classList.remove('hidden');
   els.shell.classList.add('settings-open');
   syncPluginLimitsDemand();
+  resetMainViewSettings();
   syncSettingsForm();
   ensureServiceStatusTicker();
+  // General stays expanded across closes, so its expand hook alone would leave
+  // the count unrefreshed; main's cache decides whether this goes to GitHub.
+  if (state.settingsSections?.general) void refreshAboutStars();
   if (section === 'notch') {
     setSettingsSectionExpanded('window', true);
     displaySettings?.open('notch');
@@ -6246,6 +6478,7 @@ function openViewFromTray(viewId) {
   resetSettingsListSearch();
   syncModeSelect?.close();
   syncContentForm?.closeHelp();
+  appearanceColorPicker.close();
   els.settingsPanel?.classList.add('hidden');
   els.shell.classList.remove('settings-open');
   syncPluginLimitsDemand();
@@ -6501,6 +6734,7 @@ function fixedPeriodMessage(snapshot, breakdown = '') {
 }
 
 function hidePeriodContentForMessage(message) {
+  hideHomeTrendTooltip();
   els.fixedPeriodMessage.textContent = message;
   els.fixedPeriodMessage.classList.remove('hidden');
   els.homePanel.classList.add('hidden');
@@ -6784,17 +7018,11 @@ function renderViewSwitcher({ focusMenu = false, focusDisclosure = false } = {})
 }
 
 function homeModuleShell(kind, title, viewId, meta = '') {
-  // A content outlet sits beside its native anchor. Keep that connected shell
-  // while refreshing the native fallback; retaining only author children after
-  // removing their ancestor is too late to preserve focus and scroll anchoring.
-  // Standalone plugin modules already retain their own shell by view ref.
-  const retained = kind === 'plugin' ? null : [...els.homePanel.children].find(node => node.classList.contains(`home-module-${kind}`)
-    && [node, ...node.children].some(anchor => pluginContent?.hasAnchor(anchor)));
-  const module = retained || document.createElement('section');
+  const module = document.createElement('section');
   module.className = `home-module home-module-${kind}`;
   module.setAttribute('aria-label', title);
   // Plugin modules have no detail view to jump to.
-  if (viewId && !retained) {
+  if (viewId) {
     module.tabIndex = 0;
     module.setAttribute('role', 'button');
     module.addEventListener('click', (event) => {
@@ -6833,13 +7061,6 @@ function homeModuleShell(kind, title, viewId, meta = '') {
   head.append(titleWrap, end);
   const body = document.createElement('div');
   body.className = 'home-module-body';
-  if (retained) {
-    const nativeHead = module.querySelector('.home-module-head');
-    const nativeBody = module.querySelector('.home-module-body');
-    nativeHead.replaceChildren(...head.childNodes);
-    nativeBody.replaceChildren();
-    return { module, body: nativeBody };
-  }
   module.append(head, body);
   return { module, body };
 }
@@ -6869,6 +7090,7 @@ function homeLimitRows() {
     colors: { ...clientColors, factory: clientColors.droid },
     limit: state.settings?.homeLimitAccountCount ?? 3,
     sort: hasConfiguredOrder ? 'configured' : 'remaining',
+    orderedAccountProviders: [...new Set([...Object.keys(accountSlotLists), ...Object.keys(state.settings?.limitAccountPresentation || {})])],
     accountPlan: (provider, index, providerEntries) => limitWindowsView.limitAccountPlan(provider, {
       grouped: providerEntries.length > 1
     }),
@@ -6949,6 +7171,7 @@ function renderHomeLimitModule() {
   for (const row of rows) {
     const item = document.createElement('div');
     item.className = 'home-limit-account';
+    item.dataset.key = row.key;
     const account = document.createElement('div');
     account.className = 'home-limit-account-head';
     const mark = document.createElement('span');
@@ -6971,6 +7194,7 @@ function renderHomeLimitModule() {
     for (const window of row.windows) {
       const metric = document.createElement('div');
       metric.className = 'home-limit-window';
+      metric.dataset.key = `${window.kind}:${window.label || ''}`;
       if (window.fullWidth) metric.classList.add('home-limit-window-wide');
       const line = document.createElement('div');
       line.className = 'home-limit-window-line';
@@ -7045,6 +7269,7 @@ function renderHomeModelModule(period) {
   for (const row of rows) {
     const item = document.createElement('div');
     item.className = 'home-list-row home-model-row';
+    item.dataset.key = row.key;
     const mark = document.createElement('span');
     applyHomeListMark(mark, iconKindFor({ key: row.key || row.name, modelSource: row.modelSource }, 'model'), row.color);
     const name = document.createElement('span');
@@ -7084,6 +7309,7 @@ function renderHomeToolModule(period) {
   for (const row of rows) {
     const item = document.createElement('div');
     item.className = 'home-list-row home-tool-row';
+    item.dataset.key = row.key;
     const mark = document.createElement('span');
     applyHomeListMark(mark, iconKindFor({ key: row.key }, 'tool'), row.color);
     const name = document.createElement('span');
@@ -7131,19 +7357,8 @@ function scheduleHomeSessionRepaint(rows) {
     if (visibleStatsSurface() !== 'main' || state.breakdown !== 'home') return;
     const current = els.homePanel?.querySelector('.home-module-session');
     if (!current) return;
-    const hadFocus = document.activeElement === current;
-    const hadHeadFocus = document.activeElement === current.querySelector?.('.home-module-head');
-    const focusedKey = document.activeElement?.closest?.('.home-session-row')?.dataset?.key;
     const nextRows = window.TokenMonitorEdgeDockPresentation.recentSessionRows(state.stats, homeModulePreferencesApi.homeModuleCount(state.settings, 'session'), { ...sessionPresentationOptions(), includeRunningBeyondCap: true });
-    const next = renderHomeSessionModule(nextRows);
-    if (current !== next) current.replaceWith(next);
-    if (hadFocus) next.focus();
-    if (hadHeadFocus) next.querySelector('.home-module-head')?.focus({ preventScroll: true });
-    if (focusedKey) {
-      const row = [...next.querySelectorAll('.home-session-row')]
-        .find(node => node.dataset.key === focusedKey);
-      (row || next).focus({ preventScroll: true });
-    }
+    rendererDom.reconcile(current, renderHomeSessionModule(nextRows));
     scheduleHomeSessionRepaint(nextRows);
   }, delay);
 }
@@ -7174,11 +7389,6 @@ function scheduleSessionStatusRepaint(period, incompleteHint = '') {
 }
 
 function renderHomeSessionModule(rows) {
-  const current = els.homePanel?.querySelector('.home-module-session');
-  if (current && sessionTooltipShouldHoldRender()) {
-    homeSessionRenderPending = true;
-    return current;
-  }
   rows ||= window.TokenMonitorEdgeDockPresentation.recentSessionRows(state.stats, homeModulePreferencesApi.homeModuleCount(state.settings, 'session'), { ...sessionPresentationOptions(), includeRunningBeyondCap: true });
   const runningCount = window.TokenMonitorEdgeDockPresentation.runningSessionSummary(rows).count;
   const meta = runningCount > 0 ? t('home.runningSessions', { count: runningCount }) : '';
@@ -7272,6 +7482,7 @@ function renderHomeDeviceModule() {
   for (const row of rows) {
     const item = document.createElement('div');
     item.className = 'home-list-row home-device-row';
+    item.dataset.key = row.key;
     if (row.isStale) {
       item.classList.add('is-stale');
       item.setAttribute('aria-description', t('home.staleDevice'));
@@ -7382,7 +7593,7 @@ function homeActivityTooltipEl(instanceClass = 'home-heatmap-tooltip') {
   let tooltip = document.querySelector(`.${instanceClass}`);
   if (tooltip) return tooltip;
   tooltip = document.createElement('div');
-  // Trends shares the heatmap's layout and positioning, with its own instance.
+  // Chart tooltips share the heatmap's layout, each with its own instance.
   tooltip.className = `home-activity-tooltip ${instanceClass}`;
   tooltip.setAttribute('role', 'tooltip');
   tooltip.setAttribute('aria-hidden', 'true');
@@ -7468,16 +7679,10 @@ function setupHomeActivityHover(scroller) {
     scheduleSpotlight();
   };
 
-  const hide = ({ clearHover = true, concealTooltip = true } = {}) => {
-    if (clearHover) {
-      state.homeActivityHoverPoint = null;
-      state.homeActivityHoverDate = '';
-    }
-    if (concealTooltip) {
-      tooltip.dataset.visible = 'false';
-      tooltip.setAttribute('aria-hidden', 'true');
-      tooltip.style.transform = 'translate(-9999px, -9999px)';
-    }
+  const hide = () => {
+    tooltip.dataset.visible = 'false';
+    tooltip.setAttribute('aria-hidden', 'true');
+    tooltip.style.transform = 'translate(-9999px, -9999px)';
     if (spotlightFrame) cancelAnimationFrame(spotlightFrame);
     spotlightFrame = 0;
     spotlightVisible = false;
@@ -7507,8 +7712,6 @@ function setupHomeActivityHover(scroller) {
       hide();
       return;
     }
-    state.homeActivityHoverPoint = { x: clientX, y: clientY };
-    state.homeActivityHoverDate = cell.dataset.d || '';
     if (activeCell !== cell) {
       activeCell?.removeAttribute('data-active');
       activeCell = cell;
@@ -7528,65 +7731,195 @@ function setupHomeActivityHover(scroller) {
   scroller.addEventListener('pointerleave', () => hide());
   scroller.addEventListener('scroll', () => {
     // Restoring the saved/right-edge position emits a delayed scroll event. It is not
-    // user intent and must not clear the hover that renderHome just reconnected.
+    // user intent and must not dismiss the active tooltip.
     if (homeActivityProgrammaticScrollers.delete(scroller)) {
-      state.homeActivityHoverRestore?.();
+      state.homeActivityTooltipUpdate?.();
       return;
     }
     hide();
   });
-  // The tooltip lives on document.body and is only dismissed by handlers on this
-  // scroller, which renderHome() throws away on every rebuild. Preserve the visible
-  // tooltip plus its semantic cell identity across that replacement, so live stats
-  // refreshes do not fade or jump it before the new cell is ready.
-  state.homeActivityHoverTeardown = ({ preserveHover = false } = {}) => hide({
-    clearHover: !preserveHover,
-    concealTooltip: !preserveHover
-  });
-  state.homeActivityHoverRestore = () => {
-    const point = state.homeActivityHoverPoint;
-    const date = state.homeActivityHoverDate;
-    if (!point || !date) return;
-    const cell = Array.from(canvas?.querySelectorAll('.heat[data-d]') || [])
-      .find((candidate) => candidate.dataset.d === date);
-    if (!cell) {
-      hide();
-      return;
-    }
-    const rect = cell.getBoundingClientRect();
-    const hitSlop = 2;
-    const stillHovered = point.x >= rect.left - hitSlop
-      && point.x <= rect.right + hitSlop
-      && point.y >= rect.top - hitSlop
-      && point.y <= rect.bottom + hitSlop;
-    if (!stillHovered) {
-      hide();
-      return;
-    }
-    showAtPoint(point.x, point.y, cell);
+  state.homeActivityHoverTeardown = hide;
+  state.homeActivityTooltipUpdate = () => {
+    if (!activeCell) return;
+    if (!activeCell.isConnected) { hide(); return; }
+    tooltip.querySelector('[data-home-activity-tooltip-count]').textContent = formatCompact(Number(activeCell.dataset.t || 0));
+    moveHomeActivityTooltip(tooltip, activeCell);
   };
 }
 
-// Dismiss the body-level activity tooltip + spotlight from outside the scroller's own
-// pointer handlers. A Home rerender may preserve the active hover for the replacement
-// scroller; leaving Home clears it. Dropping both closures lets the old SVG be collected.
-function hideHomeActivityTooltip({ preserveHover = false } = {}) {
-  const teardown = state.homeActivityHoverTeardown;
-  teardown?.({ preserveHover });
-  state.homeActivityHoverTeardown = null;
-  state.homeActivityHoverRestore = null;
-  if (!preserveHover) {
-    state.homeActivityHoverPoint = null;
-    state.homeActivityHoverDate = '';
-    if (!teardown) {
-      const tooltip = document.querySelector('.home-heatmap-tooltip');
-      if (tooltip) {
-        tooltip.dataset.visible = 'false';
-        tooltip.setAttribute('aria-hidden', 'true');
-        tooltip.style.transform = 'translate(-9999px, -9999px)';
-      }
+function hideHomeActivityTooltip() {
+  state.homeActivityHoverTeardown?.();
+}
+
+function bindHomeTrendTooltip(chart, model, points) {
+  if (state.homeTrendTooltipBinding?.chart === chart) {
+    state.homeTrendTooltipBinding.update(model, points);
+    return;
+  }
+  state.homeTrendTooltipBinding?.dispose();
+  if (!chart || !model?.points.length) {
+    state.homeTrendTooltipBinding = null;
+    return;
+  }
+  const homeModule = chart.closest('.home-module');
+  homeModule.setAttribute('aria-keyshortcuts', 'ArrowLeft ArrowRight Home End');
+  const svg = chart.querySelector('.area-line');
+  const crosshair = chart.querySelector('.home-trend-crosshair');
+  const marker = chart.querySelector('.home-trend-marker');
+  const tooltip = homeActivityTooltipEl('home-trend-tooltip');
+  tooltip.setAttribute('aria-live', 'polite');
+  tooltip.setAttribute('aria-atomic', 'true');
+  const count = tooltip.querySelector('[data-home-activity-tooltip-count]');
+  count.setAttribute('aria-hidden', 'true');
+  let exactCount = tooltip.querySelector('.token-number-reading');
+  if (!exactCount) {
+    exactCount = document.createElement('span');
+    exactCount.className = 'token-number-reading';
+    tooltip.querySelector('.home-activity-tooltip-row').insertBefore(exactCount, count);
+  }
+  const date = tooltip.querySelector('[data-home-activity-tooltip-date]');
+  let cost = tooltip.querySelector('.home-trend-tooltip-cost');
+  if (!cost) {
+    cost = document.createElement('span');
+    cost.className = 'home-trend-tooltip-cost';
+    tooltip.insertBefore(cost, date);
+  }
+  let pointerX = null;
+  let focused = false;
+  let selected = -1;
+  const dismiss = () => {
+    chart.removeAttribute('data-active');
+    homeModule.setAttribute('aria-label', t('home.activity'));
+    tooltip.dataset.visible = 'false';
+    tooltip.setAttribute('aria-hidden', 'true');
+    tooltip.style.transform = 'translate(-9999px, -9999px)';
+  };
+  const hide = () => {
+    pointerX = null;
+    focused = false;
+    dismiss();
+  };
+  const select = (index) => {
+    const rect = svg.getBoundingClientRect();
+    if (!(rect.width > 0)) { hide(); return; }
+    selected = index;
+    const point = model.points[index];
+    const daily = points[index];
+    const left = `${point.x / model.width * 100}%`;
+    crosshair.style.left = left;
+    marker.style.left = left;
+    marker.style.top = `${point.y / model.height * 100}%`;
+    const exactTokens = formatNumber(daily.tokens);
+    count.textContent = state.settings?.showExactHomeTrendTokens === true ? exactTokens : formatCompact(daily.tokens);
+    exactCount.textContent = exactTokens;
+    date.textContent = daily.date;
+    const hasCost = daily.cost != null && Number.isFinite(Number(daily.cost));
+    cost.textContent = hasCost || Number(daily.unpricedTokens) > 0
+      ? usageAttributionRowsApi.compactUsageCostLabel(daily.cost, daily.unpricedTokens,
+        (amount) => currencyApi.formatCurrencyFromUsd(amount, currentCurrency())) : '';
+    cost.hidden = !cost.textContent;
+    homeModule.setAttribute('aria-label', `${t('home.activity')} · ${t('home.trend')} · ${exactTokens} tokens${cost.textContent ? ` · ${cost.textContent}` : ''} · ${daily.date}`);
+    chart.setAttribute('data-active', 'true');
+    tooltip.dataset.visible = 'true';
+    tooltip.setAttribute('aria-hidden', 'false');
+    const tipRect = tooltip.getBoundingClientRect();
+    const anchorX = rect.left + point.x / model.width * rect.width;
+    const anchorY = rect.top + point.y / model.height * rect.height;
+    const pad = 6;
+    const gap = 9;
+    const xPos = Math.max(pad, Math.min(window.innerWidth - pad - tipRect.width, anchorX - tipRect.width / 2));
+    const aboveY = anchorY - gap - tipRect.height;
+    const yPos = Math.max(pad, Math.min(window.innerHeight - pad - tipRect.height,
+      aboveY >= pad ? aboveY : anchorY + gap));
+    tooltip.style.transform = `translate(${Math.round(xPos)}px, ${Math.round(yPos)}px)`;
+  };
+  const showAt = (clientX) => {
+    if (!model.points.length) { hide(); return; }
+    const rect = svg.getBoundingClientRect();
+    if (!(rect.width > 0)) { hide(); return; }
+    pointerX = clientX;
+    const first = model.points[0].x;
+    const last = model.points[model.points.length - 1].x;
+    const x = (clientX - rect.left) / rect.width * model.width;
+    select(last === first ? 0 : Math.max(0, Math.min(model.points.length - 1,
+      Math.round((x - first) / (last - first) * (model.points.length - 1)))));
+  };
+  chart.addEventListener('pointerenter', (event) => showAt(event.clientX));
+  chart.addEventListener('pointermove', (event) => showAt(event.clientX));
+  chart.addEventListener('pointerleave', hide);
+  const onFocusIn = (event) => {
+    if (event.target !== homeModule) return;
+    focused = true;
+    pointerX = null;
+    select(selected < 0 ? points.length - 1 : selected);
+  };
+  const onKeyDown = (event) => {
+    if (event.target !== homeModule) return;
+    const index = event.key === 'ArrowLeft' ? Math.max(0, selected - 1)
+      : event.key === 'ArrowRight' ? Math.min(points.length - 1, selected + 1)
+        : event.key === 'Home' ? 0 : event.key === 'End' ? points.length - 1 : null;
+    if (index === null) return;
+    event.preventDefault();
+    pointerX = null;
+    focused = true;
+    select(index);
+  };
+  const onFocusOut = (event) => {
+    if (event.target !== homeModule) return;
+    focused = false;
+    if (pointerX == null) dismiss();
+  };
+  homeModule.addEventListener('focusin', onFocusIn);
+  homeModule.addEventListener('keydown', onKeyDown);
+  homeModule.addEventListener('focusout', onFocusOut);
+  els.homePanel.addEventListener('scroll', hide);
+  state.homeTrendTooltipBinding = { chart, hide, dispose() {
+    hide();
+    homeModule.removeEventListener('focusin', onFocusIn);
+    homeModule.removeEventListener('keydown', onKeyDown);
+    homeModule.removeEventListener('focusout', onFocusOut);
+    els.homePanel.removeEventListener('scroll', hide);
+    homeModule.removeAttribute('aria-keyshortcuts');
+  }, update(nextModel, nextPoints) {
+    const date = points[selected]?.date;
+    model = nextModel;
+    points = nextPoints;
+    if (!model.points.length) { hide(); return; }
+    selected = points.findIndex(point => point.date === date);
+    if (selected < 0) selected = points.length - 1;
+    if (pointerX != null) showAt(pointerX);
+    else if (focused) select(selected);
+  } };
+}
+
+function hideHomeTrendTooltip() {
+  state.homeTrendTooltipBinding?.hide();
+}
+
+const rendererDom = window.TokenMonitorDomReconcile.create({ nodesFor: node => pluginContent?.nodesFor(node) || [] });
+let homeActivityScroller = null;
+function updateHomeActivity() {
+  const scroller = els.homePanel.querySelector('.home-activity-scroll');
+  const reveal = () => animateHomeHistoryVisuals(scroller,
+    scroller.querySelector('.home-activity-canvas'), scroller.closest('.home-module').querySelector('.home-area-chart'));
+  if (scroller !== homeActivityScroller) {
+    hideHomeActivityTooltip();
+    state.homeActivityResizeObserver?.disconnect();
+    state.homeActivityResizeObserver = null;
+    state.homeActivityHoverTeardown = null;
+    state.homeActivityTooltipUpdate = null;
+    homeActivityScroller = scroller;
+    if (scroller) {
+      setupHomeActivityScroller(scroller, reveal);
+      setupHomeActivityHover(scroller);
     }
   }
+  if (scroller) applyHomeActivityScroll(scroller);
+  if (scroller && state.animateChartsOnRender && scroller.clientWidth > 0) reveal();
+  state.homeActivityTooltipUpdate?.();
+  const trendChart = els.homePanel.querySelector('.home-area-chart');
+  const trendData = trendChart && window.TokenMonitorDomReconcile.data(trendChart);
+  bindHomeTrendTooltip(trendChart, trendData?.model, trendData?.points);
 }
 
 function renderHomeTrendsModule() {
@@ -7629,7 +7962,8 @@ function renderHomeTrendsModule() {
     rawDaily,
     today,
     Number(todayPeriod?.totalTokens || 0),
-    Number(todayPeriod?.costUsd || 0)
+    Number(todayPeriod?.costUsd || 0),
+    Number(todayPeriod?.unpricedTokens || 0)
   );
   const activityLayout = homeOverviewApi.homeActivityHeatmapLayout();
   const heatMetric = state.settings?.heatmapMetric || 'cost';
@@ -7658,11 +7992,6 @@ function renderHomeTrendsModule() {
   const { module, body } = homeModuleShell('trends', t('home.activity'), 'trends', activeDaysLabel);
   const activityScroll = document.createElement('div');
   activityScroll.className = 'home-activity-scroll';
-  if (state.homeActivityHoverPoint && state.homeActivityHoverDate) {
-    // This replacement is being inserted directly under a stationary pointer. Keep
-    // the already-visible spotlight from replaying its hover fade on the new SVG.
-    activityScroll.classList.add('is-restoring-hover');
-  }
   activityScroll.tabIndex = 0;
   activityScroll.setAttribute('role', 'region');
   activityScroll.setAttribute('aria-label', t('home.activityScroll'));
@@ -7696,6 +8025,12 @@ function renderHomeTrendsModule() {
   const chart = document.createElement('div');
   chart.className = 'home-area-chart';
   chart.innerHTML = charts.areaLineSvg(model);
+  const crosshair = document.createElement('div');
+  crosshair.className = 'home-trend-crosshair';
+  const marker = document.createElement('div');
+  marker.className = 'home-trend-marker';
+  chart.append(crosshair, marker);
+  window.TokenMonitorDomReconcile.data(chart, { model, points: linePoints });
   plot.append(chart);
   const dates = document.createElement('div');
   dates.className = 'home-trend-dates';
@@ -7706,14 +8041,6 @@ function renderHomeTrendsModule() {
     dates.append(label);
   }
   body.append(activityScroll, trendHead, plot, dates);
-  setupHomeActivityScroller(activityScroll, () => {
-    // The scroller is now laid out and has its saved/right-edge position. Reconnect
-    // an active hover only after that geometry is stable; otherwise the replacement
-    // briefly resolves against the oldest (left) edge and then drops the tooltip.
-    state.homeActivityHoverRestore?.();
-    animateHomeHistoryVisuals(activityScroll, activityCanvas, chart);
-  });
-  setupHomeActivityHover(activityScroll);
   return module;
 }
 
@@ -7740,17 +8067,6 @@ function renderHomePluginModule(id) {
 
 function renderHome() {
   if (!els.homePanel) return;
-  if (sessionTooltipShouldHoldRender()) {
-    homeSessionRenderPending = true;
-    return;
-  }
-  homeSessionRenderPending = false;
-  // The previous scroller (and its ResizeObserver) is about to be replaced; drop the
-  // observer so at most one is live. Keep the active tooltip visible while the
-  // replacement heatmap reconnects it to the same date cell.
-  hideHomeActivityTooltip({ preserveHover: true });
-  state.homeActivityResizeObserver?.disconnect();
-  state.homeActivityResizeObserver = null;
   const period = state.stats.periods?.[state.period] || { totalTokens: 0, costUsd: 0, clients: {} };
   const moduleIds = homeModuleIds();
   if (moduleIds.includes('trends')) void loadHomeHistory();
@@ -7769,8 +8085,10 @@ function renderHome() {
     action.textContent = t('home.customize');
     action.addEventListener('click', openHomeSettings);
     empty.append(title, body, action);
-    els.homePanel.replaceChildren(empty);
-    hideHomeActivityTooltip();
+    const current = els.homePanel.querySelector('.home-empty');
+    if (current) rendererDom.reconcile(current, empty);
+    else els.homePanel.replaceChildren(rendererDom.reconcile(null, empty));
+    updateHomeActivity();
     return;
   }
   let sessionRows;
@@ -7786,6 +8104,12 @@ function renderHome() {
     if (homeModulePreferencesApi.isPluginModuleId(id)) return renderHomePluginModule(id);
     return renderHomeTrendsModule();
   });
+  for (let index = 0; index < nodes.length; index++) {
+    const next = nodes[index];
+    if (next.dataset.pluginRef) continue;
+    const current = [...els.homePanel.children].find(node => node.classList.contains(`home-module-${moduleIds[index]}`));
+    nodes[index] = rendererDom.reconcile(current, next);
+  }
   // Reconcile siblings without detaching retained plugin controls. Collector
   // pushes must not discard focused drafts or cancel captured drawing gestures.
   // A module-level selector places author controls beside the module. Reorder
@@ -7803,17 +8127,7 @@ function renderHome() {
     if (!ordered.includes(child)) child.remove();
   }
   if (moduleIds.includes('session')) scheduleHomeSessionRepaint(sessionRows);
-  // setupHomeActivityScroller first runs while its module is detached, where
-  // scrollWidth can equal clientWidth. Apply again synchronously now that the DOM is
-  // attached, before the browser paints or hover restoration measures the new cell.
-  const activityScroller = els.homePanel.querySelector('.home-activity-scroll');
-  if (activityScroller) applyHomeActivityScroll(activityScroller);
-  if (state.homeActivityHoverRestore) state.homeActivityHoverRestore();
-  else hideHomeActivityTooltip();
-  if (activityScroller?.classList.contains('is-restoring-hover')) {
-    requestAnimationFrame(() => activityScroller.classList.remove('is-restoring-hover'));
-  }
-  // ResizeObserver repeats the scroll + hover restoration once layout fully settles.
+  updateHomeActivity();
 }
 
 let localSessionActivity = null;
@@ -7893,7 +8207,7 @@ function renderAppContent({ fromSearch = false } = {}) {
   const pluginPage = pluginMainPages?.render(pluginPageOptions(), state.breakdown) || false;
   els.shell.classList.toggle('plugin-page-mode', pluginPage);
   if (pluginPage) {
-    stopHomeSessionRepaint(); stopSessionStatusRepaint(); stopServiceStatusTicker(); hideHomeActivityTooltip();
+    stopHomeSessionRepaint(); stopSessionStatusRepaint(); stopServiceStatusTicker(); hideHomeActivityTooltip(); hideHomeTrendTooltip();
     cancelNumberAnimation();
     state.openSession = null;
     for (const panel of [els.homePanel, els.breakdown, els.limitsPanel, els.trendsPanel, els.serviceStatusPanel,
@@ -7929,7 +8243,7 @@ function renderAppContent({ fromSearch = false } = {}) {
   } else {
     state.fixedPeriodSnapshot = null;
   }
-  if (state.openSession && state.breakdown !== 'session') { state.openSession = null; els.sessionDetail.classList.add('hidden'); els.sessionDetail.replaceChildren(); els.sessionDetailHead.classList.add('hidden'); els.sessionDetailHead.replaceChildren(); }
+  if (state.openSession && state.breakdown !== 'session') { state.openSession = null; els.sessionDetail.classList.add('hidden'); rendererDom.clear(els.sessionDetail); els.sessionDetailHead.classList.add('hidden'); rendererDom.clear(els.sessionDetailHead); }
   if (state.openSession) { els.sessionDetail.classList.remove('hidden'); els.sessionDetailHead.classList.remove('hidden'); } else { els.sessionDetail.classList.add('hidden'); els.sessionDetailHead.classList.add('hidden'); }
   const period = state.stats.periods?.[state.period] || { totalTokens: 0, costUsd: 0, clients: {} };
   const { fixedUnavailable, detailUnavailable } = periodContentAvailability();
@@ -7984,9 +8298,8 @@ function renderAppContent({ fromSearch = false } = {}) {
   syncSessionSearchChrome();
   if (state.breakdown !== 'session' || state.openSession) els.sessionPagerHost.classList.add('hidden');
   els.viewBackRow?.classList.toggle('hidden', state.breakdown === 'home' || !state.homeReturnVisible);
-  // Leaving Home only CSS-hides the panel, so its heatmap scroller never sees a
-  // pointerleave — dismiss the body-level tooltip here (renderHome covers rerenders).
-  if (state.breakdown !== 'home') hideHomeActivityTooltip();
+  // Leaving Home only CSS-hides the panel, so its charts may not see pointerleave.
+  if (state.breakdown !== 'home') { hideHomeActivityTooltip(); hideHomeTrendTooltip(); }
   if (state.breakdown !== 'trends') hideTrendTooltip();
   if (state.breakdown === 'status') ensureServiceStatusTicker(); else stopServiceStatusTicker();
   if (state.breakdown === 'home') {
@@ -8030,10 +8343,8 @@ function renderAppContent({ fromSearch = false } = {}) {
       const latest = sessionRowsForPeriod(period).find((row) => row.key === state.openSession.summary.key);
       if (!latest) { closeSessionDetail(); return; }
       state.openSession.summary = latest;
-      // The rebuild replaces every run node, so a hovered run tooltip would die
-      // mid-read (and a keyboard focus with it); hold until it closes, as the
-      // session and home lists already do.
-      if (!sessionTooltipShouldHoldRender()) renderSessionGroupDetail(state.openSession);
+      // Update group readings while retaining the controls being read.
+      renderSessionGroupDetail(state.openSession);
     }
     refreshSessionDetailHeading();
     if (state.openSession.renderOptions) {
@@ -8317,11 +8628,16 @@ function renderBreakdownChange(breakdown, options = {}) {
 }
 
 function restartTimer() {
-  if (state.refreshTimer) clearInterval(state.refreshTimer);
   const interval = state.streamConnected
     ? 5 * 60 * 1000
     : Number(state.settings?.refreshMs || 15000);
-  state.refreshTimer = setInterval(refreshStats, interval);
+  // Local pushes can arrive every few seconds. Keep the existing deadline so
+  // they cannot indefinitely postpone the fallback read from the Hub.
+  if (state.refreshTimer && state.refreshTimerIntervalMs === interval) return;
+  if (state.refreshTimer) clearInterval(state.refreshTimer);
+  state.refreshTimerIntervalMs = interval;
+  // Only this periodic fallback may reuse fresh stream data instead of downloading.
+  state.refreshTimer = setInterval(() => refreshStats({ streamCache: true }), interval);
 }
 
 function clamp(value, min, max) {
@@ -8626,7 +8942,7 @@ function renderThemePresetChips() {
     const label = document.createElement('span');
     label.textContent = t(`settings.appearance.preset.${preset.id}`);
     chip.append(dot, label);
-    chip.addEventListener('click', () => selectThemePreset(preset.id));
+    chip.addEventListener('click', () => queueAppearanceColorChange(() => selectThemePreset(preset.id)));
     els.themePresetChips.appendChild(chip);
   }
   // Skins from active plugins sit beside the built-in presets; applying one
@@ -8653,59 +8969,64 @@ function renderThemePresetChips() {
   }
 }
 
-function renderThemeColorGrid() {
-  if (!els.themeColorGrid) return;
-  els.themeColorGrid.innerHTML = '';
-  for (const key of themePresetsApi.INTERFACE_COLOR_KEYS) {
-    const row = document.createElement('label');
-    row.className = 'color-picker-row';
-    const name = document.createElement('span');
-    name.className = 'color-picker-name';
-    name.textContent = t(`settings.appearance.color.${key}`);
-    const input = document.createElement('input');
-    input.type = 'color';
-    input.className = 'color-picker-input';
-    input.value = resolvedThemeColor(key);
-    input.dataset.themeKey = key;
-    input.addEventListener('input', () => previewThemeColor(key, input.value));
-    input.addEventListener('change', () => saveThemeColor(key, input.value));
-    const reset = document.createElement('button');
-    reset.type = 'button';
-    reset.className = 'reset-appearance-button reset-inline';
-    reset.textContent = '↺';
-    reset.setAttribute('aria-label', t('settings.appearance.resetColor'));
-    reset.addEventListener('click', () => resetThemeColor(key));
-    row.append(name, input, reset);
-    els.themeColorGrid.appendChild(row);
+function renderAppearanceColorRows(container, keys, { rowClass, nameClass, resetLabel, nameFor, colorFor, preview, save, reset }) {
+  if (!container) return;
+  const existing = new Map([...container.children].map(row => [row.dataset.colorKey, row]));
+  for (const key of keys) {
+    let row = existing.get(key);
+    if (!row) {
+      row = document.createElement('div');
+      row.className = rowClass;
+      row.dataset.colorKey = key;
+      const name = document.createElement('span');
+      name.className = nameClass;
+      const swatch = document.createElement('button');
+      swatch.type = 'button';
+      swatch.className = 'color-picker-swatch';
+      swatch.setAttribute('aria-haspopup', 'dialog');
+      swatch.setAttribute('aria-controls', 'appearanceColorPicker');
+      swatch.setAttribute('aria-expanded', 'false');
+      swatch.addEventListener('click', event => appearanceColorPicker.open({
+        button: swatch, name: name.textContent, preview: value => preview(key, value), save: value => save(key, value)
+      }, event.detail === 0));
+      const resetButton = document.createElement('button');
+      resetButton.type = 'button';
+      resetButton.className = 'reset-appearance-button reset-inline';
+      resetButton.textContent = '↺';
+      resetButton.addEventListener('click', () => queueAppearanceColorChange(() => reset(key)));
+      row.append(name, swatch, resetButton);
+      container.appendChild(row);
+    }
+    const [name, swatch, resetButton] = row.children;
+    const label = nameFor(key);
+    name.textContent = label;
+    swatch.setAttribute('aria-label', label);
+    resetButton.setAttribute('aria-label', t(resetLabel));
+    appearanceColorPicker.setSwatch(swatch, colorFor(key));
   }
 }
 
+function renderThemeColorGrid() {
+  renderAppearanceColorRows(els.themeColorGrid, ['bg', 'text', 'muted', 'accent', 'chart'], {
+    rowClass: 'color-picker-row', nameClass: 'color-picker-name', resetLabel: 'settings.appearance.resetColor',
+    nameFor: key => t(`settings.appearance.color.${key}`), colorFor: resolvedThemeColor,
+    preview: previewThemeColor, save: saveThemeColor, reset: resetThemeColor
+  });
+}
+
 function renderVendorColorList() {
-  if (!els.vendorColorList) return;
-  const overrides = themePresetsApi.normalizeOverrides(state.settings?.vendorColors, Object.keys(BRAND_VENDOR_COLORS));
-  els.vendorColorList.innerHTML = '';
-  for (const id of themePresetsApi.orderedVendorIds(BRAND_VENDOR_COLORS)) {
-    const row = document.createElement('label');
-    row.className = 'vendor-color-row';
-    const name = document.createElement('span');
-    name.className = 'vendor-color-name';
-    name.textContent = id === 'default' ? t('settings.appearance.vendorDefault') : themePresetsApi.vendorLabel(id);
-    const input = document.createElement('input');
-    input.type = 'color';
-    input.className = 'color-picker-input';
-    input.value = overrides[id] || BRAND_VENDOR_COLORS[id];
-    input.dataset.vendorId = id;
-    input.addEventListener('input', () => previewVendorColor(id, input.value));
-    input.addEventListener('change', () => saveVendorColor(id, input.value));
-    const reset = document.createElement('button');
-    reset.type = 'button';
-    reset.className = 'reset-appearance-button reset-inline';
-    reset.textContent = '↺';
-    reset.setAttribute('aria-label', t('settings.appearance.resetBrand'));
-    reset.addEventListener('click', () => resetVendorColor(id));
-    row.append(name, input, reset);
-    els.vendorColorList.appendChild(row);
-  }
+  const overrides = currentVendorOverrides();
+  renderAppearanceColorRows(els.vendorColorList, themePresetsApi.orderedVendorIds(BRAND_VENDOR_COLORS), {
+    rowClass: 'vendor-color-row', nameClass: 'vendor-color-name', resetLabel: 'settings.appearance.resetBrand',
+    nameFor: id => id === 'default' ? t('settings.appearance.vendorDefault') : themePresetsApi.vendorLabel(id),
+    colorFor: id => overrides[id] || BRAND_VENDOR_COLORS[id],
+    preview: previewVendorColor, save: saveVendorColor, reset: resetVendorColor
+  });
+}
+
+function queueAppearanceColorChange(write) {
+  appearanceColorPicker.close();
+  return appearanceColorPicker.enqueue(write);
 }
 
 function currentThemeOverrides() {
@@ -8790,7 +9111,7 @@ async function applyThemeCodeFromInput() {
     return;
   }
   els.themeCodeInput.value = parsed.code;
-  await commitThemeColors(parsed.colors);
+  await queueAppearanceColorChange(() => commitThemeColors(parsed.colors));
   if (themeCodeFeedbackIsCurrent(generation, parsed.code)) {
     showThemeCodeStatus('settings.appearance.themeCodeApplied', 'success');
   }
@@ -9350,7 +9671,6 @@ function syncHubModeUi() {
   syncContentForm?.syncSettings();
   const mode = state.settings.hubMode || 'local';
   els.hubModeOptions.value = mode;
-  if (els.syncModeDescription) els.syncModeDescription.textContent = t(SYNC_MODE_DESCRIPTIONS[mode] || SYNC_MODE_DESCRIPTIONS.local);
   const icloudSupported = state.appInfo?.platform === 'darwin';
   if (els.icloudModeOption) els.icloudModeOption.disabled = !icloudSupported;
   els.hubClientFields.classList.toggle('hidden', mode !== 'client');
@@ -9860,13 +10180,49 @@ function applyInitialBreakdownPreference() {
   if (next !== state.breakdown) setBreakdown(next);
 }
 
+// This machine's archived sessions, counted in main from the local record. It is
+// asked again for each new snapshot while Settings shows it, one request at a
+// time; a failed count waits for the next stats. A successful Clear shows zero
+// at once and drops any count asked for before it.
+const archivedSessionCountState = { requestedId: null, value: null, pending: false, clears: 0 };
+function requestArchivedSessionCount() {
+  const snapshot = state.stats?.snapshot;
+  const current = archivedSessionCountState;
+  if (!snapshot || current.pending || current.requestedId === snapshot.id || !isSettingsSurfaceVisible()) return;
+  current.requestedId = snapshot.id;
+  current.pending = true;
+  const clears = current.clears;
+  Promise.resolve()
+    .then(() => window.tokenMonitor.getArchivedSessionCount())
+    .then((count) => {
+      if (clears !== current.clears) return;
+      current.value = Number.isFinite(count) ? count : null;
+      renderSessionUsageArchiveStatus();
+    }, (error) => console.log(`[stats] archived session count failed: ${error?.message || error}`))
+    .finally(() => {
+      current.pending = false;
+      requestArchivedSessionCount();
+    });
+}
+
+function archivedSessionCountCleared() {
+  archivedSessionCountState.clears += 1;
+  archivedSessionCountState.value = 0;
+  renderSessionUsageArchiveStatus();
+}
+
 function renderSessionUsageArchiveStatus() {
   if (!els.sessionUsageArchiveStatus) return;
   if (state.settings?.sessionUsageArchiveEnabled === false) {
     els.sessionUsageArchiveStatus.textContent = t('settings.collection.sessionArchivePaused');
     return;
   }
-  const count = sessionRowsApi.archivedSessionCount(state.stats);
+  requestArchivedSessionCount();
+  const count = archivedSessionCountState.value;
+  if (count === null) {
+    els.sessionUsageArchiveStatus.textContent = '';
+    return;
+  }
   els.sessionUsageArchiveStatus.textContent = count > 0
     ? t('settings.collection.sessionArchiveActiveCount', { count })
     : t('settings.collection.sessionArchiveEmpty');
@@ -9886,9 +10242,11 @@ const CLIENT_CONNECTION_FIELDS = ['hubUrl', 'secret', 'deviceId'];
 let clientConnectionEditing = false;
 let clientConnectionEditRevision = 0;
 let hubSaveError = false;
+let hubProfileAdding = false;
+let hubProfileNameDraft = null;
 
 function clientConnectionHasDraft() {
-  return CLIENT_CONNECTION_FIELDS.some(field => hubDraftDirty[field]);
+  return hubProfileAdding || hubProfileNameDraft !== null || CLIENT_CONNECTION_FIELDS.some(field => hubDraftDirty[field]);
 }
 
 function syncHubConnectionUi() {
@@ -9899,6 +10257,7 @@ function syncHubConnectionUi() {
   const focusedEditor = els.syncConnectionEditor.contains(document.activeElement)
     || els.syncDeviceSettings.contains(document.activeElement);
   els.syncConnectionEdit.hidden = !client || editing;
+  els.syncConnectionEdit.disabled = hubSaveBusy;
   if (client && !editing && focusedEditor && isSettingsSurfaceVisible()) {
     els.syncConnectionEdit.focus({ preventScroll: true });
   }
@@ -9915,6 +10274,48 @@ function syncHubConnectionUi() {
   els.syncUploadIntervalRow.inert = !client;
   els.syncConnectionSaveError.hidden = !hubSaveError;
   els.syncConnectionSaveError.textContent = hubSaveError ? t('settings.sync.saveFailed') : '';
+  syncHubProfileControls();
+}
+
+const HUB_PROFILE_ADD_VALUE = '__add__';
+
+function syncHubProfileControls() {
+  if (!els.hubProfileSelect) return;
+  const profiles = state.settings?.hubProfiles || [];
+  const activeId = state.settings?.activeHubProfileId || '';
+  const key = JSON.stringify([profiles, currentLanguage()]);
+  if (els.hubProfileSelect.dataset.profiles !== key) {
+    els.hubProfileSelect.replaceChildren();
+    for (const profile of profiles) {
+      const option = document.createElement('option');
+      option.value = profile.id;
+      option.textContent = profile.name || profile.endpoint;
+      if (profile.name && profile.name !== profile.endpoint) option.dataset.tmSelectDescription = profile.endpoint;
+      els.hubProfileSelect.append(option);
+    }
+    const add = document.createElement('option');
+    add.value = HUB_PROFILE_ADD_VALUE;
+    add.textContent = `${t('settings.sync.addHub')}…`;
+    els.hubProfileSelect.append(add);
+    els.hubProfileSelect.dataset.profiles = key;
+  }
+  els.hubProfileSelect.value = activeId;
+  const editing = clientConnectionEditing || clientConnectionHasDraft();
+  // The picker replaces the read-only status card's job of naming the Hub, so it
+  // stays out of the way while a connection is being edited or first entered.
+  els.hubProfilePicker.hidden = !profiles.length || editing;
+  // The picker already names the connection, so the status card then reports
+  // only its state instead of repeating the endpoint.
+  els.syncConnectionEndpoint.hidden = !els.hubProfilePicker.hidden;
+  els.hubProfileSelect.disabled = hubSaveBusy;
+  // Removing lives in the editor of an existing profile; the last profile is
+  // left to the sync-mode selector so the client is never left without a Hub.
+  els.hubProfileRemove.hidden = !editing || hubProfileAdding || profiles.length < 2 || !activeId;
+  els.hubProfileRemove.disabled = hubSaveBusy;
+  els.hubProfileNameInput.disabled = hubSaveBusy;
+  if (hubProfileNameDraft === null) {
+    els.hubProfileNameInput.value = profiles.find(profile => profile.id === activeId)?.name || '';
+  }
 }
 
 function beginClientConnectionEdit({ focus = false } = {}) {
@@ -9931,6 +10332,8 @@ function beginClientConnectionEdit({ focus = false } = {}) {
 
 function cancelClientConnectionEdit() {
   if (hubSaveBusy || state.settings?.hubMode !== 'client') return;
+  hubProfileAdding = false;
+  hubProfileNameDraft = null;
   clientConnectionEditing = false;
   clientConnectionEditRevision += 1;
   hubSaveError = false;
@@ -10035,6 +10438,9 @@ function hubDraftValuesFromInputs() {
   const values = {};
   for (const [field, inputId] of HUB_DRAFT_FIELDS) {
     if (field === 'hubHostPort' && state.settings?.hubMode !== 'host') continue;
+    // The client URL and secret only apply to (and are only visible in) client
+    // mode; another mode's Save must not apply a pending client draft.
+    if ((field === 'hubUrl' || field === 'secret') && state.settings?.hubMode !== 'client') continue;
     const input = els[inputId];
     if (!input) continue;
     values[field] = normalizeHubDraftValue(field, input.value, state.settings?.[field]);
@@ -10046,12 +10452,16 @@ function hubDraftValuesFromSettings() {
   const values = {};
   for (const [field] of HUB_DRAFT_FIELDS) {
     if (field === 'hubHostPort' && state.settings?.hubMode !== 'host') continue;
+    // The client URL and secret only apply to (and are only visible in) client
+    // mode; another mode's Save must not apply a pending client draft.
+    if ((field === 'hubUrl' || field === 'secret') && state.settings?.hubMode !== 'client') continue;
     values[field] = normalizeHubDraftValue(field, state.settings?.[field]);
   }
   return values;
 }
 
 function hubDraftHasChanges() {
+  if (hubProfileAdding || hubProfileNameDraft !== null) return true;
   const draft = hubDraftValuesFromInputs();
   const saved = hubDraftValuesFromSettings();
   return Object.keys(draft).some((field) => draft[field] !== saved[field]);
@@ -10134,8 +10544,6 @@ function syncSettingsForm() {
     els.billingCycleStartDayInput.value = String(fixedPeriodRangesApi.normalizeCycleStartDay(state.settings?.billingCycleStartDay));
   }
   if (els.currencyInput) els.currencyInput.value = currentCurrency();
-  const modelRankingMetric = usageAttributionRowsApi.normalizeRankingMetric(state.settings?.modelRankingMetric);
-  for (const input of els.modelRankingMetricInputs || []) input.checked = input.value === modelRankingMetric;
   syncCurrencyRateControls();
   syncNetworkProxyControls();
   syncHubDraftFields();
@@ -10164,7 +10572,6 @@ function syncSettingsForm() {
   if (els.wslScanInput) els.wslScanInput.checked = state.settings.wslScanEnabled === true;
   if (els.sessionUsageArchiveInput) els.sessionUsageArchiveInput.checked = state.settings.sessionUsageArchiveEnabled !== false;
   renderAutomaticAppUpdateControl();
-  allTimeSessions.ensure();
   renderSessionUsageArchiveStatus();
   const exportAutoOn = Boolean(state.settings.exportAutoEnabled);
   const exportDir = state.settings.exportDir || '';
@@ -10247,21 +10654,19 @@ function syncSettingsForm() {
   if (els.backgroundImageOpacityInput) els.backgroundImageOpacityInput.value = String(state.settings.backgroundImageOpacity ?? defaultAppearance.backgroundImageOpacity);
   els.zoomInput.value = String(Math.round((Number(state.settings.zoomFactor) || 1) * 100));
   syncSliderRows();
+  renderAntigravityStatus();
+  renderWorkbuddyStatus();
+  renderMimoStatus();
+  renderViewPreferences();
+  renderToolPreferences();
+  renderLimitProviderCheckboxes();
   renderExternalProviderStatus('volcengine');
   renderExternalProviderStatus('kimi');
   for (const form of state.settings?.limitAccountForms || []) {
     if (limitProviderAccountGroup(form.id)) renderExternalProviderStatus(form.id);
   }
-  renderAntigravityStatus();
-  renderWorkbuddyStatus();
-  renderMimoStatus();
-  renderCopilotStatus();
-  renderViewPreferences();
-  renderToolPreferences();
-  renderLimitProviderCheckboxes();
   renderSettingsSummaries();
   renderOpenCodeProfiles();
-  renderOpenRouterProfiles();
   renderMinimaxApiKeys();
   renderThirdPartyProfiles();
   buildAppearanceColorControls();
@@ -10304,6 +10709,7 @@ function disabledViewIds() {
   const ids = [];
   if (state.settings?.historyEnabled === false) ids.push('trends');
   if (state.settings?.projectsEnabled === false) ids.push('project');
+  if (!limitViewAvailable()) ids.push('limits');
   return ids;
 }
 
@@ -10328,35 +10734,6 @@ function pinnedClientSet() {
   return new Set(clientDisplayPreferencesApi.normalizePinnedClients(state.settings?.pinnedClients, KNOWN_CLIENTS).split(',').filter(Boolean));
 }
 
-function visibilityIcon(hidden) {
-  const ns = 'http://www.w3.org/2000/svg';
-  const svg = document.createElementNS(ns, 'svg');
-  svg.setAttribute('viewBox', '0 0 24 24');
-  svg.setAttribute('aria-hidden', 'true');
-  const paths = [
-    'M2 12s3-7 10-7 10 7 10 7-3 7-10 7-10-7-10-7Z',
-    'M12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6Z'
-  ];
-  if (hidden) paths.push('M4 4l16 16');
-  for (const d of paths) {
-    const path = document.createElementNS(ns, 'path');
-    path.setAttribute('d', d);
-    svg.appendChild(path);
-  }
-  return svg;
-}
-
-function pinIcon() {
-  const ns = 'http://www.w3.org/2000/svg';
-  const svg = document.createElementNS(ns, 'svg');
-  svg.setAttribute('viewBox', '0 0 24 24');
-  svg.setAttribute('aria-hidden', 'true');
-  const path = document.createElementNS(ns, 'path');
-  path.setAttribute('d', 'M14 3l7 7-3 1-4 4 .5 3-2 2-3-5-5-3 2-2 3 .5 4-4 1-3Z');
-  svg.appendChild(path);
-  return svg;
-}
-
 function preferenceListForKind(kind) {
   if (kind === 'client') return els.clientDisplayList;
   if (kind === 'view') return els.viewDisplayList;
@@ -10378,7 +10755,7 @@ function preferenceItemAttribute(kind) {
 function preferenceRows(kind) {
   const list = preferenceListForKind(kind);
   const selector = kind === 'client'
-    ? '.tool-preference-row[data-client]'
+    ? ':scope > .tool-preference-row[data-client]'
     : kind === 'view'
       ? '.view-preference-row[data-view]'
       : kind === 'statusProvider'
@@ -10387,7 +10764,7 @@ function preferenceRows(kind) {
           ? '.home-module-preference-row[data-home-module]'
           : kind === 'homeLimitProvider'
             ? '.home-limit-provider-row[data-home-limit-provider]'
-            : '.limit-provider-row[data-provider]';
+            : ':scope > .limit-provider-row[data-provider]';
   return Array.from(list?.querySelectorAll(selector) || []);
 }
 
@@ -10396,15 +10773,13 @@ function applyPreferenceOrder(kind, order) {
   if (!list) return;
   const attr = preferenceItemAttribute(kind);
   const rowsById = new Map(preferenceRows(kind).map((row) => [row.dataset[attr], row]));
+  // Grouped lists keep their ordered rows above the collapsed group.
+  const tail = list.querySelector(':scope > .settings-list-group-toggle, :scope > .settings-list-group');
   for (const id of order || []) {
     const row = rowsById.get(id);
     if (!row) continue;
-    list.appendChild(row);
-    const companionId = kind === 'view'
-      ? ({ home: 'homeSettingsContainer', limits: 'limitsViewSettingsContainer', trends: 'trendSettingsContainer', project: 'projectSettingsContainer', session: 'sessionSettingsContainer', status: 'serviceProvidersContainer' })[id]
-      : kind === 'homeModule'
-        ? HOME_MODULE_SUBGROUPS[id]?.[1]
-        : '';
+    list.insertBefore(row, tail);
+    const companionId = kind === 'homeModule' ? HOME_MODULE_SUBGROUPS[id]?.[1] : '';
     const companion = companionId ? document.getElementById(companionId) : null;
     if (companion) list.appendChild(companion);
   }
@@ -10432,15 +10807,6 @@ function createPreferenceOrderHandle({ kind, id, label, count }) {
   return handle;
 }
 
-const VIEW_PREFERENCE_SUBGROUPS = {
-  limits: ['limitsViewSettingsExpanded', 'limitsViewSettingsContainer'],
-  home: ['homeSettingsExpanded', 'homeSettingsContainer'],
-  trends: ['trendSettingsExpanded', 'trendSettingsContainer'],
-  project: ['projectSettingsExpanded', 'projectSettingsContainer'],
-  session: ['sessionSettingsExpanded', 'sessionSettingsContainer'],
-  status: ['serviceProvidersExpanded', 'serviceProvidersContainer']
-};
-
 const HOME_MODULE_SUBGROUPS = {
   limits: ['homeLimitSettingsExpanded', 'homeLimitProviderContainer'],
   trends: ['homeActivitySettingsExpanded', 'homeActivitySettingsContainer'],
@@ -10464,10 +10830,14 @@ function setPreferenceSubgroupsExpanded(definitions, rowSelector, value) {
     const open = expanded.has(id);
     state[stateKey] = open;
     const row = Array.from(document.querySelectorAll(rowSelector)).find((candidate) => candidate.dataset[dataKey] === id);
-    const toggle = row?.querySelector('.view-subgroup-toggle');
+    const toggle = row?.querySelector('.view-subgroup-toggle, .home-module-disclosure');
     toggle?.classList.toggle('is-expanded', open);
     toggle?.setAttribute('aria-expanded', String(open));
-    document.getElementById(containerId)?.classList.toggle('hidden', !open);
+    const container = document.getElementById(containerId);
+    if (container) {
+      container.inert = !open;
+      container.classList.toggle('hidden', !open);
+    }
   }
 }
 
@@ -10476,10 +10846,6 @@ function togglePreferenceSubgroup(definitions, rowSelector, id) {
   if (expanded.has(id)) expanded.delete(id);
   else expanded.add(id);
   setPreferenceSubgroupsExpanded(definitions, rowSelector, Array.from(expanded).join(','));
-}
-
-function setViewPreferenceExpanded(value) {
-  setPreferenceSubgroupsExpanded(VIEW_PREFERENCE_SUBGROUPS, '.view-preference-row', value);
 }
 
 function setHomeModulePreferenceExpanded(value) {
@@ -10508,6 +10874,11 @@ function createMainPreferenceRowDrag({ kind, rowSelector, idKey, settingKey, get
       // Inactive plugin placements are absent from the rendered Home rows.
       // Refill only visible slots so a drag cannot silently remove a placement.
       let merged = order;
+      // Hidden views are not rendered in the ordered list but keep their slots.
+      if (kind === 'view') {
+        const { order: savedOrder, shown } = shownViewDisplayOrder();
+        merged = settingsListFilterApi.mergeSubsetOrder(savedOrder, order.filter((id) => shown.includes(id)));
+      }
       if (kind === 'homeModule') {
         const visible = new Set(order);
         let index = 0;
@@ -10527,9 +10898,7 @@ const viewPreferenceRowDrag = createMainPreferenceRowDrag({
   kind: 'view',
   rowSelector: '.view-preference-row[data-view]',
   idKey: 'view',
-  settingKey: 'viewDisplayOrder',
-  getExpanded: () => expandedPreferenceSubgroups(VIEW_PREFERENCE_SUBGROUPS),
-  setExpanded: setViewPreferenceExpanded
+  settingKey: 'viewDisplayOrder'
 });
 
 const homeModulePreferenceRowDrag = createMainPreferenceRowDrag({
@@ -10573,7 +10942,8 @@ const limitProviderRowDrag = rowDragControllerApi.createRowDragController({
   dragSort: verticalDragSortApi,
   getList: () => els.limitProviderCheckboxes,
   getScrollPanel: () => els.settingsPanel,
-  rowSelector: '.limit-provider-row[data-provider]',
+  // Direct children only: disabled providers sit in their own group below.
+  rowSelector: ':scope > .limit-provider-row[data-provider]',
   idKey: 'provider',
   dragExcluded: LIMIT_PROVIDER_DRAG_EXCLUDED,
   getExpanded: () => state.limitProviderSettingsExpanded,
@@ -10581,7 +10951,7 @@ const limitProviderRowDrag = rowDragControllerApi.createRowDragController({
   applyOrder: (order) => applyPreferenceOrder('provider', order),
   preserveScroll: preserveSettingsPanelScroll,
   mirrorOrder: (order) => {
-    const value = limitProviderOrderApi.preserveAbsentPluginOrder(state.settings?.limitProviderOrder, order, desktopLimitProviders()).join(',');
+    const value = limitProviderOrderWithEnabled(order);
     state.settings = { ...state.settings, limitProviderOrder: value };
     return value;
   },
@@ -10591,217 +10961,176 @@ const limitProviderRowDrag = rowDragControllerApi.createRowDragController({
   requestRender: () => renderLimitProviderCheckboxes()
 });
 
+// Main Screen settings are a master-detail pair. The nav lists the views in
+// switcher order, with views kept out of the switcher in their own group below;
+// the inspector beside it holds the selected view's settings. The selection is
+// UI state for this visit: opening the panel starts on Home.
+const MAIN_VIEW_SETTINGS = {
+  home: renderHomeSettingsList,
+  limits: renderLimitsViewSettingsList,
+  model: renderModelViewSettingsList,
+  project: renderProjectSettingsList,
+  session: renderSessionSettingsList,
+  trends: renderTrendSettingsList,
+  status: renderServiceProviderList
+};
+
+function onMainViewVisibilityToggle(id) {
+  if (id === 'trends') return onTrendVisibilityToggle();
+  if (id === 'project') return onProjectVisibilityToggle();
+  return onViewVisibilityToggle(id);
+}
+
+function selectMainSettingsView(id) {
+  if (state.mainSettingsView !== id || state.homeLimitProvidersOpen) {
+    state.mainSettingsView = id;
+    state.homeLimitProvidersOpen = false;
+    renderViewPreferences();
+  }
+  els.settingsPanel?.querySelector(`.main-view-tab[data-view="${id}"]`)?.focus({ preventScroll: true });
+}
+
+function createMainViewRow(view, { selected, disabled, orderable, count }) {
+  const id = view.id;
+  const label = viewLabel(view);
+  const row = document.createElement('div');
+  row.className = 'view-preference-row';
+  row.dataset.view = id;
+  row.classList.toggle('is-current', selected);
+  row.classList.toggle('is-hidden', !orderable);
+  row.classList.toggle('is-disabled', disabled);
+  const tab = document.createElement('button');
+  tab.type = 'button';
+  tab.className = 'main-view-tab';
+  tab.dataset.view = id;
+  tab.setAttribute('aria-controls', 'mainViewInspector');
+  if (selected) tab.setAttribute('aria-current', 'true');
+  const name = document.createElement('span');
+  name.className = 'tool-preference-name';
+  name.textContent = label;
+  tab.append(viewSwitcherIcon(id), name);
+  tab.addEventListener('click', () => selectMainSettingsView(id));
+  row.append(tab);
+  if (orderable) {
+    row.append(createPreferenceOrderHandle({ kind: 'view', id, label, count }));
+    row.addEventListener('pointerdown', (event) => viewPreferenceRowDrag.startRowDrag(event, id));
+  } else if (id !== 'limits' || !disabled) {
+    const add = document.createElement('button');
+    add.type = 'button';
+    add.className = 'main-view-add';
+    add.setAttribute('aria-label', t('settings.views.showView', { name: label }));
+    add.addEventListener('click', () => void onMainViewVisibilityToggle(id));
+    row.append(add);
+  }
+  return row;
+}
+
 function renderViewPreferences() {
   if (!els.viewDisplayList) return;
   // Every list under Main Screen shares this render path. A settings or stats
   // repaint during a drag is held until the controller lands or aborts.
   if (deferMainPreferenceRender()) return;
-  const hidden = hiddenViewSet();
-  const orderValue = effectiveViewDisplayOrderValue();
-  const views = viewDisplayPreferencesApi.orderedViews(VIEW_DISPLAY_OPTIONS, orderValue);
-  const hasCustomOrder = viewDisplayPreferencesApi.hasCustomViewDisplayOrder(state.settings?.viewDisplayOrder);
-  const hasHiddenViews = hidden.size > 0;
-  if (els.resetViewDisplayOrderButton) els.resetViewDisplayOrderButton.disabled = !hasCustomOrder;
-  if (els.showAllViewsButton) els.showAllViewsButton.disabled = !hasHiddenViews;
-  els.viewDisplayList.replaceChildren();
   const disabled = new Set(disabledViewIds());
-  const visibleCount = viewDisplayPreferencesApi.visibleViewCount({
-    views,
-    hiddenValue: state.settings?.hiddenViews,
-    disabledIds: [...disabled]
+  const views = viewDisplayPreferencesApi.orderedViews(VIEW_DISPLAY_OPTIONS, effectiveViewDisplayOrderValue());
+  const hasCustomOrder = viewDisplayPreferencesApi.hasCustomViewDisplayOrder(state.settings?.viewDisplayOrder);
+  if (els.resetViewDisplayOrderButton) els.resetViewDisplayOrderButton.disabled = !hasCustomOrder;
+  const shownIds = new Set(shownViewDisplayOrder().shown);
+  if (!views.some(({ id }) => id === state.mainSettingsView)) state.mainSettingsView = 'home';
+  const shown = views.filter(({ id }) => shownIds.has(id));
+  const off = views.filter(({ id }) => !shownIds.has(id));
+  const row = (view, orderable) => createMainViewRow(view, {
+    selected: view.id === state.mainSettingsView,
+    disabled: disabled.has(view.id),
+    orderable,
+    count: shown.length
   });
-  for (const view of views) {
-    const id = view.id;
-    const label = viewLabel(view);
-    const isHidden = hidden.has(id);
-    const isDisabled = disabled.has(id);
-    const isEffectivelyHidden = isHidden || isDisabled;
-    const row = document.createElement('div');
-    row.className = 'view-preference-row';
-    row.dataset.view = id;
-    row.classList.toggle('is-hidden', isEffectivelyHidden);
-    row.classList.toggle('is-disabled', isDisabled);
-    const name = document.createElement('div');
-    name.className = 'tool-preference-name';
-    name.textContent = label;
-    const visibility = document.createElement('button');
-    visibility.type = 'button';
-    visibility.className = `tool-visibility-button${isEffectivelyHidden ? ' is-hidden' : ''}`;
-    visibility.dataset.view = id;
-    visibility.setAttribute('aria-label', t(isEffectivelyHidden ? 'settings.views.showView' : 'settings.views.hideView', { name: label }));
-    visibility.setAttribute('aria-pressed', String(!isEffectivelyHidden));
-    visibility.disabled = !isEffectivelyHidden && visibleCount <= 1;
-    visibility.append(visibilityIcon(isEffectivelyHidden));
-    visibility.addEventListener('click', () => {
-      if (id === 'trends') return onTrendVisibilityToggle();
-      if (id === 'project') return onProjectVisibilityToggle();
-      return onViewVisibilityToggle(id);
-    });
-    const handle = createPreferenceOrderHandle({ kind: 'view', id, label, count: views.length });
-    const actions = document.createElement('div');
-    actions.className = 'tool-preference-actions';
-    actions.append(visibility, handle);
-    row.append(name, actions);
-    row.addEventListener('pointerdown', (event) => viewPreferenceRowDrag.startRowDrag(event, id));
-    els.viewDisplayList.appendChild(row);
-    if (id === 'limits') {
-      row.classList.add('has-subgroup');
-      const toggle = document.createElement('button');
-      toggle.type = 'button';
-      toggle.className = `view-subgroup-toggle${state.limitsViewSettingsExpanded ? ' is-expanded' : ''}`;
-      toggle.setAttribute('aria-label', t('settings.views.configureLimits', { name: label }));
-      toggle.setAttribute('aria-expanded', String(Boolean(state.limitsViewSettingsExpanded)));
-      const toggleIcon = document.createElement('span');
-      toggleIcon.className = 'view-subgroup-icon';
-      toggleIcon.setAttribute('aria-hidden', 'true');
-      toggle.append(toggleIcon);
-      toggle.addEventListener('click', () => togglePreferenceSubgroup(VIEW_PREFERENCE_SUBGROUPS, '.view-preference-row', id));
-      actions.insertBefore(toggle, visibility);
-
-      const listContainer = document.createElement('div');
-      listContainer.id = 'limitsViewSettingsContainer';
-      listContainer.className = `accordion-animated-container${state.limitsViewSettingsExpanded ? '' : ' hidden'}`;
-      const inner = document.createElement('div');
-      inner.className = 'accordion-animation-inner';
-      inner.appendChild(renderLimitsViewSettingsList());
-      listContainer.appendChild(inner);
-      els.viewDisplayList.appendChild(listContainer);
-    }
-    if (id === 'home') {
-      row.classList.add('has-subgroup');
-      const toggle = document.createElement('button');
-      toggle.type = 'button';
-      toggle.className = `view-subgroup-toggle${state.homeSettingsExpanded ? ' is-expanded' : ''}`;
-      toggle.setAttribute('aria-label', t('settings.views.configureHome', { name: label }));
-      toggle.setAttribute('aria-expanded', String(Boolean(state.homeSettingsExpanded)));
-      const toggleIcon = document.createElement('span');
-      toggleIcon.className = 'view-subgroup-icon';
-      toggleIcon.setAttribute('aria-hidden', 'true');
-      toggle.append(toggleIcon);
-      toggle.addEventListener('click', () => togglePreferenceSubgroup(VIEW_PREFERENCE_SUBGROUPS, '.view-preference-row', id));
-      actions.insertBefore(toggle, visibility);
-
-      const listContainer = document.createElement('div');
-      listContainer.id = 'homeSettingsContainer';
-      listContainer.className = `accordion-animated-container${state.homeSettingsExpanded ? '' : ' hidden'}`;
-      const inner = document.createElement('div');
-      inner.className = 'accordion-animation-inner';
-      inner.appendChild(renderHomeSettingsList());
-      listContainer.appendChild(inner);
-      els.viewDisplayList.appendChild(listContainer);
-    }
-    if (id === 'trends') {
-      row.classList.add('has-subgroup');
-      const toggle = document.createElement('button');
-      toggle.type = 'button';
-      toggle.className = `view-subgroup-toggle${state.trendSettingsExpanded ? ' is-expanded' : ''}`;
-      toggle.setAttribute('aria-label', t('settings.views.configureTrend', { name: label }));
-      toggle.setAttribute('aria-expanded', String(Boolean(state.trendSettingsExpanded)));
-      const toggleIcon = document.createElement('span');
-      toggleIcon.className = 'view-subgroup-icon';
-      toggleIcon.setAttribute('aria-hidden', 'true');
-      toggle.append(toggleIcon);
-      toggle.addEventListener('click', () => togglePreferenceSubgroup(VIEW_PREFERENCE_SUBGROUPS, '.view-preference-row', id));
-      actions.insertBefore(toggle, visibility);
-      
-      const listContainer = document.createElement('div');
-      listContainer.id = 'trendSettingsContainer';
-      listContainer.className = `accordion-animated-container${state.trendSettingsExpanded ? '' : ' hidden'}`;
-      const inner = document.createElement('div');
-      inner.className = 'accordion-animation-inner';
-      inner.appendChild(renderTrendSettingsList());
-      listContainer.appendChild(inner);
-      els.viewDisplayList.appendChild(listContainer);
-    }
-    if (id === 'project') {
-      row.classList.add('has-subgroup');
-      const toggle = document.createElement('button');
-      toggle.type = 'button';
-      toggle.className = `view-subgroup-toggle${state.projectSettingsExpanded ? ' is-expanded' : ''}`;
-      toggle.setAttribute('aria-label', t('settings.views.configureProject', { name: label }));
-      toggle.setAttribute('aria-expanded', String(Boolean(state.projectSettingsExpanded)));
-      const toggleIcon = document.createElement('span');
-      toggleIcon.className = 'view-subgroup-icon';
-      toggleIcon.setAttribute('aria-hidden', 'true');
-      toggle.append(toggleIcon);
-      toggle.addEventListener('click', () => togglePreferenceSubgroup(VIEW_PREFERENCE_SUBGROUPS, '.view-preference-row', id));
-      actions.insertBefore(toggle, visibility);
-
-      const listContainer = document.createElement('div');
-      listContainer.id = 'projectSettingsContainer';
-      listContainer.className = `accordion-animated-container${state.projectSettingsExpanded ? '' : ' hidden'}`;
-      const inner = document.createElement('div');
-      inner.className = 'accordion-animation-inner';
-      inner.appendChild(renderProjectSettingsList());
-      listContainer.appendChild(inner);
-      els.viewDisplayList.appendChild(listContainer);
-    }
-    if (id === 'session') {
-      row.classList.add('has-subgroup');
-      const toggle = document.createElement('button');
-      toggle.type = 'button';
-      toggle.className = `view-subgroup-toggle${state.sessionSettingsExpanded ? ' is-expanded' : ''}`;
-      toggle.setAttribute('aria-label', t('settings.views.configureSession', { name: label }));
-      toggle.setAttribute('aria-expanded', String(Boolean(state.sessionSettingsExpanded)));
-      const toggleIcon = document.createElement('span');
-      toggleIcon.className = 'view-subgroup-icon';
-      toggleIcon.setAttribute('aria-hidden', 'true');
-      toggle.append(toggleIcon);
-      toggle.addEventListener('click', () => togglePreferenceSubgroup(VIEW_PREFERENCE_SUBGROUPS, '.view-preference-row', id));
-      actions.insertBefore(toggle, visibility);
-
-      const listContainer = document.createElement('div');
-      listContainer.id = 'sessionSettingsContainer';
-      listContainer.className = `accordion-animated-container${state.sessionSettingsExpanded ? '' : ' hidden'}`;
-      const inner = document.createElement('div');
-      inner.className = 'accordion-animation-inner';
-      inner.appendChild(renderSessionSettingsList());
-      listContainer.appendChild(inner);
-      els.viewDisplayList.appendChild(listContainer);
-    }
-    if (id === 'status') {
-      row.classList.add('has-subgroup');
-      const toggle = document.createElement('button');
-      toggle.type = 'button';
-      toggle.className = `view-subgroup-toggle${state.serviceProvidersExpanded ? ' is-expanded' : ''}`;
-      toggle.setAttribute('aria-label', t('serviceStatus.configureProviders', { name: label }));
-      toggle.setAttribute('aria-expanded', String(Boolean(state.serviceProvidersExpanded)));
-      const toggleIcon = document.createElement('span');
-      toggleIcon.className = 'view-subgroup-icon';
-      toggleIcon.setAttribute('aria-hidden', 'true');
-      toggle.append(toggleIcon);
-      toggle.addEventListener('click', () => togglePreferenceSubgroup(VIEW_PREFERENCE_SUBGROUPS, '.view-preference-row', id));
-      actions.insertBefore(toggle, actions.firstChild);
-      
-      const listContainer = document.createElement('div');
-      listContainer.id = 'serviceProvidersContainer';
-      listContainer.className = `accordion-animated-container${state.serviceProvidersExpanded ? '' : ' hidden'}`;
-      const inner = document.createElement('div');
-      inner.className = 'accordion-animation-inner';
-      inner.appendChild(renderServiceProviderList());
-      listContainer.appendChild(inner);
-      els.viewDisplayList.appendChild(listContainer);
-    }
+  // Only the switcher's own views reorder; the saved order still covers the
+  // hidden ones, so a view shown again returns to its slot.
+  const focusedView = document.activeElement?.matches('[data-preference-order-handle="view"]')
+    ? document.activeElement.closest('.view-preference-row')?.dataset.view : null;
+  els.viewDisplayList.replaceChildren(...shown.map((view) => row(view, true)));
+  els.hiddenViewList?.replaceChildren(...off.map((view) => row(view, false)));
+  if (els.hiddenViewGroup) els.hiddenViewGroup.hidden = off.length === 0;
+  const selected = views.find(({ id }) => id === state.mainSettingsView);
+  const selectedOff = !shownIds.has(selected.id);
+  renderMainViewInspector(selected, { off: selectedOff, lastVisible: !selectedOff && shown.length === 1,
+    unavailable: selected.id === 'limits' && disabled.has(selected.id) });
+  if (focusedView && document.activeElement === document.body) {
+    els.viewDisplayList.querySelector(`[data-view="${focusedView}"] .preference-order-handle`)?.focus({ preventScroll: true });
   }
 }
 
-function renderHomeLimitProviderList() {
-  const wrap = document.createElement('div');
-  wrap.id = 'homeLimitProviderList';
-  wrap.className = 'settings-nested-list home-limit-provider-list';
-  const hidden = hiddenHomeLimitProviderSet();
+function renderMainViewInspector(view, { off, lastVisible, unavailable }) {
+  const inspector = els.mainViewInspector;
+  if (!inspector) return;
+  inspector.classList.toggle('is-subpage', view.id === 'home' && Boolean(state.homeLimitProvidersOpen));
+  if (view.id === 'home' && state.homeLimitProvidersOpen) {
+    inspector.removeAttribute('aria-labelledby');
+    inspector.replaceChildren(renderHomeLimitProviderList());
+    return;
+  }
+  const header = document.createElement('div');
+  header.className = 'main-view-header';
+  const badge = document.createElement('span');
+  badge.className = 'main-view-badge';
+  badge.append(viewSwitcherIcon(view.id));
+  const heading = document.createElement('div');
+  heading.className = 'main-view-heading';
+  const title = document.createElement('strong');
+  title.id = 'mainViewInspectorTitle';
+  title.textContent = viewLabel(view);
+  heading.append(title);
+  if (off) {
+    const subtitle = document.createElement('span');
+    subtitle.className = 'main-view-subtitle';
+    subtitle.textContent = t('settings.views.hiddenGroup');
+    heading.append(subtitle);
+  }
+  header.append(badge, heading);
+  const visibility = document.createElement('label');
+  visibility.className = 'checkbox-label main-view-visibility';
+  const visibilityText = document.createElement('span');
+  visibilityText.className = 'settings-item-title';
+  visibilityText.textContent = t('settings.views.showInSwitcher');
+  const visibilityInput = document.createElement('input');
+  visibilityInput.type = 'checkbox';
+  visibilityInput.checked = !off;
+  visibilityInput.disabled = lastVisible || unavailable;
+  visibilityInput.addEventListener('change', () => void onMainViewVisibilityToggle(view.id));
+  visibility.append(visibilityText, visibilityInput);
+  inspector.setAttribute('aria-labelledby', title.id);
+  inspector.replaceChildren(header, visibility);
+  const settings = MAIN_VIEW_SETTINGS[view.id];
+  if (settings) inspector.append(settings());
+}
+
+function homeLimitProviders() {
   const enabled = enabledLimitProviderSet();
-  const providers = limitProviderOrderApi
+  return limitProviderOrderApi
     .orderedLimitProviders(desktopLimitProviders(), homeLimitProviderOrderValue())
     .filter(({ id }) => enabled.has(id));
-  const hasCustomOrder = Boolean(state.settings?.homeLimitProviderOrder);
-  const displayLabel = document.createElement('label');
-  displayLabel.className = 'settings-item';
+}
+
+function setHomeLimitProvidersOpen(open) {
+  state.homeLimitProvidersOpen = open;
+  renderViewPreferences();
+  const target = open ? '.main-view-back' : '.home-limit-providers-link';
+  els.mainViewInspector?.querySelector(target)?.focus();
+}
+
+// The Home limits module's own options. Its provider list is long enough to
+// get a page of its own inside the inspector, reached from the last row.
+function renderHomeLimitSettings() {
+  const wrap = document.createElement('div');
+  wrap.className = 'settings-nested-list home-limit-settings';
+  const displayRow = document.createElement('label');
+  displayRow.className = 'settings-item home-limit-display-setting';
   const displayText = document.createElement('span');
   displayText.className = 'settings-item-text';
   const displayTitle = document.createElement('span');
   displayTitle.className = 'settings-item-title';
   displayTitle.textContent = t('settings.home.limitDisplayMode');
+  displayText.append(displayTitle);
   const displayInput = document.createElement('select');
   for (const mode of ['text', 'bars']) {
     const option = document.createElement('option');
@@ -10811,8 +11140,7 @@ function renderHomeLimitProviderList() {
   }
   displayInput.value = homeModulePreferencesApi.normalizeHomeLimitDisplayMode(state.settings?.homeLimitDisplayMode);
   displayInput.addEventListener('change', () => void saveSettings({ homeLimitDisplayMode: displayInput.value }));
-  displayText.append(displayTitle);
-  displayLabel.append(displayText, displayInput);
+  displayRow.append(displayText, displayInput);
   const statusLabel = document.createElement('label');
   statusLabel.className = 'checkbox-label home-limit-status-setting';
   const statusInput = document.createElement('input');
@@ -10869,6 +11197,43 @@ function renderHomeLimitProviderList() {
     renderHomeIfVisible();
   });
   countLabel.append(countText, countInput);
+  const providers = homeLimitProviders();
+  const hidden = hiddenHomeLimitProviderSet();
+  const link = document.createElement('button');
+  link.type = 'button';
+  link.className = 'main-view-link home-limit-providers-link';
+  const linkTitle = document.createElement('span');
+  linkTitle.className = 'main-view-link-title';
+  linkTitle.textContent = t('settings.home.limitProviders');
+  const linkMeta = document.createElement('span');
+  linkMeta.className = 'main-view-link-meta';
+  linkMeta.textContent = String(providers.filter(({ id }) => !hidden.has(id)).length);
+  link.append(linkTitle, linkMeta);
+  link.addEventListener('click', () => setHomeLimitProvidersOpen(true));
+  wrap.append(displayRow, statusLabel, providerNamesLabel, countLabel, link);
+  return wrap;
+}
+
+function renderHomeLimitProviderList() {
+  const page = document.createElement('div');
+  page.className = 'main-view-subpage';
+  const back = document.createElement('button');
+  back.type = 'button';
+  back.className = 'display-settings-back main-view-back';
+  back.textContent = t('views.home');
+  back.addEventListener('click', () => setHomeLimitProvidersOpen(false));
+  const title = document.createElement('strong');
+  title.className = 'main-view-subpage-title';
+  title.textContent = t('settings.home.limitProviders');
+  const wrap = document.createElement('div');
+  wrap.id = 'homeLimitProviderList';
+  wrap.className = 'settings-nested-list home-limit-provider-list';
+  const hidden = hiddenHomeLimitProviderSet();
+  const enabled = enabledLimitProviderSet();
+  const providers = limitProviderOrderApi
+    .orderedLimitProviders(desktopLimitProviders(), homeLimitProviderOrderValue())
+    .filter(({ id }) => enabled.has(id));
+  const hasCustomOrder = Boolean(state.settings?.homeLimitProviderOrder);
   const header = document.createElement('div');
   header.className = 'settings-note-row home-limit-provider-header';
   const note = document.createElement('p');
@@ -10883,19 +11248,9 @@ function renderHomeLimitProviderList() {
   reset.setAttribute('aria-label', t('settings.views.resetOrder'));
   reset.disabled = !hasCustomOrder;
   reset.addEventListener('click', () => void resetHomeLimitProviderOrder());
-  const showAll = document.createElement('button');
-  showAll.type = 'button';
-  showAll.className = 'tool-header-action';
-  const showAllEye = document.createElement('span');
-  showAllEye.className = 'tool-header-eye';
-  showAllEye.setAttribute('aria-hidden', 'true');
-  showAll.append(showAllEye);
-  showAll.setAttribute('aria-label', t('settings.views.showAll'));
-  showAll.disabled = providers.every(({ id }) => !hidden.has(id));
-  showAll.addEventListener('click', () => void showAllHomeLimitProviders());
-  headerActions.append(reset, showAll);
+  headerActions.append(reset);
   header.append(note, headerActions);
-  wrap.append(displayLabel, statusLabel, providerNamesLabel, countLabel, header);
+  wrap.append(header);
   for (const { id, label, settingsLabel } of providers) {
     const isHidden = hidden.has(id);
     const row = document.createElement('div');
@@ -10913,7 +11268,6 @@ function renderHomeLimitProviderList() {
     visibility.className = `tool-visibility-button${isHidden ? ' is-hidden' : ''}`;
     visibility.setAttribute('aria-label', t(isHidden ? 'settings.home.showProvider' : 'settings.home.hideProvider', { name: settingsLabel || label }));
     visibility.setAttribute('aria-pressed', String(!isHidden));
-    visibility.append(visibilityIcon(isHidden));
     visibility.addEventListener('click', () => onHomeLimitProviderVisibilityToggle(id));
     const handle = createPreferenceOrderHandle({ kind: 'homeLimitProvider', id, label: settingsLabel || label, count: providers.length });
     const actions = document.createElement('div');
@@ -10923,7 +11277,8 @@ function renderHomeLimitProviderList() {
     row.addEventListener('pointerdown', (event) => homeLimitProviderRowDrag.startRowDrag(event, id));
     wrap.append(row);
   }
-  return wrap;
+  page.append(back, title, wrap);
+  return page;
 }
 
 function renderHomeModuleCountSettings(id) {
@@ -10968,6 +11323,15 @@ function renderHomeModuleCountSettings(id) {
   return wrap;
 }
 
+function homeModuleSummary(id) {
+  if (id === 'limits') {
+    return t(`settings.home.limitDisplayMode.${homeModulePreferencesApi.normalizeHomeLimitDisplayMode(state.settings?.homeLimitDisplayMode)}`);
+  }
+  if (id === 'trends') return t((state.settings?.heatmapMetric || 'cost') === 'tokens' ? 'dashboard.heatmap.tokens' : 'dashboard.heatmap.cost');
+  if (HOME_MODULE_SUBGROUPS[id]) return t('settings.home.itemCountValue', { n: homeModulePreferencesApi.homeModuleCount(state.settings, id) });
+  return '';
+}
+
 function renderHomeSettingsList() {
   const wrap = document.createElement('div');
   wrap.id = 'homeSettingsList';
@@ -10978,11 +11342,9 @@ function renderHomeSettingsList() {
     .filter((id) => !homeModulePreferencesApi.isPluginModuleId(id)).join(',') !== homeModulePreferencesApi.DEFAULT_HOME_MODULE_ORDER;
   const header = document.createElement('div');
   header.className = 'settings-note-row home-settings-header';
-  const note = document.createElement('p');
-  note.className = 'settings-note home-settings-note';
-  note.textContent = t('settings.views.homeSettingsNote');
-  const headerActions = document.createElement('div');
-  headerActions.className = 'tool-header-actions';
+  const caption = document.createElement('span');
+  caption.className = 'main-view-caption';
+  caption.textContent = t('settings.home.modules');
   const reset = document.createElement('button');
   reset.type = 'button';
   reset.className = 'tool-header-action';
@@ -10990,67 +11352,59 @@ function renderHomeSettingsList() {
   reset.setAttribute('aria-label', t('settings.views.resetOrder'));
   reset.disabled = !hasCustomOrder;
   reset.addEventListener('click', () => void resetHomeModuleOrder());
-  const showAll = document.createElement('button');
-  showAll.type = 'button';
-  showAll.className = 'tool-header-action';
-  const showAllEye = document.createElement('span');
-  showAllEye.className = 'tool-header-eye';
-  showAllEye.setAttribute('aria-hidden', 'true');
-  showAll.append(showAllEye);
-  showAll.setAttribute('aria-label', t('settings.views.showAll'));
-  showAll.disabled = hidden.size === 0;
-  showAll.addEventListener('click', () => void showAllHomeModules());
-  headerActions.append(reset, showAll);
-  header.append(note, headerActions);
+  header.append(caption, reset);
   wrap.append(header);
   for (const moduleOption of modules) {
     const id = moduleOption.id;
     const label = moduleOption.label || t(moduleOption.labelKey);
     const isHidden = hidden.has(id);
+    const subgroup = HOME_MODULE_SUBGROUPS[id];
     const row = document.createElement('div');
     row.className = 'home-module-preference-row';
     row.dataset.homeModule = id;
     row.classList.toggle('is-hidden', isHidden);
-    const name = document.createElement('div');
+    const main = document.createElement(subgroup ? 'button' : 'div');
+    main.className = subgroup ? 'home-module-disclosure' : 'home-module-static';
+    const name = document.createElement('span');
     name.className = 'tool-preference-name';
     name.textContent = label;
+    main.append(name);
+    const summary = homeModuleSummary(id);
+    if (summary) {
+      const meta = document.createElement('span');
+      meta.className = 'home-module-meta';
+      meta.textContent = summary;
+      main.append(meta);
+    }
+    if (subgroup) {
+      const expanded = Boolean(state[subgroup[0]]);
+      main.type = 'button';
+      main.classList.toggle('is-expanded', expanded);
+      main.setAttribute('aria-expanded', String(expanded));
+      main.setAttribute('aria-controls', subgroup[1]);
+      main.addEventListener('click', () => togglePreferenceSubgroup(HOME_MODULE_SUBGROUPS, '.home-module-preference-row', id));
+    }
+    const handle = createPreferenceOrderHandle({ kind: 'homeModule', id, label, count: modules.length });
+    const visibility = document.createElement('input');
+    visibility.type = 'checkbox';
+    visibility.className = 'settings-switch';
+    visibility.checked = !isHidden;
+    visibility.setAttribute('aria-label', t('settings.home.showModule', { name: label }));
+    visibility.addEventListener('change', () => void onHomeModuleVisibilityToggle(id));
     const actions = document.createElement('div');
     actions.className = 'tool-preference-actions';
-    if (HOME_MODULE_SUBGROUPS[id]) {
-      const configure = document.createElement('button');
-      configure.type = 'button';
-      const expanded = state[HOME_MODULE_SUBGROUPS[id][0]];
-      configure.className = `view-subgroup-toggle${expanded ? ' is-expanded' : ''}`;
-      configure.setAttribute('aria-label', t(id === 'limits' ? 'settings.home.configureLimits'
-        : id === 'trends' ? 'settings.home.configureActivity' : 'settings.home.configureModule', { name: label }));
-      configure.setAttribute('aria-expanded', String(Boolean(expanded)));
-      const toggleIcon = document.createElement('span');
-      toggleIcon.className = 'view-subgroup-icon';
-      toggleIcon.setAttribute('aria-hidden', 'true');
-      configure.append(toggleIcon);
-      configure.addEventListener('click', () => togglePreferenceSubgroup(HOME_MODULE_SUBGROUPS, '.home-module-preference-row', id));
-      actions.append(configure);
-    }
-    const visibility = document.createElement('button');
-    visibility.type = 'button';
-    visibility.className = `tool-visibility-button${isHidden ? ' is-hidden' : ''}`;
-    visibility.setAttribute('aria-label', t(isHidden ? 'settings.home.showModule' : 'settings.home.hideModule', { name: label }));
-    visibility.setAttribute('aria-pressed', String(!isHidden));
-    visibility.append(visibilityIcon(isHidden));
-    visibility.addEventListener('click', () => onHomeModuleVisibilityToggle(id));
-    const handle = createPreferenceOrderHandle({ kind: 'homeModule', id, label, count: modules.length });
-    actions.append(visibility, handle);
-    row.append(name, actions);
+    actions.append(handle, visibility);
+    row.append(main, actions);
     row.addEventListener('pointerdown', (event) => homeModulePreferenceRowDrag.startRowDrag(event, id));
     wrap.append(row);
-    const subgroup = HOME_MODULE_SUBGROUPS[id];
     if (subgroup) {
       const listContainer = document.createElement('div');
       listContainer.id = subgroup[1];
       listContainer.className = `accordion-animated-container${state[subgroup[0]] ? '' : ' hidden'}`;
+      listContainer.inert = !state[subgroup[0]];
       const inner = document.createElement('div');
       inner.className = 'accordion-animation-inner';
-      inner.appendChild(id === 'limits' ? renderHomeLimitProviderList()
+      inner.appendChild(id === 'limits' ? renderHomeLimitSettings()
         : id === 'trends' ? renderHomeActivitySettings() : renderHomeModuleCountSettings(id));
       listContainer.appendChild(inner);
       wrap.append(listContainer);
@@ -11118,6 +11472,34 @@ function renderHomeActivitySettings() {
   daysRow.append(daysLabel, daysOptions);
   frag.append(daysRow);
 
+  const trendTokensRow = document.createElement('div');
+  trendTokensRow.className = 'home-activity-settings';
+  const trendTokensLabel = document.createElement('span');
+  trendTokensLabel.textContent = t('settings.home.trendTokens');
+  const trendTokensOptions = document.createElement('div');
+  trendTokensOptions.className = 'inline-options';
+  trendTokensOptions.setAttribute('role', 'radiogroup');
+  trendTokensOptions.setAttribute('aria-label', trendTokensLabel.textContent);
+  const showExactTokens = state.settings?.showExactHomeTrendTokens === true;
+  for (const mode of ['compact', 'exact']) {
+    const option = document.createElement('label');
+    option.className = 'inline-option';
+    const input = document.createElement('input');
+    input.type = 'radio';
+    input.name = 'homeTrendTokens';
+    input.value = mode;
+    input.checked = showExactTokens === (mode === 'exact');
+    input.addEventListener('change', () => {
+      if (input.checked) void saveSettings({ showExactHomeTrendTokens: mode === 'exact' }).then(renderHomeIfVisible);
+    });
+    const text = document.createElement('span');
+    text.textContent = t(`settings.home.trendTokens.${mode}`);
+    option.append(input, text);
+    trendTokensOptions.append(option);
+  }
+  trendTokensRow.append(trendTokensLabel, trendTokensOptions);
+  frag.append(trendTokensRow);
+
   return frag;
 }
 
@@ -11147,6 +11529,43 @@ function renderLimitsViewSettingsList() {
   });
   row.append(text, input);
   wrap.appendChild(row);
+  return wrap;
+}
+
+function renderModelViewSettingsList() {
+  const wrap = document.createElement('div');
+  wrap.className = 'settings-nested-list';
+  const row = document.createElement('div');
+  row.className = 'settings-item';
+  const label = document.createElement('span');
+  label.id = 'modelRankingMetricLabel';
+  label.className = 'settings-item-text settings-item-title';
+  label.textContent = t('settings.modelRanking.label');
+  const options = document.createElement('div');
+  options.className = 'inline-options';
+  options.setAttribute('role', 'radiogroup');
+  options.setAttribute('aria-labelledby', label.id);
+  const metric = usageAttributionRowsApi.normalizeRankingMetric(state.settings?.modelRankingMetric);
+  for (const value of ['tokens', 'cost']) {
+    const option = document.createElement('label');
+    option.className = 'inline-option';
+    const input = document.createElement('input');
+    input.type = 'radio';
+    input.name = 'modelRankingMetric';
+    input.value = value;
+    input.checked = value === metric;
+    input.addEventListener('change', async () => {
+      if (!input.checked) return;
+      await saveSettings({ modelRankingMetric: value });
+      render();
+    });
+    const text = document.createElement('span');
+    text.textContent = t(`settings.modelRanking.${value}`);
+    option.append(input, text);
+    options.append(option);
+  }
+  row.append(label, options);
+  wrap.append(row);
   return wrap;
 }
 
@@ -11325,17 +11744,7 @@ function renderServiceProviderList() {
   reset.setAttribute('aria-label', t('settings.views.resetOrder'));
   reset.disabled = !hasCustomOrder;
   reset.addEventListener('click', () => void resetServiceProviderOrder());
-  const showAll = document.createElement('button');
-  showAll.type = 'button';
-  showAll.className = 'tool-header-action';
-  const showAllEye = document.createElement('span');
-  showAllEye.className = 'tool-header-eye';
-  showAllEye.setAttribute('aria-hidden', 'true');
-  showAll.append(showAllEye);
-  showAll.setAttribute('aria-label', t('settings.views.showAll'));
-  showAll.disabled = hidden.size === 0;
-  showAll.addEventListener('click', () => void showAllServiceProviders());
-  headerActions.append(reset, showAll);
+  headerActions.append(reset);
   header.append(note, headerActions);
   wrap.append(header);
   const SERVICE_STATUS_REFRESH_OPTIONS = [0, 60000, 120000, 300000, 900000, 1800000];
@@ -11371,7 +11780,6 @@ function renderServiceProviderList() {
     visibility.dataset.statusProvider = id;
     visibility.setAttribute('aria-label', t(isHidden ? 'serviceStatus.showProvider' : 'serviceStatus.hideProvider', { name: label }));
     visibility.setAttribute('aria-pressed', String(!isHidden));
-    visibility.append(visibilityIcon(isHidden));
     visibility.addEventListener('click', () => onServiceProviderVisibilityToggle(id));
     const handle = createPreferenceOrderHandle({ kind: 'statusProvider', id, label, count: providers.length });
     const actions = document.createElement('div');
@@ -11468,7 +11876,8 @@ function localClientSources(clientId) {
   const identity = clientSourcesIdentity(clientId);
   const exactSources = exactLocalClientSources(clientId);
   const key = clientSourceCacheApi.clientSourceRequestKey(identity);
-  const pendingSources = key && state.clientSourcesKey === key;
+  const pendingSources = key && (state.clientSourcesKey === key
+    || (qoderDisplayApi.isQoder(clientId) && state.clientSourcesKey === clientSourcesPanelKey('qoder')));
   const sources = pendingSources
     ? (exactSources ?? clientSourceCacheApi.readLatestClientSources(state.clientSources, identity) ?? [])
       .map((source) => ({ ...source, exists: false, pending: true }))
@@ -11478,26 +11887,31 @@ function localClientSources(clientId) {
   return [...(sources || []), { id: 'wsl-home', dir: '', exists: true }];
 }
 
+function clientSourcesPanelIds(clientId) {
+  return clientId === 'qoder' ? qoderDisplayApi.IDS : [String(clientId || '')];
+}
+
+function clientSourcesPanelKey(clientId) {
+  const keys = clientSourcesPanelIds(clientId).map(id => clientSourceCacheApi.clientSourceRequestKey(clientSourcesIdentity(id)));
+  return keys.every(Boolean) ? (keys.length === 1 ? keys[0] : JSON.stringify(keys)) : '';
+}
+
 function loadClientSources(clientId, options = {}) {
-  const id = String(clientId || '');
-  const identity = clientSourcesIdentity(id);
-  const key = clientSourceCacheApi.clientSourceRequestKey(identity);
+  const panelId = state.clientHealthExpanded === 'qoder' && qoderDisplayApi.isQoder(clientId) ? 'qoder' : clientId;
+  const ids = clientSourcesPanelIds(panelId);
+  const identities = ids.map(clientSourcesIdentity);
+  const key = clientSourcesPanelKey(panelId);
   if (!key) return false;
   if (!options.force && state.clientSourcesKey === key) return true;
-  if (
-    !options.force
-    && clientSourceCacheApi.readClientSources(state.clientSources, identity) !== null
-  ) return false;
+  if (!options.force && identities.every(identity => clientSourceCacheApi.readClientSources(state.clientSources, identity) !== null)) return false;
   state.clientSourcesKey = key;
   const request = ++state.clientSourcesRequest;
-  void window.tokenMonitor?.clientSources?.(id).then((result) => {
-    if (!result || typeof result !== 'object') throw new TypeError('Invalid client source result');
+  void Promise.all(ids.map(id => window.tokenMonitor?.clientSources?.(id))).then((results) => {
+    if (results.some(result => !result || typeof result !== 'object')) throw new TypeError('Invalid client source result');
     if (state.clientSourcesRequest !== request || state.clientSourcesKey !== key) return;
-    clientSourceCacheApi.writeClientSources(
-      state.clientSources,
-      identity,
-      Array.isArray(result.sources) ? result.sources : []
-    );
+    for (let index = 0; index < identities.length; index += 1) {
+      clientSourceCacheApi.writeClientSources(state.clientSources, identities[index], Array.isArray(results[index].sources) ? results[index].sources : []);
+    }
     state.clientSourcesKey = '';
     refillOpenClientHealthPanel();
   }).catch(() => {
@@ -11519,6 +11933,12 @@ function refillOpenClientHealthPanel() {
 // Everything the panel draws beyond the health record itself: the numbers the
 // app already renders elsewhere, and this machine's own paths.
 function clientHealthDetailFor(clientId) {
+  return clientId === 'qoder'
+    ? qoderDisplayApi.healthDetail(qoderDisplayApi.IDS.map(id => ({ id, detail: clientEditionHealthDetail(id) })))
+    : clientEditionHealthDetail(clientId);
+}
+
+function clientEditionHealthDetail(clientId) {
   const options = {
     usage: clientPeriodUsage(clientId),
     sources: localClientSources(clientId),
@@ -11532,7 +11952,7 @@ function clientHealthDetailFor(clientId) {
 function sameRenderedNode(current, next) {
   if (current.nodeType !== next.nodeType) return false;
   if (current.nodeType !== Node.ELEMENT_NODE) return true;
-  if (current.tagName !== next.tagName || current.className !== next.className) return false;
+  if (current.tagName !== next.tagName || current.className !== next.className || current.id !== next.id) return false;
   const currentAction = current.dataset?.healthAction || '';
   const nextAction = next.dataset?.healthAction || '';
   return currentAction === nextAction;
@@ -11550,7 +11970,8 @@ function patchRenderedNode(current, next) {
     const value = next.getAttribute(name);
     if (current.getAttribute(name) !== value) current.setAttribute(name, value);
   }
-  if (current instanceof HTMLInputElement && current.id.startsWith('codexDots') && current.type === 'checkbox') {
+  if (current instanceof HTMLInputElement && current.type === 'checkbox'
+    && (current.id.startsWith('codexDots') || current.id.startsWith('toolTrackEnabled-qoder') || current.id === 'qoderSeparateDisplay')) {
     current.checked = next.checked;
   }
   const currentChildren = Array.from(current.childNodes);
@@ -11692,6 +12113,24 @@ function codexDotsSettingState(key) {
   return { checked, pending };
 }
 
+function qoderCollectionControls(group) {
+  const current = Object.assign({}, state.settings, ...pendingSettingsPatches);
+  return qoderCollectionSettingsApi.create({
+    document, t, editions: group.editions, clients: current.clients,
+    separate: current.separateQoderClients === true,
+    hidden: hiddenClientSet(), pinned: pinnedClientSet(),
+    onTrack: async (id, checked) => {
+      const clients = Object.assign({}, state.settings, ...pendingSettingsPatches).clients;
+      const selected = new Set(String(clients || '').split(',').filter(Boolean));
+      if (checked) selected.add(id); else selected.delete(id);
+      await saveSettings({ clients: [...selected].join(',') });
+    },
+    onSeparate: checked => saveSettings({ separateQoderClients: checked }),
+    onVisibility: onClientVisibilityToggle, onPin: onClientPinnedToggle,
+    formatTime: stamp => formatAgo(Math.max(0, Date.now() - (Date.parse(stamp) || Date.now())))
+  });
+}
+
 function clientHealthGroup(group, notes, clientId) {
   const section = document.createElement('section');
   section.className = `tool-health-group tool-health-group-${group.id}`;
@@ -11716,7 +12155,8 @@ function clientHealthGroup(group, notes, clientId) {
       const addSource = document.createElement('button');
       addSource.type = 'button';
       addSource.className = 'tool-health-source-control tool-health-source-add';
-      addSource.setAttribute('aria-label', t('settings.tools.health.addCustomSource'));
+      addSource.setAttribute('aria-label', t('settings.tools.health.addCustomSource')
+        + (clientId === 'qoder' ? ` · ${t('settings.tools.qoder.global')}` : ''));
       addSource.append(customSourceIcon('add'));
       const label = document.createElement('span');
       label.textContent = addSource.getAttribute('aria-label');
@@ -11765,7 +12205,8 @@ function clientHealthGroup(group, notes, clientId) {
     const summary = document.createElement('div');
     summary.className = 'tool-health-group-summary';
     summary.textContent = t(`settings.tools.health.sync.${group.state}`);
-    body.append(summary);
+    if (clientId === 'qoder') body.append(qoderCollectionControls(group));
+    else body.append(summary);
     if (clientId === 'codex') {
       const row = document.createElement('label');
       row.className = 'checkbox-label codex-dots-setting';
@@ -11880,7 +12321,7 @@ function clientHealthGroup(group, notes, clientId) {
   for (const note of notes) {
     const line = document.createElement('div');
     line.className = `tool-health-note-line tone-${note.tone}`;
-    line.textContent = t(`settings.tools.health.code.${note.code}`);
+    line.textContent = `${note.clientId ? (note.clientId === 'qoder' ? t('settings.tools.qoder.global') : 'CN') + ': ' : ''}${t(`settings.tools.health.code.${note.code}`)}`;
     body.append(line);
   }
   if (group.id !== 'source') section.append(heading);
@@ -12013,7 +12454,14 @@ function clientHealthPanel(detail, clientId) {
       clientId
     ));
   }
-  box.append(groups, clientHealthActions(clientId, detail));
+  box.append(groups);
+  for (const id of clientSourcesPanelIds(clientId)) {
+    const actions = clientHealthActions(id, id === clientId && clientId !== 'qoder' ? detail : clientEditionHealthDetail(id));
+    if (clientId === 'qoder') {
+      for (const button of actions.querySelectorAll('button')) button.textContent += ` · ${id === 'qoder' ? t('settings.tools.qoder.global') : 'CN'}`;
+    }
+    box.append(actions);
+  }
   return inner;
 }
 
@@ -12094,7 +12542,7 @@ const clientPreferenceRowDrag = rowDragControllerApi.createRowDragController({
   dragSort: verticalDragSortApi,
   getList: () => els.clientDisplayList,
   getScrollPanel: () => els.settingsPanel,
-  rowSelector: '.tool-preference-row[data-client]',
+  rowSelector: ':scope > .tool-preference-row[data-client]',
   idKey: 'client',
   dragExcluded: CLIENT_PREFERENCE_DRAG_EXCLUDED,
   getExpanded: () => state.clientHealthExpanded,
@@ -12102,7 +12550,10 @@ const clientPreferenceRowDrag = rowDragControllerApi.createRowDragController({
   applyOrder: (order) => applyPreferenceOrder('client', order),
   preserveScroll: preserveSettingsPanelScroll,
   mirrorOrder: (order, id) => {
-    const patch = clientDisplayPreferencesApi.clientDisplayOrderCommit(order, KNOWN_CLIENTS, state.settings?.clientDisplayOrder, state.settings?.pinnedClients, id);
+    // The drag sees only the tracked group; write it back into the full order.
+    const full = toolPreferenceRows().clients.map(client => client.id);
+    const merged = settingsListFilterApi.mergeSubsetOrder(full, order);
+    const patch = qoderDisplayApi.orderCommit(merged, KNOWN_CLIENTS, state.settings?.clientDisplayOrder, state.settings?.pinnedClients, id);
     state.settings = { ...state.settings, ...patch };
     return patch;
   },
@@ -12133,9 +12584,169 @@ function toolPreferenceQuery() {
 // detaches them from the document for good. Both lists follow the same rule so
 // the invariant is one rule, not a per-list exception.
 function toolPreferenceRows() {
-  const clients = clientDisplayPreferencesApi.orderedClients(KNOWN_CLIENTS, state.settings?.clientDisplayOrder, state.settings?.pinnedClients);
-  const matches = settingsListFilterApi.filterListItems(clients, state.toolSearchQuery, ({ id, label }) => `${label} ${id}`);
+  const ordered = clientDisplayPreferencesApi.orderedClients(KNOWN_CLIENTS, state.settings?.clientDisplayOrder, state.settings?.pinnedClients);
+  const order = qoderDisplayApi.displayPreference(ordered.map(client => client.id).join(','), false).split(',');
+  const clients = order.map(id => KNOWN_CLIENTS.find(client => client.id === id));
+  const matches = settingsListFilterApi.filterListItems(clients, state.toolSearchQuery, ({ id, label }) => id === 'qoder' ? `Qoder Qoder CN qodercn ${t('settings.tools.qoder.global')}` : `${label} ${id}`);
   return { clients, matched: new Set(matches.map(({ id }) => id)) };
+}
+
+// Leads a tracked-tool or limit-provider row, always in the text colour. A tool
+// without a mark keeps the same footprint with its initial, so names still
+// line up.
+function settingsListIcon(id, label, iconSet, extraClass = '') {
+  const icon = document.createElement('span');
+  icon.setAttribute('aria-hidden', 'true');
+  if (iconSet.has(id)) {
+    icon.className = `settings-list-icon ink-icon row-icon-${id}${extraClass ? ` ${extraClass}` : ''}`;
+  } else {
+    icon.className = 'settings-list-icon settings-list-icon-fallback';
+    icon.textContent = String(label || id).trim().charAt(0).toUpperCase();
+  }
+  return icon;
+}
+
+function settingsListRendered(list, rowSelector, rowCount, empty) {
+  return list.querySelectorAll(rowSelector).length === rowCount
+    && Boolean(list.querySelector(':scope > .settings-list-empty')) === empty;
+}
+
+// Enabled rows go straight into the list, in front of `before`, so the drag
+// controller and keyboard order — which only look at the list's own rows —
+// cover exactly the group that can be reordered. The rest wait in a collapsed
+// group underneath. While a filter is on, or when one side is empty, headings
+// would only add noise, so the rest are shown flat.
+function renderSettingsListGroups(list, { id, enabledCount, disabled, filtering, iconSet, iconClass = '', labels, expandedKey }) {
+  const rows = document.createElement('div');
+  rows.className = 'settings-list-group-rows';
+  if (!disabled.length) return { before: null, rows };
+  const host = document.createElement('div');
+  host.id = id;
+  host.className = 'accordion-animated-container settings-list-group';
+  const inner = document.createElement('div');
+  inner.className = 'accordion-animation-inner';
+  inner.append(rows);
+  host.append(inner);
+  if (filtering || !enabledCount) {
+    list.append(host);
+    return { before: host, rows };
+  }
+  const heading = document.createElement('p');
+  heading.className = 'settings-list-group-label';
+  heading.textContent = t(labels.enabled, { count: enabledCount });
+  const toggle = document.createElement('button');
+  toggle.type = 'button';
+  toggle.id = `${id}Toggle`;
+  toggle.className = 'settings-list-group-toggle';
+  toggle.setAttribute('aria-controls', id);
+  const title = document.createElement('span');
+  title.className = 'settings-list-group-label';
+  title.textContent = t(labels.disabled, { count: disabled.length });
+  const icons = document.createElement('span');
+  icons.className = 'settings-list-group-icons';
+  icons.setAttribute('aria-hidden', 'true');
+  for (const item of disabled.slice(0, 5)) {
+    const chip = document.createElement('span');
+    chip.className = 'settings-list-group-icon';
+    chip.append(settingsListIcon(item.id, item.label, iconSet, iconClass));
+    icons.append(chip);
+  }
+  const action = document.createElement('span');
+  action.className = 'settings-list-group-action';
+  const chevron = document.createElement('span');
+  chevron.className = 'cursor-disclosure-icon';
+  chevron.setAttribute('aria-hidden', 'true');
+  toggle.append(title, icons, action, chevron);
+  const apply = (expanded) => {
+    state[expandedKey] = expanded;
+    toggle.setAttribute('aria-expanded', String(expanded));
+    toggle.classList.toggle('expanded', expanded);
+    action.textContent = t(expanded ? 'settings.list.group.collapse' : 'settings.list.group.showAll');
+    host.classList.toggle('hidden', !expanded);
+    host.inert = !expanded;
+  };
+  apply(state[expandedKey] === true);
+  toggle.addEventListener('click', () => apply(host.classList.contains('hidden')));
+  list.append(heading, toggle, host);
+  return { before: toggle, rows };
+}
+
+// Restores focus after a repaint. A switch just turned off lands in the
+// collapsed, inert group, so focus goes to that group's toggle instead of
+// falling back to the document.
+function restoreSettingsListFocus(focusedId) {
+  if (!focusedId || document.activeElement !== document.body) return;
+  const target = document.getElementById(focusedId);
+  const group = target?.closest('.settings-list-group');
+  const toggle = group?.inert ? document.getElementById(`${group.id}Toggle`) : null;
+  (toggle || target)?.focus({ preventScroll: true });
+  // The toggle can sit below the fold of a long list. Reveal it after the
+  // repaint's scroll preservation, by id since a later repaint may replace it,
+  // and as an interaction so a pending restore does not scroll it away again.
+  if (toggle && typeof requestAnimationFrame === 'function') {
+    requestAnimationFrame(() => setTimeout(() => {
+      const current = document.getElementById(toggle.id);
+      if (!current || document.activeElement !== current) return;
+      settingsScrollInteractionRevision += 1;
+      current.scrollIntoView({ block: 'nearest' });
+    }, 0));
+  }
+}
+
+// Switching a row on or off moves it between the groups. The toggle records
+// what it expects, and the repaint that shows it slides the rows into place
+// instead of letting them jump.
+function takeSettingsListMotion(kind, isEnabled) {
+  const motion = state.settingsListMotion;
+  if (motion?.kind !== kind || isEnabled(motion.id) !== motion.enabled) return false;
+  state.settingsListMotion = null;
+  return !prefersReducedMotion();
+}
+
+function settingsRowVisible(row) {
+  return !row.classList.contains('is-filtered-out') && !row.closest('.accordion-animated-container.hidden');
+}
+
+function captureSettingsRowMotion(list, selector, key) {
+  const base = list.getBoundingClientRect().top;
+  const tops = new Map();
+  for (const row of list.querySelectorAll(selector)) {
+    if (!settingsRowVisible(row)) continue;
+    tops.set(row.dataset[key], { top: row.getBoundingClientRect().top - base, grouped: Boolean(row.closest('.settings-list-group')) });
+  }
+  return tops;
+}
+
+function playSettingsRowMotion(list, selector, key, before) {
+  if (!before) return;
+  const base = list.getBoundingClientRect().top;
+  const timing = { duration: 220, easing: 'cubic-bezier(0.22, 1, 0.36, 1)' };
+  for (const row of list.querySelectorAll(selector)) {
+    if (!settingsRowVisible(row)) continue;
+    const from = before.get(row.dataset[key]);
+    // A row crossing into the group would slide in from above its clipping
+    // wrapper and stay hidden until it got there, so it fades in instead.
+    const entering = !from || (!from.grouped && Boolean(row.closest('.settings-list-group')));
+    const offset = entering ? 0 : from.top - (row.getBoundingClientRect().top - base);
+    // `translate`, not `transform`: the drag controller owns the transform.
+    if (entering) row.animate([{ opacity: 0 }, { opacity: 1 }], timing);
+    else if (Math.abs(offset) > 0.5) row.animate([{ translate: `0 ${offset}px` }, { translate: '0 0' }], timing);
+  }
+}
+
+// The tracked selection including writes still in flight, so a repaint during
+// a toggle keeps each row in the group its switch shows.
+function pendingTrackedClients() {
+  return Object.assign({}, state.settings, ...pendingSettingsPatches).clients;
+}
+
+// Whether a tracked-tools row belongs to the tracked group. Qoder's single row
+// counts when either edition is tracked.
+function clientRowTracked(id) {
+  const clients = pendingTrackedClients();
+  if (id !== 'qoder') return String(clients || '').split(',').map(s => s.trim().toLowerCase()).includes(id);
+  const tracking = qoderDisplayApi.trackingState(clients);
+  return tracking.checked || tracking.mixed;
 }
 
 function renderSettingsListEmptyState(list) {
@@ -12151,8 +12762,11 @@ function toolPreferenceRenderSignature() {
   const device = localDevice();
   return JSON.stringify({
     settings: [
-      [...enabledClientSet()].sort(),
+      // The rows group by the selection including in-flight writes, so a write
+      // that fails and is dropped must invalidate them too.
+      String(pendingTrackedClients() || '').split(',').map(s => s.trim().toLowerCase()).filter(Boolean).sort(),
       state.settings?.hiddenClients || '',
+      state.settings?.separateQoderClients === true,
       state.settings?.pinnedClients || '',
       state.settings?.clientDisplayOrder || '',
       state.settings?.locale || state.settings?.language || '',
@@ -12178,20 +12792,20 @@ function renderToolPreferencesNow() {
   const detailSignature = JSON.stringify([
     localClientHealth(),
     localDevice(),
-    state.settings?.currencyRatesEffective || null
+    state.settings?.currencyRatesEffective || null,
+    // The open panel's actions read the saved selection, which can land after
+    // the rows already repainted from the pending one.
+    state.settings?.clients || ''
   ]);
-  const sourceSignature = clientSourceCacheApi.clientSourceRequestKey(
-    clientSourcesIdentity(state.clientHealthExpanded)
-  );
+  const sourceSignature = clientSourcesPanelKey(state.clientHealthExpanded);
   const { clients, matched } = toolPreferenceRows();
   // Every client keeps a row; a query with no match adds the no-matches note on
   // top of them, so the short-circuit compares against what this query is
   // expected to have produced.
-  const expectedRowCount = clients.length + (matched.size ? 0 : 1);
   if (
     state.toolPreferenceRenderSignature
     && state.toolPreferenceRenderSignature === renderSignature
-    && els.clientDisplayList.children.length === expectedRowCount
+    && settingsListRendered(els.clientDisplayList, '.tool-preference-row[data-client]', clients.length, !matched.size)
   ) {
     if (state.toolPreferenceDetailSignature !== detailSignature) {
       state.toolPreferenceDetailSignature = detailSignature;
@@ -12208,9 +12822,11 @@ function renderToolPreferencesNow() {
   state.toolPreferenceRenderSignature = renderSignature;
   state.toolPreferenceDetailSignature = detailSignature;
   state.toolPreferenceSourceSignature = sourceSignature;
-  const previousRows = Array.from(els.clientDisplayList.children);
+  const previousChildren = Array.from(els.clientDisplayList.children);
   const focusedId = document.activeElement?.id || '';
-  const enabled = enabledClientSet();
+  // One selection for the whole repaint, including writes still in flight:
+  // grouping, switches and the attention check must agree with the signature.
+  const enabled = new Set(String(pendingTrackedClients() || '').split(',').map(s => s.trim().toLowerCase()).filter(Boolean));
   const hidden = hiddenClientSet();
   const pinned = pinnedClientSet();
   const clientStatus = localClientStatus();
@@ -12218,25 +12834,42 @@ function renderToolPreferencesNow() {
   const filtering = Boolean(toolPreferenceQuery());
   const hasCustomOrder = clientDisplayPreferencesApi.hasCustomDisplayOrder(state.settings?.clientDisplayOrder);
   const hasPinnedClients = pinned.size > 0;
-  const hasHiddenClients = hidden.size > 0;
   if (els.resetClientDisplayOrderButton) els.resetClientDisplayOrderButton.disabled = !hasCustomOrder && !hasPinnedClients;
-  if (els.showAllClientsButton) els.showAllClientsButton.disabled = !hasHiddenClients;
+  const qoderTrackingState = qoderDisplayApi.trackingState(pendingTrackedClients());
+  const isTracked = clientRowTracked;
+  const motion = takeSettingsListMotion('client', isTracked)
+    ? captureSettingsRowMotion(els.clientDisplayList, '.tool-preference-row[data-client]', 'client')
+    : null;
+  const untrackedClients = clients.filter(({ id }) => !isTracked(id));
+  const groups = renderSettingsListGroups(els.clientDisplayList, {
+    id: 'clientDisplayUntrackedGroup',
+    enabledCount: clients.length - untrackedClients.length,
+    disabled: untrackedClients,
+    filtering,
+    iconSet: clientsWithIcon,
+    labels: { enabled: 'settings.tools.group.tracked', disabled: 'settings.tools.group.untracked' },
+    expandedKey: 'clientDisplayUntrackedExpanded'
+  });
   for (const { id, label } of clients) {
+    const qoderTracking = id === 'qoder' ? qoderTrackingState : null;
+    const tracked = isTracked(id);
     const row = document.createElement('div');
     row.className = 'tool-preference-row';
     row.dataset.client = id;
-    const isHidden = hidden.has(id);
-    const isPinned = pinned.has(id);
+    const isHidden = id === 'qoder' ? qoderDisplayApi.IDS.every(member => hidden.has(member)) : hidden.has(id);
+    const isPinned = id === 'qoder' ? qoderDisplayApi.IDS.some(member => pinned.has(member)) : pinned.has(id);
     row.classList.toggle('is-hidden', isHidden);
     row.classList.toggle('is-pinned', isPinned);
+    row.classList.toggle('is-untracked', !tracked);
     row.classList.toggle('is-filtered-out', !matched.has(id));
-    const labelGroup = document.createElement('div');
+    const labelGroup = document.createElement('span');
     labelGroup.className = 'tool-preference-label';
-    const name = document.createElement('div');
+    const name = document.createElement('span');
     name.className = 'tool-preference-name';
     name.textContent = label;
-    labelGroup.append(name);
-    if (enabled.has(id)) {
+    labelGroup.append(settingsListIcon(id, label, clientsWithIcon), name);
+    let statusTag = null;
+    if (tracked) {
       // A tracked client with no reported status yet (first collect still running)
       // reads as "waiting for data" rather than a bare blank.
       //
@@ -12244,36 +12877,52 @@ function renderToolPreferencesNow() {
       // client whose sync broke this morning still counts yesterday's tokens and
       // would keep reporting "Tracking" — leaving the one state this whole
       // feature exists to surface invisible until the row is expanded.
-      const needsAttention = health?.clients?.[id]?.overall === 'attention';
+      const needsAttention = id === 'qoder'
+        ? qoderDisplayApi.IDS.some(member => enabled.has(member) && health?.clients?.[member]?.overall === 'attention')
+        : health?.clients?.[id]?.overall === 'attention';
       const tagInfo = needsAttention
         ? { key: 'settings.tools.status.attention', tone: 'warn' }
-        : clientStatusPresentationApi.clientStatusTag(id, clientStatus[id] || 'waiting');
+        : id === 'qoder'
+          ? { key: qoderTracking.mixed ? 'settings.tools.qoder.partial' : 'settings.tools.qoder.all', tone: 'ok' }
+          : clientStatusPresentationApi.clientStatusTag(id, clientStatus[id] || 'waiting');
       if (tagInfo) {
-        const tag = document.createElement('span');
-        tag.className = `tool-status-tag tool-status-tag-${tagInfo.tone}`;
-        tag.textContent = t(tagInfo.key);
-        labelGroup.append(tag);
+        statusTag = document.createElement('span');
+        statusTag.className = `tool-status-tag tool-status-tag-${tagInfo.tone}`;
+        // A healthy client is a dot: the group heading already says it is
+        // tracked. Every other state keeps its words.
+        if (tagInfo.tone === 'ok' && tagInfo.key !== 'settings.tools.qoder.partial') {
+          statusTag.classList.add('is-dot');
+          statusTag.setAttribute('role', 'img');
+          statusTag.setAttribute('aria-label', t(tagInfo.key));
+        } else {
+          statusTag.textContent = t(tagInfo.key);
+        }
       }
     }
     const track = document.createElement('label');
     track.className = 'tool-preference-toggle';
     const trackInput = document.createElement('input');
     trackInput.type = 'checkbox';
-    trackInput.id = `toolTrackEnabled-${id}`;
+    trackInput.className = 'settings-switch';
+    trackInput.id = id === 'qoder' ? 'toolTrackGroup-qoder' : `toolTrackEnabled-${id}`;
     trackInput.dataset.client = id;
-    trackInput.dataset.preference = 'track';
-    trackInput.checked = enabled.has(id);
+    trackInput.dataset.preference = id === 'qoder' ? 'track-group' : 'track';
+    trackInput.checked = id === 'qoder' ? qoderTracking.checked : tracked;
+    trackInput.indeterminate = id === 'qoder' && qoderTracking.mixed;
     trackInput.setAttribute('aria-label', t('settings.tools.trackClient', { name: label }));
-    trackInput.addEventListener('change', onToolTrackingToggle);
-    // The drag handle is gone, so the checkbox carries the keyboard reorder
+    trackInput.addEventListener('change', () => { state.settingsListMotion = { kind: 'client', id, enabled: trackInput.checked }; });
+    trackInput.addEventListener('change', id === 'qoder' ? () => onQoderTrackingToggle(trackInput.checked) : onToolTrackingToggle);
+    // The drag handle is gone, so the switch carries the keyboard reorder
     // shortcuts. A checkbox has no native arrow-key behaviour, so the existing
-    // key bindings transfer unchanged.
-    trackInput.setAttribute('aria-keyshortcuts', 'ArrowUp ArrowDown Home End');
+    // key bindings transfer unchanged. Only the tracked group is ordered.
     // Arrow/Home/End reordering derives the next order from settings rather than
     // from the DOM, so a filter cannot corrupt it — but it would move the row
     // through positions the query has hidden, with nothing on screen to show
     // for it. Off while filtering, like the drag.
-    if (!filtering) trackInput.addEventListener('keydown', (event) => onPreferenceOrderKeydown(event, 'client', id));
+    if (!filtering && tracked) {
+      trackInput.setAttribute('aria-keyshortcuts', 'ArrowUp ArrowDown Home End');
+      trackInput.addEventListener('keydown', (event) => onPreferenceOrderKeydown(event, 'client', id));
+    }
     track.append(trackInput);
     const visibility = document.createElement('button');
     visibility.type = 'button';
@@ -12282,8 +12931,7 @@ function renderToolPreferencesNow() {
     visibility.dataset.client = id;
     visibility.setAttribute('aria-label', t(isHidden ? 'settings.tools.showClient' : 'settings.tools.hideClient', { name: label }));
     visibility.setAttribute('aria-pressed', String(!isHidden));
-    visibility.append(visibilityIcon(isHidden));
-    visibility.addEventListener('click', () => onClientVisibilityToggle(id));
+    visibility.addEventListener('click', () => id === 'qoder' ? onQoderPreferenceToggle('hiddenClients') : onClientVisibilityToggle(id));
     const pin = document.createElement('button');
     pin.type = 'button';
     pin.id = `toolPin-${id}`;
@@ -12291,18 +12939,27 @@ function renderToolPreferencesNow() {
     pin.dataset.client = id;
     pin.setAttribute('aria-label', t(isPinned ? 'settings.tools.unpinClient' : 'settings.tools.pinClient', { name: label }));
     pin.setAttribute('aria-pressed', String(isPinned));
-    pin.append(pinIcon());
-    pin.addEventListener('click', () => onClientPinnedToggle(id));
+    pin.addEventListener('click', () => id === 'qoder' ? onQoderPreferenceToggle('pinnedClients') : onClientPinnedToggle(id));
+    // Status sits against the switch, as on the limits list; the eye and pin
+    // appear to its left on hover.
     const actions = document.createElement('div');
     actions.className = 'tool-preference-actions';
     actions.append(visibility, pin);
+    if (statusTag) actions.append(statusTag);
+    actions.append(track);
+    // Same lead column as the limits list: the chevron, or an empty slot, keeps
+    // every icon and name aligned.
+    const disclosure = document.createElement('span');
+    disclosure.className = 'tool-preference-chevron';
+    disclosure.setAttribute('aria-hidden', 'true');
     // Tracked tools use the health snapshot; untracked tools get an on-demand
     // source view so every row keeps the same disclosure affordance.
     const detail = clientHealthDetailFor(id);
+    let main;
     if (detail) {
       const expanded = state.clientHealthExpanded === id;
       row.classList.toggle('expanded', expanded);
-      const main = document.createElement('button');
+      main = document.createElement('button');
       main.type = 'button';
       main.id = `toolHealthDisclosure-${id}`;
       main.className = 'tool-preference-main';
@@ -12310,8 +12967,7 @@ function renderToolPreferencesNow() {
       main.setAttribute('aria-expanded', String(expanded));
       const disclosureIcon = document.createElement('span');
       disclosureIcon.className = 'cursor-disclosure-icon';
-      disclosureIcon.setAttribute('aria-hidden', 'true');
-      main.append(disclosureIcon);
+      disclosure.append(disclosureIcon);
       const panel = document.createElement('div');
       panel.id = `toolHealthPanel-${id}`;
       panel.className = `accordion-animated-container${expanded ? '' : ' hidden'}`;
@@ -12324,26 +12980,28 @@ function renderToolPreferencesNow() {
         const open = state.clientHealthExpanded !== id;
         setClientHealthExpanded(open ? id : '', { refreshPlaceholder: open });
       });
-      // Last of the row's controls, where the eye and the pin already are —
-      // the label stays plain text, exactly as it reads without this feature.
-      actions.append(main);
       row.classList.add('has-health');
-      row.append(track, labelGroup, actions, panel);
+      main.append(disclosure, labelGroup);
+      row.append(main, actions, panel);
     } else {
-      row.append(track, labelGroup, actions);
+      main = document.createElement('div');
+      main.className = 'tool-preference-main';
+      main.append(disclosure, labelGroup);
+      row.append(main, actions);
     }
     // Reordering is suppressed while a filter is on: the drop commits the order
-    // it reads off the list, and a filtered list is only part of it.
-    if (!filtering) row.addEventListener('pointerdown', (event) => clientPreferenceRowDrag.startRowDrag(event, id));
-    els.clientDisplayList.appendChild(row);
+    // it reads off the list, and a filtered list is only part of it. Untracked
+    // tools wait in their own group and have no order to change.
+    if (!filtering && tracked) row.addEventListener('pointerdown', (event) => clientPreferenceRowDrag.startRowDrag(event, id));
+    if (tracked) els.clientDisplayList.insertBefore(row, groups.before);
+    else groups.rows.append(row);
   }
   if (!matched.size) renderSettingsListEmptyState(els.clientDisplayList);
   // Appended first and only then swapped out: replacing the list wholesale
   // would destroy the row under the pointer on every stats tick.
-  for (const row of previousRows) row.remove();
-  if (focusedId && document.activeElement === document.body) {
-    document.getElementById(focusedId)?.focus({ preventScroll: true });
-  }
+  for (const child of previousChildren) child.remove();
+  restoreSettingsListFocus(focusedId);
+  playSettingsRowMotion(els.clientDisplayList, '.tool-preference-row[data-client]', 'client', motion);
 }
 
 function connectLimitProviderCheckboxName(checkbox, nameNode, providerId) {
@@ -12355,6 +13013,17 @@ function connectLimitProviderCheckboxName(checkbox, nameNode, providerId) {
 function moveLimitProviderLiveNode(parent, node, before = null) {
   if (!parent || !node || node.parentElement === parent) return;
   parent.moveBefore(node, before);
+}
+
+// Account management leads each provider. Move live nodes so keyboard order,
+// focused edits and provider listeners follow the same order as the layout.
+function prioritizeLimitProviderAccounts(group) {
+  const details = group?.querySelector('.cursor-settings-details');
+  const body = details?.querySelector(':scope > .cursor-settings-details-inner') || details;
+  let accounts = body?.querySelector('.slot-panel, .managed-account-list, .opencode-profile-list');
+  if (!accounts) return;
+  while (accounts.parentElement !== body) accounts = accounts.parentElement;
+  if (accounts !== body.firstElementChild) body.moveBefore(accounts, body.firstElementChild);
 }
 
 function limitProviderQuery() {
@@ -12382,18 +13051,21 @@ function renderLimitProviderCheckboxes() {
 }
 
 function renderLimitProviderCheckboxesNow() {
+  renderAccountSlotPanels();
+  refreshAccountSlotPanels();
+  for (const [id, panel] of automaticAccountPanels) panel.controller.update(strictLocalProviderStatuses(id));
   const renderSignature = limitProviderSettingsRenderSignature();
   const { providers, matched } = limitProviderRows();
   // Same reasoning as the tracked-tools list: every provider keeps a row, and no
   // matches leaves the no-matches note on top of them.
-  const expectedRowCount = providers.length + (matched.size ? 0 : 1);
   if (
     state.limitProviderRenderSignature === renderSignature
-    && els.limitProviderCheckboxes.children.length === expectedRowCount
+    && settingsListRendered(els.limitProviderCheckboxes, '.limit-provider-row[data-provider]', providers.length, !matched.size)
   ) {
     return;
   }
-  const previousRows = Array.from(els.limitProviderCheckboxes.children);
+  const previousChildren = Array.from(els.limitProviderCheckboxes.children);
+  const previousRows = Array.from(els.limitProviderCheckboxes.querySelectorAll('.limit-provider-row[data-provider]'));
   const focusedId = document.activeElement?.id || '';
   const reusableSettingInputs = new Map();
   for (const row of previousRows) {
@@ -12412,29 +13084,51 @@ function renderLimitProviderCheckboxesNow() {
   }
   const enabled = enabledLimitProviderSet();
   const filtering = Boolean(limitProviderQuery());
+  const motion = takeSettingsListMotion('provider', id => enabled.has(id))
+    ? captureSettingsRowMotion(els.limitProviderCheckboxes, '.limit-provider-row[data-provider]', 'provider')
+    : null;
+  const disabledProviders = providers.filter(({ id }) => !enabled.has(id));
+  const groups = renderSettingsListGroups(els.limitProviderCheckboxes, {
+    id: 'limitProviderDisabledGroup',
+    enabledCount: providers.length - disabledProviders.length,
+    disabled: disabledProviders.map(({ id, label, settingsLabel }) => ({ id, label: settingsLabel || label })),
+    filtering,
+    iconSet: limitMarksWithIcon,
+    iconClass: 'limit-icon',
+    labels: { enabled: 'settings.limits.group.enabled', disabled: 'settings.limits.group.disabled' },
+    expandedKey: 'limitProviderDisabledExpanded'
+  });
+  const localId = state.settings?.deviceId;
+  const remoteProviders = new Set((state.stats?.limits?.providers || [])
+    .filter(row => row.accountKey && row.sourceDeviceId && row.sourceDeviceId !== localId).map(row => row.provider));
+  const records = enabled.size ? desktopLimitRecords() : [];
   for (const { id, label, settingsLabel } of providers) {
     const isEnabled = enabled.has(id);
     const provider = isEnabled
-      ? (limitProviderPresentationApi.limitProviderSettingsRecord(desktopLimitRecords(), id)
+      ? (limitProviderPresentationApi.limitProviderSettingsRecord(records, id)
         || { provider: id, ...(state.stats ? { status: missingLimitProviderStatus() } : {}), windows: [] })
       : { provider: id, status: 'disabled', windows: [] };
     const row = document.createElement('div');
     row.className = `limit-provider-row${isEnabled ? '' : ' is-disabled'}${matched.has(id) ? '' : ' is-filtered-out'}`;
     row.dataset.provider = id;
     const wrap = document.createElement('label');
-    wrap.className = 'client-checkbox limit-provider-toggle';
+    wrap.className = 'limit-provider-toggle';
     const cb = document.createElement('input');
     cb.type = 'checkbox';
+    cb.className = 'settings-switch';
     cb.id = `limitProviderEnabled-${id}`;
     cb.dataset.provider = id;
     cb.checked = isEnabled;
+    cb.addEventListener('change', () => { state.settingsListMotion = { kind: 'provider', id, enabled: cb.checked }; });
     cb.addEventListener('change', onLimitProviderToggle);
-    // The drag handle is gone, so the checkbox carries the keyboard reorder
+    // The drag handle is gone, so the switch carries the keyboard reorder
     // shortcuts. A checkbox has no native arrow-key behaviour, so the existing
-    // key bindings transfer unchanged.
-    cb.setAttribute('aria-keyshortcuts', 'ArrowUp ArrowDown Home End');
+    // key bindings transfer unchanged. Only the enabled group is ordered.
     // Off while filtering, for the reason given on the tracked-tools list.
-    if (!filtering) cb.addEventListener('keydown', (event) => onPreferenceOrderKeydown(event, 'provider', id));
+    if (!filtering && isEnabled) {
+      cb.setAttribute('aria-keyshortcuts', 'ArrowUp ArrowDown Home End');
+      cb.addEventListener('keydown', (event) => onPreferenceOrderKeydown(event, 'provider', id));
+    }
     const copy = document.createElement('span');
     copy.className = 'limit-provider-copy';
     const nameLine = document.createElement('span');
@@ -12443,46 +13137,58 @@ function renderLimitProviderCheckboxesNow() {
     text.className = 'limit-provider-name';
     text.textContent = settingsLabel || label;
     connectLimitProviderCheckboxName(cb, text, id);
-    nameLine.append(text);
-    const tags = document.createElement('span');
-    tags.className = 'limit-provider-tags';
+    nameLine.append(settingsListIcon(id, settingsLabel || label, limitMarksWithIcon, 'limit-icon'), text);
+    // Status reads on the right, beside the switch: a dot when healthy, then
+    // whatever summary the provider owns.
+    const actions = document.createElement('span');
+    actions.className = 'limit-provider-actions';
     const provenance = limitProviderProvenance(provider);
-    const connectionDetailKey = LIMIT_PROVIDER_CONNECTION_DETAIL_KEYS[id];
+    const sources = limitProviderPresentationApi.connectionSources(id, state.settings?.limitConnectionSources || []);
     const accountGroup = limitProviderAccountGroup(id);
     const pluginModule = state.pluginCatalog?.limits?.modules?.find(module => module.id === id);
-    const tagInfos = limitProviderPresentationApi.limitProviderSettingsTags(provider, provenance);
-    if (pluginModule) tagInfos.push(...limitProviderPresentationApi.pluginLimitCapabilityTags(pluginModule));
+    const tagInfos = pluginModule
+      ? limitProviderPresentationApi.limitProviderSettingsTags(provider, provenance).filter(tag => tag.kind !== 'capability')
+      : limitProviderPresentationApi.limitProviderSettingsTags(provider, provenance).filter(tag => tag.kind === 'status');
+    if (pluginModule) tagInfos.push(...limitProviderPresentationApi.pluginLimitCapabilityTags(pluginModule).filter(tag => tag.kind === 'custom'));
     const detected = provider.status === 'ok' && !provider.stale;
     if (detected) {
-      const statusTag = tagInfos.find((tagInfo) => tagInfo.kind === 'status');
+      const statusTag = limitProviderPresentationApi.limitProviderStatusLabel(provider);
       const dot = document.createElement('span');
       dot.className = 'limit-provider-status-dot';
       dot.setAttribute('aria-label', translatedLimitProviderTag(statusTag));
       dot.setAttribute('role', 'img');
-      nameLine.append(dot);
+      actions.append(dot);
     }
     for (const tagInfo of tagInfos) {
       if ((pluginModule || detected || !isEnabled) && tagInfo.kind === 'status') continue;
       // Account groups own their configuration summary on the right. Avoid
       // repeating "Not set up" beside the same account state, as with Codex.
       if (accountGroup && provider.status === 'notConfigured' && tagInfo.kind === 'status') continue;
-      const duplicatesInlineSetup = tagInfo.kind === 'capability'
-        && ((connectionDetailKey && !accountGroup && tagInfo.label === 'Auto')
-          || (accountGroup && tagInfo.label === 'Manual login'));
-      if (duplicatesInlineSetup) continue;
       const tag = document.createElement('span');
       tag.className = `limit-provider-tag limit-provider-tag-${tagInfo.kind}`;
       if (tagInfo.tone) tag.classList.add(`limit-provider-tag-${tagInfo.tone}`);
-      tag.textContent = tagInfo.kind === 'custom' ? tagInfo.label
-        : tagInfo.parts ? tagInfo.parts.map(translatedLimitCapabilityTag).join('/')
-          : translatedLimitProviderTag(tagInfo);
-      tags.append(tag);
+      tag.textContent = tagInfo.kind === 'custom' ? tagInfo.label : translatedLimitProviderTag(tagInfo);
+      actions.append(tag);
     }
-    copy.append(nameLine, tags);
+    // One status phrase beside the switch: a state that needs action speaks for
+    // the row, and the account summary waits in the expanded options.
+    row.classList.toggle('has-status-tag', Boolean(actions.querySelector('.limit-provider-tag-status')));
+    copy.append(nameLine);
     wrap.append(cb);
-    const actions = document.createElement('span');
-    actions.className = 'limit-provider-actions';
     const accountStatus = limitProviderAccountStatus(id);
+    if (accountStatus) {
+      accountStatus.classList.toggle('hidden', !isEnabled);
+      // Provider-owned login summaries describe this device. Keep a local
+      // failure visible even if a different device can still supply quota.
+      if (localId && LIMIT_PROVIDER_ACCOUNT_NODES[id]?.localSummary && remoteProviders.has(id)) {
+        const scope = t('settings.sync.panel.thisDevice');
+        accountStatus.dataset.localScope = scope;
+        accountStatus.setAttribute('aria-description', scope);
+      } else if (accountStatus.dataset?.localScope) {
+        delete accountStatus.dataset.localScope;
+        accountStatus.removeAttribute('aria-description');
+      }
+    }
     if (pluginModule) {
       const reading = limitProviderPresentationApi.limitProviderSettingsRecord(state.pluginCatalog?.limits?.providers, id);
       const summary = limitProviderPresentationApi.pluginLimitSettingsStatus(pluginModule, reading, isEnabled);
@@ -12497,7 +13203,7 @@ function renderLimitProviderCheckboxesNow() {
     }
     // Multi-account providers use this space for their account summary. Their
     // automatic collection support stays with the capability tags on the left.
-    if (connectionDetailKey && !accountGroup) {
+    if (isEnabled && !accountGroup && sources.some(source => ['cli', 'desktop', 'oauth', 'file'].includes(source.kind))) {
       const mode = document.createElement('span');
       mode.className = 'cursor-status-pill limit-provider-mode-pill';
       mode.textContent = t('settings.limits.connection.autoDetect');
@@ -12505,11 +13211,15 @@ function renderLimitProviderCheckboxesNow() {
     }
     const settings = LIMIT_PROVIDER_SETTINGS[id];
     const usageItems = isEnabled ? limitProviderUsageItemRows(id) : [];
-    const hasOptions = Boolean(pluginModule?.credentials || pluginModule?.settingsView || accountGroup || settings || connectionDetailKey || usageItems.length);
+    const hasOptions = Boolean(pluginModule?.credentials || pluginModule?.settingsView || accountGroup || settings || sources.length || usageItems.length);
     let optionsContainer = null;
     let optionsInner = null;
     let main = null;
-    let disclosureIcon = null;
+    // A fixed lead column, empty when there is nothing to expand, keeps every
+    // icon and name on the same line.
+    const disclosure = document.createElement('span');
+    disclosure.className = 'limit-provider-chevron';
+    disclosure.setAttribute('aria-hidden', 'true');
     if (hasOptions) {
       const expanded = state.limitProviderSettingsExpanded === id;
       row.classList.toggle('expanded', expanded);
@@ -12519,22 +13229,20 @@ function renderLimitProviderCheckboxesNow() {
       main.className = 'limit-provider-main';
       main.setAttribute('aria-description', t('settings.limits.providerOptions', { provider: settingsLabel || label }));
       main.setAttribute('aria-expanded', String(expanded));
-      disclosureIcon = document.createElement('span');
+      const disclosureIcon = document.createElement('span');
       disclosureIcon.className = 'cursor-disclosure-icon';
-      disclosureIcon.setAttribute('aria-hidden', 'true');
-      actions.append(disclosureIcon);
+      disclosure.append(disclosureIcon);
       optionsContainer = document.createElement('div');
       optionsContainer.id = `limitProviderOptions-${id}`;
       optionsContainer.className = `accordion-animated-container${expanded ? '' : ' hidden'}`;
+      optionsContainer.inert = !expanded;
       main.setAttribute('aria-controls', optionsContainer.id);
       optionsInner = document.createElement('div');
       optionsInner.className = 'accordion-animation-inner limit-provider-options-inner';
       if (accountGroup) {
         accountGroup.classList.add('limit-provider-account-group');
       }
-      if (connectionDetailKey) optionsInner.append(limitProviderConnectionDetail(connectionDetailKey));
-      if (settings) optionsInner.append(limitProviderSettingsList(id, settings, reusableSettingInputs));
-      if (usageItems.length) optionsInner.append(limitProviderUsageItemsList(id, usageItems, reusableSettingInputs));
+      if (sources.length) optionsInner.append(limitProviderConnectionDetail(id, sources, isEnabled ? strictLocalProviderStatuses(id) : []));
       optionsContainer.append(optionsInner);
       const toggleOptions = () => {
         const opening = state.limitProviderSettingsExpanded !== id;
@@ -12545,83 +13253,59 @@ function renderLimitProviderCheckboxesNow() {
       };
       main.addEventListener('click', toggleOptions);
     }
-    if (main) {
-      main.append(copy, actions);
-      row.append(wrap, main);
-    } else {
-      row.append(wrap, copy, actions);
+    if (!main) {
+      main = document.createElement('span');
+      main.className = 'limit-provider-main';
     }
+    main.append(disclosure, copy, actions);
+    row.append(main, wrap);
     // Reordering is suppressed while a filter is on: the drop commits the order
-    // it reads off the list, and a filtered list is only part of it.
-    if (!filtering) row.addEventListener('pointerdown', (event) => limitProviderRowDrag.startRowDrag(event, id));
+    // it reads off the list, and a filtered list is only part of it. Disabled
+    // providers wait in their own group and have no order to change.
+    if (!filtering && isEnabled) row.addEventListener('pointerdown', (event) => limitProviderRowDrag.startRowDrag(event, id));
     // Kept inside the row rather than as a sibling: reordering moves only
     // `.limit-provider-row` nodes, so a sibling panel would be stranded when the
     // list is dragged.
     if (optionsContainer) row.append(optionsContainer);
-    els.limitProviderCheckboxes.appendChild(row);
+    if (isEnabled) els.limitProviderCheckboxes.insertBefore(row, groups.before);
+    else groups.rows.append(row);
     // `moveBefore()` preserves focus and edit state while reparenting. Its
     // destination must already be connected, so the row is mounted first.
-    moveLimitProviderLiveNode(actions, accountStatus, disclosureIcon);
+    moveLimitProviderLiveNode(actions, accountStatus);
     moveLimitProviderLiveNode(optionsInner, accountGroup);
+    prioritizeLimitProviderAccounts(accountGroup);
+    if (!pluginModule && !accountGroup && !limitAccountForm(id)
+      && sources.some(source => ['cli', 'desktop', 'oauth', 'file'].includes(source.kind))) {
+      let automatic = automaticAccountPanels.get(id);
+      if (!automatic) {
+        const container = document.createElement('div');
+        const controller = window.TokenMonitorAutomaticAccountList.create({
+          document, provider: id, label, container, t, bridge: window.tokenMonitor, sources,
+          getContext: () => limitAccountContext(id),
+          preserveScroll: preserveSettingsPanelScroll
+        });
+        automatic = { container, controller };
+        automaticAccountPanels.set(id, automatic);
+      }
+      if (automatic.container.isConnected) moveLimitProviderLiveNode(optionsInner, automatic.container);
+      else optionsInner.append(automatic.container);
+      automatic.controller.update(strictLocalProviderStatuses(id));
+    }
+    if (usageItems.length) optionsInner?.append(limitProviderUsageItemsList(id, usageItems, reusableSettingInputs));
+    const settingsList = settings ? limitProviderSettingsList(id, settings, reusableSettingInputs) : null;
+    if (settingsList) optionsInner.append(settingsList);
     if (pluginModule) {
       const authorSettings = pluginLimitSettings?.node(pluginModule);
       if (authorSettings?.isConnected) moveLimitProviderLiveNode(optionsInner, authorSettings);
       else if (authorSettings) optionsInner?.append(authorSettings);
     }
-    // OpenCode's one setting is an off-by-default fallback estimate. Rendered by
-    // the shared path it lands above the account list, reading as the first
-    // thing to set up; it belongs below the accounts, collapsed. Reparented
-    // rather than special-cased in the shared renderer so the setting keeps its
-    // change tracking and re-render signature.
-    if (id === 'opencode') moveOpenCodeLocalFallbackSetting();
   }
   if (!matched.size) renderSettingsListEmptyState(els.limitProviderCheckboxes);
-  for (const row of previousRows) row.remove();
-  if (focusedId && document.activeElement === document.body) {
-    document.getElementById(focusedId)?.focus({ preventScroll: true });
-  }
+  for (const child of previousChildren) child.remove();
+  restoreSettingsListFocus(focusedId);
+  playSettingsRowMotion(els.limitProviderCheckboxes, '.limit-provider-row[data-provider]', 'provider', motion);
   state.limitProviderRenderSignature = renderSignature;
   pluginLimitSettings?.reconcile();
-}
-
-// Moves the OpenCode local-DB toggle into its own collapsed group beneath the
-// account list, and keeps that group's status pill in sync with the setting.
-function moveOpenCodeLocalFallbackSetting() {
-  const target = document.getElementById('opencodeLocalFallbackInner');
-  const list = document.querySelector('#limitProviderOptions-opencode .limit-provider-settings-list');
-  if (!target) return;
-  if (list) {
-    if (list.parentElement !== target) moveLimitProviderLiveNode(target, list);
-    // The shared renderer builds a fresh settings list on every pass, so moving
-    // without clearing stacks one copy of the toggle per re-render.
-    for (const stale of [...target.children]) if (stale !== list) stale.remove();
-    // The group header already names the setting, so the item's own title would
-    // read twice. Dropping it alone leaves the label cell empty and the switch
-    // adrift, so the description moves into that cell and becomes the label.
-    for (const item of target.querySelectorAll('.settings-item')) {
-      item.querySelector('.settings-item-title')?.remove();
-      const cell = item.querySelector('.settings-item-text');
-      const desc = item.querySelector('.settings-item-desc');
-      if (cell && desc && desc.parentElement !== cell) cell.append(desc);
-    }
-  }
-
-  const pill = document.getElementById('opencodeLocalFallbackStatus');
-  if (pill) {
-    const on = (state.settings || {}).opencodeLocalLimitsEnabled === true;
-    pill.textContent = t(on ? 'settings.appearance.motion.on' : 'settings.appearance.motion.off');
-  }
-
-  const toggle = document.getElementById('opencodeLocalFallbackSettingsToggle');
-  if (toggle && !toggle.dataset.wired) {
-    toggle.dataset.wired = '1';
-    // The shared helper, so this collapses exactly like every other group
-    // instead of a second hand-rolled implementation of the same thing.
-    toggle.addEventListener('click', () => setAccountGroupExpanded(
-      'opencodeLocalFallback',
-      toggle.getAttribute('aria-expanded') !== 'true'
-    ));
-  }
 }
 
 // Every account form saves through limits:saveCredential, which checks the
@@ -12629,14 +13313,10 @@ function moveOpenCodeLocalFallbackSetting() {
 // panel only turns the answer into its message line and the pending pill;
 // generated and hand-built panels share this, including which messages they
 // may override (`messages.required` / `rejected` / `invalidFormat`).
-let claudeOrganizationChoicesRevision = 0;
-let claudeWebAccountId = 'new';
-// null opens the initial empty-account form; an explicit cancel stays closed.
-let claudeWebFormOpen = null;
-const claudeAccountActions = accountShellApi.createBusyGuard();
+
 
 async function saveAccountCredential(id, values, { messages = {}, failedKey, clearInput = () => {} } = {}) {
-  if (id === 'claude') claudeOrganizationChoicesRevision += 1;
+  if (id === 'claude') legacyAccountOwners.claude.editor.revision += 1;
   const provider = LIMIT_PROVIDERS.find((entry) => entry.id === id);
   const name = provider?.settingsLabel || provider?.label || id;
   setAccountPanelMessage(id, null);
@@ -12644,7 +13324,7 @@ async function saveAccountCredential(id, values, { messages = {}, failedKey, cle
   let result;
   try {
     result = await commitAccountCredential(() => id === 'claude' && values.claudeWebAccountId
-      ? claudeAccountActions.run('claude', null, () => window.tokenMonitor.claude.saveWebAccount(values))
+      ? legacyAccountOwners.claude.claudeAccountActions.run('claude', null, () => window.tokenMonitor.claude.saveWebAccount(values))
       : window.tokenMonitor.limits.saveCredential(id, values));
   } catch (error) {
     setAccountPanelMessage(id, { key: failedKey, params: { message: error.message } });
@@ -12653,7 +13333,8 @@ async function saveAccountCredential(id, values, { messages = {}, failedKey, cle
   }
   if (id === 'claude' && values.claudeWebAccountId && result === undefined) return result;
   if (result?.verdict === 'superseded') return result;
-  if (id === 'claude') claudeOrganizationChoicesRevision += 1;
+  if (id === 'claude') legacyAccountOwners.claude.editor.revision += 1;
+  if (id === 'claude' && result?.saved) clearInput();
   if (id === 'claude' && result?.choices) renderClaudeOrganizationChoices(result.choices, result.settings?.claudeWebOrganizationId || values.claudeWebOrganizationId);
   if (id === 'claude' && result?.verdict === 'selectionRequired') {
     setAccountPanelMessage(id, { key: 'settings.claude.organizationRequired', tone: 'notice' });
@@ -12674,7 +13355,7 @@ async function saveAccountCredential(id, values, { messages = {}, failedKey, cle
     renderExternalProviderStatus(id);
     return result;
   }
-  clearInput();
+  if (id !== 'claude') clearInput();
   // Marked only once the credential is stored: marking drops the provider's
   // current record, and a rejected key must leave the linked status on screen.
   markExternalProviderCheckPending(id, result.checkedSince);
@@ -12694,35 +13375,32 @@ async function saveAccountCredential(id, values, { messages = {}, failedKey, cle
   return result;
 }
 
-// The busy guard generated panels get from their factory, for a hand-built
-// panel's own submit button.
-async function submitAccountCredential(button, id, values, options) {
-  if (button.disabled) return undefined;
-  const label = button.textContent;
-  button.disabled = true;
-  button.textContent = t('settings.common.checking');
+// A quota row's own refresh. The result says whether anything new is coming,
+// so the row can tell the user when it is not.
+async function refreshLimitAccount(provider) {
+  let result;
   try {
-    return await saveAccountCredential(id, values, options);
-  } finally {
-    button.disabled = false;
-    button.textContent = label;
-  }
-}
-
-async function refreshLimitProviderQuota(providerName) {
-  try {
-    await window.tokenMonitor.limits?.refresh?.(providerName);
+    result = await window.tokenMonitor.limits.refresh(provider.provider, {
+      accountKey: provider.accountKey,
+      accountEmail: provider.accountEmail,
+      accountName: provider.accountName,
+      accountLabel: provider.accountLabel,
+      sourceDetail: provider.sourceDetail,
+      region: provider.region
+    });
   } catch (_) {
-    // The next scheduled poll still settles the record.
+    result = { ok: false, reason: 'failed' };
   }
+  await refreshStats();
+  return result;
 }
 
 async function clearAccountCredential(id) {
-  if (id === 'claude') claudeOrganizationChoicesRevision += 1;
+  if (id === 'claude') legacyAccountOwners.claude.editor.revision += 1;
   setAccountPanelMessage(id, null);
   await commitAccountCredential(() => window.tokenMonitor.limits.clearCredential(id));
   if (id === 'claude') {
-    claudeOrganizationChoicesRevision += 1;
+    legacyAccountOwners.claude.editor.revision += 1;
     renderClaudeOrganizationChoices([]);
   }
   clearExternalProviderCheckPending(id);
@@ -12742,45 +13420,7 @@ function limitAccountForm(providerId) {
   return state.settings?.limitAccountForms?.find((form) => form.id === providerId);
 }
 
-function renderClaudeOrganizationChoices(choices, selectedId = state.settings?.claudeWebOrganizationId || '') {
-  const select = document.getElementById('claudeWebOrganizationIdInput');
-  if (!select) return false;
-  document.getElementById('claudeWebOrganizationRow')?.classList.toggle('hidden', choices.length === 0);
-  select.options.length = 0;
-  const placeholder = document.createElement('option');
-  placeholder.value = '';
-  placeholder.textContent = t('settings.claude.organizationChoose');
-  select.append(placeholder);
-  for (const choice of choices) {
-    const option = document.createElement('option');
-    option.value = choice.id;
-    option.textContent = [choice.name || choice.id, choice.plan ? choice.plan[0].toUpperCase() + choice.plan.slice(1) : ''].filter(Boolean).join(' · ');
-    select.append(option);
-  }
-  const selectedAvailable = choices.some((choice) => choice.id === selectedId);
-  select.value = selectedAvailable ? selectedId : !selectedId && choices.length === 1 ? choices[0].id : '';
-  select.disabled = choices.length === 0;
-  return selectedAvailable;
-}
-
-async function loadClaudeOrganizationChoices() {
-  const revision = ++claudeOrganizationChoicesRevision;
-  try {
-    const result = await window.tokenMonitor.limits.listOrganizationChoices('claude');
-    if (revision !== claudeOrganizationChoicesRevision) return;
-    if (result.status === 'ok') {
-      const selectedAvailable = renderClaudeOrganizationChoices(result.choices);
-      if (!selectedAvailable && (state.settings?.claudeWebOrganizationId || result.choices.length > 1)) {
-        setAccountPanelMessage('claude', { key: state.settings?.claudeWebOrganizationId
-          ? 'settings.claude.organizationUnavailable'
-          : 'settings.claude.organizationSelect', tone: 'notice' });
-      }
-    } else setAccountPanelMessage('claude', { key: 'settings.claude.organizationLoadFailed', tone: 'notice' });
-  } catch (_) {
-    if (revision !== claudeOrganizationChoicesRevision) return;
-    setAccountPanelMessage('claude', { key: 'settings.claude.organizationLoadFailed', tone: 'notice' });
-  }
-}
+function renderClaudeOrganizationChoices(...args) { return legacyAccountOwners.claude.renderClaudeOrganizationChoices(...args); }
 
 // A select beside a credential (region, site, console) saves as soon as it
 // changes. `clears` names what the change invalidates: an Alibaba cookie
@@ -12788,9 +13428,9 @@ async function loadClaudeOrganizationChoices() {
 // one, so switching drops it instead of leaving a key that can only fail.
 async function saveAccountFormSetting({ id }, field, value) {
   if (id === 'claude' && field.key === 'claudeWebOrganizationId') {
-    if (claudeWebAccountId !== 'legacy') return;
+    if (legacyAccountOwners.claude.editor.accountId !== 'legacy') return;
     if (!value || !state.settings?.claudeWebCookieConfigured || document.getElementById('claudeWebCookieInput')?.value) return;
-    claudeOrganizationChoicesRevision += 1;
+    legacyAccountOwners.claude.editor.revision += 1;
     await saveSettings({ claudeWebOrganizationId: value });
     setAccountPanelMessage('claude', null);
     await refreshStats({ force: true });
@@ -12819,18 +13459,22 @@ function setupLimitAccountPanels() {
         document,
         provider: externalProviderForAccount(form.id)
       })),
-      onRefresh: async () => {
-        if (form.id === 'claude' && claudeWebAccountId === 'legacy') await loadClaudeOrganizationChoices();
-        await refreshLimitProviderQuota(form.id);
-        await refreshStats();
-      },
       onClear: ({ id }) => clearAccountCredential(id),
       onSave: async ({ id, messages, failedKey }, values, clearInput) => {
-        if (id === 'claude' && claudeWebAccountId !== 'legacy') values.claudeWebAccountId = claudeWebAccountId;
-        const result = await saveAccountCredential(id, values, { messages, failedKey, clearInput });
-        if (id === 'claude' && result?.saved) {
-          claudeWebFormOpen = false;
-          claudeWebAccountId = 'new';
+        if (id === 'claude' && legacyAccountOwners.claude.editor.accountId !== 'legacy') values.claudeWebAccountId = legacyAccountOwners.claude.editor.accountId;
+        const editorRevision = legacyAccountOwners.claude.editor.revision;
+        const unchanged = () => (id !== 'claude' || editorRevision + 2 === legacyAccountOwners.claude.editor.revision)
+          && Object.entries(values).every(([key, value]) => {
+            const input = document.getElementById(`${key}Input`);
+            return !input || input.value === String(value);
+          });
+        let cleared = false;
+        const result = await saveAccountCredential(id, values, { messages, failedKey, clearInput: () => {
+          if (unchanged()) { clearInput(); cleared = true; }
+        } });
+        if (id === 'claude' && result?.saved && cleared) {
+          legacyAccountOwners.claude.editor.open = false;
+          legacyAccountOwners.claude.editor.accountId = 'new';
           renderClaudeOrganizationChoices([]);
           renderExternalProviderStatus(id);
         }
@@ -12847,6 +13491,32 @@ function setupLimitAccountPanels() {
       .map((provider) => limitProviderAccountGroup(provider.id))
       .find((group) => group?.parentElement === container);
     container.insertBefore(panel, nextGroup || null);
+    if (form.accountSlots && !form.accountSlotOwner) {
+      const details = panel.querySelector('.cursor-settings-details');
+      if (form.id === 'volcengine') {
+        // Migration retains local credentials completed by the environment.
+        const retained = document.createElement('details');
+        retained.id = 'volcengineFixedCredentialForm';
+        retained.className = 'hidden';
+        const summary = document.createElement('summary');
+        summary.dataset.i18n = 'settings.slots.savedSource';
+        summary.textContent = t(summary.dataset.i18n);
+        retained.append(summary, ...details.children);
+        details.append(retained);
+      } else {
+        for (const child of [...details.children]) child.remove();
+      }
+      const slotsPanel = window.TokenMonitorAccountSlotsPanel.createPanel({
+        loginAction: window.tokenMonitor[form.id],
+        form, label: LIMIT_PROVIDERS.find(provider => provider.id === form.id).label,
+        document, t, ipc: window.tokenMonitor.limits.accountSlots, forms: limitAccountPanelsApi,
+        maskEmail: email => state.settings?.maskLimitAccountEmails === true ? accountIdentityApi.maskEmailAddress(email) : email,
+        preserveScroll: preserveSettingsPanelScroll, openExternal: url => window.tokenMonitor.openExternal(url),
+        onChanged: slots => { accountSlotLists[form.id] = slots; render(); renderExternalProviderStatus(form.id); void refreshStats(); }
+      });
+      accountSlotPanels.set(form.id, slotsPanel);
+      panel.querySelector('.cursor-settings-details').prepend(slotsPanel.element);
+    }
     added = true;
     setExternalAccountExpanded(form.id, false);
     limitAccountPanelsApi.syncCredentialFields(form, { document, settings: state.settings });
@@ -12869,18 +13539,23 @@ function limitProviderAccountStatus(providerId) {
     : null;
 }
 
-function limitProviderConnectionDetail(bodyKey) {
-  const panel = document.createElement('div');
-  panel.className = 'limit-provider-connection-detail';
-  const title = document.createElement('span');
-  title.className = 'limit-provider-connection-title';
-  title.textContent = t('settings.limits.connection.title');
-  const body = document.createElement('p');
-  body.className = 'settings-note';
-  body.textContent = t(bodyKey);
-  panel.append(title, body);
-  return panel;
+// Where to get a credential lives in the add-account editor, beside its form.
+function limitProviderConnectionDetail(id, sources, readings) {
+  return window.TokenMonitorConnectionPresentation.createConnectionCard({
+    document, t, sources, readings,
+    liveSourceIds: window.TokenMonitorAccountSlotsPanel.liveSourceIds(id)
+  });
 }
+
+// Account rows render after the provider list, so the lanes they attribute
+// arrive later; swap just that provider's card when they change.
+window.TokenMonitorAccountSlotsPanel.onLiveSourcesChange((id) => {
+  const card = els.limitProviderCheckboxes?.querySelector(`.limit-provider-row[data-provider="${id}"] .limit-provider-connection-sources`);
+  if (!card) return;
+  const sources = limitProviderPresentationApi.connectionSources(id, state.settings?.limitConnectionSources || []);
+  const readings = enabledLimitProviderSet().has(id) ? strictLocalProviderStatuses(id) : [];
+  card.replaceWith(limitProviderConnectionDetail(id, sources, readings));
+});
 
 // Single entry point for the provider options accordion. The drag gesture also
 // needs to collapse and restore it, so the class/aria bookkeeping cannot stay
@@ -12895,7 +13570,7 @@ function setLimitProviderSettingsExpanded(providerId) {
     const open = row.dataset.provider === state.limitProviderSettingsExpanded;
     disclosure.setAttribute('aria-expanded', String(open));
     row.classList.toggle('expanded', open);
-    container.classList.toggle('hidden', !open);
+    accountShellApi.setDisclosureBody(disclosure, container, open);
   }
 }
 
@@ -12974,6 +13649,10 @@ function limitProviderSettingsRenderSignature() {
       state.limitProviderSettingsExpanded
     ],
     usageItems: [...enabledLimitProviderSet()].sort().map((id) => [id, limitProviderUsageItemRows(id)]),
+    // The connection card reads this device's own rows, which the Hub aggregate
+    // can hide behind a newer reading from another device.
+    connectionReadings: [...enabledLimitProviderSet()].sort().map((id) => [id, strictLocalProviderStatuses(id)
+      .map((row) => [row.status || '', Boolean(row.stale), row.source || '', row.sourceDetail || ''])]),
     query: limitProviderQuery(),
     providers: (state.stats?.limits?.providers || []).map(providerSignature),
     devices: (state.stats?.devices || []).map(deviceSignature)
@@ -13118,7 +13797,7 @@ async function onToolTrackingToggle() {
   const rendered = [...els.clientDisplayList.querySelectorAll('input[data-preference="track"]')]
     .map((cb) => [cb.dataset.client, cb.checked]);
   const checked = settingsListFilterApi.mergeRenderedSelection(
-    enabledClientSet(),
+    new Set(String(Object.assign({}, state.settings, ...pendingSettingsPatches).clients || '').split(',').filter(Boolean)),
     rendered,
     clientDisplayPreferencesApi
       .orderedClients(KNOWN_CLIENTS, state.settings?.clientDisplayOrder, state.settings?.pinnedClients)
@@ -13131,6 +13810,24 @@ async function onToolTrackingToggle() {
   // scan, and drag an all-provider limits refresh along. The extra stats pushes
   // would then repaint the whole settings panel under the pointer, which is what
   // made this checkbox stall while the eye and pin next to it did not (#471).
+}
+
+function onQoderTrackingToggle(checked) {
+  const clients = Object.assign({}, state.settings, ...pendingSettingsPatches).clients;
+  const saved = saveSettings({ clients: qoderDisplayApi.setTracked(clients, checked) });
+  if (state.clientHealthExpanded === 'qoder') refillOpenClientHealthPanel();
+  return saved;
+}
+
+async function onQoderPreferenceToggle(key) {
+  const values = key === 'hiddenClients' ? hiddenClientSet() : pinnedClientSet();
+  const remove = key === 'hiddenClients'
+    ? qoderDisplayApi.IDS.every(id => values.has(id))
+    : qoderDisplayApi.IDS.some(id => values.has(id));
+  for (const id of qoderDisplayApi.IDS) {
+    if (remove) values.delete(id); else values.add(id);
+  }
+  await saveSettings({ [key]: [...values].join(','), ...(key === 'pinnedClients' ? { clientDisplayOrder: '' } : {}) });
 }
 
 async function onClientVisibilityToggle(clientId) {
@@ -13206,62 +13903,73 @@ async function onLimitProviderToggle() {
     // collection work.
   } finally {
     if (state.pendingLimitProviderSelection?.revision === revision) {
+      const wasLimitsAvailable = limitViewAvailable();
       state.pendingLimitProviderSelection = null;
       renderLimitProviderCheckboxes();
+      if (wasLimitsAvailable !== limitViewAvailable()) {
+        renderViewPreferences();
+        renderSettingsSummaries();
+      }
     }
   }
 }
 
+// The saved order covers every provider; only the enabled group is reordered
+// on screen. See `mergeSubsetOrder`.
+function limitProviderOrderWithEnabled(order) {
+  const full = limitProviderOrderApi.normalizeLimitProviderOrder(state.settings?.limitProviderOrder, desktopLimitProviders());
+  const merged = settingsListFilterApi.mergeSubsetOrder(full, order);
+  return limitProviderOrderApi.preserveAbsentPluginOrder(state.settings?.limitProviderOrder, merged, desktopLimitProviders()).join(',');
+}
+
+function enabledLimitProviderOrder() {
+  const enabled = enabledLimitProviderSet();
+  return limitProviderOrderApi.normalizeLimitProviderOrder(state.settings?.limitProviderOrder, desktopLimitProviders())
+    .filter(id => enabled.has(id));
+}
+
 async function onLimitProviderMove(providerId, direction) {
-  const next = limitProviderOrderApi.moveLimitProvider(state.settings?.limitProviderOrder, desktopLimitProviders(), providerId, direction);
-  await saveSettings({ limitProviderOrder: limitProviderOrderApi.preserveAbsentPluginOrder(state.settings?.limitProviderOrder, next.split(','), desktopLimitProviders()).join(',') });
+  const from = enabledLimitProviderOrder().indexOf(providerId);
+  if (from >= 0) await onLimitProviderReorder(providerId, from + (direction === 'up' ? -1 : 1));
 }
 
 async function onLimitProviderReorder(providerId, targetIndex) {
-  const current = limitProviderOrderApi.normalizeLimitProviderOrder(state.settings?.limitProviderOrder, desktopLimitProviders()).join(',');
-  const next = limitProviderOrderApi.reorderLimitProvider(state.settings?.limitProviderOrder, desktopLimitProviders(), providerId, targetIndex);
-  if (next === current) return;
-  await saveSettings({ limitProviderOrder: limitProviderOrderApi.preserveAbsentPluginOrder(state.settings?.limitProviderOrder, next.split(','), desktopLimitProviders()).join(',') });
+  const order = enabledLimitProviderOrder();
+  const from = order.indexOf(providerId);
+  const to = Math.max(0, Math.min(order.length - 1, Number(targetIndex) || 0));
+  if (from < 0 || from === to) return;
+  order.splice(from, 1);
+  order.splice(to, 0, providerId);
+  await saveSettings({ limitProviderOrder: limitProviderOrderWithEnabled(order) });
 }
 
-async function onClientDisplayMove(clientId, direction) {
-  const pinned = pinnedClientSet();
-  const hasCustomOrder = clientDisplayPreferencesApi.hasCustomDisplayOrder(state.settings?.clientDisplayOrder);
-  if (!hasCustomOrder && pinned.has(clientId)) {
-    const nextPinned = clientDisplayPreferencesApi.movePinnedClient(state.settings?.pinnedClients, KNOWN_CLIENTS, clientId, direction);
-    if (nextPinned !== clientDisplayPreferencesApi.normalizePinnedClients(state.settings?.pinnedClients, KNOWN_CLIENTS)) await saveSettings({ pinnedClients: nextPinned });
-    return;
-  }
-  const next = clientDisplayPreferencesApi.moveClientDisplayOrder(state.settings?.clientDisplayOrder, KNOWN_CLIENTS, clientId, direction);
-  await saveSettings({ clientDisplayOrder: next, pinnedClients: '' });
-}
-
-async function onClientDisplayReorder(clientId, targetIndex) {
-  const pinned = pinnedClientSet();
-  const hasCustomOrder = clientDisplayPreferencesApi.hasCustomDisplayOrder(state.settings?.clientDisplayOrder);
-  if (!hasCustomOrder && pinned.has(clientId)) {
-    const pinnedTargetIndex = Math.max(0, Math.min(pinned.size - 1, Number(targetIndex) || 0));
-    const nextPinned = clientDisplayPreferencesApi.reorderPinnedClient(state.settings?.pinnedClients, KNOWN_CLIENTS, clientId, pinnedTargetIndex);
-    if (nextPinned !== clientDisplayPreferencesApi.normalizePinnedClients(state.settings?.pinnedClients, KNOWN_CLIENTS)) await saveSettings({ pinnedClients: nextPinned });
-    return;
-  }
-  const current = clientDisplayPreferencesApi.normalizeClientDisplayOrder(state.settings?.clientDisplayOrder, KNOWN_CLIENTS).join(',');
-  const next = clientDisplayPreferencesApi.reorderClientDisplayOrder(state.settings?.clientDisplayOrder, KNOWN_CLIENTS, clientId, targetIndex);
-  if (next === current) return;
-  await saveSettings({ clientDisplayOrder: next, pinnedClients: '' });
+// Settings reorder only the views in the switcher; hidden ones keep their slots.
+function shownViewDisplayOrder() {
+  const orderValue = effectiveViewDisplayOrderValue();
+  const order = viewDisplayPreferencesApi.normalizeViewDisplayOrder(orderValue, VIEW_DISPLAY_OPTIONS);
+  const disabled = new Set(disabledViewIds());
+  const shown = viewDisplayPreferencesApi.visibleViewOrder({
+    views: VIEW_DISPLAY_OPTIONS,
+    orderValue,
+    hiddenValue: state.settings?.hiddenViews,
+    availableIds: order.filter((id) => !disabled.has(id))
+  });
+  return { order, shown };
 }
 
 async function onViewDisplayMove(viewId, direction) {
-  const next = viewDisplayPreferencesApi.moveViewDisplayOrder(effectiveViewDisplayOrderValue(), VIEW_DISPLAY_OPTIONS, viewId, direction);
-  await saveSettings({ viewDisplayOrder: next });
+  const { shown } = shownViewDisplayOrder();
+  await onViewDisplayReorder(viewId, shown.indexOf(viewId) + (direction === 'up' ? -1 : 1));
 }
 
 async function onViewDisplayReorder(viewId, targetIndex) {
-  const orderValue = effectiveViewDisplayOrderValue();
-  const current = viewDisplayPreferencesApi.normalizeViewDisplayOrder(orderValue, VIEW_DISPLAY_OPTIONS).join(',');
-  const next = viewDisplayPreferencesApi.reorderViewDisplayOrder(orderValue, VIEW_DISPLAY_OPTIONS, viewId, targetIndex);
-  if (next === current) return;
-  await saveSettings({ viewDisplayOrder: next });
+  const { order, shown } = shownViewDisplayOrder();
+  const from = shown.indexOf(viewId);
+  const target = Math.max(0, Math.min(shown.length - 1, targetIndex));
+  if (from < 0 || target === from) return;
+  shown.splice(from, 1);
+  shown.splice(target, 0, viewId);
+  await saveSettings({ viewDisplayOrder: settingsListFilterApi.mergeSubsetOrder(order, shown).join(',') });
 }
 
 async function onHomeModuleVisibilityToggle(moduleId) {
@@ -13291,11 +13999,6 @@ async function resetHomeModuleOrder() {
   const pluginModules = homeModulePreferencesApi.normalizeHomeModuleOrder(state.settings?.homeModuleOrder, HOME_MODULE_OPTIONS)
     .filter((id) => homeModulePreferencesApi.isPluginModuleId(id));
   await saveSettings({ homeModuleOrder: [homeModulePreferencesApi.DEFAULT_HOME_MODULE_ORDER, ...pluginModules].join(',') });
-  renderHomeIfVisible();
-}
-
-async function showAllHomeModules() {
-  await saveSettings({ hiddenHomeModules: '' });
   renderHomeIfVisible();
 }
 
@@ -13351,24 +14054,12 @@ async function resetHomeLimitProviderOrder() {
   renderHomeIfVisible();
 }
 
-async function showAllHomeLimitProviders() {
-  await saveSettings({ hiddenHomeLimitProviders: '' });
-  renderHomeIfVisible();
-}
-
 async function resetServiceProviderOrder() {
   await saveSettings({ serviceProviderDisplayOrder: '' });
 }
 
-async function showAllServiceProviders() {
-  const showing = hiddenServiceProviderSet().size > 0;
-  await saveSettings({ hiddenServiceProviders: '' });
-  if (showing) await refreshServiceStatus({ force: true });
-}
-
 async function onPreferenceReorder(kind, id, targetIndex) {
-  if (kind === 'client') await onClientDisplayReorder(id, targetIndex);
-  else if (kind === 'view') await onViewDisplayReorder(id, targetIndex);
+  if (kind === 'view') await onViewDisplayReorder(id, targetIndex);
   else if (kind === 'homeModule') await onHomeModuleReorder(id, targetIndex);
   else if (kind === 'homeLimitProvider') await onHomeLimitProviderReorder(id, targetIndex);
   else if (kind === 'statusProvider') await onServiceProviderReorder(id, targetIndex);
@@ -13377,10 +14068,28 @@ async function onPreferenceReorder(kind, id, targetIndex) {
 
 function onPreferenceOrderKeydown(event, kind, id) {
   const moves = { ArrowUp: 'up', ArrowDown: 'down' };
+  if (kind === 'client' && ['ArrowUp', 'ArrowDown', 'Home', 'End'].includes(event.key)) {
+    event.preventDefault();
+    const ordered = clientDisplayPreferencesApi.orderedClients(KNOWN_CLIENTS, state.settings?.clientDisplayOrder, state.settings?.pinnedClients).map(client => client.id);
+    const order = qoderDisplayApi.displayPreference(ordered.join(','), false).split(',');
+    // Only the tracked group is ordered on screen; see `mergeSubsetOrder`.
+    const tracked = order.filter(clientRowTracked);
+    const from = tracked.indexOf(id);
+    let target = event.key === 'Home' ? 0 : event.key === 'End' ? tracked.length - 1 : from + (event.key === 'ArrowUp' ? -1 : 1);
+    const pinned = qoderDisplayApi.displayPreference([...pinnedClientSet()].join(','), false).split(',').filter(client => tracked.includes(client));
+    if (!clientDisplayPreferencesApi.hasCustomDisplayOrder(state.settings?.clientDisplayOrder) && pinned.includes(id)) {
+      target = Math.max(0, Math.min(pinned.length - 1, target));
+    }
+    if (from < 0 || target < 0 || target >= tracked.length || target === from) return;
+    tracked.splice(from, 1);
+    tracked.splice(target, 0, id);
+    const patch = qoderDisplayApi.orderCommit(settingsListFilterApi.mergeSubsetOrder(order, tracked), KNOWN_CLIENTS, state.settings?.clientDisplayOrder, state.settings?.pinnedClients, id);
+    void saveSettings(patch);
+    return;
+  }
   if (moves[event.key]) {
     event.preventDefault();
-    if (kind === 'client') void onClientDisplayMove(id, moves[event.key]);
-    else if (kind === 'view') void onViewDisplayMove(id, moves[event.key]);
+    if (kind === 'view') void onViewDisplayMove(id, moves[event.key]);
     else if (kind === 'homeModule') void onHomeModuleMove(id, moves[event.key]);
     else if (kind === 'homeLimitProvider') void onHomeLimitProviderMove(id, moves[event.key]);
     else if (kind === 'statusProvider') void onServiceProviderMove(id, moves[event.key]);
@@ -13398,30 +14107,29 @@ async function resetClientDisplayOrder() {
   await saveSettings({ clientDisplayOrder: '', pinnedClients: '' });
 }
 
-async function showAllClients() {
-  await saveSettings({ hiddenClients: '' });
-}
-
 async function resetViewDisplayOrder() {
   await saveSettings({ viewDisplayOrder: '' });
 }
 
-async function showAllViews() {
-  await saveSettings({ hiddenViews: '' });
-}
-
 function preserveSettingsPanelScroll(callback) {
-  if (isRendererWindowHidden()) return callback();
+  // A stats refresh can update many account panels in one synchronous pass.
+  if (preservingSettingsPanelScroll || isRendererWindowHidden()) return callback();
   const panel = els.settingsPanel;
   if (!panel || panel.classList.contains('hidden')) return callback();
   const scrollTop = panel.scrollTop;
   const scrollLeft = panel.scrollLeft;
   const interactionRevision = settingsScrollInteractionRevision;
   const restore = () => {
-    panel.scrollTop = scrollTop;
-    panel.scrollLeft = scrollLeft;
+    if (panel.scrollTop !== scrollTop) panel.scrollTop = scrollTop;
+    if (panel.scrollLeft !== scrollLeft) panel.scrollLeft = scrollLeft;
   };
-  const result = callback();
+  preservingSettingsPanelScroll = true;
+  let result;
+  try {
+    result = callback();
+  } finally {
+    preservingSettingsPanelScroll = false;
+  }
   restore();
   if (typeof requestAnimationFrame === 'function') {
     requestAnimationFrame(() => {
@@ -13459,11 +14167,16 @@ async function saveSettings(patch, syncContentBase) {
     setSyncContentEditError(patch, error);
     console.error('Could not persist settings:', error);
     try { state.settings = await window.tokenMonitor.getSettings(); } catch (_) {}
+    const trackingScanPending = String(error?.message || '').includes('tracking-scan-pending');
+    if (trackingScanPending) state.toolPreferenceRenderSignature = '';
     applyEffectiveCurrencyRates();
     preserveSettingsPanelScroll(syncSettingsForm);
     if (isSettingsSurfaceVisible()) render(); else statsRenderScheduler.request();
     restartTimer();
     maybeUpdateBarsIcon();
+    if (trackingScanPending) {
+      window.alert(t('settings.tools.trackingScanPending'));
+    }
     throw error;
   }
   pendingSettingsPatches.delete(patch);
@@ -13478,6 +14191,7 @@ async function saveSettings(patch, syncContentBase) {
 // whether the renderer sent it as a patch or as an account credential command.
 function applyPersistedSettings(next, settingsPushRevision) {
   setRendererSettings(next);
+  void refreshAccountSlotPanels();
   applyEffectiveCurrencyRates();
   // settings:update broadcasts the normalized settings before resolving the
   // IPC request. The push already ran the full sync; repeating it when the
@@ -13558,6 +14272,8 @@ pluginViewHost = pluginViewsApi && pluginBridge ? pluginViewsApi.createPluginVie
   t,
   services: {
     app: window.tokenMonitor,
+    updatesBlocked: ids => pluginSettingsPanel?.blocksUpdate(ids) === true,
+    setUpdatingPlugins: (ids, updating) => pluginSettingsPanel?.setUpdatingPlugins(ids, updating),
     native: {
       quota: limitWindowsView,
       credentials: call => window.TokenMonitorPluginCredentials.create({ document, call, t, localize: value => window.TokenMonitorPluginLocalized.localize(value, state.settings?.language),
@@ -13584,14 +14300,16 @@ const pluginLimitSettings = pluginViewHost ? window.TokenMonitorPluginLimitSetti
   getView: module => state.pluginCatalog?.plugins?.find(plugin => plugin.id === module.pluginId && plugin.status === 'active')?.views?.find(view => view.id === module.settingsView && view.surfaces.includes('settings')),
   isVisible: (module, container) => container.isConnected && isSettingsSurfaceVisible()
     && state.settingsSections?.limits && state.limitProviderSettingsExpanded === module.id
-    && !container.closest('.is-filtered-out')
+    && !container.closest('.is-filtered-out, .settings-list-group.hidden')
 }) : null;
 if (pluginLimitSettings) {
   new MutationObserver(records => {
     if (records.some(({ target }) => target === els.shell || target === els.settingsPanel
       || target === document.getElementById('limitsSettingsDetails')
-      || (target.parentElement === els.limitProviderCheckboxes && target.classList.contains('limit-provider-row'))
-      || (target.parentElement?.parentElement === els.limitProviderCheckboxes && target.classList.contains('accordion-animated-container')))) pluginLimitSettings.reconcile();
+      // Rows sit in the list or, when disabled, in its collapsible group.
+      || target.id === 'limitProviderDisabledGroup'
+      || (els.limitProviderCheckboxes.contains(target) && (target.classList.contains('limit-provider-row')
+        || (target.classList.contains('accordion-animated-container') && target.parentElement?.classList.contains('limit-provider-row')))))) pluginLimitSettings.reconcile();
   }).observe(els.shell, { subtree: true, attributes: true, attributeFilter: ['class'] });
 }
 pluginContent = pluginViewHost ? window.TokenMonitorPluginContent.create({ document,
@@ -13682,10 +14400,12 @@ pluginApi = pluginBridge ? {
   getSettings: id => pluginBridge.getSettings(id),
   updateSettings: (id, input) => pluginBridge.updateSettings(id, input),
   catalog: async () => applyPluginCatalogUpdates(await pluginBridge.catalog()),
+  recover: async id => applyPluginCatalog(await pluginBridge.recover(id)),
   discoverCatalog: async force => applyPluginCatalogUpdates(await pluginBridge.discoverCatalog(force)),
   catalogDetails: (source, id) => pluginBridge.catalogDetails(source, id),
   closeCatalogDetails: () => pluginBridge.closeCatalogDetails(),
   catalogReadmeImage: (documentId, index) => pluginBridge.catalogReadmeImage(documentId, index),
+  configureUpdates: async (id, value) => applyPluginCatalogUpdates(await pluginBridge.configureUpdates(id, value)),
   catalogPreview: (source, id, version) => pluginBridge.catalogPreview(source, id, version),
   addSource: async input => applyPluginCatalogUpdates(await pluginBridge.addSource(input)),
   refreshSource: async id => applyPluginCatalogUpdates(await pluginBridge.refreshSource(id)),
@@ -13710,7 +14430,7 @@ pluginSettingsPanel = pluginApi && window.TokenMonitorPluginSettings
     onOpenExternal: (url) => window.tokenMonitor.openExternal(url),
     onCopyText: (text) => window.tokenMonitor.copyText(text),
     setDetailTooltip: limitWindowsView.setDetailTooltip,
-    onApplySkin: (skin) => applyPluginSkin(skin),
+    onApplySkin: (skin) => queueAppearanceColorChange(() => applyPluginSkin(skin)),
     onPlaced: () => renderSettingsSummaries(),
     getEnabled: () => state.settings.pluginsEnabled !== false,
     onSetEnabled: async (enabled) => {
@@ -13763,10 +14483,16 @@ async function applyAppearancePluginSkin(skin, chip) {
   if (container.getAttribute('aria-busy') === 'true') return;
   container.querySelector('.plugin-action-error')?.remove();
   for (const control of container.querySelectorAll('button')) control.removeAttribute('aria-describedby');
-  const skinKey = JSON.stringify(skin), settingsRevision = state.settingsPushRevision;
+  const skinKey = JSON.stringify(skin);
+  let settingsRevision;
   const restoreFocus = document.activeElement === chip;
   container.setAttribute('aria-busy', 'true');
-  try { await applyPluginSkin(skin); }
+  try {
+    await queueAppearanceColorChange(() => {
+      settingsRevision = state.settingsPushRevision;
+      return applyPluginSkin(skin);
+    });
+  }
   catch (error) {
     // saveSettings refreshes the form before rethrowing. Reattach to the same
     // skin after that refresh, but discard failures from superseded settings.
@@ -13841,6 +14567,7 @@ async function init() {
   if (!systemUiThemeSeeded) state.systemDarkUi = state.appInfo?.systemDarkUi === true;
   if (els.aboutVersion) els.aboutVersion.textContent = state.appInfo?.version ? `v${state.appInfo.version}` : '—';
   state.settings = await window.tokenMonitor.getSettings();
+  await refreshAccountSlotPanels();
   // Local appearance is sufficient for first reveal. Plugin discovery, sync,
   // updater and stats queries below must not hold the window off screen.
   // Tray startup also needs its saved appearance prepared before native show.
@@ -14015,7 +14742,9 @@ document.addEventListener('click', (event) => {
 });
 
 document.addEventListener('keydown', (event) => {
-  if (event.key === 'Escape' && state.periodMenuOpen) {
+  if (event.key !== 'Escape') return;
+  hideHomeTrendTooltip();
+  if (state.periodMenuOpen) {
     event.preventDefault();
     setPeriodMenuOpen(false, { restoreFocus: true });
   }
@@ -14075,10 +14804,13 @@ els.settingsButton.addEventListener('click', (event) => {
   // closing it needs no catch-up repaint. Only the panel's own DOM has to be
   // caught up when it opens, because its renderers idle while it is closed.
   if (settingsOpen) {
+    hideHomeTrendTooltip();
+    resetMainViewSettings();
     syncSettingsForm();
   } else {
     syncModeSelect?.close();
     syncContentForm?.closeHelp();
+    appearanceColorPicker.close();
     resetSettingsListSearch();
     stopWindowShortcutRecording();
   }
@@ -14088,6 +14820,7 @@ els.settingsButton.addEventListener('click', (event) => {
   els.shell.style.transform = 'translateZ(0)';
   requestAnimationFrame(() => { els.shell.style.transform = ''; });
   ensureServiceStatusTicker();
+  if (settingsOpen && state.settingsSections?.general) void refreshAboutStars();
 });
 els.saveSettingsButton.addEventListener('click', async () => {
   if (hubSaveBusy || !hubDraftHasChanges()) return;
@@ -14099,6 +14832,9 @@ els.saveSettingsButton.addEventListener('click', async () => {
     const submittedEditRevision = clientConnectionEditRevision;
     const submittedHubFields = hubDraftValuesFromInputs();
     const patch = { ...submittedHubFields };
+    if (state.settings?.hubMode === 'client' && els.hubProfileNameInput) {
+      patch.hubProfileAction = { type: hubProfileAdding ? 'add' : 'save', name: els.hubProfileNameInput.value };
+    }
     if (Object.prototype.hasOwnProperty.call(submittedHubFields, 'hubHostPort')) {
       patch.hubHostPort = Number(submittedHubFields.hubHostPort) || 17321;
     }
@@ -14111,6 +14847,10 @@ els.saveSettingsButton.addEventListener('click', async () => {
     } catch (_) {
       hubSaveError = true;
       return;
+    }
+    if (patch.hubProfileAction) {
+      hubProfileAdding = false;
+      hubProfileNameDraft = null;
     }
     reconcileHubDraftsAfterSave(submittedHubFields, submittedHubRevisions);
     finishClientConnectionSave(submittedHubRevisions, submittedEditRevision);
@@ -14125,8 +14865,66 @@ els.saveSettingsButton.addEventListener('click', async () => {
   }
 });
 
-els.syncConnectionEdit?.addEventListener('click', () => beginClientConnectionEdit({ focus: true }));
+// While a Hub switch is in flight the fields still hold the previous Hub.
+els.syncConnectionEdit?.addEventListener('click', () => {
+  if (!hubSaveBusy) beginClientConnectionEdit({ focus: true });
+});
 els.syncConnectionCancel?.addEventListener('click', cancelClientConnectionEdit);
+
+els.hubProfileNameInput?.addEventListener('input', () => {
+  const savedName = state.settings?.hubProfiles?.find(profile => profile.id === state.settings?.activeHubProfileId)?.name || '';
+  hubProfileNameDraft = els.hubProfileNameInput.value === savedName ? null : els.hubProfileNameInput.value;
+  beginClientConnectionEdit();
+  syncHubSaveButton();
+});
+function beginHubProfileAdd() {
+  if (hubSaveBusy || clientConnectionEditing || clientConnectionHasDraft()) return;
+  hubProfileAdding = true;
+  hubProfileNameDraft = '';
+  els.hubProfileNameInput.value = '';
+  for (const field of ['hubUrl', 'secret']) {
+    const inputId = HUB_DRAFT_FIELDS.find(([name]) => name === field)[1];
+    els[inputId].value = '';
+    markHubDraftDirty(field);
+  }
+  beginClientConnectionEdit();
+  syncHubDraftFields();
+  els.hubProfileNameInput.focus({ preventScroll: true });
+}
+
+async function changeHubProfile(action) {
+  if (hubSaveBusy || clientConnectionEditing || clientConnectionHasDraft()) return;
+  hubSaveBusy = true;
+  hubSaveError = false;
+  syncHubConnectionUi();
+  syncHubSaveButton();
+  try {
+    await saveSettings({ hubProfileAction: action });
+    await refreshHubInfo();
+    void refreshHubBuildStatus();
+    await refreshStats();
+  } catch (_) {
+    hubSaveError = true;
+  } finally {
+    hubSaveBusy = false;
+    syncHubDraftFields();
+  }
+}
+els.hubProfileSelect?.addEventListener('change', () => {
+  const value = els.hubProfileSelect.value;
+  if (value === HUB_PROFILE_ADD_VALUE) {
+    els.hubProfileSelect.value = state.settings?.activeHubProfileId || '';
+    beginHubProfileAdd();
+  } else if (value !== state.settings?.activeHubProfileId) {
+    void changeHubProfile({ type: 'select', id: value });
+  }
+});
+els.hubProfileRemove?.addEventListener('click', async () => {
+  if (hubSaveBusy) return;
+  // Remove discards the open edit of the profile being removed.
+  cancelClientConnectionEdit();
+  await changeHubProfile({ type: 'delete', id: state.settings?.activeHubProfileId });
+});
 
 els.syncPanelOpenDevices?.addEventListener('click', () => openViewFromTray('device'));
 
@@ -14137,6 +14935,9 @@ els.hubModeOptions.addEventListener('change', async (event) => {
     syncHubModeUi();
     return;
   }
+  // A failed save belongs to the mode it was made in.
+  hubSaveError = false;
+  syncHubConnectionUi();
   await saveSettings({ hubMode: target.value });
   await refreshHubInfo();
   void refreshHubBuildStatus();
@@ -14171,14 +14972,6 @@ els.languageInput?.addEventListener('change', async () => {
 els.currencyInput?.addEventListener('change', async () => {
   await saveSettings({ currency: els.currencyInput.value });
 });
-
-for (const input of els.modelRankingMetricInputs || []) {
-  input.addEventListener('change', async () => {
-    if (!input.checked) return;
-    await saveSettings({ modelRankingMetric: usageAttributionRowsApi.normalizeRankingMetric(input.value) });
-    render();
-  });
-}
 
 els.currencyRateModeAuto?.addEventListener('change', async () => {
   if (!els.currencyRateModeAuto.checked) return;
@@ -14347,6 +15140,7 @@ els.clearSessionUsageArchiveButton?.addEventListener('click', async () => {
         : 'settings.collection.sessionArchiveFailed'));
       return;
     }
+    archivedSessionCountCleared();
     await refreshStats();
   } finally {
     els.clearSessionUsageArchiveButton.disabled = false;
@@ -14381,7 +15175,6 @@ els.exportNowButton?.addEventListener('click', async () => {
   }
 });
 els.resetClientDisplayOrderButton?.addEventListener('click', resetClientDisplayOrder);
-els.showAllClientsButton?.addEventListener('click', showAllClients);
 
 // Escape clears the field rather than closing the settings panel: while a
 // filter is on, that is what the key is expected to undo.
@@ -14412,7 +15205,6 @@ bindSettingsListSearch(els.limitProviderSearchInput, (value) => {
   renderLimitProviderCheckboxes();
 });
 els.resetViewDisplayOrderButton?.addEventListener('click', resetViewDisplayOrder);
-els.showAllViewsButton?.addEventListener('click', showAllViews);
 els.resetGlassButton.addEventListener('click', async () => {
   els.glassInput.value = String(defaultAppearance.glassOpacity);
   applyAppearanceFromControls();
@@ -14445,8 +15237,8 @@ els.zoomInput.addEventListener('input', applyAppearanceFromControls);
 els.chooseBackgroundImageButton?.addEventListener('click', () => { void changeBackgroundImage(); });
 els.clearBackgroundImageButton?.addEventListener('click', () => { void changeBackgroundImage(true); });
 void loadBackgroundImage();
-els.resetThemeColorsButton?.addEventListener('click', () => commitThemeColors({}, true));
-els.resetVendorColorsButton?.addEventListener('click', () => commitVendorColors({}));
+els.resetThemeColorsButton?.addEventListener('click', () => queueAppearanceColorChange(() => commitThemeColors({}, true)));
+els.resetVendorColorsButton?.addEventListener('click', () => queueAppearanceColorChange(() => commitVendorColors({})));
 els.textSizeInput?.addEventListener('change', async () => {
   await saveSettings({ textSize: fontSettingsApi.normalizeTextSize(els.textSizeInput.value) });
 });
@@ -14485,8 +15277,12 @@ function setupSettingsAccordion(group, toggle, details, onExpandedChange) {
 
 setupSettingsAccordion(els.appUpdateNotes, els.appUpdateNotesToggle, els.appUpdateNotesDetails);
 setupSettingsAccordion(els.advancedSettingsGroup, els.advancedSettingsToggle, els.advancedSettingsDetails);
-setupSettingsAccordion(els.themeAdvancedGroup, els.themeAdvancedToggle, els.themeAdvancedDetails);
-setupSettingsAccordion(els.themeVendorGroup, els.themeVendorToggle, els.themeVendorDetails);
+function closeAppearanceColorPickerOnCollapse(expanded) {
+  if (!expanded) appearanceColorPicker.close();
+}
+setupSettingsAccordion(els.themeAdvancedGroup, els.themeAdvancedToggle, els.themeAdvancedDetails, closeAppearanceColorPickerOnCollapse);
+setupSettingsAccordion(els.themeVendorGroup, els.themeVendorToggle, els.themeVendorDetails, closeAppearanceColorPickerOnCollapse);
+setupSettingsAccordion(els.appearanceLegacyGroup, els.appearanceLegacyToggle, els.appearanceLegacyDetails);
 setupSettingsAccordion(els.edgeDockMoreOptionsGroup, els.edgeDockMoreOptionsToggle, els.edgeDockMoreOptionsDetails);
 setupSettingsAccordion(els.notchMoreOptionsGroup, els.notchMoreOptionsToggle, els.notchMoreOptionsDetails);
 for (const input of els.systemGlassInputs || []) {
@@ -14949,7 +15745,10 @@ els.resetZoomButton.addEventListener('click', async () => {
 });
 els.openConfigButton.addEventListener('click', () => window.tokenMonitor.openUserData());
 els.openTokscaleLinkButton?.addEventListener('click', () => window.tokenMonitor.openExternal?.('https://github.com/junhoyeo/tokscale'));
-els.openRepositoryButton?.addEventListener('click', () => window.tokenMonitor.openExternal?.(TOKEN_MONITOR_REPOSITORY_URL));
+els.openRepositoryButton?.addEventListener('click', () => {
+  celebrateAboutStar();
+  window.tokenMonitor.openExternal?.(TOKEN_MONITOR_REPOSITORY_URL);
+});
 els.openWebsiteButton?.addEventListener('click', () => window.tokenMonitor.openExternal?.(TOKEN_MONITOR_WEBSITE_URL));
 els.reportIssueButton?.addEventListener('click', () => window.tokenMonitor.openExternal?.(TOKEN_MONITOR_ISSUES_URL));
 els.refreshButton.addEventListener('click', () => {
@@ -14986,6 +15785,8 @@ els.floatingBubbleTab.addEventListener('mouseleave', handleFloatingBubbleHoverLe
 document.documentElement.addEventListener('mouseleave', handleDocumentHoverLeave);
 document.documentElement.addEventListener('mouseleave', hideTrendTooltip);
 window.addEventListener('blur', handleTrendsWindowBlur);
+window.addEventListener('blur', hideHomeTrendTooltip);
+window.addEventListener('resize', hideHomeTrendTooltip);
 document.documentElement.addEventListener('mouseenter', clearHoverCollapseTimer);
 els.floatingBubbleTab.addEventListener('keydown', (event) => {
   if (event.key !== 'Enter' && event.key !== ' ') return;
@@ -15121,6 +15922,7 @@ window.tokenMonitor.onSettingsPush?.((next) => {
     if (JSON.stringify(next[key]) !== JSON.stringify(state.settings?.[key])) delete appearancePreview[key];
   }
   setRendererSettings(next);
+  void refreshAccountSlotPanels();
   syncPluginTrayDemand();
   applyEffectiveCurrencyRates();
   observeDisplayLiveTokenRates(state.stats);
@@ -15186,22 +15988,18 @@ function renderStatsUpdate() {
   if (surface !== 'main') return;
   render();
   if (!isSettingsSurfaceVisible()) return;
-  renderCodexAccounts();
-  renderMimoStatus();
-  renderWorkbuddyStatus();
-  renderSettingsSummaries();
-  renderLimitProviderCheckboxes();
-  renderToolPreferences();
-  renderWslPanel();
-  updateOpenRouterProfilesStatus();
-  updateMinimaxApiKeysStatus();
-  updateThirdPartyProfilesStatus();
-  renderExternalProviderStatus('volcengine');
-  renderExternalProviderStatus('kimi');
-  for (const form of state.settings?.limitAccountForms || []) {
-    if (limitProviderAccountGroup(form.id)) renderExternalProviderStatus(form.id);
-  }
-  renderCopilotStatus();
+  preserveSettingsPanelScroll(() => {
+    refreshAccountOwnerReadings();
+    renderSettingsSummaries();
+    renderLimitProviderCheckboxes();
+    renderToolPreferences();
+    renderWslPanel();
+    renderExternalProviderStatus('volcengine');
+    renderExternalProviderStatus('kimi');
+    for (const form of state.settings?.limitAccountForms || []) {
+      if (limitProviderAccountGroup(form.id)) renderExternalProviderStatus(form.id);
+    }
+  });
   signalContentReady();
 }
 
@@ -15209,11 +16007,11 @@ const statsRenderScheduler = statsRenderSchedulerApi.createStatsRenderScheduler(
   isHidden: isRendererWindowHidden,
   render: renderStatsUpdate
 });
-// Pulled once up front, then only while something on screen reads it: the
-// archived count in Settings, or TOTAL sessions/projects. Bot identity arrives
-// in a compact snapshot projection and does not need a full history pull.
+// Pulled once up front, then only while TOTAL sessions/projects show it.
+// Settings' archived count is counted in main (requestArchivedSessionCount), and
+// bot identity arrives in a compact snapshot projection; neither needs the list.
 function allTimeSessionsNeeded() {
-  if (!allTimeSessions.loaded() || isSettingsPanelOpen()) return true;
+  if (!allTimeSessions.loaded()) return true;
   return state.period === 'allTime' && (state.breakdown === 'session' || state.breakdown === 'project');
 }
 const allTimeSessions = allTimeSessionsApi.createAllTimeSessionsLoader({
@@ -16172,8 +16970,8 @@ function trayComposerProviderChoices(currentProviders = [], options = {}) {
 function trayComposerAccountChoices(provider) {
   const stats = desktopSurfaceStats() || {};
   const raw = provider === 'auto'
-    ? desktopLimitProviders().flatMap((entry) => trayLayoutApi.accountOptions(stats, entry.id))
-    : trayLayoutApi.accountOptions(stats, provider);
+    ? desktopLimitProviders().flatMap((entry) => trayLayoutApi.accountOptions(stats, entry.id, t))
+    : trayLayoutApi.accountOptions(stats, provider, t);
   return raw.map((entry) => ({
     value: entry.value,
     label: entry.label,
@@ -16573,298 +17371,37 @@ function syncLimitProviderAccountExpansion(providerId, expanded) {
   }
 }
 
-function setCodexAccountExpanded(expanded) {
-  setAccountGroupExpanded('codex', expanded, 'codexAccountExpanded');
-}
-
-function setCursorAccountExpanded(expanded) {
-  setAccountGroupExpanded('cursor', expanded, 'cursorAccountExpanded');
-}
-
-function setAntigravityAccountExpanded(expanded) {
-  setAccountGroupExpanded('antigravity', expanded, 'antigravityAccountExpanded');
-}
-
-function setOpencodeCookieExpanded(expanded) {
-  setAccountGroupExpanded('opencode', expanded, 'opencodeCookieExpanded');
-}
-
-function setOpenrouterAccountExpanded(expanded) {
-  setAccountGroupExpanded('openrouter', expanded, 'openrouterAccountExpanded');
-}
-
-function setThirdPartyAccountExpanded(expanded) {
-  setAccountGroupExpanded('thirdparty', expanded, 'thirdPartyAccountExpanded');
-}
-
-function selectedThirdPartyAdapter() {
-  const platform = String(document.getElementById('thirdpartyPlatformInput')?.value || 'newapi');
-  const mode = String(document.getElementById('thirdpartyModeInput')?.value || 'account');
-  if (platform === 'custom') return 'custom';
-  if (platform === 'sub2api') return 'sub2api';
-  return mode === 'token' ? 'newapi-token' : 'newapi-account';
-}
-
-function updateThirdPartyHttpWarning() {
-  const input = document.getElementById('thirdpartyBaseUrlInput');
-  const warning = document.getElementById('thirdpartyHttpWarning');
-  if (!warning) return;
-  let insecure;
-  try {
-    insecure = new URL(String(input?.value || '').trim()).protocol === 'http:';
-  } catch {
-    warning.classList.add('hidden');
-    return;
-  }
-  warning.classList.toggle('hidden', !insecure);
-}
-
-function setThirdPartyAdapterFields() {
-  const adapter = selectedThirdPartyAdapter();
-  const customMode = adapter === 'custom';
-  const sub2apiMode = adapter === 'sub2api';
-  const singleChoiceField = customMode || sub2apiMode;
-  const accountMode = adapter === 'newapi-account' || sub2apiMode;
-  const newApiAccountMode = adapter === 'newapi-account';
-  const pairedCredentials = newApiAccountMode;
-  document.getElementById('thirdpartyChoiceGrid')?.classList.toggle('single-field', singleChoiceField);
-  document.getElementById('thirdpartyModeField')?.classList.toggle('hidden', singleChoiceField);
-  document.getElementById('thirdpartyCredentialGrid')?.classList.toggle(
-    'single-field',
-    !pairedCredentials
-  );
-  document.getElementById('thirdpartyAccessTokenRow')?.classList.toggle('hidden', !accountMode);
-  document.getElementById('thirdpartyRefreshTokenRow')?.classList.toggle('hidden', !sub2apiMode);
-  document.getElementById('thirdpartySub2ApiSteps')?.classList.toggle('hidden', !sub2apiMode);
-  document.getElementById('thirdpartyUserIdRow')?.classList.toggle('hidden', !newApiAccountMode);
-  document.getElementById('thirdpartyApiKeyRow')?.classList.toggle('hidden', accountMode);
-  document.getElementById('thirdpartyCustomConfig')?.classList.toggle('hidden', !customMode);
-  const hint = document.getElementById('thirdpartyModeHint');
-  if (hint) {
-    const hintKey = customMode
-      ? 'settings.thirdparty.hintCustom'
-      : sub2apiMode
-        ? 'settings.thirdparty.hintSub2Api'
-        : adapter === 'newapi-token'
-          ? 'settings.thirdparty.hintNewApiToken'
-          : 'settings.thirdparty.hintNewApiAccount';
-    hint.textContent = t(hintKey);
-  }
-  const accessTokenLabel = document.getElementById('thirdpartyAccessTokenLabel');
-  const accessTokenInput = document.getElementById('thirdpartyAccessTokenInput');
-  const refreshTokenLabel = document.getElementById('thirdpartyRefreshTokenLabel');
-  const refreshTokenInput = document.getElementById('thirdpartyRefreshTokenInput');
-  const accessTokenKey = 'settings.thirdparty.accessToken';
-  const accessTokenPlaceholderKey = sub2apiMode
-    ? 'settings.thirdparty.sub2ApiAccessTokenPlaceholder'
-    : 'settings.thirdparty.accessTokenPlaceholder';
-  const refreshTokenKey = 'settings.thirdparty.refreshToken';
-  const refreshTokenPlaceholderKey = sub2apiMode
-    ? 'settings.thirdparty.sub2ApiRefreshTokenPlaceholder'
-    : 'settings.thirdparty.refreshTokenPlaceholder';
-  if (accessTokenLabel) {
-    accessTokenLabel.dataset.i18n = accessTokenKey;
-    accessTokenLabel.textContent = t(accessTokenKey);
-  }
-  if (accessTokenInput) {
-    accessTokenInput.dataset.i18nPlaceholder = accessTokenPlaceholderKey;
-    accessTokenInput.placeholder = t(accessTokenPlaceholderKey);
-  }
-  if (refreshTokenLabel) {
-    refreshTokenLabel.dataset.i18n = refreshTokenKey;
-    refreshTokenLabel.textContent = t(refreshTokenKey);
-  }
-  if (refreshTokenInput) {
-    refreshTokenInput.dataset.i18nPlaceholder = refreshTokenPlaceholderKey;
-    refreshTokenInput.placeholder = t(refreshTokenPlaceholderKey);
-  }
-}
 
 
-function setMimoAccountExpanded(expanded) {
-  setAccountGroupExpanded('mimo', expanded, 'mimoAccountExpanded');
-}
 
-async function refreshMimoAccounts() {
-  try {
-    state.settings.mimoManagedAccounts = await window.tokenMonitor.mimo.accounts() || [];
-    renderMimoStatus();
-  } catch (_) {}
-}
 
-function setCopilotAccountExpanded(expanded) {
-  setAccountGroupExpanded('copilot', expanded, 'copilotAccountExpanded');
-}
 
-function setCopilotManualExpanded(expanded) {
-  const next = Boolean(expanded);
-  state.copilotManualExpanded = next;
-  document.getElementById('copilotManualToggle')?.setAttribute('aria-expanded', next ? 'true' : 'false');
-  document.getElementById('copilotManualDetails')?.classList.toggle('hidden', !next);
-  document.getElementById('copilotManualPanel')?.classList.toggle('expanded', next);
-}
+
+
+
+function setThirdPartyAdapterFields(...args) { return legacyAccountOwners.thirdparty.setThirdPartyAdapterFields(...args); }
+
+
+
+
+
+
+
 
 function setCursorStatusText(el, text) {
-  el.textContent = text;
-  el.setAttribute('aria-label', text);
+  if (el.textContent !== text) el.textContent = text;
+  if (el.getAttribute('aria-label') !== text) el.setAttribute('aria-label', text);
 }
 
-function renderCodexLoginStatus() {
-  const addButton = document.getElementById('codexAddAccountButton');
-  const cancelButton = document.getElementById('codexCancelLoginButton');
-  const refreshButton = document.getElementById('codexRefreshAccountsButton');
-  const openButton = document.getElementById('codexOpenLoginUrlButton');
-  const copyButton = document.getElementById('codexCopyLoginUrlButton');
-  const statusEl = document.getElementById('codexLoginStatus');
-  const workspaceSelection = document.getElementById('codexWorkspaceSelection');
-  const workspaceSelect = document.getElementById('codexWorkspaceSelect');
-  const urlActions = document.getElementById('codexLoginUrlActions');
-  const details = document.getElementById('codexLoginDetails');
-  const output = document.getElementById('codexLoginOutput');
-  if (!addButton || !cancelButton || !refreshButton || !openButton || !copyButton || !statusEl || !workspaceSelection || !workspaceSelect || !urlActions || !details || !output) return;
 
-  addButton.classList.toggle('hidden', state.codexSignInBusy);
-  cancelButton.classList.toggle('hidden', !state.codexSignInBusy);
-  refreshButton.classList.toggle('hidden', state.codexSignInBusy);
-  accountShellApi.render({ progress: statusEl, progressText: state.codexLoginStatus });
-  workspaceSelection.classList.toggle('hidden', state.codexWorkspaceChoices.length === 0);
-  workspaceSelect.replaceChildren(...state.codexWorkspaceChoices.map((workspace) => {
-    const option = document.createElement('option');
-    option.value = workspace.id;
-    option.textContent = workspace.workspaceKind === 'personal'
-      ? t('settings.codex.personalWorkspace')
-      : workspace.label || workspace.id;
-    option.selected = workspace.id === state.codexWorkspaceId;
-    return option;
-  }));
-  urlActions.classList.toggle('hidden', !state.codexSignInBusy);
-  openButton.classList.toggle('hidden', !state.codexLoginUrl);
-  copyButton.classList.toggle('hidden', !state.codexLoginUrl);
-  output.textContent = state.codexLoginOutput;
-  details.classList.toggle('hidden', !state.codexLoginOutput);
-}
+function renderCodexAccounts(...args) { return legacyAccountOwners.codex.renderCodexAccounts(...args); }
 
-function renderCodexAccounts() {
-  if (!isSettingsSurfaceVisible()) return;
-  const statusEl = document.getElementById('codexAccountStatus');
-  const listEl = document.getElementById('codexAccountList');
-  const errorEl = document.getElementById('codexAccountErrorMessage');
-  if (!statusEl || !listEl || !errorEl) return;
-
-  const accounts = state.settings?.codexManagedAccounts || [];
-  const enabledCount = accounts.filter(account => account.enabled !== false).length;
-  const statusText = accounts.length === 0
-    ? t('settings.codex.notConfigured')
-    : t('settings.opencode.connected', { linked: enabledCount, total: accounts.length });
-  accountShellApi.render({ status: statusEl, statusText, error: errorEl, errorText: state.codexAccountError });
-  listEl.replaceChildren();
-  if (accounts.length === 0) {
-    const empty = document.createElement('p');
-    empty.className = 'settings-note';
-    empty.textContent = t('settings.codex.empty');
-    listEl.append(empty);
-  } else {
-    const codexProviders = localProviderStatuses('codex');
-    for (const account of accounts) {
-      const enabled = account.enabled !== false;
-      const row = document.createElement('div');
-      row.className = 'managed-account-row';
-      row.classList.toggle('disabled', !enabled);
-      const input = document.createElement('input');
-      input.className = 'managed-account-checkbox';
-      input.type = 'checkbox';
-      input.checked = account.enabled !== false;
-      input.setAttribute('aria-label', t('settings.codex.toggleAccount', {
-        account: account.email || t('settings.codex.unnamedAccount')
-      }));
-      const main = document.createElement('div');
-      main.className = 'managed-account-main';
-      const email = document.createElement('div');
-      email.className = 'managed-account-email';
-      email.textContent = account.email || t('settings.codex.unnamedAccount');
-      main.append(email);
-      input.addEventListener('change', async () => {
-        input.disabled = true;
-        const result = await window.tokenMonitor.codex.setAccountEnabled(account.id, input.checked);
-        if (!result?.ok) {
-          state.codexAccountError = result?.error || t('settings.codex.toggleFailed');
-        } else {
-          state.codexAccountError = '';
-          state.settings.codexManagedAccounts = result.accounts || [];
-        }
-        renderCodexAccounts();
-        renderSettingsSummaries();
-      });
-      const right = document.createElement('span');
-      right.className = 'managed-account-right';
-      const info = document.createElement('span');
-      info.className = 'managed-account-info';
-      const workspaceLabel = account.workspaceKind === 'personal'
-        ? t('settings.codex.personalWorkspace')
-        : account.workspaceLabel;
-      const accountMetadata = [
-        workspaceLabel,
-        enabled
-          ? limitProviderPresentationApi.limitProviderDisplayLabel(
-            accountIdentityApi.codexManagedAccountPlanLabel(account, codexProviders)
-          )
-          : t('settings.codex.disabled')
-      ].filter((value, index, values) => value && values.indexOf(value) === index);
-      info.textContent = accountMetadata.join(' · ');
-      info.setAttribute('aria-label', accountMetadata.join(' · '));
-      const remove = document.createElement('button');
-      remove.type = 'button';
-      remove.className = 'managed-account-remove';
-      remove.textContent = '✕';
-      remove.setAttribute('aria-label', t('settings.codex.remove'));
-      let confirmingRemove = false;
-      remove.addEventListener('click', async () => {
-        if (!confirmingRemove) {
-          confirmingRemove = true;
-          remove.classList.add('confirming');
-          remove.textContent = '✓';
-          remove.setAttribute('aria-label', t('settings.codex.removeConfirm', {
-            account: account.email || t('settings.codex.unnamedAccount')
-          }));
-          return;
-        }
-        const result = await window.tokenMonitor.codex.removeAccount(account.id);
-        if (!result?.ok) {
-          state.codexAccountError = result?.error || t('settings.codex.removeFailed');
-        } else {
-          state.codexAccountError = '';
-          state.settings.codexManagedAccounts = result.accounts || [];
-          renderCodexAccounts();
-          renderSettingsSummaries();
-          refreshStats({ force: true }).catch(() => {});
-          return;
-        }
-        renderCodexAccounts();
-        renderSettingsSummaries();
-      });
-      right.append(info, remove);
-      row.append(input, main, right);
-      listEl.append(row);
-    }
-  }
-  renderSettingsSummaries();
-}
-
-async function refreshCodexAccounts() {
-  try {
-    state.settings.codexManagedAccounts = await window.tokenMonitor.codex.accounts();
-    state.codexAccountError = '';
-  } catch (err) {
-    state.codexAccountError = err.message;
-  }
-  renderCodexAccounts();
-}
 
 // Account cards reflect THIS machine's configured credential, so read the
 // local device's RAW limits from state.stats.devices — NOT the collapsed
 // state.stats.limits.providers. In sync mode, aggregateLimits() collapses a
 // local `unauthorized` row out in favor of a remote `ok` (providerCollapseKey
-// for deepseek/grok and keyless minimax rows is just the provider name;
+// for grok and keyless minimax rows is just the provider name;
 // pickBetterProvider keeps the higher statusRank). Searching the aggregate
 // would miss the local row and fall back to the remote `ok`, falsely reporting
 // an invalid local key as Linked. Only legacy/non-aggregated stats without a
@@ -16877,6 +17414,23 @@ function localDeviceLimitsProviders() {
   );
 }
 
+// Settings can paint a just-completed local probe before the usage/Hub
+// snapshot catches up. Keep the per-device presentation once it has caught up.
+function settingsLocalDeviceLimitsProviders() {
+  const deviceId = state.settings?.deviceId || '';
+  if (settingsLocalLimits?.deviceId !== deviceId) return localDeviceLimitsProviders();
+  const local = settingsLocalLimits.limits;
+  const published = state.stats?.devices?.find(device => device.deviceId === deviceId)?.limits;
+  if (published?.updatedAt && published.updatedAt >= local.updatedAt) {
+    if (published.updatedAt > local.updatedAt) return localDeviceLimitsProviders();
+    // Millisecond timestamps can tie across different quota results. Only
+    // hand back to the published presentation when it contains the result.
+    const publishedRows = (published.providers || []).map(({ stale: _stale, ...row }) => row);
+    if (JSON.stringify(publishedRows) === JSON.stringify(local.providers)) return localDeviceLimitsProviders();
+  }
+  return accountIdentityApi.localDeviceLimitsProviders({ devices: [settingsLocalLimits] }, deviceId);
+}
+
 function localProviderStatus(name) {
   const localProviders = localDeviceLimitsProviders();
   if (localProviders !== null) {
@@ -16885,540 +17439,42 @@ function localProviderStatus(name) {
   return (state.stats?.limits?.providers || []).find((provider) => provider.provider === name) || null;
 }
 
+// Automatic account rows must not promote a Hub aggregate to a local login.
+function strictLocalProviderStatuses(name) {
+  const localDeviceId = state.settings?.deviceId || '';
+  if (!localDeviceId && Array.isArray(state.stats?.devices)) return [];
+  const local = settingsLocalDeviceLimitsProviders();
+  const providers = local !== null ? local
+    : state.mode !== 'sync' && (!state.settings?.hubMode || state.settings.hubMode === 'local')
+      ? state.stats?.limits?.providers || [] : [];
+  return providers.filter(provider => provider.provider === name
+    && (!provider.sourceDeviceId || provider.sourceDeviceId === localDeviceId));
+}
+
 function localProviderStatuses(name) {
-  const localProviders = localDeviceLimitsProviders();
+  const localProviders = settingsLocalDeviceLimitsProviders();
   const providers = localProviders !== null
     ? localProviders
     : (state.stats?.limits?.providers || []);
   return providers.filter((provider) => provider.provider === name);
 }
 
-function workbuddyAccountError(code, fallback = 'loginFailed') {
-  const keys = {
-    TIMEOUT: 'loginTimeout',
-    STATE_MISMATCH: 'loginStateMismatch',
-    INVALID_STATE: 'loginStateMismatch',
-    INVALID_LOGIN_URL: 'loginStateMismatch',
-    CONTEXT_CHANGED: 'loginStateMismatch',
-    credentialStorageUnavailable: 'credentialStorageUnavailable',
-    PERSISTENCE_FAILED: 'credentialStorageUnavailable',
-    ROLLBACK_FAILED: 'credentialStorageUnavailable',
-    loginInProgress: 'loginInProgress'
-  };
-  return t(`settings.workbuddy.${Object.hasOwn(keys, code) ? keys[code] : fallback}`);
-}
 
-function applyWorkbuddyAccounts(accounts) {
-  if (!state.settings || !Array.isArray(accounts)) return;
-  state.workbuddyAccountsRevision = (state.workbuddyAccountsRevision || 0) + 1;
-  state.settings.workbuddyManagedAccounts = accounts;
-  renderWorkbuddyStatus();
-  renderSettingsSummaries();
-  renderSubscriptionSettings();
-}
 
-async function mutateWorkbuddyAccount(id, operation, enabled) {
-  if (state.workbuddyMutationBusy || state.workbuddySignInBusy || state.workbuddyCancelBusy) return;
-  state.workbuddyMutationBusy = true;
-  state.workbuddyAccountError = '';
-  renderWorkbuddyStatus();
-  try {
-    const api = window.tokenMonitor.workbuddy;
-    const result = operation === 'remove'
-      ? await api.removeAccount(id)
-      : await api.setAccountEnabled(id, enabled);
-    if (!result?.ok) {
-      state.workbuddyAccountError = workbuddyAccountError(result?.errorCode,
-        operation === 'remove' ? 'removeFailed' : 'toggleFailed');
-    } else {
-      applyWorkbuddyAccounts(result.accounts);
-      refreshStats({ force: true }).catch(() => {});
-    }
-  } catch (_) {
-    state.workbuddyAccountError = workbuddyAccountError('', operation === 'remove' ? 'removeFailed' : 'toggleFailed');
-  } finally {
-    state.workbuddyMutationBusy = false;
-    renderWorkbuddyStatus();
-  }
-}
 
-function finishWorkbuddyLogin(attempt, result) {
-  if (state.workbuddyLoginAttempt !== attempt) return;
-  if (state.workbuddyCancelBusy) {
-    state.workbuddyPendingLoginResult = { attempt, result };
-    return;
-  }
-  state.workbuddySignInBusy = false;
-  state.workbuddyAccountError = '';
-  if (result?.ok) {
-    applyWorkbuddyAccounts(result.accounts);
-    state.workbuddyLoginStatusKey = '';
-    refreshStats({ force: true }).catch(() => {});
-  } else if (['CANCELED', 'CANCELLED'].includes(result?.errorCode)) {
-    state.workbuddyLoginStatusKey = 'loginCancelled';
-  } else {
-    state.workbuddyLoginStatusKey = '';
-    state.workbuddyAccountError = workbuddyAccountError(result?.errorCode);
-  }
-  renderWorkbuddyStatus();
-}
 
-async function startWorkbuddyLogin(realm) {
-  if (!['cn', 'ai'].includes(realm) || state.workbuddySignInBusy || state.workbuddyCancelBusy || state.workbuddyMutationBusy) return;
-  const attempt = (state.workbuddyLoginAttempt || 0) + 1;
-  state.workbuddyLoginAttempt = attempt;
-  state.workbuddySignInBusy = true;
-  state.workbuddyPendingLoginResult = null;
-  state.workbuddyAccountError = '';
-  state.workbuddyLoginStatusKey = 'loginStatus';
-  renderWorkbuddyStatus();
-  let result;
-  try {
-    result = await window.tokenMonitor.workbuddy.addAccount(realm);
-  } catch (_) {
-    result = { ok: false };
-  }
-  finishWorkbuddyLogin(attempt, result);
-}
 
-async function cancelWorkbuddyLogin() {
-  if (!state.workbuddySignInBusy || state.workbuddyCancelBusy) return;
-  state.workbuddyCancelBusy = true;
-  state.workbuddyAccountError = '';
-  renderWorkbuddyStatus();
-  let cancelled = false;
-  try {
-    const result = await window.tokenMonitor.workbuddy.cancelLogin();
-    cancelled = result === true || result?.ok === true;
-  } catch (_) {}
-  state.workbuddyCancelBusy = false;
-  if (cancelled) {
-    // A cancelled IPC promise may settle later, including after the next login.
-    state.workbuddyLoginAttempt = (state.workbuddyLoginAttempt || 0) + 1;
-    state.workbuddySignInBusy = false;
-    state.workbuddyPendingLoginResult = null;
-    state.workbuddyLoginStatusKey = 'loginCancelled';
-  } else if (state.workbuddyPendingLoginResult) {
-    const pending = state.workbuddyPendingLoginResult;
-    state.workbuddyPendingLoginResult = null;
-    finishWorkbuddyLogin(pending.attempt, pending.result);
-  } else {
-    state.workbuddyAccountError = workbuddyAccountError('', 'cancelFailed');
-  }
-  renderWorkbuddyStatus();
-}
 
-function renderWorkbuddyStatus() {
-  const list = document.getElementById('workbuddyAccountList');
-  if (!list || !state.settings) return;
-  const accounts = Array.isArray(state.settings.workbuddyManagedAccounts) ? state.settings.workbuddyManagedAccounts : [];
-  const busy = Boolean(state.workbuddySignInBusy || state.workbuddyCancelBusy || state.workbuddyMutationBusy);
-  accountShellApi.render({
-    status: document.getElementById('workbuddyAccountStatus'),
-    statusText: accounts.length
-      ? t('settings.workbuddy.connected', { linked: accounts.filter((a) => a.enabled !== false).length, total: accounts.length })
-      : t('settings.workbuddy.notConfigured'),
-    progress: document.getElementById('workbuddyLoginStatus'),
-    progressText: state.workbuddyCancelBusy
-      ? t('settings.workbuddy.cancelling')
-      : state.workbuddyLoginStatusKey ? t(`settings.workbuddy.${state.workbuddyLoginStatusKey}`) : '',
-    error: document.getElementById('workbuddyAccountErrorMessage'),
-    errorText: state.workbuddyAccountError
-  });
-  for (const [id, key] of [['workbuddyAddCnAccountButton', 'addCnAccount'], ['workbuddyAddAiAccountButton', 'addAiAccount']]) {
-    const button = document.getElementById(id);
-    if (!button) continue;
-    button.disabled = busy;
-    button.textContent = t(`settings.workbuddy.${key}`);
-  }
-  const cancel = document.getElementById('workbuddyCancelLoginButton');
-  if (cancel) {
-    cancel.classList.toggle('hidden', !state.workbuddySignInBusy && !state.workbuddyCancelBusy);
-    cancel.disabled = Boolean(state.workbuddyCancelBusy);
-  }
-  list.replaceChildren();
-  if (!accounts.length) {
-    const empty = document.createElement('p');
-    empty.className = 'settings-note';
-    empty.textContent = t('settings.workbuddy.empty');
-    list.append(empty);
-  }
-  const providers = localProviderStatuses('workbuddy');
-  accounts.forEach((account, index) => {
-    const name = accountIdentityApi.accountTitleLabel({ provider: 'workbuddy', ...account }, accounts, {
-      maskEmail: state.settings.maskLimitAccountEmails === true, index
-    }) || t('settings.workbuddy.accountFallback', { number: index + 1 });
-    const row = document.createElement('div');
-    row.className = 'managed-account-row';
-    row.classList.toggle('disabled', account.enabled === false);
-    const input = document.createElement('input');
-    input.type = 'checkbox';
-    input.className = 'managed-account-checkbox';
-    input.checked = account.enabled !== false;
-    input.disabled = busy;
-    input.setAttribute('aria-label', t('settings.workbuddy.toggleAccount', { account: name }));
-    input.addEventListener('change', () => mutateWorkbuddyAccount(account.id, 'toggle', input.checked));
-    const main = document.createElement('div');
-    main.className = 'managed-account-main';
-    const title = document.createElement('div');
-    title.className = 'managed-account-email';
-    title.textContent = name;
-    title.setAttribute('aria-label', name);
-    const meta = document.createElement('div');
-    meta.className = 'workbuddy-account-meta';
-    meta.textContent = t(account.realm === 'ai' ? 'settings.workbuddy.realmAi' : 'settings.workbuddy.realmCn');
-    main.append(title, meta);
-    const right = document.createElement('span');
-    right.className = 'managed-account-right';
-    const info = document.createElement('span');
-    info.className = 'managed-account-info';
-    // Nicknames, realm labels and email addresses never redirect a quota lookup.
-    const provider = account.accountKey
-      ? providers.find((candidate) => candidate.accountKey === account.accountKey)
-      : null;
-    info.textContent = account.enabled === false ? t('settings.workbuddy.disabled')
-      : provider ? translatedLimitProviderTag(limitProviderPresentationApi.limitProviderStatusLabel(provider))
-        : t('settings.workbuddy.notChecked');
-    info.setAttribute('aria-label', info.textContent);
-    const remove = document.createElement('button');
-    remove.type = 'button';
-    remove.className = 'managed-account-remove';
-    remove.textContent = '✕';
-    remove.setAttribute('aria-label', t('settings.workbuddy.remove'));
-    remove.disabled = busy;
-    let armed = false;
-    remove.addEventListener('click', () => {
-      if (busy) return;
-      if (!armed) {
-        armed = true;
-        remove.classList.add('confirming');
-        remove.textContent = '✓';
-        remove.setAttribute('aria-label', t('settings.workbuddy.removeConfirm', { account: name }));
-        return;
-      }
-      return mutateWorkbuddyAccount(account.id, 'remove');
-    });
-    right.append(info, remove);
-    row.append(input, main, right);
-    list.append(row);
-  });
-}
+function renderWorkbuddyStatus(...args) { return legacyAccountOwners.workbuddy.renderWorkbuddyStatus(...args); }
 
-function initWorkbuddyAccountSettings() {
-  const api = window.tokenMonitor.workbuddy;
-  const toggle = document.getElementById('workbuddySettingsToggle');
-  if (!api || !toggle) return;
-  toggle.addEventListener('click', () => setAccountGroupExpanded('workbuddy', !state.workbuddyAccountExpanded, 'workbuddyAccountExpanded'));
-  setAccountGroupExpanded('workbuddy', false, 'workbuddyAccountExpanded');
-  renderWorkbuddyStatus();
-  api.onAccounts(applyWorkbuddyAccounts);
-  const revision = state.workbuddyAccountsRevision || 0;
-  api.accounts().then((accounts) => {
-    if ((state.workbuddyAccountsRevision || 0) === revision) applyWorkbuddyAccounts(accounts);
-  }).catch(() => {
-    if ((state.workbuddyAccountsRevision || 0) !== revision) return;
-    state.workbuddyAccountError = workbuddyAccountError('', 'accountsFailed');
-    renderWorkbuddyStatus();
-  });
-  document.getElementById('workbuddyAddCnAccountButton')?.addEventListener('click', () => startWorkbuddyLogin('cn'));
-  document.getElementById('workbuddyAddAiAccountButton')?.addEventListener('click', () => startWorkbuddyLogin('ai'));
-  document.getElementById('workbuddyCancelLoginButton')?.addEventListener('click', cancelWorkbuddyLogin);
-}
 
-function renderAntigravityStatus() {
-  if (!isSettingsSurfaceVisible()) return;
-  const statusEl = document.getElementById('antigravityAccountStatus');
-  const listEl = document.getElementById('antigravityAccountList');
-  const errorEl = document.getElementById('antigravityAccountErrorMessage');
-  const statusMessage = document.getElementById('antigravityLoginStatus');
-  const addButton = document.getElementById('antigravityAddAccountButton');
-  const cancelButton = document.getElementById('antigravityCancelLoginButton');
-  if (!statusEl || !listEl || !errorEl || !addButton || !cancelButton) return;
-  const accounts = state.settings?.antigravityManagedAccounts || [];
-  const enabledCount = accounts.filter((account) => account.enabled !== false).length;
-  accountShellApi.render({
-    status: statusEl,
-    statusText: accounts.length === 0
-      ? t('settings.antigravity.notConfigured')
-      : t('settings.antigravity.connected', { linked: enabledCount, total: accounts.length }),
-    error: errorEl,
-    errorText: state.antigravityAccountError,
-    progress: statusMessage,
-    progressText: state.antigravitySignInBusy ? t('settings.antigravity.loginStatus') : ''
-  });
-  addButton.disabled = state.antigravitySignInBusy;
-  addButton.textContent = t(state.antigravitySignInBusy
-    ? 'settings.antigravity.waitingForGoogle'
-    : 'settings.antigravity.addAccount');
-  cancelButton.classList.toggle('hidden', !state.antigravitySignInBusy);
+function renderAntigravityStatus(...args) { return legacyAccountOwners.antigravity.renderAntigravityStatus(...args); }
 
-  listEl.replaceChildren();
-  if (accounts.length === 0) {
-    const empty = document.createElement('p');
-    empty.className = 'settings-note';
-    empty.textContent = t('settings.antigravity.empty');
-    listEl.append(empty);
-  }
-  const antigravityProviders = localProviderStatuses('antigravity');
-  accounts.forEach((account, index) => {
-    const enabled = account.enabled !== false;
-    const accountName = String(account.accountEmail || account.accountLabel || '').trim()
-      || t('settings.antigravity.accountFallback', { number: index + 1 });
-    const row = document.createElement('div');
-    row.className = 'managed-account-row';
-    row.classList.toggle('disabled', !enabled);
 
-    const input = document.createElement('input');
-    input.className = 'managed-account-checkbox';
-    input.type = 'checkbox';
-    input.checked = enabled;
-    input.disabled = state.antigravitySignInBusy;
-    input.setAttribute('aria-label', t('settings.antigravity.toggleAccount', { account: accountName }));
-    input.addEventListener('change', async () => {
-      input.disabled = true;
-      const result = await window.tokenMonitor.antigravity.setAccountEnabled(account.id, input.checked);
-      if (!result?.ok) state.antigravityAccountError = result?.error || t('settings.antigravity.toggleFailed');
-      else {
-        state.antigravityAccountError = '';
-        state.settings.antigravityManagedAccounts = result.accounts || [];
-      }
-      renderAntigravityStatus();
-      renderSettingsSummaries();
-    });
-
-    const main = document.createElement('div');
-    main.className = 'managed-account-main';
-    const email = document.createElement('div');
-    email.className = 'managed-account-email';
-    email.textContent = accountName;
-    main.append(email);
-
-    const right = document.createElement('span');
-    right.className = 'managed-account-right';
-    const info = document.createElement('span');
-    info.className = 'managed-account-info';
-    const accountKey = String(account.accountKey || '').trim();
-    const accountEmail = String(account.accountEmail || '').trim().toLowerCase();
-    const provider = antigravityProviders.find((candidate) => {
-      const providerKey = String(candidate?.accountKey || '').trim();
-      const providerEmail = String(candidate?.accountEmail || '').trim().toLowerCase();
-      if (accountKey && providerKey) return accountKey === providerKey;
-      return Boolean(accountEmail && providerEmail && accountEmail === providerEmail);
-    });
-    const planLabel = limitProviderPresentationApi.limitProviderDisplayLabel(provider?.accountLabel);
-    const statusLabel = provider && provider.status !== 'ok'
-      ? translatedLimitProviderTag(limitProviderPresentationApi.limitProviderStatusLabel(provider))
-      : '';
-    info.textContent = enabled ? (planLabel || statusLabel) : t('settings.antigravity.disabled');
-    info.setAttribute('aria-label', provider?.actionRequired === 'accountVerification'
-      ? t('settings.antigravity.verificationRequiredDetail')
-      : info.textContent);
-    const remove = document.createElement('button');
-    remove.type = 'button';
-    remove.className = 'managed-account-remove';
-    remove.textContent = '✕';
-    remove.setAttribute('aria-label', t('settings.antigravity.remove'));
-    remove.disabled = state.antigravitySignInBusy;
-    let confirmingRemove = false;
-    remove.addEventListener('click', async () => {
-      if (!confirmingRemove) {
-        confirmingRemove = true;
-        remove.classList.add('confirming');
-        remove.textContent = '✓';
-        remove.setAttribute('aria-label', t('settings.antigravity.removeConfirm', { account: accountName }));
-        return;
-      }
-      remove.disabled = true;
-      const result = await window.tokenMonitor.antigravity.removeAccount(account.id);
-      if (!result?.ok) state.antigravityAccountError = result?.error || t('settings.antigravity.removeFailed');
-      else {
-        state.antigravityAccountError = '';
-        state.settings.antigravityManagedAccounts = result.accounts || [];
-        refreshStats({ force: true }).catch(() => {});
-      }
-      renderAntigravityStatus();
-      renderSettingsSummaries();
-    });
-    right.append(info, remove);
-    row.append(input, main, right);
-    listEl.append(row);
-  });
-  renderSettingsSummaries();
-}
-
-function mimoSettingsAccountTitle(account, index) {
-  // The discovered session has no address to name it by — nothing was pasted for
-  // it — so it is named after the app it comes from.
-  if (account?.removable === false) return t('settings.mimo.desktopAccount');
-  return String(account?.accountEmail || '').trim() || `Account ${index + 1}`;
-}
-
-function renderMimoStatus() {
-  if (!isSettingsSurfaceVisible()) return;
-  const statusEl = document.getElementById('mimoAccountStatus');
-  const listEl = document.getElementById('mimoAccountList');
-  const emptyEl = document.getElementById('mimoAccountEmpty');
-  const errorEl = document.getElementById('mimoAccountErrorMessage');
-  if (!statusEl || !listEl || !emptyEl || !errorEl) return;
-  const accounts = state.settings?.mimoManagedAccounts || [];
-  const enabledCount = accounts.filter((account) => account.enabled !== false).length;
-  const statusText = accounts.length === 0
-    ? t('settings.mimo.notConfigured')
-    : t('settings.mimo.connected', { linked: enabledCount, total: accounts.length });
-  accountShellApi.render({ status: statusEl, statusText, error: errorEl, errorText: state.mimoAccountError });
-  emptyEl.classList.toggle('hidden', accounts.length > 0);
-
-  const providers = localProviderStatuses('mimo');
-  listEl.replaceChildren();
-  if (accounts.length > 0) {
-    for (const [index, account] of accounts.entries()) {
-      const enabled = account.enabled !== false;
-      const accountName = mimoSettingsAccountTitle(account, index);
-      const row = document.createElement('div');
-      row.className = 'managed-account-row';
-      row.classList.toggle('disabled', !enabled);
-      // A credential Token Monitor never stored has no stored preference to
-      // toggle and nothing here to remove: this row is the session the machine's
-      // own MiMo Desktop is signed into, listed so the count above it is honest
-      // about what the provider answers for.
-      const detected = account.removable === false;
-
-      const input = detected ? null : document.createElement('input');
-      if (input) {
-        input.className = 'managed-account-checkbox';
-        input.type = 'checkbox';
-        input.checked = enabled;
-        input.setAttribute('aria-label', t('settings.mimo.toggleAccount', {
-          account: accountName
-        }));
-        input.addEventListener('change', async () => {
-          input.disabled = true;
-          const result = await window.tokenMonitor.mimo.setAccountEnabled(account.id, input.checked);
-          if (!result?.ok) {
-            state.mimoAccountError = result?.error || t('settings.mimo.toggleFailed');
-          } else {
-            state.mimoAccountError = '';
-            state.settings.mimoManagedAccounts = result.accounts || [];
-          }
-          renderMimoStatus();
-          renderSettingsSummaries();
-        });
-      }
-
-      const main = document.createElement('div');
-      main.className = 'managed-account-main';
-      const label = document.createElement('div');
-      label.className = 'managed-account-email';
-      label.textContent = accountName;
-      main.append(label);
-
-      const right = document.createElement('span');
-      right.className = 'managed-account-right';
-      const info = document.createElement('span');
-      info.className = 'managed-account-info';
-      const failedProvider = enabled && providers.find((provider) => (
-        provider.accountKey === account.accountKey
-        && provider.sourceDetail === (detected ? 'app' : 'managed')
-        && provider.status === 'unauthorized'
-      ));
-      const statusLabel = failedProvider
-        ? translatedLimitProviderTag(limitProviderPresentationApi.limitProviderStatusLabel(failedProvider))
-        : '';
-      info.textContent = !enabled ? t('settings.mimo.disabled')
-        : statusLabel || limitProviderPresentationApi.limitProviderDisplayLabel(account.accountLabel);
-      info.setAttribute('aria-label', info.textContent);
-
-      const remove = detected ? null : document.createElement('button');
-      if (remove) {
-        remove.type = 'button';
-        remove.className = 'managed-account-remove';
-        remove.textContent = '✕';
-        remove.setAttribute('aria-label', t('settings.mimo.remove'));
-        let confirmingRemove = false;
-        remove.addEventListener('click', async () => {
-          if (!confirmingRemove) {
-            confirmingRemove = true;
-            remove.classList.add('confirming');
-            remove.textContent = '✓';
-            remove.setAttribute('aria-label', t('settings.mimo.removeConfirm', {
-              account: accountName
-            }));
-            return;
-          }
-          const result = await window.tokenMonitor.mimo.removeAccount(account.id);
-          if (result?.ok) {
-            state.mimoAccountError = '';
-            state.settings.mimoManagedAccounts = result.accounts || [];
-            renderMimoStatus();
-            renderSettingsSummaries();
-            refreshStats({ force: true }).catch(() => {});
-            return;
-          }
-          state.mimoAccountError = result?.error || t('settings.mimo.removeFailed');
-          renderMimoStatus();
-          renderSettingsSummaries();
-        });
-      }
-
-      right.append(info);
-      if (remove) right.append(remove);
-      row.append(input || document.createElement('span'), main, right);
-      listEl.append(row);
-    }
-  }
-  renderSettingsSummaries();
-}
-
-function copilotProviderStatus() {
-  return localProviderStatus('copilot');
-}
-
-function copilotAccountLinked() {
-  const provider = copilotProviderForAccount();
-  return Boolean(state.settings?.copilotApiTokenConfigured) && provider?.status === 'ok';
-}
-
-function copilotProviderForAccount() {
-  const provider = copilotProviderStatus();
-  const pendingSince = Number(state.copilotPendingCheckSince || 0);
-  if (!provider || !pendingSince) return provider;
-  const updatedAt = Date.parse(provider.updatedAt || '');
-  if (!Number.isFinite(updatedAt) || updatedAt < pendingSince) return null;
-  state.copilotPendingCheckSince = 0;
-  return provider;
-}
-
-function markCopilotTokenCheckPending() {
-  state.copilotPendingCheckSince = Date.now();
-  clearCopilotProviderStatus();
-}
-
-function clearCopilotPendingCheck() {
-  state.copilotPendingCheckSince = 0;
-}
-
-function clearCopilotProviderStatus() {
-  if (!Array.isArray(state.stats?.limits?.providers)) return;
-  state.stats.limits.providers = state.stats.limits.providers.filter((provider) => provider.provider !== 'copilot');
-}
-
-const externalLimitAccountConfig = {
-  kimi: {
-    configuredKey: 'kimiCredentialConfigured',
-    sourceKey: 'kimiCredentialSource',
-    pendingKey: 'kimiPendingCheckSince'
-  },
-  volcengine: {
-    configuredKey: 'volcengineCredentialsConfigured',
-    sourceKey: 'volcengineCredentialsSource',
-    pendingKey: 'volcenginePendingCheckSince'
-  }
-};
+function renderMimoStatus(...args) { return legacyAccountOwners.mimo.renderMimoStatus(...args); }
 
 function clearDisabledLimitProviderPendingChecks(enabledProviders) {
-  if (!enabledProviders.has('copilot')) clearCopilotPendingCheck();
-  for (const providerName of [...Object.keys(externalLimitAccountConfig),
-    ...(state.settings?.limitAccountForms || []).map((form) => form.id)]) {
+  for (const providerName of (state.settings?.limitAccountForms || []).map((form) => form.id)) {
     if (!enabledProviders.has(providerName)) clearExternalProviderCheckPending(providerName);
   }
 }
@@ -17428,7 +17484,7 @@ function externalProviderForAccount(providerName) {
   const provider = providerName === 'muse'
     ? localProviderStatuses('muse').find((row) => row.source === 'web') || null
     : localProviderStatus(providerName);
-  const config = externalLimitAccountConfig[providerName] || limitAccountForm(providerName)?.status;
+  const config = limitAccountForm(providerName)?.status;
   const pendingSince = Number(config ? state[config.pendingKey] : 0);
   if (!provider || !pendingSince) return provider;
   const updatedAt = Date.parse(provider.updatedAt || '');
@@ -17440,7 +17496,7 @@ function externalProviderForAccount(providerName) {
 }
 
 function externalProviderAccountLinked(providerName) {
-  const config = externalLimitAccountConfig[providerName] || limitAccountForm(providerName)?.status;
+  const config = limitAccountForm(providerName)?.status;
   const provider = externalProviderForAccount(providerName);
   return Boolean(config && state.settings?.[config.configuredKey]) && provider?.status === 'ok';
 }
@@ -17465,7 +17521,7 @@ function scheduleExternalProviderCheckSettle(providerName) {
   cancelExternalProviderCheckSettle(providerName);
   const timer = setTimeout(() => {
     externalProviderCheckSettleTimers.delete(providerName);
-    const config = externalLimitAccountConfig[providerName] || limitAccountForm(providerName)?.status;
+    const config = limitAccountForm(providerName)?.status;
     if (!config || Number(state[config.pendingKey] || 0) <= 0) return;
     // Stop the spinner, but keep the save-time cutoff: a record dated before
     // this save must never be able to confirm the new credential.
@@ -17476,7 +17532,7 @@ function scheduleExternalProviderCheckSettle(providerName) {
 }
 
 function markExternalProviderCheckPending(providerName, checkedSince = Date.now()) {
-  const config = externalLimitAccountConfig[providerName] || limitAccountForm(providerName)?.status;
+  const config = limitAccountForm(providerName)?.status;
   if (!config) return;
   state[config.pendingKey] = checkedSince;
   externalProviderCheckSettled.delete(providerName);
@@ -17487,7 +17543,7 @@ function markExternalProviderCheckPending(providerName, checkedSince = Date.now(
 function clearExternalProviderCheckPending(providerName) {
   cancelExternalProviderCheckSettle(providerName);
   externalProviderCheckSettled.delete(providerName);
-  const config = externalLimitAccountConfig[providerName] || limitAccountForm(providerName)?.status;
+  const config = limitAccountForm(providerName)?.status;
   if (config) state[config.pendingKey] = 0;
 }
 
@@ -17512,46 +17568,14 @@ function clearExternalProviderPendingStatus(providerName) {
   state.stats.limits.providers = state.stats.limits.providers.filter((provider) => provider.provider !== providerName);
 }
 
-function nextCopilotSignInFlowId() {
-  return `copilot-${Date.now()}-${Math.random().toString(36).slice(2)}`;
-}
 
-function nextCodexSignInFlowId() {
-  return `codex-${Date.now()}-${Math.random().toString(36).slice(2)}`;
-}
 
-function isCurrentCodexSignInFlow(flowId) {
-  const current = String(state.codexSignInFlowId || '');
-  const incoming = String(flowId || '');
-  return current && incoming === current;
-}
 
-function isCurrentCopilotSignInFlow(flowId) {
-  const current = String(state.copilotSignInFlowId || '');
-  const incoming = String(flowId || '');
-  return current && incoming === current;
-}
 
-function copilotAccountStatusText(provider, configured, source, enabled = true) {
-  const accountStatus = limitProviderPresentationApi.apiKeyAccountStatus(provider, configured, enabled);
-  if (accountStatus === 'linked') {
-    const accountName = String(provider?.accountName || '').trim();
-    return accountName || t(source === 'env' ? 'settings.copilot.statusEnv' : 'settings.copilot.statusSet');
-  }
-  if (accountStatus === 'invalid') return t('settings.copilot.statusInvalid');
-  if (accountStatus === 'notConfigured') return t('settings.copilot.statusNotSet');
-  const statusKeys = {
-    checking: 'settings.common.checking',
-    disabled: 'settings.limits.status.disabled',
-    limited: 'settings.common.limited',
-    unavailable: 'settings.common.unavailable',
-    notChecked: 'settings.common.notChecked',
-    error: 'settings.common.error'
-  };
-  return t(statusKeys[accountStatus] || 'settings.common.error');
-}
+
 
 function apiKeyAccountStatusText(providerName, provider, configured, source, enabled = true) {
+  if (providerName === 'alibaba' && provider?.source === 'cli') source = 'cli';
   const accountStatus = limitProviderPresentationApi.apiKeyAccountStatus(provider, configured, enabled);
   if (accountStatus === 'linked') {
     // A ZCode-discovered login is an OAuth-style link, not a pasted API key,
@@ -17599,208 +17623,44 @@ function setExternalAccountExpanded(providerName, expanded) {
   });
 }
 
-function volcenginePlatformUrl() {
-  return 'https://console.volcengine.com/ark/region:ark+cn-beijing/openManagement?LLM=%7B%7D&advancedActiveKey=subscribe';
-}
 
-function kimiPlatformUrl() {
-  return 'https://www.kimi.com/code/console';
-}
 
-function editClaudeWebAccount(account = null) {
-  claudeOrganizationChoicesRevision += 1;
-  claudeWebAccountId = account?.id || 'new';
-  claudeWebFormOpen = true;
-  const input = document.getElementById('claudeWebCookieInput');
-  if (input) input.value = '';
-  renderClaudeOrganizationChoices(account?.organizationId
-    ? [{ id: account.organizationId, name: account.accountName || account.organizationId }]
-    : [], account?.organizationId || '');
-  setAccountPanelMessage('claude', null);
-  renderExternalProviderStatus('claude');
-  input?.focus();
-  if (account?.id === 'legacy') void loadClaudeOrganizationChoices();
-}
 
-function cancelClaudeWebAccountEdit(restoreFocus = document.activeElement?.id === 'claudeCancelWebAccountButton') {
-  claudeOrganizationChoicesRevision += 1;
-  claudeWebAccountId = 'new';
-  claudeWebFormOpen = false;
-  const input = document.getElementById('claudeWebCookieInput');
-  if (input) input.value = '';
-  renderClaudeOrganizationChoices([]);
-  setAccountPanelMessage('claude', null);
-  renderExternalProviderStatus('claude');
-  if (restoreFocus) document.getElementById('claudeAddWebAccountButton')?.focus({ preventScroll: true });
-}
 
-async function runClaudeAccountAction(button, operation) {
-  return claudeAccountActions.run('claude', button, async () => {
-    setAccountPanelMessage('claude', null);
-    try {
-      const result = await commitAccountCredential(operation);
-      if (!result?.ok) throw new Error(t('settings.common.error'));
-      await refreshStats();
-      renderExternalProviderStatus('claude');
-      return result;
-    } catch (error) {
-      setAccountPanelMessage('claude', { key: 'settings.claude.saveFailed', params: { message: error.message } });
-      renderExternalProviderStatus('claude');
-      return null;
-    }
-  });
-}
+function claudeAccountStatusText(...args) { return legacyAccountOwners.claude.claudeAccountStatusText(...args); }
 
-function claudeWebSettingsAccounts(providers) {
-  const accounts = [...(state.settings?.claudeManagedAccounts || [])];
-  if (state.settings?.claudeWebLegacyCookieConfigured) {
-    const legacy = state.settings.claudeWebLegacyAccount || providers.find((provider) => provider.source === 'web'
-      && !accounts.some((account) => account.accountKey === provider.accountKey));
-    accounts.unshift({ ...legacy, id: 'legacy', enabled: true, organizationId: state.settings.claudeWebOrganizationId || '' });
-  }
-  return accounts;
-}
-
-function claudeAccountStatusText(fallback, enabled) {
-  const providers = localProviderStatuses('claude');
-  const accounts = claudeWebSettingsAccounts(providers);
-  // Count configured Web logins even before their first result, and include
-  // discovered local identities without double-counting the same subscription.
-  const identities = new Map();
-  for (const account of accounts) {
-    const key = account.accountKey || `managed:${account.id}`;
-    const linked = enabled && account.enabled !== false
-      && providers.some((provider) => provider.accountKey && provider.accountKey === account.accountKey && provider.status === 'ok');
-    identities.set(key, identities.get(key) === true || linked);
-  }
-  for (const provider of providers) {
-    if (!provider.accountKey || provider.source === 'web' || provider.status === 'notConfigured') continue;
-    identities.set(provider.accountKey, identities.get(provider.accountKey) === true || (enabled && provider.status === 'ok'));
-  }
-  return identities.size ? t('settings.opencode.connected', {
-    linked: [...identities.values()].filter(Boolean).length, total: identities.size
-  }) : fallback;
-}
-
-function renderClaudeWebAccounts() {
-  const list = document.getElementById('claudeWebAccountList');
-  if (!list) return;
-  const providers = localProviderStatuses('claude');
-  const accounts = claudeWebSettingsAccounts(providers);
-  const statusTexts = accounts.map((account) => [account.id === 'legacy' ? t('settings.claude.legacyLogin') : '', account.accountName, account.accountLabel,
-    account.enabled === false ? t('settings.codex.disabled')
-      : apiKeyAccountStatusText('claude', { status: state.settings?.claudeWebLoginStatuses?.[account.id] || 'notChecked' },
-        true, 'settings', limitProviderEnabled('claude'))].filter(Boolean).join(' · '));
-  const signature = JSON.stringify([accounts.map((account) => [account.id, account.accountKey, account.accountEmail,
-    account.accountName, account.accountLabel, account.organizationId, account.enabled]),
-  claudeWebAccountId, claudeWebFormOpen, state.settings?.claudeWebLegacyCookieSource, currentLocale()]);
-  if (list.dataset.signature === signature) {
-    list.querySelectorAll('.managed-account-info').forEach((info, index) => {
-      info.textContent = statusTexts[index];
-      info.setAttribute('aria-label', info.textContent);
-    });
-    return;
-  }
-  list.dataset.signature = signature;
-  list.replaceChildren();
-  for (const [index, account] of accounts.entries()) {
-    const row = document.createElement('div');
-    row.className = 'managed-account-row claude-web-account-row';
-    row.classList.toggle('disabled', account.enabled === false);
-    const labelText = account.accountEmail || account.accountName || t('settings.codex.unnamedAccount');
-    const input = document.createElement('input');
-    input.type = 'checkbox';
-    input.className = 'managed-account-checkbox';
-    input.checked = account.enabled !== false;
-    input.disabled = account.id === 'legacy';
-    input.setAttribute('aria-label', t('settings.codex.toggleAccount', { account: labelText }));
-    input.addEventListener('change', async () => {
-      await runClaudeAccountAction(input, () => window.tokenMonitor.claude.setAccountEnabled(account.id, input.checked));
-      input.checked = (state.settings?.claudeManagedAccounts || []).find((entry) => entry.id === account.id)?.enabled !== false;
-    });
-    const main = document.createElement('div');
-    main.className = 'managed-account-main';
-    const label = document.createElement('div');
-    label.className = 'managed-account-email';
-    label.textContent = labelText;
-    const info = document.createElement('div');
-    info.className = 'managed-account-info';
-    info.textContent = statusTexts[index];
-    info.setAttribute('aria-label', info.textContent);
-    main.append(label, info);
-    const actions = document.createElement('span');
-    actions.className = 'managed-account-right';
-    const edit = document.createElement('button');
-    edit.type = 'button';
-    edit.textContent = t('settings.claude.updateAccount');
-    edit.addEventListener('click', () => claudeAccountActions.run('claude', edit, () => editClaudeWebAccount(account)));
-    const remove = document.createElement('button');
-    remove.type = 'button';
-    remove.className = 'managed-account-remove';
-    remove.textContent = '✕';
-    remove.setAttribute('aria-label', t('settings.codex.remove'));
-    let confirmingRemove = false;
-    remove.addEventListener('click', () => {
-      if (!confirmingRemove) {
-        confirmingRemove = true;
-        remove.classList.add('confirming');
-        remove.textContent = '✓';
-        remove.setAttribute('aria-label', t('settings.codex.removeConfirm', { account: labelText }));
-        return;
-      }
-      return runClaudeAccountAction(remove, async () => {
-        const result = account.id === 'legacy'
-          ? { ...(await window.tokenMonitor.limits.clearCredential('claude')), ok: true }
-          : await window.tokenMonitor.claude.removeWebAccount(account.id);
-        if (result?.ok && claudeWebAccountId === account.id) {
-          claudeWebAccountId = 'new';
-          claudeWebFormOpen = false;
-          renderClaudeOrganizationChoices([]);
-        }
-        return result;
-      });
-    });
-    remove.classList.toggle('hidden', account.id === 'legacy' && state.settings?.claudeWebLegacyCookieSource === 'env');
-    const controls = document.createElement('span');
-    controls.className = 'settings-actions';
-    controls.append(edit);
-    actions.append(controls, remove);
-    row.append(input, main, actions);
-    list.append(row);
-  }
-  const add = document.createElement('button');
-  add.id = 'claudeAddWebAccountButton';
-  add.type = 'button';
-  add.textContent = t('settings.codex.addAccount');
-  add.setAttribute('aria-expanded', String(claudeWebFormOpen ?? accounts.length === 0));
-  add.addEventListener('click', () => claudeAccountActions.run('claude', add, () => editClaudeWebAccount()));
-  const actions = document.createElement('div');
-  actions.className = 'settings-actions';
-  actions.append(add);
-  if (claudeWebFormOpen ?? accounts.length === 0) {
-    const cancel = document.createElement('button');
-    cancel.id = 'claudeCancelWebAccountButton';
-    cancel.type = 'button';
-    cancel.textContent = t('settings.common.cancel');
-    cancel.addEventListener('click', () => {
-      // Capture before the busy guard disables Cancel and blurs it.
-      const restoreFocus = document.activeElement === cancel;
-      return claudeAccountActions.run('claude', cancel, () => cancelClaudeWebAccountEdit(restoreFocus));
-    });
-    actions.append(cancel);
-  }
-  list.append(actions);
-}
+function renderClaudeWebAccounts(...args) { return legacyAccountOwners.claude.renderClaudeWebAccounts(...args); }
 
 function renderExternalProviderStatus(providerName) {
-  const config = externalLimitAccountConfig[providerName] || limitAccountForm(providerName)?.status;
+  const config = limitAccountForm(providerName)?.status;
   const statusEl = document.getElementById(`${providerName}AccountStatus`);
   const openBtn = document.getElementById(`${providerName}OpenBrowser`);
   const logoutBtn = document.getElementById(`${providerName}LogoutButton`);
-  const refreshBtn = document.getElementById(`${providerName}RefreshButton`);
   const manualPanel = document.getElementById(`${providerName}ManualPanel`);
   const errorEl = document.getElementById(`${providerName}ErrorMessage`);
-  if (!config || !statusEl || !openBtn || !logoutBtn || !refreshBtn || !manualPanel || !errorEl) return;
+  const retained = providerName === 'volcengine' && state.settings?.volcengineFixedCredentialsStored === true;
+  if (providerName === 'volcengine') {
+    const fixedForm = document.getElementById('volcengineFixedCredentialForm');
+    fixedForm?.classList.toggle('hidden', !retained);
+    if (fixedForm && !retained) fixedForm.open = false;
+    if (fixedForm && retained) {
+      for (const key of ['volcengineRegion', 'volcengineAgentRegion']) {
+        const input = document.getElementById(`${key}Input`);
+        const region = state.settings[key] || '';
+        // Follow stored settings until the user edits the value, including
+        // intentionally clearing it to fall back to the provider's region.
+        const unchanged = input.value === (input.defaultValue || '');
+        input.defaultValue = region;
+        if (unchanged) input.value = region;
+      }
+    }
+  }
+  if (!retained && statusEl && limitAccountForm(providerName)?.accountSlots && !limitAccountForm(providerName)?.accountSlotOwner) {
+    const summary = accountSlotPanels.get(providerName)?.summary();
+    setCursorStatusText(statusEl, summary?.total ? t('settings.slots.connectedCount', summary) : t(limitAccountForm(providerName).emptyKey));
+    return;
+  }
+  if (!config || !statusEl || !openBtn || !logoutBtn || !manualPanel || !errorEl) return;
 
   const source = state.settings?.[config.sourceKey] || '';
   const wasPending = Number(state[config.pendingKey] || 0) > 0;
@@ -17816,7 +17676,8 @@ function renderExternalProviderStatus(providerName) {
   errorEl.textContent = message ? t(message.key, message.params) : '';
   errorEl.classList.toggle('hidden', !message);
   errorEl.classList.toggle('error', message?.tone !== 'notice');
-  const configured = Boolean(state.settings?.[config.configuredKey]);
+  const cliAccount = providerName === 'alibaba' && provider?.source === 'cli';
+  const configured = Boolean(state.settings?.[config.configuredKey] || cliAccount);
   const enabled = limitProviderEnabled(providerName);
   const settled = externalProviderCheckSettled.has(providerName);
   const pending = enabled && Number(state[config.pendingKey] || 0) > 0 && !settled;
@@ -17826,32 +17687,33 @@ function renderExternalProviderStatus(providerName) {
   if (wasPending && !pending && linked) setExternalAccountExpanded(providerName, false);
   const form = limitAccountForm(providerName);
   if (form) limitAccountPanelsApi.syncCredentialFields(form, { document, settings: state.settings });
-  if (providerName === 'volcengine') renderVolcengineAgentOverrideState();
   if (providerName === 'claude') renderClaudeWebAccounts();
   // Once the settle window lapses without a fresh record, show "not checked"
   // instead of a permanent spinner; the cutoff above still blocks the old
   // record from being read as a confirmed link.
   const statusProvider = provider || (settled && configured && enabled ? { status: 'noSyncedData' } : null);
-  const statusText = pending ? t('settings.common.checking')
+  let statusText = pending ? t('settings.common.checking')
     : apiKeyAccountStatusText(providerName, statusProvider, configured, source, enabled);
+  if (cliAccount && !pending) statusText = `CLI · ${statusText}`;
   setCursorStatusText(statusEl, providerName === 'claude' && !pending
-    ? claudeAccountStatusText(statusText, enabled) : statusText);
+    ? claudeAccountStatusText(statusText) : statusText);
   // A local ZCode install keeps the Z.ai row honest when unchecked: the
   // auto-discovered plans still exist, so the pill shows auto-detect instead
   // of the final "disabled" state the generic seven-state map lands on.
   if (providerName === 'zai' && !enabled && state.settings?.zcodeLoginDetected === true) {
     setCursorStatusText(statusEl, t('settings.limits.connection.autoDetect'));
   }
-  manualPanel.classList.toggle('hidden', linked);
+  manualPanel.classList.toggle('hidden', linked && !limitAccountForm(providerName)?.accountSlots);
   openBtn.classList.toggle('hidden', linked);
   if (providerName === 'claude') {
-    const showForm = claudeWebFormOpen ?? (!(state.settings?.claudeManagedAccounts || []).length && !state.settings?.claudeWebLegacyCookieConfigured);
+    const showForm = legacyAccountOwners.claude.editor.open ?? (!(state.settings?.claudeManagedAccounts || []).length && !state.settings?.claudeWebLegacyCookieConfigured);
     manualPanel.classList.toggle('hidden', !showForm);
-    document.getElementById('claudeWebOrganizationRow')?.classList.toggle('hidden', !showForm || !document.getElementById('claudeWebOrganizationIdInput')?.options.length);
+    document.getElementById('claudeWebOrganizationRow')?.classList.toggle('hidden', !showForm || ![...(document.getElementById('claudeWebOrganizationIdInput')?.options || [])].some(option => option.value));
     openBtn.classList.remove('hidden');
   }
   const discoveredLogin = (providerName === 'zai' && source === 'zcode-auto')
     || (providerName === 'cline' && source === 'cline-signin')
+    || cliAccount
     || providerName === 'hark';
   if (discoveredLogin) {
     // The discovered login is not user-entered, so the override input and the
@@ -17860,407 +17722,17 @@ function renderExternalProviderStatus(providerName) {
     manualPanel.classList.remove('hidden');
     openBtn.classList.remove('hidden');
   }
-  const canClearConfiguredCredential = source === 'settings' && configured;
+  const canClearConfiguredCredential = retained || (source === 'settings' && configured);
   logoutBtn.classList.toggle('hidden', !canClearConfiguredCredential);
   if (providerName === 'claude') logoutBtn.classList.add('hidden');
-  refreshBtn.classList.toggle('hidden', !configured);
   renderSettingsSummaries();
 }
 
-// The override inputs are password fields, cleared after every save and never
-// repopulated, so this tag is the only thing that tells a stored second account
-// apart from one that was never filled in. It reads the redacted 'set' marker
-// rather than volcengineAgentCredentials, which falls back to the Coding Plan
-// key and is therefore truthy for every Coding-only user.
-function renderVolcengineAgentOverrideState() {
-  const stored = state.settings?.volcengineAgentAccessKeyId === 'set';
-  document.getElementById('volcengineAgentConfigured')?.classList.toggle('hidden', !stored);
-  // Saving with the override fields empty deliberately keeps the stored one, so
-  // without this there is no way back to the main account short of clearing the
-  // Coding Plan credentials too.
-  document.getElementById('volcengineAgentClearButton')?.classList.toggle('hidden', !stored);
-}
-
-// The Agent Plan override is collapsed by default: it only matters when the two
-// plans were bought on different Volcengine accounts.
-function setVolcengineAgentExpanded(expanded) {
-  const next = Boolean(expanded);
-  state.volcengineAgentExpanded = next;
-  document.getElementById('volcengineAgentToggle')?.setAttribute('aria-expanded', next ? 'true' : 'false');
-  document.getElementById('volcengineAgentDetails')?.classList.toggle('hidden', !next);
-  document.getElementById('volcengineAgentPanel')?.classList.toggle('expanded', next);
-}
-
-
-function renderCopilotStatus() {
-  const statusEl = document.getElementById('copilotApiTokenStatus');
-  const signInBtn = document.getElementById('copilotSignInButton');
-  const cancelBtn = document.getElementById('copilotCancelSignInButton');
-  const logoutBtn = document.getElementById('copilotLogoutButton');
-  const refreshBtn = document.getElementById('copilotRefreshButton');
-  const manualPanel = document.getElementById('copilotManualPanel');
-  const loginStatusEl = document.getElementById('copilotLoginStatus');
-  const errorEl = document.getElementById('copilotErrorMessage');
-  if (!statusEl || !signInBtn || !cancelBtn || !logoutBtn || !refreshBtn || !manualPanel || !loginStatusEl || !errorEl) return;
-
-  const source = state.settings?.copilotApiTokenSource || '';
-  const provider = copilotProviderForAccount();
-  const configured = Boolean(state.settings?.copilotApiTokenConfigured);
-  const enabled = limitProviderEnabled('copilot');
-  const linked = copilotAccountLinked();
-  accountShellApi.render({
-    status: statusEl,
-    statusText: copilotAccountStatusText(provider, configured, source, enabled),
-    error: errorEl,
-    errorText: state.copilotErrorMessage,
-    progress: loginStatusEl,
-    progressText: state.copilotLoginStatus
-  });
-  manualPanel.classList.toggle('hidden', linked);
-  if (linked && state.copilotManualExpanded) setCopilotManualExpanded(false);
-  signInBtn.classList.toggle('hidden', linked || state.copilotSignInBusy);
-  cancelBtn.classList.toggle('hidden', !state.copilotSignInBusy || !state.copilotSignInCancelable || linked);
-  logoutBtn.classList.toggle('hidden', !linked || source !== 'settings');
-  refreshBtn.classList.toggle('hidden', !configured || (state.copilotSignInBusy && !linked));
-  renderSettingsSummaries();
-}
-
-
-function renderOpenCodeProfiles() {
-  if (!isSettingsSurfaceVisible()) return;
-  const listEl = document.getElementById('opencodeProfileList');
-  if (!listEl) return;
-  renderAccountShellError('opencode');
-
-  const api = window.tokenMonitor.opencode;
-
-  const isCurrent = accountProfileRequests.begin('opencode');
-  api.getProfiles().then(({ profiles, hasEnvVar, hasAmbientKey, ambientEnabled = true }) => {
-    if (!isCurrent() || !isSettingsSurfaceVisible() || document.getElementById('opencodeProfileList') !== listEl) return;
-    accountProfileStatuses.retire('opencode');
-    listEl.replaceChildren();
-    const entries = Object.entries(profiles);
-
-    if (entries.length === 0 && !hasEnvVar && !hasAmbientKey) {
-      const empty = document.createElement('div');
-      empty.className = 'opencode-empty';
-      empty.textContent = t('settings.opencode.emptyList');
-      listEl.append(empty);
-      state.opencodeProfileCount = 0;
-      renderOpenCodeProfilesStatusSummary({});
-      renderSettingsSummaries();
-      return;
-    }
-
-    // The auto-detected key counts as an account: it is what the limits card is
-    // reading, so leaving it out of the total reports "not set up" next to live
-    // quota. It has no delete because Token Monitor does not own that
-    // credential — OpenCode does — but naming it does belong here: a name is
-    // what lets it join an account, and typing an existing account's name is
-    // how a user says the two are the same OpenCode account.
-    if (hasAmbientKey) {
-      const item = document.createElement('div');
-      item.className = 'opencode-profile-item';
-      // Switchable like any other account, even without a name. Turning it off
-      // is a device preference rather than a stored credential, so the row keeps
-      // rendering with its box clear instead of disappearing along with the only
-      // control that could bring it back.
-      const ambientToggle = document.createElement('input');
-      ambientToggle.className = 'profile-toggle';
-      ambientToggle.type = 'checkbox';
-      ambientToggle.checked = ambientEnabled;
-      ambientToggle.setAttribute('aria-label', t('settings.opencode.ambientName'));
-      ambientToggle.setAttribute('aria-description', t('settings.opencode.ambientDetail'));
-      ambientToggle.addEventListener('change', async () => {
-        await window.tokenMonitor.opencode.setAmbientEnabled(ambientToggle.checked);
-        renderOpenCodeProfiles();
-        updateOpenCodeProfilesStatus();
-        renderSettingsSummaries();
-      });
-      const nameBox = document.createElement('span');
-      nameBox.className = 'profile-name-box';
-      // An editable field rather than a label behind an edit button: this row
-      // has no name yet, and naming it is the only thing a user can do here, so
-      // hiding that behind a hover-revealed pencil hides the whole feature. The
-      // placeholder carries the label the row used to show.
-      const nameInput = document.createElement('input');
-      nameInput.className = 'profile-name-input is-placeholder';
-      nameInput.type = 'text';
-      nameInput.placeholder = t('settings.opencode.ambientName');
-      nameInput.setAttribute('aria-label', t('settings.opencode.nameAmbient'));
-
-      // Typing an existing account's name binds the auto-detected key into that
-      // account. That claim is confirmed, never inferred: the main process
-      // refuses it without `merge`, so a blur landing on a name that happens to
-      // exist offers the button instead of quietly merging.
-      const mergeBtn = document.createElement('button');
-      mergeBtn.className = 'credential-merge-btn hidden';
-      const offer = opencodeMergeOffer(mergeBtn, (name) => applyNaming(name, true));
-      const applyNaming = async (name, merge) => {
-        const at = offer.revision();
-        // 'ambient' stores a reference rather than the key, so a key rotated
-        // inside OpenCode keeps being read live.
-        const result = await window.tokenMonitor.opencode.saveProfile(name, '', 'ambient', { merge });
-        if (!result.ok) {
-          if (result.nameTaken) {
-            offer.offer(at, name, t('settings.opencode.mergeInto', { name }));
-            return;
-          }
-          if (offer.stale(at)) return;
-          setAccountShellError('opencode', opencodeSaveErrorText(result));
-          return;
-        }
-        setAccountShellError('opencode', '');
-        renderOpenCodeProfiles();
-        updateOpenCodeProfilesStatus();
-        renderSettingsSummaries();
-      };
-      const endNaming = async (save) => {
-        const name = nameInput.value.trim();
-        if (!save || !name) {
-          nameInput.value = '';
-          offer.withdraw();
-          return;
-        }
-        await applyNaming(name, false);
-      };
-      // Editing the name withdraws the offer: the confirmation names one account,
-      // and it must be the one on screen when the user clicks it.
-      nameInput.addEventListener('input', () => offer.withdraw());
-      nameInput.addEventListener('keydown', (e) => {
-        if (e.key === 'Enter') endNaming(true);
-        if (e.key === 'Escape') endNaming(false);
-      });
-      nameInput.addEventListener('blur', () => endNaming(true));
-
-      const detail = document.createElement('span');
-      detail.className = 'profile-detail';
-      detail.textContent = t('settings.opencode.ambientDetail');
-      nameBox.append(nameInput, mergeBtn, detail);
-
-      const rightBox = document.createElement('span');
-      rightBox.className = 'profile-right';
-      const infoSpan = document.createElement('span');
-      infoSpan.className = 'profile-info';
-      // Not `opencode-info-<name>`: that shape is generated from user-chosen
-      // account names, so a profile named the same as any sentinel would take
-      // this row's status.
-      infoSpan.id = 'opencodeAmbientInfo';
-      infoSpan.textContent = ambientEnabled ? '...' : t('settings.opencode.disabled');
-      rightBox.append(infoSpan);
-      item.append(ambientToggle, nameBox, rightBox);
-      listEl.appendChild(item);
-    }
-
-    state.opencodeProfileCount = entries.length + (hasAmbientKey ? 1 : 0);
-    renderSettingsSummaries();
-
-    for (const [name, profile] of entries) {
-      const item = document.createElement('div');
-      item.className = 'opencode-profile-item';
-
-      const toggle = document.createElement('input');
-      toggle.className = 'profile-toggle';
-      toggle.type = 'checkbox';
-      toggle.checked = profile.enabled;
-      toggle.addEventListener('change', () => {
-        api.setProfileEnabled(name, toggle.checked).then(() => {
-          const info = item.querySelector('.profile-info');
-          info.textContent = toggle.checked ? '...' : t('settings.opencode.disabled');
-          renderSettingsSummaries();
-          updateOpenCodeProfilesStatus();
-        });
-      });
-
-      const nameBox = document.createElement('span');
-      nameBox.className = 'profile-name-box';
-      const nameSpan = document.createElement('span');
-      nameSpan.className = 'profile-name';
-      nameSpan.textContent = name;
-
-      const nameInput = document.createElement('input');
-      nameInput.className = 'profile-name-input hidden';
-      nameInput.type = 'text';
-      nameInput.value = name;
-
-      const renameBtn = document.createElement('button');
-      renameBtn.type = 'button';
-      renameBtn.className = 'profile-rename-btn';
-      renameBtn.setAttribute('aria-label', t('settings.opencode.rename'));
-
-      let editing = false;
-      function beginRename() {
-        if (editing) return;
-        editing = true;
-        nameSpan.classList.add('hidden');
-        nameInput.classList.remove('hidden');
-        nameInput.focus();
-        nameInput.select();
-      }
-      // Renaming onto an existing account merges the two, which asserts they are
-      // the same OpenCode account. That claim gets a visible button rather than
-      // a repeated keypress: confirming should be something the user chooses,
-      // not something they discover by pressing Enter again.
-      const mergeBtn = document.createElement('button');
-      mergeBtn.className = 'credential-merge-btn hidden';
-      const offer = opencodeMergeOffer(mergeBtn, (next) => applyRename(next, true));
-      const applyRename = async (next, merge) => {
-        const at = offer.revision();
-        const result = await api.renameProfile(name, next, { merge });
-        if (!result.ok) {
-          if (result.nameTaken) {
-            offer.offer(at, next, t('settings.opencode.mergeInto', { name: next }));
-            return;
-          }
-          if (offer.stale(at)) return;
-          setAccountShellError('opencode', opencodeSaveErrorText(result));
-          return;
-        }
-        setAccountShellError('opencode', '');
-        renderOpenCodeProfiles();
-        updateOpenCodeProfilesStatus();
-        renderSettingsSummaries();
-      };
-      // Retyping withdraws the offer, so the button can only ever confirm the
-      // name the user is currently proposing.
-      nameInput.addEventListener('input', () => offer.withdraw());
-      async function endRename(save) {
-        if (!editing) return;
-        editing = false;
-        nameInput.classList.add('hidden');
-        nameSpan.classList.remove('hidden');
-        const next = nameInput.value.trim();
-        if (!save || !next || next === name) return;
-        await applyRename(next, false);
-      }
-      renameBtn.addEventListener('click', beginRename);
-      nameInput.addEventListener('keydown', (e) => {
-        if (e.key === 'Enter') endRename(true);
-        if (e.key === 'Escape') endRename(false);
-      });
-      nameInput.addEventListener('blur', () => endRename(true));
-
-      // Which credentials this account holds. Two of them under one name is the
-      // user's assertion that they are the same OpenCode account, and that
-      // assertion decides which source answers for quota and which identity the
-      // account is published under, so it stays visible. Acting on them lives in
-      // the expanded section rather than inline: a click that unbinds an account
-      // should not sit one pixel from the account's own controls.
-      // A reference the collector has stopped using says so on its own row.
-      // Otherwise an account that also holds a cookie shows the credential as
-      // present, keeps reporting fine from the cookie, and nothing anywhere
-      // reveals that its Go quota is no longer coming from the detected key.
-      const ambientLabel = profile.ambientStale
-        ? `${t('settings.opencode.ambientName')} · ${t('settings.opencode.needsRebind')}`
-        : t('settings.opencode.ambientName');
-      const credentials = [
-        ['ambient', profile.usesAmbientKey, ambientLabel],
-        ['api', profile.hasApiKey, t('settings.opencode.kindApi')],
-        ['cookie', profile.hasCookie, t('settings.opencode.kindCookie')]
-      ].filter(([, present]) => present);
-
-      // The summary line is the control that expands it: clicking the thing you
-      // want to see beats a separate chevron stranded between the status text
-      // and the delete button.
-      const multiCredential = credentials.length > 1;
-      const detail = document.createElement(multiCredential ? 'button' : 'span');
-      detail.className = 'profile-detail';
-      let chevron = null;
-      if (multiCredential) {
-        detail.type = 'button';
-        detail.classList.add('is-expandable');
-        detail.setAttribute('aria-expanded', 'false');
-        detail.setAttribute('aria-label', t('settings.opencode.showCredentials'));
-        // The same disclosure chevron every other group uses, so it animates and
-        // reads the same; only the direction differs, pointing right when closed.
-        chevron = document.createElement('span');
-        chevron.className = 'cursor-disclosure-icon';
-        chevron.setAttribute('aria-hidden', 'true');
-      }
-      detail.textContent = credentials.map(([, , label]) => label).join(' + ');
-      if (chevron) detail.append(chevron);
-
-      nameBox.append(nameSpan, nameInput, renameBtn, mergeBtn, detail);
-
-      const rightBox = document.createElement('span');
-      rightBox.className = 'profile-right';
-
-      const infoSpan = document.createElement('span');
-      infoSpan.className = 'profile-info';
-      infoSpan.id = opencodeRowId('opencode-info-', name);
-      infoSpan.textContent = profile.enabled ? '...' : t('settings.opencode.disabled');
-
-      const deleteBtn = document.createElement('button');
-      deleteBtn.className = 'profile-delete';
-      deleteBtn.textContent = '✕';
-      deleteBtn.setAttribute('aria-label', t('settings.opencode.delete'));
-      let confirmingDelete = false;
-      deleteBtn.addEventListener('click', async () => {
-        if (!confirmingDelete) {
-          confirmingDelete = true;
-          deleteBtn.classList.add('confirming');
-          deleteBtn.textContent = '✓';
-          deleteBtn.setAttribute('aria-label', t('settings.opencode.deleteConfirm', { name }));
-          return;
-        }
-        await api.deleteProfile(name);
-        renderOpenCodeProfiles();
-        updateOpenCodeProfilesStatus();
-        renderSettingsSummaries();
-      });
-
-      // Expanding is only worth offering once an account holds more than one
-      // credential — with a single one the row already says everything.
-      let credentialList = null;
-      if (multiCredential) {
-        credentialList = document.createElement('div');
-        credentialList.className = 'opencode-credential-list accordion-animated-container hidden';
-        credentialList.id = opencodeRowId('opencode-credentials-', name);
-        // The shared accordion squeezes one inner wrapper, so the rows go inside
-        // it rather than on the container, which cannot shrink.
-        const credentialInner = document.createElement('div');
-        credentialInner.className = 'accordion-animation-inner';
-        for (const [kind, , label] of credentials) {
-          credentialInner.append(opencodeCredentialRow(name, kind, label));
-        }
-        credentialList.append(credentialInner);
-        detail.setAttribute('aria-controls', credentialList.id);
-        detail.addEventListener('click', () => {
-          const open = credentialList.classList.toggle('hidden') === false;
-          detail.setAttribute('aria-expanded', String(open));
-          detail.classList.toggle('is-open', open);
-        });
-      }
-
-      rightBox.append(infoSpan, deleteBtn);
-      item.append(toggle, nameBox, rightBox);
-      if (credentialList) item.append(credentialList);
-      listEl.appendChild(item);
-    }
-
-    updateOpenCodeProfilesStatus();
-  }).catch(() => {
-    if (!isCurrent() || !isSettingsSurfaceVisible()) return;
-    accountShellApi.render({
-      status: document.getElementById('opencodeCookieStatus'),
-      statusText: t('settings.opencode.connectFailed')
-    });
-  });
-}
+function renderOpenCodeProfiles(...args) { return legacyAccountOwners.opencode.renderOpenCodeProfiles(...args); }
 
 // A merge that would land two credentials of the same kind on one account is
 // refused rather than resolved: confirming that two accounts are the same is a
 // different question from choosing which of two cookies to keep.
-function opencodeSaveErrorText(result) {
-  if (result?.credentialConflict) {
-    return t('settings.opencode.credentialConflict', {
-      kind: t(result.kind === 'cookie' ? 'settings.opencode.kindCookie'
-        : result.kind === 'ambient' ? 'settings.opencode.ambientName'
-          : 'settings.opencode.kindApi')
-    });
-  }
-  return result?.error || t('settings.opencode.saveFailedShort');
-}
 
 // A merge confirmation names one specific proposal: this credential, into this
 // account. Editing the field withdraws it, so the click the main process
@@ -18279,29 +17751,6 @@ function opencodeSaveErrorText(result) {
 // revision where it was, so the reply to the request the user just cancelled
 // still matched and put the button back — the original bug, reached through the
 // other door. Everything that ends an offer withdraws it.
-function opencodeMergeOffer(button, confirm) {
-  let revision = 0;
-  let pending = '';
-  button.addEventListener('click', () => {
-    if (pending !== '') confirm(pending);
-  });
-  return {
-    // Captured before the await, compared after it.
-    revision: () => revision,
-    stale: (at) => at !== revision,
-    withdraw: () => {
-      revision += 1;
-      pending = '';
-      button.classList.add('hidden');
-    },
-    offer: (at, name, label) => {
-      if (at !== revision) return;
-      pending = name;
-      button.textContent = label;
-      button.classList.remove('hidden');
-    }
-  };
-}
 
 // Element ids for a row, from the account name.
 //
@@ -18314,781 +17763,44 @@ function opencodeMergeOffer(button, confirm) {
 // A counter would work too, but these two call sites are independent: one
 // renders the row, the other looks it up from a later status reply. A pure
 // function of the name cannot drift between them the way a shared table can.
-function opencodeRowId(prefix, name) {
-  return `${prefix}${encodeURIComponent(name)}`;
-}
 
 // One credential inside an expanded account. Renaming moves it to another
 // account name, which is what splits a binding apart or forms a new one;
 // deleting drops just this credential and leaves the rest of the account.
-function opencodeCredentialRow(accountName, kind, label) {
-  const api = window.tokenMonitor.opencode;
-  const refresh = () => {
-    renderOpenCodeProfiles();
-    updateOpenCodeProfilesStatus();
-    renderSettingsSummaries();
-  };
 
-  const row = document.createElement('div');
-  row.className = 'opencode-credential-row';
-
-  const labelSpan = document.createElement('span');
-  labelSpan.className = 'credential-label';
-  labelSpan.textContent = label;
-
-  // The account name is shown on every credential rather than hidden behind an
-  // edit button, because seeing the same name twice is the explanation for why
-  // these are one account. Typing a different one moves that credential out.
-  const nameInput = document.createElement('input');
-  nameInput.className = 'credential-name-input';
-  nameInput.type = 'text';
-  nameInput.value = accountName;
-  nameInput.setAttribute('aria-label', t('settings.opencode.moveCredential', { kind: label }));
-  nameInput.placeholder = t('settings.opencode.profileNamePlaceholder');
-
-  const actions = document.createElement('span');
-  actions.className = 'credential-actions';
-
-  // A merge is a claim that two credentials belong to one OpenCode account, so
-  // it is confirmed with a visible button rather than by pressing the same key
-  // twice and hoping the user reads why.
-  const mergeBtn = document.createElement('button');
-  mergeBtn.className = 'credential-merge-btn hidden';
-  const offer = opencodeMergeOffer(mergeBtn, (target) => finishMove(target, true));
-
-  const finishMove = async (target, merge) => {
-    const at = offer.revision();
-    const result = await api.moveCredential(accountName, kind, target, { merge });
-    if (!result.ok) {
-      if (result.nameTaken) {
-        offer.offer(at, target, t('settings.opencode.mergeInto', { name: target }));
-        return;
-      }
-      if (offer.stale(at)) return;
-      setAccountShellError('opencode', opencodeSaveErrorText(result));
-      return;
-    }
-    setAccountShellError('opencode', '');
-    refresh();
-  };
-  const endMove = async (save) => {
-    const target = nameInput.value.trim();
-    if (!save || !target || target === accountName) {
-      nameInput.value = accountName;
-      offer.withdraw();
-      return;
-    }
-    await finishMove(target, false);
-  };
-
-  // Same rule as everywhere else: retyping the target withdraws the pending
-  // confirmation rather than leaving a button that would move it somewhere the
-  // user is no longer proposing.
-  nameInput.addEventListener('input', () => offer.withdraw());
-  nameInput.addEventListener('keydown', (e) => {
-    if (e.key === 'Enter') endMove(true);
-    if (e.key === 'Escape') endMove(false);
-  });
-  nameInput.addEventListener('blur', () => endMove(true));
-
-  const removeBtn = document.createElement('button');
-  removeBtn.className = 'profile-delete';
-  removeBtn.textContent = '✕';
-  removeBtn.setAttribute('aria-label', t('settings.opencode.removeCredential', { kind: label }));
-  // Two-step, like deleting an account: unbinding is not undoable from here.
-  let confirming = false;
-  removeBtn.addEventListener('click', async () => {
-    if (!confirming) {
-      confirming = true;
-      removeBtn.classList.add('confirming');
-      removeBtn.textContent = '✓';
-      return;
-    }
-    const result = await api.removeCredential(accountName, kind);
-    if (result.ok) refresh();
-  });
-
-  actions.append(removeBtn);
-  // The merge label carries the target account name and never fits beside the
-  // input, so it trails the row and wraps onto its own line when it appears.
-  row.append(labelSpan, nameInput, actions, mergeBtn);
-  return row;
-}
-
-async function updateOpenCodeProfilesStatus() {
-  const api = window.tokenMonitor.opencode;
-  const isCurrent = accountProfileStatuses.begin('opencode');
-  const status = await api.status();
-  if (!isCurrent() || !isSettingsSurfaceVisible()) return;
-  const profiles = status.profiles || {};
-
-  // The auto-detected key has no account name, so it arrives in its own field
-  // and lands on its own element rather than one keyed by a name a user could
-  // also type.
-  const entries = Object.entries(profiles).map(([name, s]) => [
-    opencodeRowId('opencode-info-', name),
-    s
-  ]);
-  if (status.ambient) entries.push(['opencodeAmbientInfo', status.ambient]);
-
-  for (const [elementId, s] of entries) {
-    const infoEl = document.getElementById(elementId);
-    if (!infoEl) continue;
-
-    if (s.disabled) {
-      infoEl.textContent = t('settings.opencode.disabled');
-    } else if (s.needsRebind) {
-      // Said once, on the credential line, which has room for it and is the
-      // thing that needs re-attaching. This cell is a fixed narrow column and
-      // would only repeat it truncated.
-      infoEl.textContent = '';
-    } else if (s.expired) {
-      infoEl.textContent = t('settings.opencode.statusExpired');
-    } else if (s.linked) {
-      const parts = [];
-      if (s.go) parts.push('Go');
-      if (s.zen) parts.push('Zen');
-      let text = '✓ ' + parts.join(' · ');
-      if (s.hasBalance && s.balanceUsd != null) {
-        text += '  $' + Number(s.balanceUsd).toFixed(2);
-      }
-      infoEl.textContent = text;
-    } else if (s.error) {
-      infoEl.textContent = s.error;
-    } else {
-      infoEl.textContent = t('settings.opencode.connectFailed');
-    }
-  }
-
-  renderOpenCodeProfilesStatusSummary(profiles, status.ambient);
-}
 
 // `ambient` counts toward both halves: it is a row in the list and it is what
 // the limits card reads on a machine with nothing configured, so leaving it out
 // reports "0/0" beside live quota.
-function renderOpenCodeProfilesStatusSummary(profiles, ambient = null) {
-  const totalEl = document.getElementById('opencodeCookieStatus');
-  if (totalEl) {
-    const statuses = [...Object.values(profiles), ...(ambient ? [ambient] : [])];
-    const linkedCount = statuses.filter(s => s.linked).length;
-    const configuredProfileCount = state.opencodeProfileCount || 0;
-    const totalCount = Math.max(statuses.length, configuredProfileCount);
-    accountShellApi.render({
-      status: totalEl,
-      statusText: totalCount > 0
-        ? t('settings.opencode.connected', { linked: linkedCount, total: totalCount })
-        : t('settings.opencode.statusNotSet')
-    });
-  }
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+function renderMinimaxApiKeys(...args) { return legacyAccountOwners.minimax.renderMinimaxApiKeys(...args); }
+
+function renderThirdPartyProfiles(...args) { return legacyAccountOwners.thirdparty.renderThirdPartyProfiles(...args); }
+
+function renderCursorStatus(...args) { return legacyAccountOwners.cursor.renderCursorStatus(...args); }
+
+// Every quota push reaches every account owner through one interface, so no
+// owner's rows or header can keep the status they had before a refresh
+// answered. Claude is the exception: its rows are derived from the readings,
+// so renderExternalProviderStatus('claude') rebuilds them with its header.
+function refreshAccountOwnerReadings() {
+  for (const owner of Object.values(legacyAccountOwners)) owner.refreshReadings?.();
 }
 
-function openrouterProfileStatusText(provider, options = {}) {
-  const status = limitProviderPresentationApi.namedApiProfileStatus(provider, options);
-  if (status === 'disabled') return t('settings.profiles.disabled');
-  if (status === 'hidden') return '';
-  if (status === 'checking') return t('settings.openrouter.checking');
-  if (status === 'invalid') return t('settings.openrouter.invalidKey');
-  if (status !== 'linked') return t('settings.openrouter.unavailable');
-  const balance = optionalFiniteNumber(provider.balance?.amount);
-  if (balance !== null) return `✓ ${formatMoney(balance, 'USD')}`;
-  const quota = (provider.windows || []).find((window) => window?.showMeter !== false);
-  const remaining = optionalFiniteNumber(quota?.remaining);
-  if (remaining !== null) return `✓ ${formatMoney(remaining, 'USD')} left`;
-  return '✓';
-}
 
-function thirdPartyProfileStatusText(provider, options = {}) {
-  const status = limitProviderPresentationApi.namedApiProfileStatus(provider, options);
-  if (status === 'disabled') return t('settings.profiles.disabled');
-  if (status === 'hidden') return '';
-  if (status === 'checking') return t('settings.thirdparty.checking');
-  if (status === 'invalid') return t('settings.thirdparty.invalidKey');
-  if (status !== 'linked') return t('settings.thirdparty.unavailable');
-  const balance = optionalFiniteNumber(provider.balance?.amount);
-  if (balance !== null) return `✓ ${formatCompactMoney(balance, provider.balance?.currency || 'USD', state.settings?.compactTokenUnits, currentLocale())}`;
-  const unlimited = (provider.windows || []).some((window) => (
-    window?.showMeter === false && String(window?.detail || '').toLowerCase() === 'unlimited'
-  ));
-  return unlimited ? `✓ ${t('settings.thirdparty.unlimited')}` : '✓';
-}
-
-function updateNamedApiProfilesStatus({
-  providerId,
-  profileSettingsKey,
-  profileCountStateKey,
-  statusText
-}) {
-  const providerEnabled = limitProviderEnabled(providerId);
-  const providers = localProviderStatuses(providerId);
-  const byName = new Map(providers.map((provider) => [
-    String(provider.accountName || provider.accountLabel || ''),
-    provider
-  ]));
-  for (const infoEl of document.querySelectorAll(`[data-managed-profile-provider="${providerId}"][data-managed-profile-name]`)) {
-    const name = infoEl.dataset.managedProfileName || '';
-    const profile = state.settings?.[profileSettingsKey]?.[name];
-    infoEl.textContent = statusText(byName.get(name), {
-      providerEnabled,
-      profileEnabled: profile?.enabled !== false
-    });
-  }
-  const envInfo = document.querySelector(
-    `[data-managed-profile-provider="${providerId}"][data-managed-profile-environment]`
-  );
-  if (envInfo) envInfo.textContent = statusText(byName.get('environment'), { providerEnabled });
-  const statusEl = document.getElementById(`${providerId}Status`);
-  if (!statusEl) return;
-  const total = state[profileCountStateKey] || 0;
-  const linked = providers.filter((provider) => provider.status === 'ok').length;
-  accountShellApi.render({
-    status: statusEl,
-    statusText: total === 0
-      ? t(`settings.${providerId}.statusNotSet`)
-      : !providerEnabled
-        ? t(`settings.${providerId}.nAccounts`, { count: total })
-        : t(`settings.${providerId}.connected`, { linked, total })
-  });
-}
-
-function updateMinimaxApiKeysStatus() {
-  const rows = localProviderStatuses('minimax');
-  const enabled = limitProviderEnabled('minimax');
-  const provider = enabled ? limitProviderPresentationApi.limitProviderSettingsRecord(rows, 'minimax') : null;
-  accountShellApi.render({
-    status: document.getElementById('minimaxStatus'),
-    statusText: !enabled
-      ? t('settings.limits.status.disabled')
-      : provider
-        ? translatedLimitProviderTag(limitProviderPresentationApi.limitProviderStatusLabel(provider))
-        : t('settings.common.checking')
-  });
-  for (const row of document.querySelectorAll('[data-minimax-key]')) {
-    const reading = rows.find(candidate => candidate.source === 'api' && candidate.accountKey === row.dataset.minimaxKey);
-    row.querySelector('.managed-account-info').textContent = apiKeyAccountStatusText('minimax', reading, true, 'settings',
-      enabled && row.dataset.credentialEnabled !== 'false');
-  }
-}
-
-function minimaxKeyErrorText(result) {
-  const key = result?.status === 'required' ? 'settings.common.credentialRequired'
-    : result?.status === 'invalidFormat' ? 'settings.common.credentialInvalidFormat'
-    : result?.status === 'notConfigured' ? 'settings.minimax.statusNotSet'
-    : result?.status === 'unauthorized' ? 'settings.minimax.statusInvalid'
-    : 'settings.common.unavailable';
-  return result?.error || t(key);
-}
-
-function minimaxBillingUrl(key) {
-  const rows = localProviderStatuses('minimax').filter(row => row.source === 'api');
-  const row = key.accountKey ? rows.find(row => row.accountKey === key.accountKey) : null;
-  const region = key.apiRegion || state.settings?.minimaxApiRegion || 'auto';
-  const intl = region === 'intl' || (region === 'auto' && row?.region !== 'cn');
-  const origin = intl ? 'https://platform.minimax.io' : 'https://platform.minimaxi.com';
-  return `${origin}/user-center/payment/${key.billingMode === 'api' ? 'balance' : 'token-plan'}`;
-}
-
-function updateOpenRouterProfilesStatus() {
-  updateNamedApiProfilesStatus({
-    providerId: 'openrouter',
-    profileSettingsKey: 'openrouterProfiles',
-    profileCountStateKey: 'openrouterProfileCount',
-    statusText: openrouterProfileStatusText
-  });
-}
-
-function updateThirdPartyProfilesStatus() {
-  updateNamedApiProfilesStatus({
-    providerId: 'thirdparty',
-    profileSettingsKey: 'thirdPartyProfiles',
-    profileCountStateKey: 'thirdPartyProfileCount',
-    statusText: thirdPartyProfileStatusText
-  });
-}
-
-function openrouterProfileErrorText(result) {
-  if (result?.errorCode === 'invalidName') return t('settings.openrouter.invalidName');
-  if (result?.errorCode === 'missingApiKey') return t('settings.openrouter.statusNotSet');
-  return result?.error || t('settings.openrouter.saveFailedShort');
-}
-
-function thirdPartyProfileErrorText(result, adapter = '') {
-  if (result?.errorCode === 'invalidName') return t('settings.thirdparty.invalidName');
-  if (result?.errorCode === 'invalidAdapter') return t('settings.thirdparty.invalidAdapter');
-  if (result?.errorCode === 'invalidBaseUrl') return t('settings.thirdparty.invalidBaseUrl');
-  if (result?.errorCode === 'missingAccessToken' && adapter === 'sub2api') {
-    return t('settings.thirdparty.missingSub2ApiToken');
-  }
-  if (result?.errorCode === 'missingAccessToken') return t('settings.thirdparty.missingAccessToken');
-  if (result?.errorCode === 'missingApiKey') return t('settings.thirdparty.missingApiKey');
-  if (result?.errorCode === 'invalidCredential' && adapter === 'sub2api') {
-    return t('settings.thirdparty.sub2ApiCredentialRejected');
-  }
-  if (result?.errorCode === 'invalidEndpointPath') return t('settings.thirdparty.invalidEndpointPath');
-  if (result?.errorCode === 'invalidAuthMode') return t('settings.thirdparty.invalidAuthMode');
-  if (result?.errorCode === 'invalidJsonPath') return t('settings.thirdparty.invalidJsonPath');
-  if (result?.errorCode === 'invalidCurrency') return t('settings.thirdparty.invalidCurrency');
-  if (result?.errorCode === 'invalidDivisor') return t('settings.thirdparty.invalidDivisor');
-  if (result?.errorCode === 'invalidCredential') return t('settings.thirdparty.invalidCredential');
-  if (result?.errorCode === 'unavailable') return t('settings.thirdparty.unavailable');
-  return result?.error || t('settings.thirdparty.saveFailedShort');
-}
-
-function appendNamedApiProfileRow(listEl, config) {
-  const {
-    api,
-    providerId,
-    name = '',
-    profile = { enabled: true },
-    env = false,
-    rerender,
-    updateStatus,
-    errorText,
-    detail = ''
-  } = config;
-  const item = document.createElement('div');
-  item.className = 'opencode-profile-item';
-  if (!env) {
-    const toggle = document.createElement('input');
-    toggle.className = 'profile-toggle';
-    toggle.type = 'checkbox';
-    toggle.checked = profile.enabled !== false;
-    toggle.setAttribute('aria-label', name);
-    toggle.addEventListener('change', async () => {
-      const previousEnabled = profile.enabled !== false;
-      profile.enabled = toggle.checked;
-      toggle.disabled = true;
-      updateStatus();
-      try {
-        const result = await api.setProfileEnabled(name, toggle.checked);
-        if (!result?.ok) {
-          toggle.checked = previousEnabled;
-          profile.enabled = previousEnabled;
-          updateStatus();
-        }
-      } catch (_) {
-        toggle.checked = previousEnabled;
-        profile.enabled = previousEnabled;
-        updateStatus();
-      } finally {
-        toggle.disabled = false;
-        renderSettingsSummaries();
-      }
-    });
-    item.append(toggle);
-  } else {
-    const spacer = document.createElement('span');
-    spacer.className = 'profile-toggle';
-    spacer.setAttribute('aria-hidden', 'true');
-    item.append(spacer);
-  }
-
-  const nameBox = document.createElement('span');
-  nameBox.className = 'profile-name-box';
-  const nameSpan = document.createElement('span');
-  nameSpan.className = 'profile-name';
-  nameSpan.textContent = env ? t(`settings.${providerId}.environment`) : name;
-  nameBox.append(nameSpan);
-  if (detail) {
-    const detailSpan = document.createElement('span');
-    detailSpan.className = 'profile-detail';
-    detailSpan.textContent = detail;
-    detailSpan.setAttribute('aria-label', detail);
-    nameBox.append(detailSpan);
-  }
-
-  if (!env) {
-    const nameInput = document.createElement('input');
-    nameInput.className = 'profile-name-input hidden';
-    nameInput.type = 'text';
-    nameInput.value = name;
-    const renameBtn = document.createElement('button');
-    renameBtn.type = 'button';
-    renameBtn.className = 'profile-rename-btn';
-    renameBtn.setAttribute('aria-label', t('settings.profiles.rename'));
-    let editing = false;
-    const finishRename = async (save) => {
-      if (!editing) return;
-      editing = false;
-      nameInput.classList.add('hidden');
-      nameSpan.classList.remove('hidden');
-      const nextName = nameInput.value.trim();
-      if (save && nextName && nextName !== name) {
-        const result = await api.renameProfile(name, nextName);
-        if (result?.ok) {
-          setAccountShellError(providerId, '');
-          rerender();
-        } else {
-          nameInput.value = name;
-          setAccountShellError(providerId, errorText(result));
-        }
-      }
-    };
-    renameBtn.addEventListener('click', () => {
-      editing = true;
-      nameSpan.classList.add('hidden');
-      nameInput.classList.remove('hidden');
-      nameInput.focus();
-      nameInput.select();
-    });
-    nameInput.addEventListener('keydown', (event) => {
-      if (event.key === 'Enter') void finishRename(true);
-      if (event.key === 'Escape') void finishRename(false);
-    });
-    nameInput.addEventListener('blur', () => void finishRename(true));
-    nameBox.append(nameInput, renameBtn);
-  }
-
-  const rightBox = document.createElement('span');
-  rightBox.className = 'profile-right';
-  const info = document.createElement('span');
-  info.className = 'profile-info';
-  info.dataset.managedProfileProvider = providerId;
-  if (env) info.dataset.managedProfileEnvironment = 'true';
-  else info.dataset.managedProfileName = name;
-  info.textContent = t(`settings.${providerId}.checking`);
-  rightBox.append(info);
-
-  if (!env) {
-    const deleteBtn = document.createElement('button');
-    deleteBtn.className = 'profile-delete';
-    deleteBtn.textContent = '✕';
-    deleteBtn.setAttribute('aria-label', t('settings.profiles.delete'));
-    let confirming = false;
-    deleteBtn.addEventListener('click', async () => {
-      if (!confirming) {
-        confirming = true;
-        deleteBtn.classList.add('confirming');
-        deleteBtn.textContent = '✓';
-        deleteBtn.setAttribute('aria-label', t('settings.profiles.deleteConfirm', { name }));
-        return;
-      }
-      const result = await api.deleteProfile(name);
-      if (result?.ok) rerender();
-    });
-    rightBox.append(deleteBtn);
-  }
-  item.append(nameBox, rightBox);
-  listEl.append(item);
-}
-
-function renderNamedApiProfiles(config) {
-  if (!isSettingsSurfaceVisible()) return;
-  const {
-    providerId,
-    profileSettingsKey,
-    envConfiguredKey,
-    profileCountStateKey,
-    api,
-    rerender,
-    updateStatus,
-    errorText,
-    detailForProfile = () => ''
-  } = config;
-  const listEl = document.getElementById(`${providerId}ProfileList`);
-  if (!listEl || !api) return;
-  renderAccountShellError(providerId);
-  const isCurrent = accountProfileRequests.begin(providerId);
-  api.getProfiles().then(({ profiles, hasEnvVar }) => {
-    if (!isCurrent() || !isSettingsSurfaceVisible() || document.getElementById(`${providerId}ProfileList`) !== listEl) return;
-    listEl.replaceChildren();
-    state.settings[profileSettingsKey] = profiles;
-    state.settings[envConfiguredKey] = Boolean(hasEnvVar);
-    const entries = Object.entries(profiles);
-    state[profileCountStateKey] = entries.length + (hasEnvVar ? 1 : 0);
-    if (state[profileCountStateKey] === 0) {
-      const empty = document.createElement('div');
-      empty.className = 'opencode-empty';
-      empty.textContent = t(`settings.${providerId}.emptyList`);
-      listEl.append(empty);
-      updateStatus();
-      renderSettingsSummaries();
-      return;
-    }
-
-    for (const [name, profile] of entries) {
-      appendNamedApiProfileRow(listEl, {
-        api,
-        providerId,
-        name,
-        profile,
-        rerender,
-        updateStatus,
-        errorText,
-        detail: detailForProfile(profile)
-      });
-    }
-    if (hasEnvVar) {
-      appendNamedApiProfileRow(listEl, {
-        api,
-        providerId,
-        env: true,
-        rerender,
-        updateStatus,
-        errorText
-      });
-    }
-    updateStatus();
-    renderSettingsSummaries();
-  }).catch(() => {
-    if (!isCurrent() || !isSettingsSurfaceVisible()) return;
-    accountShellApi.render({
-      status: document.getElementById(`${providerId}Status`),
-      statusText: t(`settings.${providerId}.unavailable`)
-    });
-  });
-}
-
-function renderOpenRouterProfiles() {
-  renderNamedApiProfiles({
-    providerId: 'openrouter',
-    profileSettingsKey: 'openrouterProfiles',
-    envConfiguredKey: 'openrouterEnvConfigured',
-    profileCountStateKey: 'openrouterProfileCount',
-    api: window.tokenMonitor.openrouter,
-    rerender: renderOpenRouterProfiles,
-    updateStatus: updateOpenRouterProfilesStatus,
-    errorText: openrouterProfileErrorText
-  });
-}
-
-async function renderMinimaxApiKeys() {
-  if (!isSettingsSurfaceVisible()) return;
-  const list = document.getElementById('minimaxKeyList');
-  const isCurrent = accountProfileRequests.begin('minimax');
-  try {
-    const keys = await window.tokenMonitor.minimax.getKeys();
-    if (!isCurrent() || !isSettingsSurfaceVisible()) return;
-    list.replaceChildren();
-    let savedIndex = 0;
-    for (const key of keys) {
-      const row = document.createElement('div');
-      row.className = 'managed-account-row';
-      row.dataset.minimaxKey = key.accountKey;
-      row.dataset.credentialEnabled = String(key.enabled !== false);
-      const label = document.createElement('span');
-      label.className = 'managed-account-main managed-account-email';
-      const name = t('settings.minimax.accountFallback', { number: ++savedIndex });
-      label.textContent = `${name} · ${t(`settings.minimax.${key.billingMode === 'api' ? 'billingApi' : 'billingTokenPlan'}`)}`;
-      const actions = document.createElement('span');
-      actions.className = 'managed-account-right';
-      const info = document.createElement('span');
-      info.className = 'managed-account-info';
-      const open = document.createElement('button');
-      open.className = 'managed-account-remove';
-      open.textContent = '↗';
-      open.setAttribute('aria-label', t('settings.minimax.openBrowser'));
-      open.addEventListener('click', () => window.tokenMonitor.openExternal(minimaxBillingUrl(key)));
-      actions.append(info, open);
-      const remove = document.createElement('button');
-      remove.className = 'managed-account-remove';
-      remove.textContent = '✕';
-      remove.setAttribute('aria-label', t('settings.minimax.clearApiKey'));
-      let confirming = false;
-      remove.addEventListener('click', () => {
-        if (!confirming) {
-          confirming = true;
-          remove.textContent = '✓';
-          remove.classList.add('confirming');
-          remove.setAttribute('aria-label', t('settings.profiles.deleteConfirm', { name: label.textContent }));
-          return;
-        }
-        return accountProfileSaves.run('minimax', remove, async () => {
-          const result = await window.tokenMonitor.minimax.removeKey(key.id);
-          setAccountShellError('minimax', result?.ok ? '' : minimaxKeyErrorText(result));
-          if (result?.ok) { await renderMinimaxApiKeys(); await refreshStats(); }
-        });
-      });
-      actions.append(remove);
-      row.append(label, actions);
-      list.append(row);
-    }
-    updateMinimaxApiKeysStatus();
-    renderSettingsSummaries();
-  } catch (_) {
-    if (!isCurrent() || !isSettingsSurfaceVisible()) return;
-    accountShellApi.render({
-      status: document.getElementById('minimaxStatus'),
-      statusText: t('settings.common.unavailable')
-    });
-  }
-}
-
-function renderThirdPartyProfiles() {
-  renderNamedApiProfiles({
-    providerId: 'thirdparty',
-    profileSettingsKey: 'thirdPartyProfiles',
-    envConfiguredKey: 'thirdPartyEnvConfigured',
-    profileCountStateKey: 'thirdPartyProfileCount',
-    api: window.tokenMonitor.thirdparty,
-    rerender: renderThirdPartyProfiles,
-    updateStatus: updateThirdPartyProfilesStatus,
-    errorText: thirdPartyProfileErrorText,
-    detailForProfile: (profile) => {
-      const adapter = profile?.adapter === 'newapi-token'
-        ? t('settings.thirdparty.detailNewApiKey')
-        : profile?.adapter === 'custom'
-          ? t('settings.thirdparty.detailCustom')
-          : profile?.adapter === 'sub2api'
-            ? t('settings.thirdparty.detailSub2Api')
-            : t('settings.thirdparty.detailNewApiAccount');
-      let host = '';
-      try { host = new URL(String(profile?.baseUrl || '')).host; } catch (_) {}
-      return [adapter, host].filter(Boolean).join(' · ');
-    }
-  });
-}
-
-function renderCursorStatus() {
-  if (!isSettingsSurfaceVisible()) return;
-  const statusEl = document.getElementById('cursorAccountStatus');
-  const listEl = document.getElementById('cursorAccountList');
-  const errorEl = document.getElementById('cursorErrorMessage');
-  if (!statusEl || !listEl || !errorEl) return;
-
-  accountShellApi.render({
-    error: errorEl,
-    errorText: state.cursorAccount.error
-      ? t('settings.cursor.statusCheckFailed', { message: state.cursorAccount.error })
-      : accountShellErrors.cursor || ''
-  });
-
-  if (state.cursorAccount.error) {
-    setCursorStatusText(statusEl, t('settings.common.error'));
-    setCursorCheckboxesEnabled(Boolean(state.cursorAccount.status?.accounts?.length));
-    setSettingsSectionExpanded('limits', true);
-    setCursorAccountExpanded(true);
-    renderSettingsSummaries();
-    return;
-  }
-
-  const status = state.cursorAccount.status;
-  if (!status) {
-    setCursorStatusText(statusEl, t('settings.common.checking'));
-    renderSettingsSummaries();
-    return;
-  }
-
-  const accounts = Array.isArray(status.accounts) ? status.accounts : [];
-  const managementBlocked = status.managementBlocked === true;
-  document.getElementById('cursorAgentActiveNote')?.classList.toggle('hidden', !managementBlocked);
-  const addButton = document.getElementById('cursorAddAccountButton');
-  if (addButton) addButton.disabled = managementBlocked;
-  const summary = accounts.length === 0
-    ? t('settings.cursor.notLoggedIn')
-    : t('settings.cursor.connected', { linked: status.linkedCount || 0, total: accounts.length });
-  setCursorStatusText(statusEl, summary);
-  setCursorCheckboxesEnabled(accounts.some((account) => !account.expired && !account.error));
-  listEl.replaceChildren();
-  if (accounts.length === 0) {
-    const empty = document.createElement('p');
-    empty.className = 'settings-note';
-    empty.textContent = t('settings.cursor.empty');
-    listEl.append(empty);
-  } else {
-    for (const account of accounts) {
-      const enabled = account.enabled !== false;
-      const row = document.createElement('div');
-      row.className = 'managed-account-row';
-      row.classList.toggle('disabled', !enabled);
-      const fallbackId = String(account.id || '');
-      const accountName = account.email || account.label || (fallbackId ? `…${fallbackId.slice(-8)}` : t('settings.cursor.unnamedAccount'));
-      const input = document.createElement('input');
-      input.className = 'managed-account-checkbox';
-      input.type = 'checkbox';
-      input.checked = enabled;
-      input.setAttribute('aria-label', t('settings.cursor.toggleAccount', { account: accountName }));
-      const main = document.createElement('div');
-      main.className = 'managed-account-main';
-      const name = document.createElement('div');
-      name.className = 'managed-account-email';
-      name.textContent = accountName;
-      main.append(name);
-      const planLabel = account.membershipType
-        ? limitProviderPresentationApi.limitProviderDisplayLabel(account.membershipType)
-        : t('settings.cursor.webAccount');
-      input.addEventListener('change', async () => {
-        input.disabled = true;
-        const result = await window.tokenMonitor.cursor.setAccountEnabled(account.id, input.checked);
-        if (!result?.ok) {
-          state.cursorAccount = { ...state.cursorAccount, error: result?.error || t('settings.cursor.toggleFailed') };
-        } else {
-          state.cursorAccount = { status: result.status, error: '', busy: false };
-          refreshStats({ force: true }).catch(() => {});
-        }
-        renderCursorStatus();
-      });
-      const right = document.createElement('span');
-      right.className = 'managed-account-right';
-      const info = document.createElement('div');
-      info.className = 'managed-account-info';
-      info.textContent = !enabled
-        ? t('settings.cursor.disabled')
-        : account.expired
-          ? t('settings.cursor.expiredShort')
-          : account.error
-            ? t('settings.common.error')
-            : planLabel;
-      info.setAttribute('aria-label', info.textContent);
-      right.append(info);
-      if (account.removable === true && !managementBlocked) {
-        const remove = document.createElement('button');
-        remove.type = 'button';
-        remove.className = 'managed-account-remove';
-        remove.textContent = '✕';
-        remove.setAttribute('aria-label', t('settings.cursor.remove'));
-        let confirmingRemove = false;
-        remove.addEventListener('click', async () => {
-          if (!confirmingRemove) {
-            confirmingRemove = true;
-            remove.classList.add('confirming');
-            remove.textContent = '✓';
-            remove.setAttribute('aria-label', t('settings.cursor.removeConfirm', { account: accountName }));
-            return;
-          }
-          remove.disabled = true;
-          const result = await window.tokenMonitor.cursor.logout(account.id);
-          if (!result?.ok) {
-            const message = result?.code === 'EXTERNAL_AGENT_ACTIVE'
-              ? t('settings.cursor.agentActive')
-              : result?.error || t('settings.cursor.removeFailed');
-            state.cursorAccount = { ...state.cursorAccount, error: message };
-          } else {
-            state.cursorAccount = { status: result.status, error: '', busy: false };
-            refreshStats({ force: true }).catch(() => {});
-          }
-          renderCursorStatus();
-        });
-        right.append(remove);
-      }
-      row.append(input, main, right);
-      listEl.append(row);
-    }
-  }
-  renderSettingsSummaries();
-}
-
-async function refreshCursorStatus({ force = false, discover = false } = {}) {
-  setAccountShellError('cursor', '');
-  state.cursorAccount = { status: null, error: '', busy: true };
-  renderCursorStatus();
-  try {
-    const status = await window.tokenMonitor.cursor.status({ force, discover });
-    state.cursorAccount = { status, error: '', busy: false };
-  } catch (err) {
-    state.cursorAccount = { status: null, error: err.message, busy: false };
-  }
-  renderCursorStatus();
-}
-
-function setCursorCheckboxesEnabled(enabled) {
-  const row = document.querySelector('#clientDisplayList .tool-preference-row[data-client="cursor"]');
-  const input = row?.querySelector('input[data-preference="track"]');
-  row?.classList.toggle('disabled', !enabled);
-  if (input) {
-    input.disabled = !enabled;
-    input.setAttribute('aria-description', enabled ? '' : t('settings.cursor.loginRequired'));
-  }
-}
 
 let openCustomPricingForm = null;
 let modelAliasForm = null;
@@ -19099,6 +17811,13 @@ function setupModelAliasesUI() {
   if (!toggle) return;
   toggle.addEventListener('click', () => setAccountGroupExpanded('modelAliases', !state.modelAliasesExpanded, 'modelAliasesExpanded'));
   setAccountGroupExpanded('modelAliases', false, 'modelAliasesExpanded');
+  window.TokenMonitorHelpPopover.createHelpPopover({
+    trigger: document.getElementById('modelAliasGroupingHelpButton'),
+    popover: document.getElementById('modelAliasGroupingHelp'),
+    document,
+    align: 'center',
+    preferAbove: true
+  });
   modelAliasForm = window.TokenMonitorModelAliasForm.createModelAliasForm({
     document, t: (key, params) => t(key === 'settings.modelAliases.saveError' && modelAliasSaveConflict ? 'settings.sync.content.conflict' : key, params),
     getAliases: () => state.settings?.modelAliases || {},
@@ -19127,21 +17846,24 @@ function setupModelAliasesUI() {
   }
 }
 
+let customPricingRowsKey;
+let customPricingDisclosure;
+
 function customPricingMeta(ov) {
   const parts = [];
-  if (typeof ov.cacheReadPerM === 'number') parts.push(`${t('settings.customPricing.cacheRead')} $${ov.cacheReadPerM}`);
-  if (typeof ov.inputPerM === 'number') parts.push(`${t('settings.customPricing.input')} $${ov.inputPerM}`);
+  if (typeof ov.inputPerM === 'number') parts.push(`${t('settings.customPricing.summaryInput')} $${ov.inputPerM}`);
   if (typeof ov.outputPerM === 'number') parts.push(`${t('settings.customPricing.output')} $${ov.outputPerM}`);
+  if (typeof ov.cacheReadPerM === 'number') parts.push(`${t('settings.customPricing.summaryCacheRead')} $${ov.cacheReadPerM}`);
   if (typeof ov.cacheWritePerM === 'number') parts.push(`${t('settings.customPricing.cacheWrite')} $${ov.cacheWritePerM}`);
   if (typeof ov.cacheWrite1hPerM === 'number') parts.push(`${t('settings.customPricing.cacheWrite1h')} $${ov.cacheWrite1hPerM}`);
-  return parts.length ? `${parts.join(' · ')} / 1M` : '';
+  return parts.join(' · ');
 }
 
 function renderCustomPricing() {
   if (!isSettingsSurfaceVisible()) return;
   const listEl = document.getElementById('customPricingList');
   const statusEl = document.getElementById('customPricingStatus');
-  if (!listEl) return;
+  if (!listEl || !customPricingDisclosure) return;
   const overrides = state.settings?.customModelPricing || [];
   const pricingBase = syncContentForm?.base();
   if (statusEl) {
@@ -19149,39 +17871,52 @@ function renderCustomPricing() {
       ? t('settings.customPricing.count', { count: overrides.length })
       : t('settings.customPricing.none');
   }
+  const editLabel = t('settings.common.edit');
+  const removeLabel = t('settings.customPricing.remove');
+  const emptyLabel = t('settings.customPricing.empty');
+  const rows = overrides.map(override => ({ override, meta: customPricingMeta(override) }));
+  const rowsKey = JSON.stringify([rows, pricingBase?.identity, pricingBase?.revisions?.customPricing,
+    editLabel, removeLabel, emptyLabel, t('settings.collection.modelActions')]);
+  if (rowsKey === customPricingRowsKey) return;
+  customPricingRowsKey = rowsKey;
   listEl.replaceChildren();
+  customPricingDisclosure.resetRows();
   if (overrides.length === 0) {
     const empty = document.createElement('p');
     empty.className = 'settings-note';
-    empty.textContent = t('settings.customPricing.empty');
+    empty.textContent = emptyLabel;
     listEl.append(empty);
     return;
   }
-  for (const ov of overrides) {
+  for (const { override: ov, meta: summary } of rows) {
     const row = document.createElement('div');
     row.className = 'managed-account-row custom-pricing-row';
     const main = document.createElement('button');
     main.type = 'button';
     main.className = 'managed-account-main custom-pricing-edit';
-    main.setAttribute('aria-description', t('settings.customPricing.edit'));
-    main.addEventListener('click', () => { if (openCustomPricingForm) openCustomPricingForm(ov); });
+    main.setAttribute('aria-description', editLabel);
+    customPricingDisclosure.trackRow(ov.modelId, main);
+    const openEditor = () => openCustomPricingForm?.(ov);
+    main.addEventListener('click', openEditor);
     const name = document.createElement('div');
     name.className = 'managed-account-email';
     name.textContent = ov.modelId;
     const meta = document.createElement('div');
     meta.className = 'managed-account-meta';
-    meta.textContent = customPricingMeta(ov);
+    meta.textContent = summary;
     main.append(name, meta);
-    const remove = document.createElement('button');
-    remove.type = 'button';
-    remove.className = 'managed-account-remove custom-pricing-remove';
-    remove.textContent = t('settings.customPricing.remove');
-    remove.addEventListener('click', async () => {
-      const next = customPricingFormApi.removeOverride(overrides, ov.modelId);
-      try { await saveSettings({ customModelPricing: next }, pricingBase); } catch (_) { return; }
-      renderCustomPricing();
+    const menu = window.TokenMonitorModelAliasForm.createModelSettingsMenu(document, {
+      label: t('settings.collection.modelActions', { model: ov.modelId }),
+      editLabel,
+      removeLabel,
+      edit: openEditor,
+      remove: async () => {
+        const next = customPricingFormApi.removeOverride(overrides, ov.modelId);
+        try { await saveSettings({ customModelPricing: next }, pricingBase); } catch (_) { return; }
+        renderCustomPricing();
+      }
     });
-    row.append(main, remove);
+    row.append(main, menu);
     listEl.append(row);
   }
 }
@@ -19194,6 +17929,7 @@ function setupCustomPricingUI() {
 
   const form = document.getElementById('customPricingForm');
   const addButton = document.getElementById('customPricingAddButton');
+  customPricingDisclosure = window.TokenMonitorModelAliasForm.createModelEditorDisclosure(form, addButton);
   const select = document.getElementById('customPricingModelSelect');
   const manualInput = document.getElementById('customPricingModelInput');
   const inputEl = document.getElementById('customPricingInput');
@@ -19203,7 +17939,13 @@ function setupCustomPricingUI() {
   const cacheWrite1hEl = document.getElementById('customPricingCacheWrite1h');
   const advanced = document.getElementById('customPricingAdvanced');
   const advancedSummary = document.getElementById('customPricingAdvancedSummary');
-  const help = document.getElementById('customPricingHelp');
+  const help = window.TokenMonitorHelpPopover.createHelpPopover({
+    trigger: document.getElementById('customPricingHelpButton'),
+    popover: document.getElementById('customPricingHelp'),
+    document,
+    align: 'center',
+    preferAbove: true
+  });
   const rateFields = [
     [inputEl, 'inputPerM'], [outputEl, 'outputPerM'], [cacheReadEl, 'cacheReadPerM'],
     [cacheWriteEl, 'cacheWritePerM'], [cacheWrite1hEl, 'cacheWrite1hPerM']
@@ -19225,7 +17967,7 @@ function setupCustomPricingUI() {
     lookupRevision += 1;
     editedFields.clear();
     advanced.open = false;
-    if (help.matches(':popover-open')) help.hidePopover();
+    help.close();
     for (const [el] of rateFields) el.value = '';
     updateAdvancedSummary();
     manualInput.value = ''; manualInput.classList.add('hidden');
@@ -19256,12 +17998,13 @@ function setupCustomPricingUI() {
   };
 
   const closeForm = () => {
-    form.classList.add('hidden');
-    addButton.classList.remove('hidden');
-    resetForm();
+    // Keep the fields in place while the form collapses.
+    lookupRevision += 1;
+    help.close();
+    customPricingDisclosure.setOpen(false);
   };
   openCustomPricingForm = (prefill) => {
-    pricingEdit = { base: syncContentForm?.base(), entries: structuredClone(state.settings?.customModelPricing || []) };
+    pricingEdit = { adding: !prefill, base: syncContentForm?.base(), entries: structuredClone(state.settings?.customModelPricing || []) };
     resetForm();
     populateModels();
     if (prefill && prefill.modelId) {
@@ -19278,12 +18021,22 @@ function setupCustomPricingUI() {
         updateApproximation(el);
       }
       advanced.open = cacheWriteEl.value !== '' || cacheWrite1hEl.value !== '';
+    } else {
+      select.value = '';
     }
-    form.classList.remove('hidden');
-    addButton.classList.add('hidden');
+    const title = document.getElementById('customPricingFormTitle');
+    const titleKey = prefill ? 'settings.customPricing.edit' : 'settings.customPricing.add';
+    title.setAttribute('data-i18n', titleKey);
+    title.textContent = t(titleKey);
+    customPricingDisclosure.setOpen(true, prefill?.modelId);
+    accountShellApi.focusDisclosureControl(form, select.value === '__manual__' ? manualInput : select);
   };
 
-  addButton.addEventListener('click', () => openCustomPricingForm());
+  addButton.addEventListener('click', () => {
+    if (saveButton.disabled) return;
+    if (pricingEdit?.adding && !form.classList.contains('hidden')) closeForm();
+    else openCustomPricingForm();
+  });
   cancelButton.addEventListener('click', closeForm);
 
   select.addEventListener('change', async () => {
@@ -19365,856 +18118,7 @@ function setupCustomPricingUI() {
 }
 
 function setupCursorAccountUI() {
-  const codexToggle = document.getElementById('codexSettingsToggle');
-  if (codexToggle) {
-    codexToggle.addEventListener('click', () => setCodexAccountExpanded(!state.codexAccountExpanded));
-    setCodexAccountExpanded(false);
-    renderCodexAccounts();
-
-    const codexAddButton = document.getElementById('codexAddAccountButton');
-    const codexCancelButton = document.getElementById('codexCancelLoginButton');
-    const codexOpenUrlButton = document.getElementById('codexOpenLoginUrlButton');
-    const codexCopyUrlButton = document.getElementById('codexCopyLoginUrlButton');
-    const codexWorkspaceSelect = document.getElementById('codexWorkspaceSelect');
-    const codexConfirmWorkspaceButton = document.getElementById('codexConfirmWorkspaceButton');
-    const codexLoginDetails = document.getElementById('codexLoginDetails');
-    window.tokenMonitor.codex.onLoginStatus((status) => {
-      if (!status || !isCurrentCodexSignInFlow(status.flowId)) return;
-      if (status.phase === 'workspaceSelection') {
-        state.codexWorkspaceChoices = Array.isArray(status.workspaces) ? status.workspaces : [];
-        state.codexWorkspaceId = state.codexWorkspaceChoices.some((workspace) => workspace.id === status.currentWorkspaceId)
-          ? status.currentWorkspaceId
-          : state.codexWorkspaceChoices[0]?.id || '';
-        state.codexLoginStatus = t('settings.codex.chooseWorkspace');
-        renderCodexLoginStatus();
-        return;
-      }
-      if (status.phase !== 'output') return;
-      state.codexLoginOutput = (state.codexLoginOutput + String(status.text || '')).slice(-3000);
-      if (status.loginUrl) state.codexLoginUrl = status.loginUrl;
-      state.codexLoginStatus = t(state.codexLoginUrl ? 'settings.codex.loginWaiting' : 'settings.codex.loginStarting');
-      renderCodexLoginStatus();
-    });
-    codexAddButton.addEventListener('click', async () => {
-      if (state.codexSignInBusy) return;
-      const flowId = nextCodexSignInFlowId();
-      state.codexSignInFlowId = flowId;
-      state.codexSignInBusy = true;
-      state.codexLoginUrl = '';
-      state.codexLoginOutput = '';
-      state.codexWorkspaceChoices = [];
-      state.codexWorkspaceId = '';
-      state.codexLoginStatus = t('settings.codex.loginStarting');
-      state.codexAccountError = '';
-      if (codexLoginDetails) codexLoginDetails.open = false;
-      renderCodexLoginStatus();
-      renderCodexAccounts();
-      try {
-        const result = await window.tokenMonitor.codex.addAccount({ flowId });
-        if (!isCurrentCodexSignInFlow(result?.flowId || flowId)) return;
-        if (!result?.ok) {
-          if (result?.outcome === 'cancelled') return;
-          state.codexAccountError = result?.error || t('settings.codex.loginFailed');
-          state.codexLoginStatus = t('settings.codex.loginFailed');
-          if (codexLoginDetails && state.codexLoginOutput) codexLoginDetails.open = true;
-          setCodexAccountExpanded(true);
-        } else {
-          state.codexAccountError = '';
-          state.codexLoginStatus = t('settings.codex.loginSuccess');
-          renderCodexLoginStatus();
-          state.settings.codexManagedAccounts = await window.tokenMonitor.codex.accounts();
-          await refreshStats({ force: true });
-          state.codexLoginStatus = '';
-          state.codexLoginOutput = '';
-          state.codexWorkspaceChoices = [];
-          state.codexWorkspaceId = '';
-        }
-      } catch (err) {
-        if (!isCurrentCodexSignInFlow(flowId)) return;
-        state.codexAccountError = err.message;
-        state.codexLoginStatus = t('settings.codex.loginFailed');
-        if (codexLoginDetails && state.codexLoginOutput) codexLoginDetails.open = true;
-      } finally {
-        if (isCurrentCodexSignInFlow(flowId)) {
-          state.codexSignInBusy = false;
-          state.codexSignInFlowId = '';
-          state.codexLoginUrl = '';
-          state.codexWorkspaceChoices = [];
-          state.codexWorkspaceId = '';
-          renderCodexLoginStatus();
-          renderCodexAccounts();
-        }
-      }
-    });
-
-    codexCancelButton.addEventListener('click', async () => {
-      const flowId = state.codexSignInFlowId;
-      if (!isCurrentCodexSignInFlow(flowId)) return;
-      const result = await window.tokenMonitor.codex.cancelLogin({ flowId });
-      if (!result?.cancelled || !isCurrentCodexSignInFlow(flowId)) return;
-      state.codexSignInBusy = false;
-      state.codexSignInFlowId = '';
-      state.codexLoginUrl = '';
-      state.codexLoginStatus = '';
-      state.codexLoginOutput = '';
-      state.codexWorkspaceChoices = [];
-      state.codexWorkspaceId = '';
-      state.codexAccountError = '';
-      if (codexLoginDetails) codexLoginDetails.open = false;
-      renderCodexLoginStatus();
-      renderCodexAccounts();
-    });
-
-    codexWorkspaceSelect.addEventListener('change', () => {
-      state.codexWorkspaceId = codexWorkspaceSelect.value;
-    });
-
-    codexConfirmWorkspaceButton.addEventListener('click', async () => {
-      const flowId = state.codexSignInFlowId;
-      const workspaceId = state.codexWorkspaceId;
-      if (!isCurrentCodexSignInFlow(flowId) || !workspaceId) return;
-      codexConfirmWorkspaceButton.disabled = true;
-      try {
-        const result = await window.tokenMonitor.codex.selectWorkspace({ flowId, workspaceId });
-        if (!result?.ok || !isCurrentCodexSignInFlow(flowId)) return;
-        state.codexWorkspaceChoices = [];
-        state.codexWorkspaceId = '';
-        state.codexLoginStatus = t('settings.codex.loginLoadingAccount');
-        renderCodexLoginStatus();
-      } finally {
-        codexConfirmWorkspaceButton.disabled = false;
-      }
-    });
-
-    codexOpenUrlButton.addEventListener('click', async () => {
-      if (!state.codexLoginUrl) return;
-      const result = await window.tokenMonitor.openExternal(state.codexLoginUrl);
-      if (!result?.ok) {
-        state.codexAccountError = result?.error || t('settings.codex.openLoginUrlFailed');
-        renderCodexAccounts();
-      }
-    });
-
-    codexCopyUrlButton.addEventListener('click', () => {
-      if (state.codexLoginUrl) copyToClipboard(state.codexLoginUrl, codexCopyUrlButton);
-    });
-
-    renderCodexLoginStatus();
-
-    document.getElementById('codexRefreshAccountsButton').addEventListener('click', () => {
-      refreshCodexAccounts();
-    });
-  }
-
-  document.getElementById('cursorSettingsToggle').addEventListener('click', () => {
-    const expanding = !state.cursorAccountExpanded;
-    setCursorAccountExpanded(expanding);
-    if (expanding && !state.cursorAccount.busy) void refreshCursorStatus({ discover: true });
-  });
-  setCursorAccountExpanded(false);
-
-  const cursorAddAccountButton = document.getElementById('cursorAddAccountButton');
-  const cursorManualDetails = document.getElementById('cursorManualDetails');
-  function setCursorManualExpanded(expanded) {
-    const next = Boolean(expanded);
-    cursorAddAccountButton?.setAttribute('aria-expanded', next ? 'true' : 'false');
-    cursorManualDetails?.classList.toggle('hidden', !next);
-    document.getElementById('cursorManualPanel')?.classList.toggle('expanded', next);
-  }
-  cursorAddAccountButton?.addEventListener('click', () => {
-    setCursorManualExpanded(cursorManualDetails?.classList.contains('hidden'));
-  });
-  setCursorManualExpanded(false);
-
-  document.getElementById('cursorLoginButton').addEventListener('click', () => {
-    window.tokenMonitor.openExternal('https://cursor.com');
-  });
-
-  const cursorManualSubmit = document.getElementById('cursorManualSubmit');
-  cursorManualSubmit.addEventListener('click', () => accountProfileSaves.run('cursor', cursorManualSubmit, async () => {
-    const input = document.getElementById('cursorManualInput');
-    setAccountShellError('cursor', '');
-    const result = await window.tokenMonitor.cursor.loginManual(input.value);
-    if (!result.ok) {
-      const message = result.code === 'EXTERNAL_AGENT_ACTIVE'
-        ? t('settings.cursor.agentActive')
-        : result.error;
-      setAccountShellError('cursor', t('settings.cursor.loginFailed', { message }));
-      return;
-    }
-    input.value = '';
-    setAccountShellError('cursor', '');
-    state.cursorAccount = { status: result.status, error: '', busy: false };
-    renderCursorStatus();
-    setCursorManualExpanded(false);
-    await refreshStats({ force: true });
-  }));
-
-  refreshCursorStatus({ discover: true });
-
-  const opencodeToggle = document.getElementById('opencodeSettingsToggle');
-  if (opencodeToggle) {
-    opencodeToggle.addEventListener('click', () => {
-      const expanding = document.getElementById('opencodeSettingsDetails').classList.contains('hidden');
-      setOpencodeCookieExpanded(expanding);
-      if (expanding) renderOpenCodeProfiles();
-    });
-
-    const addToggle = document.getElementById('opencodeAddToggle');
-    const addDetails = document.getElementById('opencodeAddDetails');
-    function setOpenCodeAddExpanded(expanded) {
-      const next = Boolean(expanded);
-      addToggle?.setAttribute('aria-expanded', next ? 'true' : 'false');
-      addDetails?.classList.toggle('hidden', !next);
-      document.getElementById('opencodeAddForm')?.classList.toggle('expanded', next);
-    }
-    addToggle?.addEventListener('click', () => setOpenCodeAddExpanded(addDetails?.classList.contains('hidden')));
-
-    document.getElementById('opencodeOpenBrowser')?.addEventListener('click', () => {
-      window.tokenMonitor.openExternal('https://opencode.ai/console');
-    });
-
-    // API key is the default: it needs no browser round trip. The cookie stays
-    // selectable because it is the only thing that reaches the Zen balance.
-    const kindSelect = document.getElementById('opencodeCredentialKind');
-    // The merge confirmation is about one specific proposal: this name, this
-    // credential. Editing any part of the form makes the offer on screen stale,
-    // and a confirmation the user gives has to be a confirmation of what they
-    // are looking at, so any edit withdraws it.
-    const addMergeButton = document.getElementById('opencodeCredentialMerge');
-    // Confirming re-runs the submit handler's own closure, which is what holds
-    // the name and credential the offer was made for.
-    let confirmOpenCodeMerge = () => {};
-    const addMergeOffer = addMergeButton
-      ? opencodeMergeOffer(addMergeButton, () => confirmOpenCodeMerge())
-      : null;
-    const clearOpenCodeMergeOffer = () => addMergeOffer?.withdraw();
-    for (const id of ['opencodeProfileName', 'opencodeApiKeyInput', 'opencodeCookieInput']) {
-      document.getElementById(id)?.addEventListener('input', clearOpenCodeMergeOffer);
-    }
-    const applyOpenCodeCredentialKind = () => {
-      const isCookie = kindSelect?.value === 'cookie';
-      document.getElementById('opencodeApiFields')?.classList.toggle('hidden', isCookie);
-      document.getElementById('opencodeCookieFields')?.classList.toggle('hidden', !isCookie);
-      // One button for both modes; only what it is fetching differs. The keys
-      // page itself lives under a workspace id we do not have, so both land on
-      // the console sign-in.
-      const browserButton = document.getElementById('opencodeOpenBrowser');
-      if (browserButton) {
-        const key = isCookie ? 'settings.opencode.openBrowser' : 'settings.opencode.openBrowserKeys';
-        browserButton.dataset.i18n = key;
-        browserButton.textContent = t(key);
-      }
-      // Clear the field being hidden so a value typed under one credential type
-      // can never be submitted as the other.
-      const stale = document.getElementById(isCookie ? 'opencodeApiKeyInput' : 'opencodeCookieInput');
-      if (stale) stale.value = '';
-      setAccountShellError('opencode', '');
-      clearOpenCodeMergeOffer();
-    };
-    kindSelect?.addEventListener('change', applyOpenCodeCredentialKind);
-    applyOpenCodeCredentialKind();
-
-    const profileSubmit = document.getElementById('opencodeCookieSubmit');
-    profileSubmit.addEventListener('click', () => accountProfileSaves.run('opencode', profileSubmit, async () => {
-      const opencodeCredentialKind = kindSelect?.value === 'cookie' ? 'cookie' : 'api';
-      const input = document.getElementById(opencodeCredentialKind === 'cookie'
-        ? 'opencodeCookieInput'
-        : 'opencodeApiKeyInput');
-      const nameInput = document.getElementById('opencodeProfileName');
-      const name = (nameInput.value || '').trim();
-      const cookie = input.value;
-
-      setAccountShellError('opencode', '');
-
-      // The name is required rather than defaulted. Saving one credential keeps
-      // the other under the same name, and the collector reads that as "these
-      // are the same account", so a blank name silently becoming `default`
-      // could attach one account's key to another account's cookie. Making the
-      // user type the name is what keeps the association explicit.
-      if (!name) {
-        setAccountShellError('opencode', t('settings.opencode.nameRequired'));
-        nameInput.focus();
-        return;
-      }
-
-      // A name that already holds a different credential kind binds the two into
-      // one account, so the main process refuses it and the form asks first.
-      // The confirmation replaces the submit button rather than appearing beside
-      // it: the next click has different consequences from the one just made.
-      const submit = async (merge) => {
-        const at = addMergeOffer?.revision();
-        confirmOpenCodeMerge = () => accountProfileSaves.run('opencode', addMergeButton, () => submit(true));
-        const result = await window.tokenMonitor.opencode.saveProfile(
-          name,
-          cookie,
-          opencodeCredentialKind,
-          { merge }
-        );
-        // Whether or not the form still shows this proposal, a save that landed
-        // has to reach the list. Only the fields are left alone, so an edit made
-        // while the request was in flight is not wiped by its reply.
-        const stale = addMergeOffer ? addMergeOffer.stale(at) : false;
-        if (result.ok) {
-          // Only this proposal's own offer is taken down. Two saves can overlap,
-          // and the newer one can answer first: clearing unconditionally let an
-          // older success wipe a merge confirmation the user was looking at and
-          // that was still correct.
-          if (!stale) {
-            input.value = '';
-            nameInput.value = '';
-            addMergeOffer?.withdraw();
-          }
-          if (!stale) setAccountShellError('opencode', '');
-          renderOpenCodeProfiles();
-          updateOpenCodeProfilesStatus();
-          renderSettingsSummaries();
-          return;
-        }
-        if (stale) return;
-        if (result.nameTaken && addMergeOffer) {
-          addMergeOffer.offer(at, name, t('settings.opencode.mergeInto', { name }));
-          return;
-        }
-        setAccountShellError('opencode', opencodeSaveErrorText(result));
-      };
-      await submit(false);
-    }));
-  }
-
-  const minimaxToggle = document.getElementById('minimaxSettingsToggle');
-  if (minimaxToggle) {
-    minimaxToggle.addEventListener('click', () => {
-      const expanded = !state.minimaxAccountExpanded;
-      setExternalAccountExpanded('minimax', expanded);
-      if (expanded) renderMinimaxApiKeys();
-    });
-    document.getElementById('minimaxOpenBrowser').addEventListener('click', () => {
-      const billingMode = document.getElementById('minimaxBillingModeInput').value;
-      const apiRegion = document.getElementById('minimaxApiRegionInput').value;
-      window.tokenMonitor.openExternal(minimaxBillingUrl({ billingMode, apiRegion }));
-    });
-    document.getElementById('minimaxRefreshButton').addEventListener('click', () => refreshLimitProviderQuota('minimax'));
-    const submit = document.getElementById('minimaxKeySubmit');
-    submit.addEventListener('click', () => accountProfileSaves.run('minimax', submit, async () => {
-      setAccountShellError('minimax', '');
-      const input = document.getElementById('minimaxApiKeyInput');
-      const mode = document.getElementById('minimaxBillingModeInput');
-      const region = document.getElementById('minimaxApiRegionInput');
-      const draft = { apiKey: input.value, billingMode: mode.value, apiRegion: region.value };
-      const result = await window.tokenMonitor.minimax.addKey(draft);
-      const unchanged = input.value === draft.apiKey && mode.value === draft.billingMode
-        && region.value === draft.apiRegion;
-      if (!result?.ok) {
-        if (unchanged) setAccountShellError('minimax', minimaxKeyErrorText(result));
-        return;
-      }
-      if (unchanged) input.value = '';
-      await renderMinimaxApiKeys();
-      await refreshStats();
-    }));
-  }
-
-  const openrouterToggle = document.getElementById('openrouterSettingsToggle');
-  if (openrouterToggle) {
-    openrouterToggle.addEventListener('click', () => {
-      const expanding = !state.openrouterAccountExpanded;
-      setOpenrouterAccountExpanded(expanding);
-      if (expanding) renderOpenRouterProfiles();
-    });
-    setOpenrouterAccountExpanded(false);
-
-    const addToggle = document.getElementById('openrouterAddToggle');
-    const addDetails = document.getElementById('openrouterAddDetails');
-    addToggle?.addEventListener('click', () => {
-      const expanded = addDetails?.classList.contains('hidden');
-      addToggle.setAttribute('aria-expanded', expanded ? 'true' : 'false');
-      addDetails?.classList.toggle('hidden', !expanded);
-      document.getElementById('openrouterAddForm')?.classList.toggle('expanded', expanded);
-    });
-    document.getElementById('openrouterOpenBrowser')?.addEventListener('click', () => {
-      window.tokenMonitor.openExternal('https://openrouter.ai/settings/keys');
-    });
-    const profileSubmit = document.getElementById('openrouterProfileSubmit');
-    profileSubmit?.addEventListener('click', () => accountProfileSaves.run('openrouter', profileSubmit, async () => {
-      const nameInput = document.getElementById('openrouterProfileName');
-      const keyInput = document.getElementById('openrouterApiKeyInput');
-      const name = String(nameInput?.value || '').trim() || 'default';
-      const apiKey = String(keyInput?.value || '').trim();
-      setAccountShellError('openrouter', '');
-      if (!apiKey) {
-        setAccountShellError('openrouter', t('settings.openrouter.statusNotSet'));
-        return;
-      }
-      const result = await window.tokenMonitor.openrouter.saveProfile(name, apiKey);
-      if (result?.ok) {
-        nameInput.value = '';
-        keyInput.value = '';
-        renderOpenRouterProfiles();
-        await refreshStats({ force: true });
-      } else {
-        setAccountShellError('openrouter', openrouterProfileErrorText(result));
-      }
-    }));
-  }
-
-  const thirdpartyToggle = document.getElementById('thirdpartySettingsToggle');
-  if (thirdpartyToggle) {
-    thirdpartyToggle.addEventListener('click', () => {
-      const expanding = !state.thirdPartyAccountExpanded;
-      setThirdPartyAccountExpanded(expanding);
-      if (expanding) renderThirdPartyProfiles();
-    });
-    setThirdPartyAccountExpanded(false);
-
-    const addToggle = document.getElementById('thirdpartyAddToggle');
-    const addDetails = document.getElementById('thirdpartyAddDetails');
-    const platformInput = document.getElementById('thirdpartyPlatformInput');
-    const modeInput = document.getElementById('thirdpartyModeInput');
-    const baseUrlInput = document.getElementById('thirdpartyBaseUrlInput');
-    platformInput?.addEventListener('change', setThirdPartyAdapterFields);
-    modeInput?.addEventListener('change', setThirdPartyAdapterFields);
-    baseUrlInput?.addEventListener('input', updateThirdPartyHttpWarning);
-    setThirdPartyAdapterFields();
-    updateThirdPartyHttpWarning();
-    addToggle?.addEventListener('click', () => {
-      const expanded = addDetails?.classList.contains('hidden');
-      addToggle.setAttribute('aria-expanded', expanded ? 'true' : 'false');
-      addDetails?.classList.toggle('hidden', !expanded);
-      document.getElementById('thirdpartyAddForm')?.classList.toggle('expanded', expanded);
-    });
-    const profileSubmit = document.getElementById('thirdpartyProfileSubmit');
-    profileSubmit?.addEventListener('click', () => accountProfileSaves.run('thirdparty', profileSubmit, async () => {
-      const nameInput = document.getElementById('thirdpartyProfileName');
-      const accessTokenInput = document.getElementById('thirdpartyAccessTokenInput');
-      const refreshTokenInput = document.getElementById('thirdpartyRefreshTokenInput');
-      const userIdInput = document.getElementById('thirdpartyUserIdInput');
-      const keyInput = document.getElementById('thirdpartyApiKeyInput');
-      const endpointPathInput = document.getElementById('thirdpartyEndpointPathInput');
-      const authModeInput = document.getElementById('thirdpartyAuthModeInput');
-      const remainingPathInput = document.getElementById('thirdpartyRemainingPathInput');
-      const usedPathInput = document.getElementById('thirdpartyUsedPathInput');
-      const totalPathInput = document.getElementById('thirdpartyTotalPathInput');
-      const currencyInput = document.getElementById('thirdpartyCurrencyInput');
-      const divisorInput = document.getElementById('thirdpartyDivisorInput');
-      const name = String(nameInput?.value || '').trim() || 'default';
-      const adapter = selectedThirdPartyAdapter();
-      const baseUrl = String(baseUrlInput?.value || '').trim();
-      const accessToken = String(accessTokenInput?.value || '').trim();
-      const refreshToken = String(refreshTokenInput?.value || '').trim();
-      const userId = String(userIdInput?.value || '').trim();
-      const apiKey = String(keyInput?.value || '').trim();
-      setAccountShellError('thirdparty', '');
-      const result = await window.tokenMonitor.thirdparty.saveProfile({
-        name,
-        adapter,
-        baseUrl,
-        accessToken,
-        refreshToken,
-        userId,
-        apiKey,
-        endpointPath: String(endpointPathInput?.value || '').trim(),
-        authMode: String(authModeInput?.value || '').trim(),
-        remainingPath: String(remainingPathInput?.value || '').trim(),
-        usedPath: String(usedPathInput?.value || '').trim(),
-        totalPath: String(totalPathInput?.value || '').trim(),
-        currency: String(currencyInput?.value || '').trim(),
-        divisor: String(divisorInput?.value || '').trim()
-      });
-      if (result?.ok) {
-        nameInput.value = '';
-        baseUrlInput.value = '';
-        updateThirdPartyHttpWarning();
-        accessTokenInput.value = '';
-        refreshTokenInput.value = '';
-        userIdInput.value = '';
-        keyInput.value = '';
-        endpointPathInput.value = '/user/balance';
-        authModeInput.value = 'bearer';
-        remainingPathInput.value = '';
-        usedPathInput.value = '';
-        totalPathInput.value = '';
-        currencyInput.value = 'USD';
-        divisorInput.value = '1';
-        renderThirdPartyProfiles();
-        await refreshStats({ force: true });
-      } else {
-        setAccountShellError('thirdparty', thirdPartyProfileErrorText(result, adapter));
-      }
-    }));
-  }
-
-  const volcengineToggle = document.getElementById('volcengineSettingsToggle');
-  if (volcengineToggle) {
-    volcengineToggle.addEventListener('click', () => setExternalAccountExpanded('volcengine', !state.volcengineAccountExpanded));
-    setExternalAccountExpanded('volcengine', false);
-    renderExternalProviderStatus('volcengine');
-
-    document.getElementById('volcengineOpenBrowser').addEventListener('click', () => {
-      window.tokenMonitor.openExternal(volcenginePlatformUrl());
-    });
-
-    document.getElementById('volcengineAgentToggle')?.addEventListener('click', () => {
-      setVolcengineAgentExpanded(document.getElementById('volcengineAgentDetails')?.classList.contains('hidden'));
-    });
-    setVolcengineAgentExpanded(false);
-
-    document.getElementById('volcengineAgentClearButton')?.addEventListener('click', async () => {
-      await saveSettings({
-        volcengineAgentAccessKeyId: '', volcengineAgentSecretAccessKey: '', volcengineAgentRegion: ''
-      });
-      renderExternalProviderStatus('volcengine');
-      await refreshStats({ force: true });
-    });
-
-    document.getElementById('volcengineLogoutButton').addEventListener('click', () => clearAccountCredential('volcengine'));
-
-    document.getElementById('volcengineRefreshButton').addEventListener('click', async () => {
-      await refreshStats({ force: true });
-    });
-
-    document.getElementById('volcengineCredentialsSubmit').addEventListener('click', async (event) => {
-      const accessKeyInput = document.getElementById('volcengineAccessKeyInput');
-      const secretInput = document.getElementById('volcengineSecretAccessKeyInput');
-      const regionInput = document.getElementById('volcengineRegionInput');
-      const agentAccessKeyInput = document.getElementById('volcengineAgentAccessKeyInput');
-      const agentSecretInput = document.getElementById('volcengineAgentSecretAccessKeyInput');
-      const agentRegionInput = document.getElementById('volcengineAgentRegionInput');
-      const accessKeyValue = String(accessKeyInput.value || '').trim();
-      const secretValue = String(secretInput.value || '').trim();
-      // Checks only this panel can make: which fields pair with which.
-      const agentAccessKeyValue = String(agentAccessKeyInput?.value || '').trim();
-      const agentSecretValue = String(agentSecretInput?.value || '').trim();
-      const pairing = accessKeyValue && /^AKLT/i.test(accessKeyValue) && !secretValue
-        ? 'settings.volcengine.secretRequired'
-        : agentAccessKeyValue && !agentSecretValue ? 'settings.volcengine.agentSecretRequired' : '';
-      if (pairing) {
-        setAccountPanelMessage('volcengine', { key: pairing });
-        renderExternalProviderStatus('volcengine');
-        return;
-      }
-      await submitAccountCredential(event.currentTarget, 'volcengine', {
-        volcengineAccessKeyId: accessKeyInput.value,
-        volcengineSecretAccessKey: secretInput.value,
-        volcengineRegion: regionInput.value || 'cn-beijing',
-        // Only sent when the user actually filled the override in, so saving the
-        // Coding Plan key again cannot silently wipe a separate Agent account.
-        ...(agentAccessKeyValue ? {
-          volcengineAgentAccessKeyId: agentAccessKeyValue,
-          volcengineAgentSecretAccessKey: agentSecretValue,
-          volcengineAgentRegion: agentRegionInput?.value || 'cn-beijing'
-        } : {})
-      }, {
-        failedKey: 'settings.volcengine.saveFailed',
-        clearInput: () => {
-          accessKeyInput.value = '';
-          secretInput.value = '';
-          if (agentAccessKeyInput) agentAccessKeyInput.value = '';
-          if (agentSecretInput) agentSecretInput.value = '';
-        }
-      });
-    });
-  }
-
-  const kimiToggle = document.getElementById('kimiSettingsToggle');
-  if (kimiToggle) {
-    kimiToggle.addEventListener('click', () => setExternalAccountExpanded('kimi', !state.kimiAccountExpanded));
-    setExternalAccountExpanded('kimi', false);
-    renderExternalProviderStatus('kimi');
-
-    document.getElementById('kimiOpenBrowser').addEventListener('click', () => {
-      window.tokenMonitor.openExternal(kimiPlatformUrl());
-    });
-
-    document.getElementById('kimiLogoutButton').addEventListener('click', () => clearAccountCredential('kimi'));
-
-    document.getElementById('kimiRefreshButton').addEventListener('click', async () => {
-      await refreshStats({ force: true });
-    });
-
-    // Two independent lanes: each submit sends only its own credential, so
-    // saving one never blanks the other.
-    for (const [submitId, inputId, field] of [
-      ['kimiApiKeySubmit', 'kimiApiKeyInput', 'kimiApiKey'],
-      ['kimiWebAccessTokenSubmit', 'kimiWebAccessTokenInput', 'kimiWebAccessToken']
-    ]) {
-      document.getElementById(submitId).addEventListener('click', (event) => {
-        const input = document.getElementById(inputId);
-        return submitAccountCredential(event.currentTarget, 'kimi', { [field]: input.value }, {
-          failedKey: 'settings.kimi.saveFailed',
-          clearInput: () => { input.value = ''; }
-        });
-      });
-    }
-  }
-
-  initWorkbuddyAccountSettings();
-
-  const antigravityToggle = document.getElementById('antigravitySettingsToggle');
-  if (antigravityToggle && window.tokenMonitor.antigravity) {
-    antigravityToggle.addEventListener('click', () => {
-      setAntigravityAccountExpanded(!state.antigravityAccountExpanded);
-    });
-    setAntigravityAccountExpanded(false);
-    renderAntigravityStatus();
-
-    window.tokenMonitor.antigravity.onAccounts((accounts) => {
-      state.settings.antigravityManagedAccounts = accounts || [];
-      renderAntigravityStatus();
-    });
-    window.tokenMonitor.antigravity.accounts().then((accounts) => {
-      state.settings.antigravityManagedAccounts = accounts || [];
-      renderAntigravityStatus();
-    }).catch(() => {});
-
-    document.getElementById('antigravityAddAccountButton').addEventListener('click', async () => {
-      if (state.antigravitySignInBusy) return;
-      state.antigravitySignInBusy = true;
-      state.antigravityAccountError = '';
-      renderAntigravityStatus();
-      let result;
-      try {
-        result = await window.tokenMonitor.antigravity.addAccount();
-      } catch (error) {
-        result = { ok: false, error: error.message };
-      } finally {
-        state.antigravitySignInBusy = false;
-      }
-      if (!result?.ok && result?.errorCode !== 'cancelled') {
-        const errorKeys = {
-          OAUTH_CLIENT_NOT_FOUND: 'settings.antigravity.oauthClientMissing',
-          TIMEOUT: 'settings.antigravity.loginTimeout',
-          STATE_MISMATCH: 'settings.antigravity.loginStateMismatch',
-          credentialStorageUnavailable: 'settings.antigravity.credentialStorageUnavailable',
-          loginInProgress: 'settings.antigravity.loginInProgress'
-        };
-        state.antigravityAccountError = errorKeys[result?.errorCode]
-          ? t(errorKeys[result.errorCode])
-          : result?.error || t('settings.antigravity.loginFailed');
-      } else if (result?.ok) {
-        state.antigravityAccountError = '';
-        state.settings.antigravityManagedAccounts = result.accounts || [];
-        // Match the Codex account flow: the account is connected as soon as its
-        // credential is stored. Quota onboarding and refresh continue in the
-        // background instead of leaving the login button visually busy.
-        refreshStats({ force: true }).catch(() => {});
-      }
-      renderAntigravityStatus();
-    });
-
-    document.getElementById('antigravityCancelLoginButton').addEventListener('click', async () => {
-      await window.tokenMonitor.antigravity.cancelLogin();
-      state.antigravitySignInBusy = false;
-      renderAntigravityStatus();
-    });
-  }
-
-  const mimoToggle = document.getElementById('mimoSettingsToggle');
-  if (mimoToggle) {
-    mimoToggle.addEventListener('click', () => {
-      const expanding = !state.mimoAccountExpanded;
-      setMimoAccountExpanded(expanding);
-      if (expanding) void refreshMimoAccounts();
-    });
-
-    const addToggle = document.getElementById('mimoAddToggle');
-    const addDetails = document.getElementById('mimoAddDetails');
-    function setMimoAddExpanded(expanded) {
-      const next = Boolean(expanded);
-      addToggle?.setAttribute('aria-expanded', next ? 'true' : 'false');
-      addDetails?.classList.toggle('hidden', !next);
-      document.getElementById('mimoManualPanel')?.classList.toggle('expanded', next);
-    }
-    addToggle?.addEventListener('click', () => setMimoAddExpanded(addDetails?.classList.contains('hidden')));
-    setMimoAccountExpanded(false);
-    renderMimoStatus();
-
-    window.tokenMonitor.mimo.onAccounts((accounts) => {
-      state.settings.mimoManagedAccounts = accounts || [];
-      renderMimoStatus();
-    });
-
-    void refreshMimoAccounts();
-
-    document.getElementById('mimoOpenConsoleButton').addEventListener('click', async () => {
-      const result = await window.tokenMonitor.mimo.openConsole();
-      if (!result?.ok) {
-        state.mimoAccountError = result?.error || t('settings.mimo.openFailed');
-        renderMimoStatus();
-        return;
-      }
-      state.mimoAccountError = '';
-      renderMimoStatus();
-    });
-
-    document.getElementById('mimoSaveAccountButton').addEventListener('click', async () => {
-      const input = document.getElementById('mimoCookieInput');
-      const saveButton = document.getElementById('mimoSaveAccountButton');
-      saveButton.disabled = true;
-      saveButton.textContent = t('settings.mimo.checking');
-      let result;
-      try {
-        result = await window.tokenMonitor.mimo.addAccount(input.value);
-      } catch (_) {
-        result = { ok: false, errorCode: 'validationUnavailable' };
-      } finally {
-        saveButton.disabled = false;
-        saveButton.textContent = t('settings.mimo.saveAccount');
-      }
-      if (!result?.ok) {
-        if (result?.errorCode === 'missingRequiredCookies') {
-          state.mimoAccountError = t('settings.mimo.missingCookies', { cookies: (result.missingCookies || []).join(', ') });
-        } else if (result?.errorCode === 'invalidCookie') {
-          state.mimoAccountError = t('settings.mimo.invalidCookie');
-        } else if (result?.errorCode === 'validationRateLimited') {
-          state.mimoAccountError = t('settings.mimo.validationRateLimited');
-        } else if (result?.errorCode === 'validationUnavailable') {
-          state.mimoAccountError = t('settings.mimo.validationUnavailable');
-        } else if (result?.errorCode === 'credentialStorageUnavailable') {
-          state.mimoAccountError = t('settings.mimo.credentialStorageUnavailable');
-        } else {
-          state.mimoAccountError = result?.error || t('settings.mimo.addFailed');
-        }
-        renderMimoStatus();
-        return;
-      }
-      input.value = '';
-      state.mimoAccountError = '';
-      state.settings.mimoManagedAccounts = await window.tokenMonitor.mimo.accounts();
-      renderMimoStatus();
-      setMimoAddExpanded(false);
-      await refreshStats({ force: true });
-    });
-  }
-  const copilotToggle = document.getElementById('copilotSettingsToggle');
-  if (copilotToggle) {
-    copilotToggle.addEventListener('click', () => setCopilotAccountExpanded(!state.copilotAccountExpanded));
-    document.getElementById('copilotManualToggle')?.addEventListener('click', () => {
-      const details = document.getElementById('copilotManualDetails');
-      setCopilotManualExpanded(details?.classList.contains('hidden'));
-    });
-    setCopilotAccountExpanded(false);
-    setCopilotManualExpanded(false);
-    renderCopilotStatus();
-
-    const setCopilotError = (message) => {
-      state.copilotErrorMessage = message || '';
-      renderCopilotStatus();
-    };
-
-    window.tokenMonitor.copilot?.onLoginStatus?.((status) => {
-      if (!status) return;
-      if (!isCurrentCopilotSignInFlow(status.flowId)) return;
-      if (status.phase === 'authorize') {
-        state.copilotAuthorizeMessage = t('settings.copilot.authorize', { code: status.userCode || '' });
-        state.copilotLoginStatus = state.copilotAuthorizeMessage;
-      } else if (status.phase === 'polling') {
-        state.copilotLoginStatus = [state.copilotAuthorizeMessage, t('settings.copilot.polling')].filter(Boolean).join('\n\n');
-      } else if (status.phase === 'success') {
-        state.copilotSignInCancelable = false;
-        state.copilotAuthorizeMessage = '';
-        state.copilotLoginStatus = t('settings.copilot.loginSuccess');
-      } else if (status.phase === 'error') {
-        state.copilotSignInCancelable = false;
-        state.copilotAuthorizeMessage = '';
-        state.copilotLoginStatus = '';
-        setCopilotError(status.error || t('settings.copilot.loginFailed'));
-      } else {
-        state.copilotAuthorizeMessage = '';
-        state.copilotLoginStatus = t('settings.copilot.loginStarting');
-      }
-      renderCopilotStatus();
-    });
-
-    document.getElementById('copilotSignInButton').addEventListener('click', async () => {
-      if (state.copilotSignInBusy) return;
-      const flowId = nextCopilotSignInFlowId();
-      state.copilotSignInFlowId = flowId;
-      state.copilotSignInBusy = true;
-      state.copilotSignInCancelable = true;
-      state.copilotAuthorizeMessage = '';
-      state.copilotLoginStatus = t('settings.copilot.loginStarting');
-      setCopilotError('');
-      setCopilotManualExpanded(false);
-      renderCopilotStatus();
-      try {
-        const result = await window.tokenMonitor.copilot.signIn({ flowId });
-        if (!isCurrentCopilotSignInFlow(result?.flowId || flowId)) return;
-        if (!result?.ok) {
-          setCopilotError(result?.error || t('settings.copilot.loginFailed'));
-          setCopilotAccountExpanded(true);
-        } else {
-          state.copilotSignInCancelable = false;
-          markCopilotTokenCheckPending();
-          state.copilotAuthorizeMessage = '';
-          state.copilotLoginStatus = '';
-          renderCopilotStatus();
-          await refreshStats({ force: true });
-          if (copilotAccountLinked()) setCopilotAccountExpanded(false);
-        }
-      } catch (err) {
-        if (!isCurrentCopilotSignInFlow(flowId)) return;
-        setCopilotError(err.message);
-      } finally {
-        if (isCurrentCopilotSignInFlow(flowId)) {
-          state.copilotSignInBusy = false;
-          state.copilotSignInCancelable = false;
-          state.copilotSignInFlowId = '';
-          state.copilotAuthorizeMessage = '';
-          state.copilotLoginStatus = '';
-          renderCopilotStatus();
-        }
-      }
-    });
-
-    document.getElementById('copilotCancelSignInButton').addEventListener('click', async () => {
-      const flowId = state.copilotSignInFlowId;
-      await window.tokenMonitor.copilot.cancelSignIn({ flowId });
-      if (!isCurrentCopilotSignInFlow(flowId)) return;
-      state.copilotSignInBusy = false;
-      state.copilotSignInCancelable = false;
-      state.copilotSignInFlowId = '';
-      state.copilotAuthorizeMessage = '';
-      state.copilotLoginStatus = '';
-      renderCopilotStatus();
-    });
-
-    document.getElementById('copilotLogoutButton').addEventListener('click', async () => {
-      await saveSettings({ copilotApiToken: '' });
-      clearCopilotPendingCheck();
-      clearCopilotProviderStatus();
-      renderCopilotStatus();
-      await refreshStats({ force: true });
-    });
-
-    document.getElementById('copilotRefreshButton').addEventListener('click', async () => {
-      await refreshStats({ force: true });
-    });
-
-    document.getElementById('copilotApiTokenSubmit').addEventListener('click', async () => {
-      const input = document.getElementById('copilotApiTokenInput');
-      setCopilotError('');
-      if (!String(input.value || '').trim()) {
-        setCopilotManualExpanded(true);
-        setCopilotError(t('settings.copilot.statusNotSet'));
-        return;
-      }
-      try {
-        markCopilotTokenCheckPending();
-        await saveSettings({ copilotApiToken: input.value });
-        input.value = '';
-        renderCopilotStatus();
-        await refreshStats({ force: true });
-        if (copilotAccountLinked()) setCopilotAccountExpanded(false);
-        else setCopilotAccountExpanded(true);
-        renderCopilotStatus();
-      } catch (err) {
-        clearCopilotPendingCheck();
-        setCopilotError(t('settings.copilot.saveFailed', { message: err.message }));
-      }
-    });
-  }
-
+ for (const owner of Object.values(legacyAccountOwners)) owner.setup?.();
 }
 
 function initSettingsAnimationWrappers() {
@@ -20227,9 +18131,7 @@ function initSettingsAnimationWrappers() {
     '.presence-feature-body',
     '#opencodeManualPanel',
     '#cursorManualPanel',
-    '#kimiManualPanel',
-    '.credential-manual-panel',
-    '#volcengineManualPanel'
+    '.credential-manual-panel'
   ].join(', ');
 
   document.querySelectorAll(selectors).forEach(el => {
@@ -20268,8 +18170,53 @@ const displaySettingsPreview = window.TokenMonitorDisplaySettingsPreview.create(
 displaySettings = window.TokenMonitorDisplaySettings.create({
   document, root: document.getElementById('windowSettingsDetails').querySelector('.settings-section-details-inner'),
   scrollPanel: els.settingsPanel, t, platform: () => state.appInfo?.platform, settings: () => state.settings,
-  preview: displaySettingsPreview.show, cancelScroll: cancelSettingsScrollAnchorOnInteraction
+  preview: displaySettingsPreview.show, cancelScroll: cancelSettingsScrollAnchorOnInteraction,
+  stopWindowShortcutRecording
 });
+let legacyAccountOwners;
+function createLegacyAccountOwners() {
+ const owners = {};
+ owners.codex = window.TokenMonitorCodexAccountOwner.create({ document, window, providerLabel: LIMIT_PROVIDERS.find(entry => entry.id === 'codex').label, initial: {codexSignInBusy: state.codexSignInBusy, codexLoginStatus: state.codexLoginStatus, codexWorkspaceChoices: state.codexWorkspaceChoices, codexWorkspaceId: state.codexWorkspaceId, codexLoginUrl: state.codexLoginUrl, codexLoginOutput: state.codexLoginOutput, codexAccountError: state.codexAccountError, codexSignInFlowId: state.codexSignInFlowId, codexAccountExpanded: state.codexAccountExpanded}, getSettings: () => state.settings, getAccountContext: () => limitAccountContext('codex'), preserveScroll: preserveSettingsPanelScroll, localProviderStatuses, applySettings: settings => applyPersistedSettings(settings, state.settingsPushRevision), setAccountGroupExpanded: (...args) => setAccountGroupExpanded(...args), accountShellApi, t: (...args) => t(...args), isSettingsSurfaceVisible: (...args) => isSettingsSurfaceVisible(...args), renderSettingsSummaries: (...args) => renderSettingsSummaries(...args), limitProviderPresentationApi, accountIdentityApi, refreshStats: (...args) => refreshStats(...args), copyToClipboard: (...args) => copyToClipboard(...args) });
+ Object.defineProperty(state, 'codexSignInBusy', { configurable: true, get: () => owners.codex.state.codexSignInBusy, set: value => { owners.codex.state.codexSignInBusy = value; } });
+ Object.defineProperty(state, 'codexLoginStatus', { configurable: true, get: () => owners.codex.state.codexLoginStatus, set: value => { owners.codex.state.codexLoginStatus = value; } });
+ Object.defineProperty(state, 'codexWorkspaceChoices', { configurable: true, get: () => owners.codex.state.codexWorkspaceChoices, set: value => { owners.codex.state.codexWorkspaceChoices = value; } });
+ Object.defineProperty(state, 'codexWorkspaceId', { configurable: true, get: () => owners.codex.state.codexWorkspaceId, set: value => { owners.codex.state.codexWorkspaceId = value; } });
+ Object.defineProperty(state, 'codexLoginUrl', { configurable: true, get: () => owners.codex.state.codexLoginUrl, set: value => { owners.codex.state.codexLoginUrl = value; } });
+ Object.defineProperty(state, 'codexLoginOutput', { configurable: true, get: () => owners.codex.state.codexLoginOutput, set: value => { owners.codex.state.codexLoginOutput = value; } });
+ Object.defineProperty(state, 'codexAccountError', { configurable: true, get: () => owners.codex.state.codexAccountError, set: value => { owners.codex.state.codexAccountError = value; } });
+ Object.defineProperty(state, 'codexSignInFlowId', { configurable: true, get: () => owners.codex.state.codexSignInFlowId, set: value => { owners.codex.state.codexSignInFlowId = value; } });
+ Object.defineProperty(state, 'codexAccountExpanded', { configurable: true, get: () => owners.codex.state.codexAccountExpanded, set: value => { owners.codex.state.codexAccountExpanded = value; } });
+ owners.cursor = window.TokenMonitorCursorAccountOwner.create({ document, window, providerLabel: LIMIT_PROVIDERS.find(entry => entry.id === 'cursor').label, initial: {cursorAccount: state.cursorAccount, cursorAccountExpanded: state.cursorAccountExpanded}, getSettings: () => state.settings, getAccountContext: () => limitAccountContext('cursor'), preserveScroll: preserveSettingsPanelScroll, localProviderStatuses, applySettings: settings => applyPersistedSettings(settings, state.settingsPushRevision), setAccountGroupExpanded: (...args) => setAccountGroupExpanded(...args), isSettingsSurfaceVisible: (...args) => isSettingsSurfaceVisible(...args), accountShellApi, t: (...args) => t(...args), accountShellErrors, setCursorStatusText: (...args) => setCursorStatusText(...args), setSettingsSectionExpanded: (...args) => setSettingsSectionExpanded(...args), renderSettingsSummaries: (...args) => renderSettingsSummaries(...args), limitProviderPresentationApi, refreshStats: (...args) => refreshStats(...args), setAccountShellError: (...args) => setAccountShellError(...args), accountProfileSaves });
+ Object.defineProperty(state, 'cursorAccount', { configurable: true, get: () => owners.cursor.state.cursorAccount, set: value => { owners.cursor.state.cursorAccount = value; } });
+ Object.defineProperty(state, 'cursorAccountExpanded', { configurable: true, get: () => owners.cursor.state.cursorAccountExpanded, set: value => { owners.cursor.state.cursorAccountExpanded = value; } });
+ owners.antigravity = window.TokenMonitorAntigravityAccountOwner.create({ document, window, providerLabel: LIMIT_PROVIDERS.find(entry => entry.id === 'antigravity').label, initial: {antigravityAccountError: state.antigravityAccountError, antigravitySignInBusy: state.antigravitySignInBusy, antigravityAccountExpanded: state.antigravityAccountExpanded}, getSettings: () => state.settings, getAccountContext: () => limitAccountContext('antigravity'), preserveScroll: preserveSettingsPanelScroll, localProviderStatuses, applySettings: settings => applyPersistedSettings(settings, state.settingsPushRevision), setAccountGroupExpanded: (...args) => setAccountGroupExpanded(...args), isSettingsSurfaceVisible: (...args) => isSettingsSurfaceVisible(...args), accountShellApi, t: (...args) => t(...args), renderSettingsSummaries: (...args) => renderSettingsSummaries(...args), limitProviderPresentationApi, translatedLimitProviderTag: (...args) => translatedLimitProviderTag(...args), refreshStats: (...args) => refreshStats(...args) });
+ Object.defineProperty(state, 'antigravityAccountError', { configurable: true, get: () => owners.antigravity.state.antigravityAccountError, set: value => { owners.antigravity.state.antigravityAccountError = value; } });
+ Object.defineProperty(state, 'antigravitySignInBusy', { configurable: true, get: () => owners.antigravity.state.antigravitySignInBusy, set: value => { owners.antigravity.state.antigravitySignInBusy = value; } });
+ Object.defineProperty(state, 'antigravityAccountExpanded', { configurable: true, get: () => owners.antigravity.state.antigravityAccountExpanded, set: value => { owners.antigravity.state.antigravityAccountExpanded = value; } });
+ owners.mimo = window.TokenMonitorMimoAccountOwner.create({ document, window, providerLabel: LIMIT_PROVIDERS.find(entry => entry.id === 'mimo').label, initial: {mimoAccountError: state.mimoAccountError, mimoAccountExpanded: state.mimoAccountExpanded}, getSettings: () => state.settings, getAccountContext: () => limitAccountContext('mimo'), preserveScroll: preserveSettingsPanelScroll, localProviderStatuses, applySettings: settings => applyPersistedSettings(settings, state.settingsPushRevision), setAccountGroupExpanded: (...args) => setAccountGroupExpanded(...args), t: (...args) => t(...args), isSettingsSurfaceVisible: (...args) => isSettingsSurfaceVisible(...args), accountShellApi, renderSettingsSummaries: (...args) => renderSettingsSummaries(...args), translatedLimitProviderTag: (...args) => translatedLimitProviderTag(...args), limitProviderPresentationApi, refreshStats: (...args) => refreshStats(...args) });
+ Object.defineProperty(state, 'mimoAccountError', { configurable: true, get: () => owners.mimo.state.mimoAccountError, set: value => { owners.mimo.state.mimoAccountError = value; } });
+ Object.defineProperty(state, 'mimoAccountExpanded', { configurable: true, get: () => owners.mimo.state.mimoAccountExpanded, set: value => { owners.mimo.state.mimoAccountExpanded = value; } });
+ owners.workbuddy = window.TokenMonitorWorkbuddyAccountOwner.create({ document, window, providerLabel: LIMIT_PROVIDERS.find(entry => entry.id === 'workbuddy').label, initial: {workbuddyAccountsRevision: state.workbuddyAccountsRevision, workbuddyMutationBusy: state.workbuddyMutationBusy, workbuddySignInBusy: state.workbuddySignInBusy, workbuddyCancelBusy: state.workbuddyCancelBusy, workbuddyAccountError: state.workbuddyAccountError, workbuddyLoginAttempt: state.workbuddyLoginAttempt, workbuddyPendingLoginResult: state.workbuddyPendingLoginResult, workbuddyLoginStatusKey: state.workbuddyLoginStatusKey, workbuddyAccountExpanded: state.workbuddyAccountExpanded}, getSettings: () => state.settings, getAccountContext: () => limitAccountContext('workbuddy'), preserveScroll: preserveSettingsPanelScroll, localProviderStatuses, applySettings: settings => applyPersistedSettings(settings, state.settingsPushRevision), t: (...args) => t(...args), renderSettingsSummaries: (...args) => renderSettingsSummaries(...args), renderSubscriptionSettings: (...args) => renderSubscriptionSettings(...args), refreshStats: (...args) => refreshStats(...args), accountShellApi, accountIdentityApi, translatedLimitProviderTag: (...args) => translatedLimitProviderTag(...args), limitProviderPresentationApi, setAccountGroupExpanded: (...args) => setAccountGroupExpanded(...args) });
+ Object.defineProperty(state, 'workbuddyAccountsRevision', { configurable: true, get: () => owners.workbuddy.state.workbuddyAccountsRevision, set: value => { owners.workbuddy.state.workbuddyAccountsRevision = value; } });
+ Object.defineProperty(state, 'workbuddyMutationBusy', { configurable: true, get: () => owners.workbuddy.state.workbuddyMutationBusy, set: value => { owners.workbuddy.state.workbuddyMutationBusy = value; } });
+ Object.defineProperty(state, 'workbuddySignInBusy', { configurable: true, get: () => owners.workbuddy.state.workbuddySignInBusy, set: value => { owners.workbuddy.state.workbuddySignInBusy = value; } });
+ Object.defineProperty(state, 'workbuddyCancelBusy', { configurable: true, get: () => owners.workbuddy.state.workbuddyCancelBusy, set: value => { owners.workbuddy.state.workbuddyCancelBusy = value; } });
+ Object.defineProperty(state, 'workbuddyAccountError', { configurable: true, get: () => owners.workbuddy.state.workbuddyAccountError, set: value => { owners.workbuddy.state.workbuddyAccountError = value; } });
+ Object.defineProperty(state, 'workbuddyLoginAttempt', { configurable: true, get: () => owners.workbuddy.state.workbuddyLoginAttempt, set: value => { owners.workbuddy.state.workbuddyLoginAttempt = value; } });
+ Object.defineProperty(state, 'workbuddyPendingLoginResult', { configurable: true, get: () => owners.workbuddy.state.workbuddyPendingLoginResult, set: value => { owners.workbuddy.state.workbuddyPendingLoginResult = value; } });
+ Object.defineProperty(state, 'workbuddyLoginStatusKey', { configurable: true, get: () => owners.workbuddy.state.workbuddyLoginStatusKey, set: value => { owners.workbuddy.state.workbuddyLoginStatusKey = value; } });
+ Object.defineProperty(state, 'workbuddyAccountExpanded', { configurable: true, get: () => owners.workbuddy.state.workbuddyAccountExpanded, set: value => { owners.workbuddy.state.workbuddyAccountExpanded = value; } });
+ owners.claude = window.TokenMonitorClaudeAccountOwner.create({ document, window, strictLocalProviderStatuses, providerLabel: LIMIT_PROVIDERS.find(entry => entry.id === 'claude').label, accountShellApi, initial: {}, getSettings: () => state.settings, getAccountContext: () => limitAccountContext('claude'), preserveScroll: preserveSettingsPanelScroll, localProviderStatuses, applySettings: settings => applyPersistedSettings(settings, state.settingsPushRevision), t: (...args) => t(...args), setAccountPanelMessage: (...args) => setAccountPanelMessage(...args), renderExternalProviderStatus: (...args) => renderExternalProviderStatus(...args), commitAccountCredential: (...args) => commitAccountCredential(...args), refreshStats: (...args) => refreshStats(...args), apiKeyAccountStatusText: (...args) => apiKeyAccountStatusText(...args), limitProviderEnabled: (...args) => limitProviderEnabled(...args), currentLocale: (...args) => currentLocale(...args) });
+
+ owners.opencode = window.TokenMonitorOpencodeAccountOwner.create({ document, window, providerLabel: LIMIT_PROVIDERS.find(entry => entry.id === 'opencode').label, initial: {opencodeProfileCount: state.opencodeProfileCount}, getSettings: () => state.settings, getAccountContext: () => limitAccountContext('opencode'), preserveScroll: preserveSettingsPanelScroll, localProviderStatuses, applySettings: settings => applyPersistedSettings(settings, state.settingsPushRevision), setAccountGroupExpanded: (...args) => setAccountGroupExpanded(...args), isSettingsSurfaceVisible: (...args) => isSettingsSurfaceVisible(...args), renderAccountShellError: (...args) => renderAccountShellError(...args), accountProfileRequests, accountProfileStatuses, t: (...args) => t(...args), renderSettingsSummaries: (...args) => renderSettingsSummaries(...args), setAccountShellError: (...args) => setAccountShellError(...args), accountShellApi, encodeURIComponent: (...args) => encodeURIComponent(...args), accountProfileSaves });
+ Object.defineProperty(state, 'opencodeProfileCount', { configurable: true, get: () => owners.opencode.state.opencodeProfileCount, set: value => { owners.opencode.state.opencodeProfileCount = value; } });
+ owners.minimax = window.TokenMonitorMinimaxAccountOwner.create({ document, window, providerLabel: LIMIT_PROVIDERS.find(entry => entry.id === 'minimax').label, initial: {minimaxAccountExpanded: state.minimaxAccountExpanded}, getSettings: () => state.settings, getAccountContext: () => limitAccountContext('minimax'), preserveScroll: preserveSettingsPanelScroll, localProviderStatuses, applySettings: settings => applyPersistedSettings(settings, state.settingsPushRevision), limitProviderEnabled: (...args) => limitProviderEnabled(...args), limitProviderPresentationApi, accountShellApi, t: (...args) => t(...args), translatedLimitProviderTag: (...args) => translatedLimitProviderTag(...args), apiKeyAccountStatusText: (...args) => apiKeyAccountStatusText(...args), isSettingsSurfaceVisible: (...args) => isSettingsSurfaceVisible(...args), accountProfileRequests, accountProfileSaves, setAccountShellError: (...args) => setAccountShellError(...args), refreshStats: (...args) => refreshStats(...args), renderSettingsSummaries: (...args) => renderSettingsSummaries(...args), setExternalAccountExpanded: (...args) => setExternalAccountExpanded(...args) });
+ Object.defineProperty(state, 'minimaxAccountExpanded', { configurable: true, get: () => owners.minimax.state.minimaxAccountExpanded, set: value => { owners.minimax.state.minimaxAccountExpanded = value; } });
+ owners.thirdparty = window.TokenMonitorThirdpartyAccountOwner.create({ document, window, providerLabel: LIMIT_PROVIDERS.find(entry => entry.id === 'thirdparty').label, initial: {thirdPartyAccountExpanded: state.thirdPartyAccountExpanded}, getSettings: () => state.settings, getAccountContext: () => limitAccountContext('thirdparty'), preserveScroll: preserveSettingsPanelScroll, localProviderStatuses, applySettings: settings => applyPersistedSettings(settings, state.settingsPushRevision), setAccountGroupExpanded: (...args) => setAccountGroupExpanded(...args), t: (...args) => t(...args), limitProviderPresentationApi, optionalFiniteNumber: (...args) => optionalFiniteNumber(...args), formatCompactMoney: (...args) => formatCompactMoney(...args), currentLocale: (...args) => currentLocale(...args), limitProviderEnabled: (...args) => limitProviderEnabled(...args), accountShellApi, renderSettingsSummaries: (...args) => renderSettingsSummaries(...args), setAccountShellError: (...args) => setAccountShellError(...args), isSettingsSurfaceVisible: (...args) => isSettingsSurfaceVisible(...args), renderAccountShellError: (...args) => renderAccountShellError(...args), accountProfileRequests, accountProfileSaves, refreshStats: (...args) => refreshStats(...args) });
+ Object.defineProperty(state, 'thirdPartyAccountExpanded', { configurable: true, get: () => owners.thirdparty.state.thirdPartyAccountExpanded, set: value => { owners.thirdparty.state.thirdPartyAccountExpanded = value; } });
+ return owners;
+}
+legacyAccountOwners = createLegacyAccountOwners();
 setupCursorAccountUI();
 setupCustomPricingUI();
 setupModelAliasesUI();

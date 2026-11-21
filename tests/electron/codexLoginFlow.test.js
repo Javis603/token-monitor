@@ -5,6 +5,13 @@ const fs = require('node:fs');
 const path = require('node:path');
 const test = require('node:test');
 
+function readAccountOwnersAndMain() {
+  const owners = ['codex', 'antigravity', 'mimo', 'cursor', 'opencode', 'thirdparty'];
+  return owners.map(id => fs.readFileSync(path.join(__dirname, '../../src/electron/providers', id, 'accountService.js'), 'utf8')).join('\n')
+    + '\n' + fs.readFileSync(path.join(__dirname, '../../src/electron/main.js'), 'utf8');
+}
+
+
 const electronDir = path.join(__dirname, '..', '..', 'src', 'electron');
 const rendererDir = path.join(electronDir, 'renderer');
 
@@ -25,15 +32,15 @@ test('Codex account login exposes browser, copy, and cancel controls', () => {
 });
 
 test('Codex login IPC owns cancellation per flow and sends an allowlisted URL', () => {
-  const main = read(path.join(electronDir, 'main.js'));
+  const main = readAccountOwnersAndMain();
   const preload = read(path.join(electronDir, 'preload.js'));
   const addHandler = main.slice(
-    main.indexOf("ipcMain.handle('codex:addAccount'"),
-    main.indexOf("ipcMain.handle('codex:cancelLogin'")
+    main.indexOf('async function login('),
+    main.indexOf('function cancelLogin(')
   );
   const cancelHandler = main.slice(
-    main.indexOf("ipcMain.handle('codex:cancelLogin'"),
-    main.indexOf("ipcMain.handle('codex:removeAccount'")
+    main.indexOf('function cancelLogin('),
+    main.indexOf('async function switchSystemAccount(')
   );
 
   assert.match(main, /let codexLoginController = null;/);
@@ -51,7 +58,7 @@ test('Codex login IPC owns cancellation per flow and sends an allowlisted URL', 
   assert.match(addHandler, /signal: controller\.signal/);
   assert.match(addHandler, /onCommit: \(\) => \{[\s\S]*codexLoginCanCancel = false;/);
   assert.match(addHandler, /codexLoginUrlFromOutput\(streamed\)/);
-  assert.match(addHandler, /event\.sender\.send\('codex:loginStatus', \{[\s\S]*flowId/);
+  assert.match(addHandler, /onStatus\(\{[\s\S]*flowId/);
   assert.match(cancelHandler, /controller\?\.abort\(\);/);
   assert.match(cancelHandler, /if \(!codexLoginCanCancel\) return \{ ok: false, cancelled: false, tooLate: true \};/);
   assert.doesNotMatch(cancelHandler, /codexLoginController = null/);
@@ -61,7 +68,7 @@ test('Codex login IPC owns cancellation per flow and sends an allowlisted URL', 
 });
 
 test('Codex account persistence remains cancellable until settings commit', () => {
-  const main = read(path.join(electronDir, 'main.js'));
+  const main = readAccountOwnersAndMain();
   const addAccount = main.slice(
     main.indexOf('async function addCodexManagedAccount'),
     main.indexOf('async function removeCodexManagedAccount')
@@ -74,7 +81,7 @@ test('Codex account persistence remains cancellable until settings commit', () =
   assert.match(addAccount, /options\.onCommit\?\.\(\);/);
   assert.match(addAccount, /commitCodexManagedAccount\([\s\S]*\{ restart: false \}\)/);
   assert.match(addAccount, /await removeManagedHomeIfSafe\(backupHomePath\);[\s\S]*accountCommitted = true;/);
-  assert.match(addAccount, /catch \(error\) \{[\s\S]*settings\.codexManagedAccounts = previousAccounts;[\s\S]*rollbackCodexManagedHome/);
+  assert.match(addAccount, /catch \(error\) \{[\s\S]*setCodexManagedAccounts\(previousAccounts\);[\s\S]*rollbackCodexManagedHome/);
   assert.match(addAccount, /accountCommitted = true;[\s\S]*if \(!accountCommitted\) await removeManagedHomeIfSafe\(tempHome\)/);
   assert.ok(
     addAccount.lastIndexOf('options.signal?.aborted') < addAccount.indexOf('commitCodexManagedAccount'),
@@ -83,7 +90,7 @@ test('Codex account persistence remains cancellable until settings commit', () =
 });
 
 test('Codex managed home paths reject traversal outside the managed root', () => {
-  const main = read(path.join(electronDir, 'main.js'));
+  const main = readAccountOwnersAndMain();
   const helper = main.slice(
     main.indexOf('function codexManagedHomePath'),
     main.indexOf('function findExistingCodexAccount')
@@ -101,20 +108,20 @@ test('Codex managed home paths reject traversal outside the managed root', () =>
 });
 
 test('Codex managed login stores workspace metadata without rewriting CLI auth before account commit', () => {
-  const main = read(path.join(electronDir, 'main.js'));
+  const main = readAccountOwnersAndMain();
   const preload = read(path.join(electronDir, 'preload.js'));
   const html = read(path.join(rendererDir, 'index.html'));
-  const app = read(path.join(rendererDir, 'app.js'));
+  const app = read(path.join(rendererDir, 'limits/providerOwners/codex.js'));
   const resolver = main.slice(
     main.indexOf('async function resolveCodexWorkspaceAfterLogin'),
-    main.indexOf('// Best practice: each account gets its own OAuth grant')
+    main.indexOf('async function addCodexManagedAccount')
   );
   const addAccount = main.slice(
     main.indexOf('async function addCodexManagedAccount'),
     main.indexOf('async function removeCodexManagedAccount')
   );
 
-  assert.match(resolver, /listCodexWorkspaces\(auth/);
+  assert.match(resolver, /listWorkspaces\(auth/);
   assert.match(resolver, /options\.selectWorkspace/);
   assert.match(resolver, /workspaceAccountId = normalizeWorkspaceId\(selected\.id\)/);
   assert.match(resolver, /accountKey: codexAccountKey\(initialIdentity\.email, workspaceAccountId\)/);
@@ -135,7 +142,7 @@ test('Codex managed login stores workspace metadata without rewriting CLI auth b
 });
 
 test('Codex startup hydrates missing managed workspace labels without blocking startup', () => {
-  const main = read(path.join(electronDir, 'main.js'));
+  const main = readAccountOwnersAndMain();
   const hydration = main.slice(
     main.indexOf('function hydrateCodexManagedWorkspaceLabels'),
     main.indexOf('function codexAccountsForRenderer')
@@ -145,15 +152,15 @@ test('Codex startup hydrates missing managed workspace labels without blocking s
     main.indexOf("ipcMain.handle('settings:get'")
   );
 
-  assert.match(hydration, /settings\?\.limitsEnabled === false/);
-  assert.match(hydration, /parseLimitProviders\(settings\?\.limitProviders\)\.includes\('codex'\)/);
+  assert.match(hydration, /!isEnabled\(\)/);
+  assert.match(main, /isEnabled: \(\) => settings\?\.limitsEnabled !== false/);
   assert.match(hydration, /account\.enabled !== false/);
   assert.match(hydration, /!account\.workspaceLabel/);
   assert.match(hydration, /!account\.workspaceKind/);
   assert.doesNotMatch(hydration, /workspaceLabel === 'Personal'|legacyPersonalLabel/);
   assert.match(hydration, /CODEX_WORKSPACE_LABEL_HYDRATION_CONCURRENCY/);
   assert.match(hydration, /mapWithConcurrency/);
-  assert.match(hydration, /listCodexWorkspaces\(auth, electronProviderDeps\(\{ env: process\.env \}\)\)/);
+  assert.match(hydration, /listWorkspaces\(auth, electronProviderDeps\(\{ env: env \}\)\)/);
   assert.match(hydration, /workspaceAccountId !== resolved\.workspaceAccountId/);
   assert.match(hydration, /account\.enabled === false/);
   assert.match(hydration, /workspaceLabel: resolved\.label/);
@@ -164,10 +171,10 @@ test('Codex startup hydrates missing managed workspace labels without blocking s
 });
 
 test('Codex login renderer ignores stale flows and exposes explicit URL actions', () => {
-  const app = read(path.join(rendererDir, 'app.js'));
+  const app = read(path.join(rendererDir, 'limits/providerOwners/codex.js'));
   const setup = app.slice(
-    app.indexOf('function setupCursorAccountUI()'),
-    app.indexOf('\nsetupCursorAccountUI();')
+    app.indexOf('async function startCodexLogin()'),
+    app.length
   );
 
   assert.match(setup, /const flowId = nextCodexSignInFlowId\(\);/);

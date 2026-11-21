@@ -30,7 +30,7 @@
 
 ## 什麼是 Token Monitor？
 
-一款桌面應用程式，即時顯示 Claude Code、Codex、Cursor、GitHub Copilot、Cherry Studio 等 54+ 種 AI 編程工具的 Token 用量與 AI 工具額度，具備即時多裝置同步與歷史使用趨勢功能，並支援依工具、裝置、模型、session 或專案分項顯示。它會出現在你目光所及之處：主視窗、MacBook 瀏海、選單列或系統匣、螢幕邊緣、懸浮小窗，以及原生 macOS 小工具。
+一款桌面應用程式，即時顯示 Claude Code、Codex、Cursor、GitHub Copilot、Cherry Studio 等 56+ 種 AI 編程工具的 Token 用量與 AI 工具額度，具備即時多裝置同步與歷史使用趨勢功能，並支援依工具、裝置、模型、session 或專案分項顯示。它會出現在你目光所及之處：主視窗、MacBook 瀏海、選單列或系統匣、螢幕邊緣、懸浮小窗，以及原生 macOS 小工具。
 
 ## 支援的工具
 
@@ -79,6 +79,8 @@
     <img src=".github/assets/tools-icon/mistral.png" width="40" alt="Mistral Vibe" title="Mistral Vibe" />
     <img src=".github/assets/tools-icon/prime-agent.png" width="40" alt="Prime Agent" title="Prime Agent" />
     <img src=".github/assets/tools-icon/jcode.png" width="40" alt="Jcode" title="Jcode" />
+    <img src=".github/assets/tools-icon/junie.png" width="40" alt="Junie" title="Junie" />
+    <img src=".github/assets/tools-icon/opencodereview.png" width="40" alt="OpenCodeReview" title="OpenCodeReview" />
     <img src=".github/assets/tools-icon/typesafe.png" width="40" alt="TypeSafe" title="TypeSafe" />
     <img src=".github/assets/tools-icon/openrouter.png" width="40" alt="OpenRouter" title="OpenRouter" />
     <img src=".github/assets/tools-icon/volcengine.png" width="40" alt="Volcengine" title="Volcengine" />
@@ -160,7 +162,7 @@ brew install --cask token-monitor
 
 ### 用量追蹤
 
-- **即時 Token 追蹤**：Claude Code、Codex、Cursor、GitHub Copilot、Antigravity、OpenCode 等 42+ 種 AI 工具，每輪對話後 UI 在數秒內更新（完整清單見上方表格）
+- **即時 Token 追蹤**：Claude Code、Codex、Cursor、GitHub Copilot、Antigravity、OpenCode 等 44+ 種 AI 工具，每輪對話後 UI 在數秒內更新（完整清單見上方表格）
 - **即時 Token 速率**：可選顯示的即時讀數，以 `tok/s` 顯示生成速度或以 `tok/min` 顯示總消耗
 - **單一 session 明細**：點進某個 session，可看每則提問的 Token 消耗，並展開查看每次回覆的 Token 拆分與用到的工具（開啟時才即時讀取本機 transcript 或資料庫，絕不同步）
 - **快取命中統計**：點擊任何工具或模型，展開查看輸入 Token（快取命中與未命中）、輸出 Token 的詳細分類及命中率百分比
@@ -245,7 +247,7 @@ Token Monitor 對 Token 用量、帳戶額度與 session 明細分別支援：
 | <img src=".github/assets/tools-icon/workbuddy.png" width="28" alt="WorkBuddy" /> | WorkBuddy | `~/.workbuddy/projects/`、`~/.workbuddy/workbuddy.db` | ✅ | ✅ | ✅ |
 | <img src=".github/assets/tools-icon/proma.png" width="28" alt="Proma" /> | Proma | `~/.proma/` (`agent-sessions/`, `sdk-config/sessions/`, `sdk-config/projects/`), `~/.proma-dev/` | ✅ | — | — |
 | <img src=".github/assets/tools-icon/catpaw.png" width="28" alt="CatPaw" /> | CatPaw | `<platform-app-data>/` (`catpaw-moon/`, `catpaw-overseas/`, `catpaw-memory-*.db`) | ✅ | — | — |
-| <img src=".github/assets/tools-icon/qoder.png" width="28" alt="Qoder" /> | Qoder | `~/.qoder-cn/projects/**/*.jsonl`, legacy `<platform-app-data>/QoderCN/SharedClientCache/cache/db/local.db`（僅限中國版） | ✅ | ✅ | — |
+| <img src=".github/assets/tools-icon/qoder.png" width="28" alt="Qoder" /> | Qoder | `~/.qoder/projects/**/*.jsonl` (global), `~/.qoder-cn/projects/**/*.jsonl` (CN) | ✅ | ✅ | — |
 | <img src=".github/assets/tools-icon/reasonix.png" width="28" alt="Reasonix" /> | Reasonix | `~/.reasonix/`（`stats/`、`sessions/`、`projects/*/sessions/`） | ✅ | — | — |
 | <img src=".github/assets/tools-icon/deepseek.png" width="28" alt="DeepSeek" /> | DeepSeek / DeepSeek Harness | `~/.dsh/sessions/`（`session.jsonl`、`session.jsonl.zstd`） | ✅ | ✅ | ✅ |
 | <img src=".github/assets/tools-icon/cherrystudio.png" width="28" alt="Cherry Studio" /> | Cherry Studio | `<platform-app-data>/CherryStudio/`（`Data/Agents/.claude/projects/` V2、`.claude/projects/` legacy） | ✅ | — | — |
@@ -257,6 +259,8 @@ Token Monitor 對 Token 用量、帳戶額度與 session 明細分別支援：
 | <img src=".github/assets/tools-icon/mistral.png" width="28" alt="Mistral" /> | Mistral Vibe | `$VIBE_HOME/logs/session/` (`~/.vibe/logs/session/`); Mistral Admin Cookie（Included API／Vibe 每月額度與點數餘額） | ✅ | ✅ | — |
 | <img src=".github/assets/tools-icon/prime-agent.png" width="28" alt="Prime Agent" /> | Prime Agent | `~/.prime/agent/` (`sessions/`, `session-artifacts/`) | ✅ | — | — |
 | <img src=".github/assets/tools-icon/jcode.png" width="28" alt="Jcode" /> | Jcode | `~/.jcode/sessions/` | ✅ | — | — |
+| <img src=".github/assets/tools-icon/junie.png" width="28" alt="Junie" /> | Junie | `~/.junie/sessions/**/events.jsonl` | ✅ | — | — |
+| <img src=".github/assets/tools-icon/opencodereview.png" width="28" alt="OpenCodeReview" /> | OpenCodeReview | `~/.opencodereview/sessions/**/*.jsonl` | ✅ | — | — |
 | <img src=".github/assets/tools-icon/typesafe.png" width="28" alt="TypeSafe" /> | TypeSafe | TypeSafe Console Cookie（帳單餘額及根據 token 用量估算花費） | — | ✅ | — |
 | <img src=".github/assets/tools-icon/openrouter.png" width="28" alt="OpenRouter" /> | OpenRouter | OpenRouter API 金鑰（查詢用量／金鑰上限；獲授權存取 credits 時顯示餘額，官方文件指定 Management 金鑰） | — | ✅ | — |
 | <img src=".github/assets/tools-icon/volcengine.png" width="28" alt="Volcengine" /> | Volcengine | Ark API key 或火山引擎 AK/SK（透過火山引擎 API 查詢火山方舟 Coding Plan / Agent Plan 額度） | — | ✅ | — |
@@ -294,11 +298,7 @@ Token Monitor 對 Token 用量、帳戶額度與 session 明細分別支援：
 
 - Custom 會從一個 GET 餘額端點映射數值 JSON 欄位；僅相容 OpenAI 或 Anthropic API 並不足夠。
 
-#### Qoder CN（本機介接）
-
-Qoder CN 的 Token 用量來自應用程式本機資料，而非 API —— 在 Settings → tools 中啟用（選用，預設關閉）。目前版本使用 Qoder 設定目錄內的 `projects` JSONL 記錄（通常為 `~/.qoder-cn/projects`），舊版本則使用 SQLite；Token Monitor 內建的 tokscale 會同時讀取兩者。JSONL 路徑依序使用 `TOKEN_MONITOR_QODER_CN_PROJECTS_PATH`、`QODERCN_CONFIG_DIR/projects`、預設路徑；舊資料庫可用 `TOKEN_MONITOR_QODER_CN_DB_PATH` 覆寫。詳見 [Qoder 資料來源說明](docs/providers/qodercn.md)。
-
-這是進階本機整合，但兩種格式都不需要額外執行環境。無法讀取的來源會保留上一次完整讀取的資料。舊資料庫的 session 只記錄專案名稱而非路徑，因此不會顯示所屬專案。只統計有實際 Token 欄位的 JSONL 記錄；目前第一方方案模型可能只有 credits 與 context 使用比例，欠缺可靠的每 session context window，因此不會猜測 Token。Credits 仍會顯示於 AI Tool Limits，含實際 Token 的 BYOK／自訂模型會正常統計。
+- Qoder：在「設定 → 工具」的 Qoder 群組中可分別追蹤國際版與 CN。全新安裝預設追蹤兩者，既有選擇保持不變。工具用量預設合併顯示，開啟「分開顯示版本」後會分成兩行。國際版讀取 `QODER_CONFIG_DIR/projects`（預設 `~/.qoder/projects`）；CN 依序讀取 `TOKEN_MONITOR_QODER_CN_PROJECTS_PATH`、`QODERCN_CONFIG_DIR/projects`（預設 `~/.qoder-cn/projects`）。只統計 transcript 中實際記錄的 Token：託管模型只記錄 credits、沒有 Token 的記錄不會計入，這些 credits 仍可在 AI 工具額度中查看。有回報指出 Qoder CN CLI 1.1.62 設定 `QODERCN_EXPOSE_TOKEN_USAGE=1` 後會記錄之後的 Token；既有記錄不會補回。`dfmodel` 等動態模型代號會照原樣顯示。只把用量存在 SQLite 的舊版 Qoder CN 不再採集，Token Monitor 既有的歷史檔案會保留。詳見 [Qoder 資料來源說明](docs/providers/qodercn.md)。
 </details>
 
 ### 其他功能支援
@@ -307,7 +307,7 @@ Qoder CN 的 Token 用量來自應用程式本機資料，而非 API —— 在 
 |---------|-------------------------|------------|
 | 會話標題 | Claude Code, Codex, OpenCode, Cursor, Antigravity, Cline CLI, Factory Droid, Kimi CLI, Grok Build, Pi, Oh My Pi, OmO Native, MiMo, ZCode, CodeBuddy, WorkBuddy, Reasonix, DeepSeek Harness, Cherry Studio, Devin CLI, fx, MiniMax Code | — |
 | 每次提示／回覆的用量與工具呼叫 | Claude Code, Codex, OpenCode, Pi, Oh My Pi, OmO Native, CodeBuddy, WorkBuddy, Reasonix, DeepSeek Harness | 明細只在本機讀取，不會同步。 |
-| 上下文用量／剩餘空間 | Claude Code, Codex, DeepSeek Harness | Claude Code 的上下文上限依模型估算。 |
+| 上下文用量／剩餘空間 | Claude Code, Codex, DeepSeek Harness, Grok Build, WorkBuddy, CatPaw | Claude Code 的上下文上限依模型估算。 |
 | 快取用量／會話快取命中率 | 提供快取欄位的來源，例如 Claude Code, Codex, OpenCode, Cursor, Kimi, Pi, Oh My Pi, OmO Native, DeepSeek Harness | 有快取用量資料時才顯示命中率。 |
 | 快取剩餘時間估算 | Claude Code | 依紀錄中的快取層級估算為 5 分鐘或 1 小時。 |
 | 輸出速度／Token 消耗速率 | Claude Code, Codex, OpenCode, Antigravity, Kimi, GitHub Copilot, Pi, Oh My Pi, OmO Native, Kilo CLI, MiMo Code/MiMo Desktop, Muse Code, ZCode CLI, Kiro, DeepSeek Harness, Devin CLI | `tok/s` 為輸出速度，`tok/min` 為總 Token 消耗速率；計時可能包含等待。 |
@@ -485,7 +485,7 @@ Token Monitor 會在本機處理使用紀錄，不會向專案維護者傳送分
 
 ## 參與貢獻
 
-歡迎提交 Issue 和 PR。專案規範、架構說明和指令參考都在 [AGENTS.md](AGENTS.md) 中——它是為編碼代理撰寫的，但同樣可以作為貢獻者指南。
+歡迎提交 Issue 和 PR。請先閱讀 [CONTRIBUTING.md](CONTRIBUTING.md)；專案規範、架構說明和指令參考都在 [AGENTS.md](AGENTS.md) 中。
 
 ## 致謝
 

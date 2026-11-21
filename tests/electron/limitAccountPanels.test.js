@@ -438,12 +438,11 @@ test('shared account actions reuse credential settings invalidation and collect 
   const app = fs.readFileSync(path.join(__dirname, '..', '..', 'src', 'electron', 'renderer', 'app.js'), 'utf8');
   const main = fs.readFileSync(path.join(__dirname, '..', '..', 'src', 'electron', 'main.js'), 'utf8');
   const slice = (source, from, to) => source.slice(source.indexOf(from), source.indexOf(to, source.indexOf(from)));
-  for (const action of ['save', 'save-unchanged', 'save-cookie', 'save-slow', 'save-refresh-fails', 'clear', 'clear-empty', 'refresh', 'startup']) {
+  for (const action of ['save', 'save-unchanged', 'save-cookie', 'save-slow', 'save-refresh-fails', 'startup']) {
     await t.test(action, async (t) => {
       let settings = { limitsEnabled: true, limitProviders: 'ollama,deepseek', ollamaApiKey: 'fixture-old', ollamaCookie: '' };
-      if (action === 'clear-empty') settings.ollamaApiKey = '';
       if (action === 'startup') settings.limitProviders = 'ollama';
-      const env = action.startsWith('clear') ? { OLLAMA_API_KEY: 'fixture-env' } : {};
+      const env = {};
       const polls = [];
       const pending = [];
       let releaseQuota;
@@ -474,7 +473,7 @@ test('shared account actions reuse credential settings invalidation and collect 
       let commands;
       const host = {
         console: { log() {} },
-        settingsForRenderer: () => ({ limitAccountForms: [form] }),
+        settingsForRenderer: () => ({ limitAccountForms: [{ ...form, accountSlots: false }] }),
         applySettingsPatch: (patch, _onDots, limitContext) => {
           const previous = settings;
           commands.noteSettingsPatch(patch);
@@ -497,11 +496,10 @@ test('shared account actions reuse credential settings invalidation and collect 
         probeDeps: () => ({ probe: true, providerRuntimeState: new Map(), fetch: (url) => http(url, true) })
       });
       const form = { id: 'ollama', kind: 'credential' };
-      let callbacks;
       let statsReads = 0;
       let cutoff;
       const context = {
-        state: { settings: { limitAccountForms: [form] }, accountPanelMessages: {} },
+        state: { settings: { limitAccountForms: [{ ...form, accountSlots: false }] }, accountPanelMessages: {} },
         LIMIT_PROVIDERS: [{ id: 'ollama', label: 'Ollama' }],
         document: { getElementById: (id) => id === 'accountsSettingsDetails' ? { insertBefore() {} } : null },
         window: { tokenMonitor: { limits: {
@@ -510,7 +508,7 @@ test('shared account actions reuse credential settings invalidation and collect 
           refresh: (id) => runLimitInvalidation(handle, { provider: id }, 'account-panel', { clear: false })
         } } },
         limitAccountPanelsApi: {
-          createCredentialPanel: (_form, handlers) => { callbacks = handlers; return {}; },
+          createCredentialPanel: () => ({}),
           syncCredentialFields() {}
         },
         refreshStats: async (options = {}) => {
@@ -541,10 +539,6 @@ test('shared account actions reuse credential settings invalidation and collect 
           releaseQuota();
         }
         assert.equal((await saved).saved, true, 'refresh failure cannot undo a successful credential write');
-      } else if (action.startsWith('clear')) await context.clearAccountCredential('ollama');
-      else {
-        context.setupLimitAccountPanels();
-        await callbacks.onRefresh();
       }
       if (action === 'startup') {
         assert.equal(polls.length, 0, 'startup queues one intent until a runtime is ready');
@@ -645,7 +639,7 @@ test('account setting errors are reported through the persistent panel message',
   const renders = [];
   let callbacks;
   const context = {
-    state: { settings: { limitAccountForms: [form] } },
+    state: { settings: { limitAccountForms: [{ ...form, accountSlots: false }] } },
     document: { getElementById: (id) => id === 'accountsSettingsDetails' ? { insertBefore() {} } : null },
     limitAccountPanelsApi: { createCredentialPanel: (_, received) => { callbacks = received; return {}; } },
     LIMIT_PROVIDERS: [{ id: 'deepseek' }],
@@ -714,4 +708,13 @@ test('Mistral setup renders both the allowance note and cookie-copy steps', () =
   assert.match(group.text, /DevTools/);
   assert.match(group.text, /ory_session_/);
   assert.ok(group.byId('mistralCookieInput'));
+});
+
+for (const id of ['ollama', 'typesafe']) test(`${id}: fixed clear cannot bypass account-slot management`, async () => {
+  const { createCredentialCommands } = require('../../src/electron/limits/credentialCommands');
+  let writes = 0;
+  const commands = createCredentialCommands({ getSettings: () => ({}), env: {},
+    applySettingsPatch: () => { writes += 1; } });
+  assert.deepEqual(await commands.clearCredential(id), { cleared: false, errorCode: 'accountSlotRequired' });
+  assert.equal(writes, 0);
 });

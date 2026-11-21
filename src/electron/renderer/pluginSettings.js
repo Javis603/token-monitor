@@ -7,10 +7,11 @@
 // through the trusted host; this is not a same-renderer security boundary.
 (function exposePluginSettings(root, factory) {
   const positionApi = typeof module === 'object' && module.exports ? require('./selectControl') : root?.TokenMonitorSelectControl;
-  const api = factory(positionApi);
+  const actionMenuApi = typeof module === 'object' && module.exports ? require('./actionMenu') : root?.TokenMonitorActionMenu;
+  const api = factory(positionApi, actionMenuApi);
   if (typeof module === 'object' && module.exports) module.exports = api;
   if (root) root.TokenMonitorPluginSettings = api;
-})(typeof window !== 'undefined' ? window : null, function createPluginSettingsApi(positionApi) {
+})(typeof window !== 'undefined' ? window : null, function createPluginSettingsApi(positionApi, actionMenuApi) {
   const isFeatured = origin => origin?.kind === 'official' || origin?.kind === 'maintainer';
   const SURFACE_ORDER = ['home', 'page', 'tray', 'edgeDock', 'notch'];
   const SURFACE_LABEL_KEYS = { home: 'views.home', page: 'plugins.initial.purpose.page', tray: 'settings.plugins.surface.tray',
@@ -134,6 +135,8 @@
     let actionError = null;
     const sourceDraft = { url: '', publicKey: '' };
     const chosenVersions = new Map();
+    const updatedVersions = new Map();
+    const updatingPlugins = new Set();
     const detailState = new Map();
     const authorSettings = new Map();
     const settingsIdentities = new Map(), settingsMounts = new Map();
@@ -278,42 +281,13 @@
     }
 
     function actionMenu(label, entries, leadingControl = null) {
-      const wrap = el(document, 'div', 'plugin-menu-wrap');
-      const popover = el(document, 'div', 'plugin-menu'); popover.id = `plugin-menu-${++menuId}`; popover.setAttribute('popover', 'auto');
-      const trigger = button('', () => {}, 'plugin-more'); trigger.setAttribute('aria-label', label);
-      const icon = el(document, 'span', 'plugin-more-icon'); icon.setAttribute('aria-hidden', 'true'); trigger.append(icon);
-      trigger.setAttribute('popovertarget', popover.id); trigger.setAttribute('aria-controls', popover.id); trigger.setAttribute('aria-expanded', 'false');
-      let keyboardOpen = false, focusLast = false;
-      const menuItems = () => [...popover.querySelectorAll('button:not(:disabled), input:not(:disabled)')];
-      trigger.addEventListener('click', event => { keyboardOpen = event.detail === 0; focusLast = false; });
-      trigger.addEventListener('keydown', event => {
-        if (event.key !== 'ArrowDown' && event.key !== 'ArrowUp') return;
-        event.preventDefault(); keyboardOpen = true; focusLast = event.key === 'ArrowUp';
-        if (popover.matches(':popover-open')) (focusLast ? menuItems().at(-1) : menuItems()[0])?.focus({ preventScroll: true });
-        else popover.showPopover();
-      });
-      popover.addEventListener('toggle', () => {
-        trigger.setAttribute('aria-expanded', String(popover.matches(':popover-open')));
-        if (popover.matches(':popover-open')) {
-          const rect = trigger.getBoundingClientRect();
-          const position = positionApi.popupPosition(rect, { width: window.innerWidth, height: window.innerHeight }, {
-            width: popover.offsetWidth, height: popover.scrollHeight + 2, align: 'end', heightLimit: window.innerHeight
-          });
-          Object.assign(popover.style, { left: `${position.left}px`, top: `${position.top}px`, width: `${position.width}px`, maxHeight: `${position.maxHeight}px` });
-          if (keyboardOpen) (focusLast ? menuItems().at(-1) : menuItems()[0])?.focus({ preventScroll: true });
-        }
-      });
-      popover.addEventListener('keydown', (event) => {
-        const direction = { ArrowDown: 1, ArrowUp: -1, Home: 'first', End: 'last' }[event.key];
-        if (direction === undefined) return;
-        event.preventDefault();
-        const items = menuItems();
-        const next = positionApi.navigate(items, items.indexOf(document.activeElement), direction);
-        items[next]?.focus();
-      });
-      if (leadingControl) popover.append(leadingControl);
-      for (const [text, action] of entries) popover.append(button(text, () => { popover.hidePopover(); trigger.focus({ preventScroll: true }); action(); }));
-      wrap.append(trigger, popover); return wrap;
+      const menu = actionMenuApi.create(document, label, button);
+      if (leadingControl) {
+        menu.appendItems(leadingControl);
+        const automatic = autoUpdateControl(); if (automatic) menu.appendItems(automatic);
+      }
+      for (const [text, action] of entries) menu.appendItems(button(text, () => { menu.close(); action(); }));
+      return menu.element;
     }
 
     // Runtime enabled also includes safe mode. The switch edits the saved
@@ -339,6 +313,17 @@
       row.append(toggle); return row;
     }
 
+    function autoUpdateControl(id = null) {
+      if (!catalogData?.autoUpdate || !api.configureUpdates) return null;
+      const row = el(document, 'label', 'checkbox-label plugin-auto-update');
+      const input = el(document, 'input'); input.type = 'checkbox';
+      input.checked = id === null ? catalogData.autoUpdate.enabled : catalogData.autoUpdate.plugins[id] !== false;
+      input.disabled = busy || Boolean(catalogData.autoUpdate.error);
+      input.addEventListener('change', () => void run(async () => { catalogData = await api.configureUpdates(id, input.checked); return null; }));
+      row.append(input, el(document, 'span', '', t(id === null ? 'plugins.catalog.autoUpdate' : 'plugins.catalog.autoUpdatePlugin')));
+      return row;
+    }
+
     async function previewCatalog(entry, version) {
       if (packagePreview) { const token = packagePreview.token; packagePreview = null; await api.cancelInstall(token); }
       packagePreview = await api.catalogPreview(entry.origin.id, entry.id, version);
@@ -347,6 +332,41 @@
     function catalogVersion(entry) {
       const remembered = chosenVersions.get(`${entry.origin.id}/${entry.id}`);
       return entry.versions?.some(version => version.version === remembered && version.installable) ? remembered : entry.version;
+    }
+
+    function updateNotes(entry, version) {
+      const selected = entry.versions?.find(item => item.version === version);
+      const notes = el(document, 'section', 'plugin-update-notes');
+      notes.append(el(document, 'h3', 'plugin-detail-heading', t('plugins.catalog.updateRange', { from: entry.installedVersion, to: version })));
+      for (const change of selected?.updateNotes || []) {
+        const release = el(document, 'div', 'plugin-update-note');
+        release.append(el(document, 'h4', 'plugin-detail-heading', `v${change.version}`), el(document, 'p', 'plugin-description', change.changelog));
+        notes.append(release);
+      }
+      if (!selected?.updateNotes?.length) notes.append(el(document, 'p', 'settings-note', t('plugins.catalog.noUpdateNotes')));
+      return notes;
+    }
+
+    function updatePlugin(entry, version = entry.version, control = null) {
+      if (busy || updatingPlugins.has(entry.id)) return;
+      if (control) control.textContent = t('plugins.catalog.updating');
+      void run(async () => {
+        requireSavedAuthorSettings(entry.id);
+        await previewCatalog(entry, version);
+        if (!isFeatured(entry.origin) || packagePreview.initialSetup?.fields?.length) {
+          catalogReview = entry; sourcesOpen = false; activeTab = 'discover';
+          chosenVersions.set(`${entry.origin.id}/${entry.id}`, version);
+          return null;
+        }
+        const preview = packagePreview;
+        try {
+          const next = await api.install(preview.token, { trustUpdate: true });
+          packagePreview = null; catalogReview = null; updatedVersions.set(entry.id, version);
+          return next;
+        } catch (error) {
+          await api.cancelInstall(preview.token); packagePreview = null; throw error;
+        }
+      }, `plugin:${entry.id}`);
     }
 
     function catalogReviewPanel() {
@@ -379,17 +399,6 @@
           });
         });
         row.append(select); wrap.append(row);
-        const selected = entry.versions.find(v => v.version === version);
-        if (entry.installedVersion && selected?.updateNotes.length) {
-          const notes = el(document, 'section', 'plugin-update-notes plugin-detail-section');
-          notes.append(el(document, 'h3', 'plugin-detail-heading', t('plugins.catalog.updateRange', { from: entry.installedVersion, to: version })));
-          for (const change of selected.updateNotes) {
-            const release = el(document, 'div', 'plugin-update-note');
-            release.append(el(document, 'h4', 'plugin-detail-heading', `v${change.version}`), el(document, 'p', 'plugin-description', change.changelog));
-            notes.append(release);
-          }
-          wrap.append(notes);
-        }
       }
       if (packagePreview) wrap.append(packagePanel());
       else wrap.append(button(t('plugins.ui.previewPackage'), () => void run(async () => { await previewCatalog(entry, version); return null; })));
@@ -515,17 +524,18 @@
       panel.append(identity(p.name, p.author || p.id, t(`plugins.origin.${p.origin.kind}`), p.icon, p.identityIcon, isFeatured(p.origin) ? p.origin.kind : '', p.presentation));
       const meta = el(document, 'div', 'plugin-card-meta');
       meta.append(el(document, 'span', 'plugin-version', `${p.installedVersion ? `${p.installedVersion} → ` : ''}${p.version}`), typeLabels(p)); panel.append(meta);
-      panel.append(el(document, 'p', 'plugin-description', p.description));
-      if (p.origin.kind !== 'local') panel.append(el(document, 'p', 'plugin-description', p.origin.label));
-      if (p.origin.url) panel.append(el(document, 'code', 'plugin-log', p.origin.url));
-      if (p.origin.packageUrl) panel.append(el(document, 'code', 'plugin-log', p.origin.packageUrl));
+      if (p.operation === 'update' && catalogReview) panel.append(updateNotes(catalogReview, p.version));
+      else panel.append(el(document, 'p', 'plugin-description', p.description));
       if (!featured) panel.append(el(document, 'p', 'plugin-risk', t('plugins.trusted.warning')));
       panel.append(el(document, 'p', 'settings-note', t(featured
         ? p.operation === 'update' ? 'plugins.package.officialUpdate' : list.enabled ? 'plugins.package.officialInstall' : 'plugins.package.officialEnableLater'
         : p.operation === 'install' ? (list.enabled ? 'plugins.package.installConsent' : 'plugins.package.enableLater') : 'plugins.package.grants')));
       const setup = initialSetupControls(p); if (setup) panel.append(setup);
-      const details = el(document, 'details', 'plugin-logs'); details.append(el(document, 'summary', '', t('plugins.package.integrity')));
-      details.append(el(document, 'code', 'plugin-log', p.sha256)); panel.append(details);
+      const details = el(document, 'details', 'plugin-logs'); details.append(el(document, 'summary', '', t('plugins.catalog.technicalDetails')));
+      if (p.origin.label) details.append(el(document, 'p', 'settings-note', p.origin.label));
+      if (p.origin.url) details.append(el(document, 'code', 'plugin-log', p.origin.url));
+      if (p.origin.packageUrl) details.append(el(document, 'code', 'plugin-log', p.origin.packageUrl));
+      details.append(el(document, 'p', 'settings-note', t('plugins.package.integrity')), el(document, 'code', 'plugin-log', p.sha256)); panel.append(details);
       const actions = el(document, 'div', 'settings-actions plugin-consent-actions');
       const install = trustInstall => void run(async () => {
         requireSavedAuthorSettings(p.id);
@@ -677,7 +687,8 @@
       if (selected ? selected.installable : ['available', 'update'].includes(entry.status)) {
         footer.append(button(t(entry.installedVersion ? 'plugins.package.update' : 'plugins.package.install'), () => {
           dialog.close();
-          void run(async () => { activeTab = 'discover'; sourcesOpen = false; catalogReview = entry; await previewCatalog(entry, version); return null; });
+          if (entry.installedVersion) updatePlugin(entry, version);
+          else void run(async () => { activeTab = 'discover'; sourcesOpen = false; catalogReview = entry; await previewCatalog(entry, version); return null; });
         }, 'plugin-allow'));
       } else if (entry.status === 'repository') footer.append(el(document, 'span', 'settings-note', t('plugins.catalog.repositoryOnly')));
       else if (entry.status === 'incompatible') footer.append(el(document, 'span', 'plugin-risk', t('plugins.catalog.incompatible')));
@@ -750,7 +761,7 @@
             head.append(title);
             const actions = el(document, 'div', 'settings-actions');
             const available = entry.versions?.find(v => v.version === entry.version)?.installable ?? ['available', 'update'].includes(entry.status);
-            if (available) actions.append(button(t(entry.installedVersion ? 'plugins.package.update' : 'plugins.package.install'), () => void run(async () => { catalogReview = entry; await previewCatalog(entry, catalogVersion(entry)); return null; })));
+            if (available) actions.append(button(t(entry.installedVersion ? 'plugins.package.update' : 'plugins.package.install'), event => { if (entry.installedVersion) updatePlugin(entry, catalogVersion(entry), event.currentTarget); else void run(async () => { catalogReview = entry; await previewCatalog(entry, catalogVersion(entry)); return null; }); }));
             else if (!entry.installedVersion && (entry.versions?.length || entry.status === 'incompatible' || entry.status === 'installed')) {
               const install = button(t('plugins.package.install'), () => {});
               install.disabled = true; actions.append(install);
@@ -959,6 +970,7 @@
     }
 
     function openPlugin(id, placements = false) {
+      if (updatingPlugins.has(id)) return;
       if (!selectedPluginId) installedPosition = rememberPosition();
       selectedPluginId = id; diagnostics = false; render();
       const target = (placements && content.querySelector('.plugin-views')) || content.querySelector('.plugin-back');
@@ -1014,6 +1026,13 @@
         meta.append(el(document, 'span', 'plugin-version', `v${plugin.version}`), typeLabels(plugin)); card.append(meta);
       }
       const footer = el(document, 'div', 'plugin-card-footer');
+      if (plugin.recoveryRequired) {
+        card.append(el(document, 'p', 'plugin-risk', t('plugins.trusted.packageRecoveryNote')));
+        footer.append(button(t('plugins.trusted.reloadNow'), () => void run(() => {
+          for (const id of authorSettings.keys()) requireSavedAuthorSettings(id);
+          return api.recover(plugin.id);
+        }, `plugin:${plugin.id}`), 'plugin-recover plugin-update-action'));
+      }
       const exceptional = !['active', 'disabled'].includes(plugin.status);
 
       const surfaces = SURFACE_ORDER.filter(surface => plugin.views?.some(view => view.placements?.[surface]));
@@ -1040,10 +1059,19 @@
         openPlugin(plugin.id);
       }, 'plugin-manage');
       manage.setAttribute('aria-label', t('plugins.ui.manageNamed', { name: plugin.name }));
+      manage.disabled = busy || updatingPlugins.has(plugin.id);
       if (plugin.status === 'crashed') footer.append(button(t('settings.plugins.restart'), () => void run(() => api.restart(plugin.id)), 'plugin-restart plugin-inline-action'));
       const update = catalogData?.entries.find(entry => entry.id === plugin.id && entry.status === 'update' && entry.origin.id === plugin.installation?.origin.id);
-      if (update) footer.append(button(t('plugins.catalog.updateTo', { version: update.version }), () => catalogDialog(update), 'plugin-update-action'));
+      if (update) {
+        card.append(updateNotes(update, update.version));
+        const action = button(t('plugins.catalog.updateTo', { version: update.version }), event => updatePlugin(update, update.version, event.currentTarget), 'plugin-update-action');
+        action.disabled = busy || updatingPlugins.has(plugin.id); footer.append(action);
+      }
       footer.append(manage); card.append(footer);
+      if (updatedVersions.get(plugin.id) === plugin.version) {
+        const status = el(document, 'p', 'settings-note', t('plugins.catalog.updated', { version: plugin.version }));
+        status.setAttribute('role', 'status'); card.append(status);
+      }
       return card;
     }
 
@@ -1185,6 +1213,7 @@
       const toolbar = el(document, 'div', 'plugin-detail-toolbar');
       const back = button(t('plugins.ui.back'), closePlugin, 'plugin-back');
       toolbar.append(back); wrap.append(toolbar, pluginIdentity(plugin));
+      if (isFeatured(plugin.installation?.origin)) { const control = autoUpdateControl(plugin.id); if (control) wrap.append(control); }
       if (plugin.version) {
         const meta = el(document, 'div', 'plugin-card-meta');
         meta.append(el(document, 'span', 'plugin-version', `v${plugin.version}`), typeLabels(plugin)); wrap.append(meta);
@@ -1538,6 +1567,18 @@
         return list.enabled ? t('settings.summary.plugins', { active, total: list.plugins.length }) : t('settings.summary.off');
       },
       list: () => list,
+      setUpdatingPlugins(ids, updating) {
+        if (updating) { for (const id of ids) updatingPlugins.add(id); render(); return; }
+        // Keep entry points locked until their descriptors reflect the committed
+        // or restored revision, so opening an editor cannot inherit a stale revision.
+        return Promise.all([api.list(), api.catalog?.()]).then(([next, catalog]) => {
+          if (disposed) return;
+          list = next; if (catalog) catalogData = catalog;
+          for (const id of ids) updatingPlugins.delete(id);
+          render();
+        });
+      },
+      blocksUpdate: ids => busy || ids.some(id => selectedPluginId === id || packagePreview?.id === id || authorSettings.get(id)?.editor?.hasUnsavedChanges()),
       // Consent and logs are interaction state: a background push must not
       // close an open consent panel the user is reading.
       isInteracting: () => activeTab === 'style' || Boolean(catalogModal || consentFor || packagePreview || operation || selectedPluginId || aboutOpen) || busy || Boolean(container.querySelector('.plugin-menu:popover-open, .plugin-location-count [role="tooltip"]:popover-open')) || container.contains(document.activeElement)

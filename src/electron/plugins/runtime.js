@@ -16,6 +16,7 @@ const { createPluginPages } = require('./pages');
 const { createManagedPlugins } = require('./managed');
 const { normalizeAppearance } = require('../../shared/plugins/appearance');
 const { createPluginCatalog } = require('./catalog');
+const { createPluginUpdates } = require('./updates');
 const maintainerSources = require('./maintainerSources');
 const officialSources = require('./officialSources');
 const { createPluginManager } = require('./manager');
@@ -204,10 +205,23 @@ function createPluginRuntime({
   try { managed.recover(); }
   catch (error) { log(`[plugins] Plugin management unavailable: ${error.message}`); }
   const catalog = createPluginCatalog({ nativeImage: electron.nativeImage, manager, managed, getLocale, root: path.join(userDataDir, 'plugin-catalogs'), fetchImpl: netFetch, maintainerSources, officialSources });
+  const updates = createPluginUpdates({ root: path.join(userDataDir, 'plugin-catalogs'), catalog, manager, managed,
+    enabled: () => !disposed && !safeMode && getSettings().pluginsEnabled !== false, log,
+    apply: (preview, check) => managed.install(preview.token, {
+      trustUpdate: true,
+      beforeCommit: check,
+      beforeEnable: (_plugin, plan) => { check(); return plan.values; },
+      withLifecycle: (change, beforeRelease) => changePackage(null, change, [preview.id], () => { check(); beforeRelease(); }, true)
+    }) });
+  const catalogSnapshot = () => {
+    const result = catalog.list(), autoUpdate = updates.list();
+    return { ...result, autoUpdate, error: [result.error, autoUpdate.error].filter(Boolean).join('\n') };
+  };
   let catalogRefreshTimer = null;
   const refreshCatalog = async () => {
     try {
       await catalog.discover();
+      await updates.run();
       if (!disposed) for (const webContents of [...listListeners]) {
         if (webContents.isDestroyed()) listListeners.delete(webContents);
         else webContents.send('plugins:changed');
@@ -348,6 +362,7 @@ function createPluginRuntime({
         views: [], skins: [], errors: [] });
     }
     for (const plugin of list.plugins) {
+      plugin.recoveryRequired = [...failedCleanup].some(([host, ids]) => !host.isDestroyed() && ids.has(plugin.id));
       plugin.initialSetup = initialSetupReview(settings, plugin);
       plugin.installation = managed.describe(plugin.id);
       if (plugin.installation) plugin.settingsIdentity = `${plugin.installation.sha256}:${plugin.installation.installedAt}`;
@@ -382,7 +397,7 @@ function createPluginRuntime({
 
   const lifecycleHosts = new Set(), lifecyclePlugins = new Map(), observedLifecycleHosts = new WeakSet(), lifecycleRequests = new Map(), failedCleanup = new Map();
   let lifecycleSequence = 0;
-  function requestLifecycle(host, action, ids, content) {
+  function requestLifecycle(host, action, ids, content, automatic = false) {
     if (host.isDestroyed()) return Promise.resolve({});
     return new Promise((resolve, reject) => {
       const request = ++lifecycleSequence;
@@ -392,7 +407,7 @@ function createPluginRuntime({
       };
       const timer = setTimeout(() => finish('Plugin UI did not respond'), 5000);
       lifecycleRequests.set(request, { host, finish });
-      host.send('plugins:lifecycle', { request, action, ids, ...(content ? { content } : {}) });
+      host.send('plugins:lifecycle', { request, action, ids, ...(content ? { content } : {}), ...(automatic ? { automatic: true } : {}) });
     });
   }
   async function inspectHosts(ids, content) {
@@ -477,9 +492,18 @@ function createPluginRuntime({
     return result;
   }
 
-  async function changePackage(event, change, ids, beforeRelease) {
-    requireMain(event);
+  async function changePackage(event, change, ids, beforeRelease, automatic = false) {
+    if (!automatic) requireMain(event);
+    else {
+      const reviews = await Promise.all([...lifecycleHosts].filter(host => !host.isDestroyed()).map(host => requestLifecycle(host, 'inspect-update', ids)));
+      if (reviews.some(review => review.blocked)) throw new Error('Automatic plugin update deferred: settings are being edited');
+    }
     const affected = await inspectHosts(ids);
+    // A native settings editor need not have loaded the author's UI module.
+    // Include those hosts in the final automatic-release check as well.
+    if (automatic) for (const host of lifecycleHosts) {
+      if (!host.isDestroyed() && !affected.some(item => item.host === host)) affected.push({ host, ids });
+    }
     for (const [host, failedIds] of failedCleanup) {
       if (host.isDestroyed() || !ids.some(id => failedIds.has(id))) continue;
       const item = affected.find(item => item.host === host);
@@ -488,6 +512,7 @@ function createPluginRuntime({
     }
     const reload = affected.filter(item => item.error).map(item => item.host);
     const unsaved = affected.some(item => item.unsaved);
+    if (automatic && (reload.length || unsaved)) throw new Error('Automatic plugin update deferred: UI needs attention');
     if (reload.length) await confirm(event, 'plugins.trusted.reloadNote', unsaved ? 'plugins.trusted.packageUnsavedNote' : null);
     else if (unsaved) await confirm(event, 'plugins.trusted.packageUnsavedNote');
     await beforeRelease?.();
@@ -496,16 +521,19 @@ function createPluginRuntime({
     try {
       for (const item of affected.filter(item => !item.error)) {
         // Include partially released hosts in recovery if author cleanup fails.
+        let result;
         try {
-          await requestLifecycle(item.host, 'release', item.ids);
+          result = await requestLifecycle(item.host, 'release', item.ids, undefined, automatic);
           released.push(item);
         } catch (error) {
           failedCleanup.set(item.host, new Set([...(failedCleanup.get(item.host) || []), ...item.ids]));
           recovery.push(item.host);
           log(`[plugins] package cleanup failed: ${error.message}`);
+          if (automatic) throw error;
           await confirm(event, 'plugins.trusted.reloadNote');
           reload.push(item.host);
         }
+        if (result?.deferred) throw new Error('Automatic plugin update deferred: new unsaved work');
       }
       await change();
     } finally {
@@ -520,7 +548,7 @@ function createPluginRuntime({
         }
       }
       const needsRecovery = [...new Set(recovery)].filter(host => !host.isDestroyed() && !reload.includes(host));
-      if (needsRecovery.length) {
+      if (needsRecovery.length && !automatic) {
         const response = await dialog.showMessageBox(BrowserWindow.fromWebContents(event.sender), {
           type: 'warning', title: translate(getLocale(), 'plugins.trusted.reloadTitle'),
           message: translate(getLocale(), 'plugins.trusted.packageRecoveryNote'),
@@ -659,21 +687,28 @@ function createPluginRuntime({
       manager.restart(String(id));
       return listWithPlacements();
     });
+    handle('plugins:recover', async (event, id) => {
+      requireMain(event);
+      const finish = await resumeHosts(event, [String(id)]);
+      await finish();
+      return listWithPlacements();
+    });
     handle('plugins:reload', (event) => {
       requireMain(event);
       return changeCode(event, () => manager.reload());
     });
-    handle('plugins:addSource', (event, input) => { requireMain(event); managed.assertAvailable(); return catalog.addSource(input); });
-    handle('plugins:refreshSource', (event, id) => { requireMain(event); managed.assertAvailable(); return catalog.refreshSource(id); });
-    handle('plugins:removeSource', (event, id) => { requireMain(event); managed.assertAvailable(); return catalog.removeSource(id); });
+    handle('plugins:addSource', async (event, input) => { requireMain(event); managed.assertAvailable(); await catalog.addSource(input); return catalogSnapshot(); });
+    handle('plugins:refreshSource', async (event, id) => { requireMain(event); managed.assertAvailable(); await catalog.refreshSource(id); return catalogSnapshot(); });
+    handle('plugins:removeSource', (event, id) => { requireMain(event); managed.assertAvailable(); catalog.removeSource(id); return catalogSnapshot(); });
     handle('plugins:catalog', event => {
       requireMain(event);
-      const result = catalog.list();
+      const result = catalogSnapshot();
       const status = managed.status?.();
       if (status?.error) result.error = status.error.message;
       return result;
     });
-    handle('plugins:discoverCatalog', (event, force) => { requireMain(event); return catalog.discover(force === true); });
+    handle('plugins:discoverCatalog', async (event, force) => { requireMain(event); await catalog.discover(force === true); return catalogSnapshot(); });
+    handle('plugins:configureUpdates', (event, id, value) => { requireMain(event); updates.configure(id, value); return catalogSnapshot(); });
     handle('plugins:catalogDetails', (event, source, id) => { requireMain(event); return catalog.details(source, id); });
     handle('plugins:closeCatalogDetails', event => { requireMain(event); catalog.closeDetails(); });
     handle('plugins:catalogReadmeImage', (event, documentId, index) => { requireMain(event); return catalog.readmeImage(documentId, index); });
@@ -840,9 +875,11 @@ function createPluginRuntime({
       if (started) return;
       started = true;
       registerIpc();
-      // Index-only refresh never installs or enables code and does not block startup.
-      void refreshCatalog().catch(error => log(`[plugins] Catalog refresh failed: ${error.message}`));
-      return manager.reload();
+      // Discover after initial local loading; network work does not block startup.
+      return manager.reload().then(result => {
+        void refreshCatalog().catch(error => log(`[plugins] Catalog refresh failed: ${error.message}`));
+        return result;
+      });
     },
     publishStats(stats, businessStats = stats, extras = {}) {
       if (disposed) return;

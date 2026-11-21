@@ -30,7 +30,7 @@
 
 ## O que é o Token Monitor?
 
-Um app de desktop que mostra o uso de tokens ao vivo e os Limites de Ferramentas de IA em 54+ ferramentas de programação com IA — Claude Code, Codex, Cursor, GitHub Copilot, Cherry Studio e muitas outras — com sincronização multidispositivo em tempo real, tendências de uso histórico e detalhamentos por ferramenta, dispositivo, modelo, sessão ou projeto. Ele aparece onde você estiver olhando: a janela principal, o notch do MacBook, a barra de menus ou a bandeja do sistema, a borda da tela, uma bolha flutuante e widgets nativos do macOS.
+Um app de desktop que mostra o uso de tokens ao vivo e os Limites de Ferramentas de IA em 56+ ferramentas de programação com IA — Claude Code, Codex, Cursor, GitHub Copilot, Cherry Studio e muitas outras — com sincronização multidispositivo em tempo real, tendências de uso histórico e detalhamentos por ferramenta, dispositivo, modelo, sessão ou projeto. Ele aparece onde você estiver olhando: a janela principal, o notch do MacBook, a barra de menus ou a bandeja do sistema, a borda da tela, uma bolha flutuante e widgets nativos do macOS.
 
 ## Ferramentas suportadas
 
@@ -79,6 +79,8 @@ Uso de tokens, limites de ferramentas de IA e detalhes de sessão das ferramenta
     <img src=".github/assets/tools-icon/mistral.png" width="40" alt="Mistral Vibe" title="Mistral Vibe" />
     <img src=".github/assets/tools-icon/prime-agent.png" width="40" alt="Prime Agent" title="Prime Agent" />
     <img src=".github/assets/tools-icon/jcode.png" width="40" alt="Jcode" title="Jcode" />
+    <img src=".github/assets/tools-icon/junie.png" width="40" alt="Junie" title="Junie" />
+    <img src=".github/assets/tools-icon/opencodereview.png" width="40" alt="OpenCodeReview" title="OpenCodeReview" />
     <img src=".github/assets/tools-icon/typesafe.png" width="40" alt="TypeSafe" title="TypeSafe" />
     <img src=".github/assets/tools-icon/openrouter.png" width="40" alt="OpenRouter" title="OpenRouter" />
     <img src=".github/assets/tools-icon/volcengine.png" width="40" alt="Volcengine" title="Volcengine" />
@@ -160,7 +162,7 @@ Abra o app para começar a acompanhar o uso local deste dispositivo, sem configu
 
 ### Acompanhamento de uso
 
-- **Rastreamento de tokens ao vivo** — Claude Code, Codex, Cursor, GitHub Copilot, Antigravity, OpenCode e 42+ ferramentas de IA, com a interface atualizando poucos segundos após cada turno (lista completa na tabela acima)
+- **Rastreamento de tokens ao vivo** — Claude Code, Codex, Cursor, GitHub Copilot, Antigravity, OpenCode e 44+ ferramentas de IA, com a interface atualizando poucos segundos após cada turno (lista completa na tabela acima)
 - **Taxa de tokens ao vivo** — uma leitura opcional da velocidade de geração em `tok/s` ou do consumo total em `tok/min`
 - **Detalhes por sessão** — abra uma sessão para ver os tokens por prompt, expansível até a divisão exata de tokens de cada resposta e as ferramentas usadas (lido sob demanda de transcrições ou bancos locais, nunca sincronizado)
 - **Estatísticas de acerto de cache** — clique em qualquer ferramenta ou modelo para expandir um detalhamento completo dos tokens de entrada (acerto no cache vs. fora do cache), tokens de saída e as porcentagens de acerto
@@ -245,7 +247,7 @@ O Token Monitor suporta uso de tokens, verificação de limites da conta e detal
 | <img src=".github/assets/tools-icon/workbuddy.png" width="28" alt="WorkBuddy" /> | WorkBuddy | `~/.workbuddy/projects/`, `~/.workbuddy/workbuddy.db` | ✅ | ✅ | ✅ |
 | <img src=".github/assets/tools-icon/proma.png" width="28" alt="Proma" /> | Proma | `~/.proma/` (`agent-sessions/`, `sdk-config/sessions/`, `sdk-config/projects/`), `~/.proma-dev/` | ✅ | — | — |
 | <img src=".github/assets/tools-icon/catpaw.png" width="28" alt="CatPaw" /> | CatPaw | `<platform-app-data>/` (`catpaw-moon/`, `catpaw-overseas/`, `catpaw-memory-*.db`) | ✅ | — | — |
-| <img src=".github/assets/tools-icon/qoder.png" width="28" alt="Qoder" /> | Qoder | `~/.qoder-cn/projects/**/*.jsonl`, legado `<platform-app-data>/QoderCN/SharedClientCache/cache/db/local.db` (somente CN) | ✅ | ✅ | — |
+| <img src=".github/assets/tools-icon/qoder.png" width="28" alt="Qoder" /> | Qoder | `~/.qoder/projects/**/*.jsonl` (global), `~/.qoder-cn/projects/**/*.jsonl` (CN) | ✅ | ✅ | — |
 | <img src=".github/assets/tools-icon/reasonix.png" width="28" alt="Reasonix" /> | Reasonix | `~/.reasonix/` (`stats/`, `sessions/`, `projects/*/sessions/`) | ✅ | — | — |
 | <img src=".github/assets/tools-icon/deepseek.png" width="28" alt="DeepSeek" /> | DeepSeek / DeepSeek Harness | `~/.dsh/sessions/` (`session.jsonl`, `session.jsonl.zstd`) | ✅ | ✅ | ✅ |
 | <img src=".github/assets/tools-icon/cherrystudio.png" width="28" alt="Cherry Studio" /> | Cherry Studio | `<platform-app-data>/CherryStudio/` (`Data/Agents/.claude/projects/` V2, `.claude/projects/` legado) | ✅ | — | — |
@@ -257,6 +259,8 @@ O Token Monitor suporta uso de tokens, verificação de limites da conta e detal
 | <img src=".github/assets/tools-icon/mistral.png" width="28" alt="Mistral" /> | Mistral Vibe | `$VIBE_HOME/logs/session/` (`~/.vibe/logs/session/`); Cookie do Mistral Admin (franquia de API / cota mensal do Vibe e saldo de créditos) | ✅ | ✅ | — |
 | <img src=".github/assets/tools-icon/prime-agent.png" width="28" alt="Prime Agent" /> | Prime Agent | `~/.prime/agent/` (`sessions/`, `session-artifacts/`) | ✅ | — | — |
 | <img src=".github/assets/tools-icon/jcode.png" width="28" alt="Jcode" /> | Jcode | `~/.jcode/sessions/` | ✅ | — | — |
+| <img src=".github/assets/tools-icon/junie.png" width="28" alt="Junie" /> | Junie | `~/.junie/sessions/**/events.jsonl` | ✅ | — | — |
+| <img src=".github/assets/tools-icon/opencodereview.png" width="28" alt="OpenCodeReview" /> | OpenCodeReview | `~/.opencodereview/sessions/**/*.jsonl` | ✅ | — | — |
 | <img src=".github/assets/tools-icon/typesafe.png" width="28" alt="TypeSafe" /> | TypeSafe | Cookie do TypeSafe Console (saldo de cobrança e gasto estimado em tokens via dados de uso) | — | ✅ | — |
 | <img src=".github/assets/tools-icon/openrouter.png" width="28" alt="OpenRouter" /> | OpenRouter | Chave de API do OpenRouter (uso/limite da chave; saldo quando o acesso a créditos é autorizado, documentado para chaves Management) | — | ✅ | — |
 | <img src=".github/assets/tools-icon/volcengine.png" width="28" alt="Volcengine" /> | Volcengine | Chave de API do Ark ou AK/SK da Volcengine (cota do Ark Coding Plan e do Agent Plan via API da Volcengine) | — | ✅ | — |
@@ -293,7 +297,7 @@ O Token Monitor suporta uso de tokens, verificação de limites da conta e detal
 - O cache do Cursor vem da exportação de uso no nível da conta do Cursor, então cobre o uso do Cursor IDE, do Cursor CLI e do Grok Bot. O Token Monitor detecta automaticamente as contas com login pelo aplicativo desktop do Cursor e também permite adicionar contas manualmente nas Configurações. O cache ressincroniza sozinho quando fica desatualizado, mas sessões recém-concluídas podem levar alguns minutos para chegar ao painel do Cursor, então o uso recente ainda pode aparecer com atraso.
 
 - O mapeamento personalizado associa campos JSON numéricos de um único endpoint GET de saldo; compatibilidade apenas com OpenAI ou Anthropic não é suficiente.
-- O Qoder CN vem desativado por padrão; ative-o em Configurações → ferramentas. As sessões atuais são arquivos JSONL em `~/.qoder-cn/projects` (`TOKEN_MONITOR_QODER_CN_PROJECTS_PATH` e, depois, `QODERCN_CONFIG_DIR/projects`); versões mais antigas usavam um banco SQLite, sobrescrevível com `TOKEN_MONITOR_QODER_CN_DB_PATH`. Uma fonte ilegível mantém a última leitura completa. Sessões do banco legado registram apenas o nome do projeto, então aparecem sem projeto. Linhas JSONL faturadas por plano que informam créditos mas nenhuma contagem de tokens são omitidas dos totais de tokens; esses créditos permanecem nos Limites de Ferramentas de IA, e as linhas BYOK com tokens medidos são contadas. Veja as [notas da origem do Qoder](docs/providers/qodercn.md).
+- Qoder: o grupo Qoder em Configurações → ferramentas monitora as versões internacional e CN de forma independente. Novas instalações monitoram ambas; as escolhas existentes são preservadas. A lista de uso das ferramentas combina as duas, a menos que **Mostrar versões separadamente** esteja ativado. Os transcripts internacionais são lidos de `QODER_CONFIG_DIR/projects` (padrão `~/.qoder/projects`); os do CN, de `TOKEN_MONITOR_QODER_CN_PROJECTS_PATH` e, depois, `QODERCN_CONFIG_DIR/projects` (padrão `~/.qoder-cn/projects`). Apenas as contagens de tokens registradas nos transcripts são contadas: linhas de modelos gerenciados que registram créditos sem tokens ficam de fora, e esses créditos continuam nos Limites de ferramentas de IA. Há relatos de que o Qoder CN CLI 1.1.62 registra contadores futuros com `QODERCN_EXPOSE_TOKEN_USAGE=1`; registros existentes não são preenchidos. Códigos dinâmicos de modelo, como `dfmodel`, aparecem como foram registrados. Versões antigas do Qoder CN que guardavam o uso apenas em SQLite não são mais coletadas; os arquivos de histórico existentes do Token Monitor são mantidos. Veja as [notas da origem do Qoder](docs/providers/qodercn.md).
 </details>
 
 ### Suporte a recursos adicionais
@@ -302,7 +306,7 @@ O Token Monitor suporta uso de tokens, verificação de limites da conta e detal
 |---------|-------------------------|------------|
 | Títulos de sessão | Claude Code, Codex, OpenCode, Cursor, Antigravity, Cline CLI, Factory Droid, Kimi CLI, Grok Build, Pi, Oh My Pi, OmO Native, MiMo, ZCode, CodeBuddy, WorkBuddy, Reasonix, DeepSeek Harness, Cherry Studio, Devin CLI, fx, MiniMax Code | — |
 | Uso por prompt/resposta e chamadas de ferramentas | Claude Code, Codex, OpenCode, Pi, Oh My Pi, OmO Native, CodeBuddy, WorkBuddy, Reasonix, DeepSeek Harness | Os detalhes são lidos localmente e não são sincronizados. |
-| Uso de contexto/espaço restante | Claude Code, Codex, DeepSeek Harness | O limite de contexto do Claude Code é estimado pelo modelo. |
+| Uso de contexto/espaço restante | Claude Code, Codex, DeepSeek Harness, Grok Build, WorkBuddy, CatPaw | O limite de contexto do Claude Code é estimado pelo modelo. |
 | Uso de cache/taxa de acerto do cache da sessão | Fontes com campos de cache, por exemplo: Claude Code, Codex, OpenCode, Cursor, Kimi, Pi, Oh My Pi, OmO Native, DeepSeek Harness | A taxa de acerto aparece quando há dados de uso de cache. |
 | Estimativa de tempo restante do cache | Claude Code | 5 minutos ou 1 hora, conforme o tipo de cache registrado. |
 | Velocidade de saída/taxa de consumo de tokens | Claude Code, Codex, OpenCode, Antigravity, Kimi, GitHub Copilot, Pi, Oh My Pi, OmO Native, Kilo CLI, MiMo Code/MiMo Desktop, Muse Code, ZCode CLI, Kiro, DeepSeek Harness, Devin CLI | Saída em `tok/s` e consumo total de tokens em `tok/min`; o tempo pode incluir espera. |
@@ -480,7 +484,7 @@ O Token Monitor processa os registros de uso localmente e não envia analytics n
 
 ## Contribuindo
 
-Issues e PRs são bem-vindos. As convenções do projeto, as notas de arquitetura e a referência de comandos ficam em [AGENTS.md](AGENTS.md) — escritos para agentes de programação, mas que também servem de guia para quem quer contribuir.
+Issues e PRs são bem-vindos. Comece pelo [CONTRIBUTING.md](CONTRIBUTING.md); as convenções do projeto, as notas de arquitetura e a referência de comandos ficam em [AGENTS.md](AGENTS.md).
 
 ## Agradecimentos
 

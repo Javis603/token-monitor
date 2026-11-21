@@ -34,3 +34,21 @@ test('loading installed state reads update availability from the local catalog w
   await h.loadPluginCatalog();
   assert.equal(h.settingsSectionSummary('plugins'), '1/2 enabled · 1 updates');
 });
+const appUpdatePresentationApi = require('../../src/electron/renderer/appUpdatePresentation.js');
+test('collapsed General summary lists what is in effect, falling back to the version', () => {
+  const labels = { 'settings.startup.startAtLogin': 'Start at login', 'settings.summary.autoUpdate': 'Auto-update', 'settings.summary.proxy': 'Proxy' };
+  const context = {
+    appUpdatePresentationApi,
+    state: { settings: {}, appInfo: { version: '0.94.0', loginItemSupported: true }, appUpdate: { installSupported: true } },
+    t: (key) => labels[key] || key
+  };
+  vm.createContext(context);
+  vm.runInContext(extract('settingsSectionSummary'), context);
+  assert.equal(context.settingsSectionSummary('general'), 'v0.94.0');
+  Object.assign(context.state.settings, { startAtLogin: true, automaticAppUpdates: true, proxyUrl: ' http://127.0.0.1:7890 ', discordRpc: true });
+  assert.equal(context.settingsSectionSummary('general'), 'Start at login · Auto-update · Proxy', 'Discord is not summarized');
+  context.state.appInfo.loginItemSupported = false;
+  context.state.appUpdate = { installSupported: false };
+  context.state.settings.proxyUrl = '  ';
+  assert.equal(context.settingsSectionSummary('general'), 'v0.94.0', 'unsupported or blank settings are not in effect');
+});

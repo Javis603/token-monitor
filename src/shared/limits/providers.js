@@ -32,42 +32,51 @@
   // subscriptionProviderLabel(). It is not scoped to one list — adding one
   // renames the provider on all of them at once. Surfaces that name a live
   // quota rather than a configured tool keep `label`, as the tray detail does.
+  // `portableAccountKey: true` keeps configured accounts separate across devices.
+  // Omit it for device-local credential identities that collapse by provider.
   const LIMIT_PROVIDER_CATALOG = Object.freeze([
-    { id: 'claude', label: 'Claude', settingsLabel: 'Claude Code' },
-    { id: 'codex', label: 'Codex' },
-    { id: 'opencode', label: 'OpenCode' },
-    { id: 'cursor', label: 'Cursor' },
+    { id: 'claude', portableAccountKey: true, label: 'Claude', settingsLabel: 'Claude Code' },
+    { id: 'codex', portableAccountKey: true, label: 'Codex' },
+    { id: 'opencode', portableAccountKey: true, label: 'OpenCode' },
+    { id: 'cursor', portableAccountKey: true, label: 'Cursor' },
     { id: 'antigravity', label: 'Antigravity' },
-    { id: 'cline', label: 'Cline' },
-    { id: 'factory', label: 'Factory Droid' },
+    // Keys identify the API key or sign-in account within each lane; matching display emails do not establish identity.
+    { id: 'cline', portableAccountKey: true, label: 'Cline' },
+    { id: 'factory', portableAccountKey: true, label: 'Factory Droid' },
     { id: 'kimi', label: 'Kimi' },
     { id: 'grok', label: 'Grok' },
     { id: 'copilot', label: 'GitHub Copilot' },
     { id: 'zed', label: 'Zed' },
     { id: 'commandcode', label: 'Command Code' },
-    { id: 'mimo', label: 'Xiaomi MiMo' },
+    { id: 'mimo', portableAccountKey: true, label: 'Xiaomi MiMo' },
     { id: 'muse', label: 'Muse' },
     { id: 'zai', label: 'GLM', settingsLabel: 'Z.ai / GLM' },
     { id: 'zaiteam', label: 'GLM Team' },
     { id: 'kiro', label: 'Kiro' },
     { id: 'workbuddy', label: 'WorkBuddy' },
     { id: 'qoder', label: 'Qoder' },
-    { id: 'deepseek', label: 'DeepSeek' },
+    { id: 'deepseek', portableAccountKey: true, label: 'DeepSeek' },
     { id: 'devin', label: 'Devin' },
     { id: 'minimax', label: 'Minimax' },
     { id: 'mistral', label: 'Mistral' },
     { id: 'typesafe', label: 'TypeSafe' },
-    { id: 'openrouter', label: 'OpenRouter' },
-    { id: 'volcengine', label: 'Volcengine' },
+    { id: 'openrouter', portableAccountKey: true, label: 'OpenRouter' },
+    // Keys come from AK/SK and region; distinct keys preserve the Coding/Agent plan split.
+    { id: 'volcengine', portableAccountKey: true, label: 'Volcengine' },
     { id: 'ollama', label: 'Ollama' },
     { id: 'trae', label: 'Trae CN' },
-    { id: 'alibaba', label: 'Alibaba Cloud' },
+    // Keys are console-issued account UIDs; distinct keys mean distinct accounts.
+    { id: 'alibaba', portableAccountKey: true, label: 'Alibaba Cloud' },
     { id: 'stepfun', label: 'StepFun' },
-    { id: 'notion', label: 'Notion AI' },
-    { id: 'manus', label: 'Manus' },
-    { id: 'hark', label: 'Hark' },
-    { id: 'opendesign', label: 'OpenDesign' },
-    { id: 'thirdparty', label: 'Third-party APIs' }
+    // Allowances are per user AND workspace; the verified composite key is portable.
+    { id: 'notion', portableAccountKey: true, label: 'Notion AI' },
+    // Keys hash the session account user id, identically on every device.
+    { id: 'manus', portableAccountKey: true, label: 'Manus' },
+    // Keys hash the decoded session token; a second cookie is another session.
+    { id: 'hark', portableAccountKey: true, label: 'Hark' },
+    // Workspace IDs are portable across devices.
+    { id: 'opendesign', portableAccountKey: true, label: 'OpenDesign' },
+    { id: 'thirdparty', portableAccountKey: true, label: 'Third-party APIs' }
   ].map((provider) => Object.freeze({ ...provider })));
 
   const LIMIT_PROVIDER_IDS = Object.freeze(LIMIT_PROVIDER_CATALOG.map((provider) => provider.id));

@@ -47,6 +47,8 @@
       : iconNode(document, view?.icon || 'dot', null, size));
     const native = icon?.native && vendors.ROW_ICON_MASKS[icon.native];
     const source = native ? `${iconBase}${native}.svg` : icon?.data || view?.identityIcon;
+    // Load/error handlers own this subtree, including the mask and fallback.
+    node.setAttribute('data-dom-island', JSON.stringify([source, icon?.native, icon?.mode, view?.identityIcon, view?.icon, size]));
     if (source) {
       const image = document.createElement('img');
       image.alt = ''; image.width = size; image.height = size;

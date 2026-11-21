@@ -1,4 +1,8 @@
+// @ts-check
 'use strict';
+
+const { normalizeLimitProductId } = require('./products');
+const { defaultIdentityKey, accountSlotField, normalizeAmbientAccounts } = require('./accountSlots');
 
 // The limits account registry index: one account declaration per catalog
 // provider, in catalog order. Each declaration lives in
@@ -9,86 +13,153 @@
 // discovery, status) is declared there as data or as functions that receive the
 // bound module; src/shared/limits/registry.js does the binding.
 //
-// Declaration shape:
-//   {
-//     id: 'zed',
-//     fetch: 'fetchZedLimits',  // limits.js export the collector calls
-//     fields: [ ... ],          // settings keys this provider owns
-//     status: { ... },          // optional: renderer account-status projection
-//     accountStatus(input, limits), // optional: custom status projection
-//     discover(env, limits),    // optional: local credential discovery probe
-//     envProbe: { key, fn },    // optional: extra env-configured projection key
-//     urlPolicy: [ ... ],       // optional: external-URL allowlist rules
-//     fetchDep: 'workbuddyFetch',   // optional: deps key consulted before fetch
-//     resolveFetch(deps, limits),   // optional: custom transport resolution
-//     extraSettingKeys: [ ... ]     // optional: non-field keys that still scope
-//                                 // a provider refresh (e.g. feature toggles)
-//   }
-//
-// Field shape:
-//   {
-//     key: 'zedCookie',         // settings key (also the wire/config key)
-//     kind: 'credential' | 'setting' | 'profiles' | 'managed',
-//     storePath: ['providers', 'zed', 'cookie'],
-//                               // present ⇒ the value lives in credentials.json,
-//                               // never settings.json, never the renderer
-//     resolve: 'zedCookie',     // limits.js export name of the env resolver
-//     resolveStyle: 'options',  // 'options' (default): fn(env, {key: value});
-//                               // 'explicit': fn(env, value)
-//     normalize: 'secret' | 'trim' | { fn, style } | (value) => value,
-//                               // write-time normalizer. Absent ⇒ raw pass-
-//                               // through. Default when resolve is set: the
-//     // resolver applied to the explicit lane. {fn, style} styles:
-//     //   'value'      fn(value)
-//     //   'options'    fn({ [key]: value }, {})
-//     //   'optionsEnv' fn({ [key]: value }, process.env)
-//     envFallback: ['TOKEN_MONITOR_ZED_COOKIE', 'ZED_COOKIE'],
-//                               // env names consulted by limitsConfigFromSettings
-//                               // after the settings lane, in order
-//     configDefault: 'global',  // limitsConfigFromSettings value when neither
-//                               // settings nor env produced one (default '')
-//     configNormalize: fn,      // limitsConfigFromSettings read-time normalizer
-//     contextOverride: true,    // config value is context[key] ?? settings[key]
-//     config: false,            // excluded from limitsAccountConfig entirely
-//                               // (the provider wires its own config lane)
-//     persist: 'default',       // 'default': write normalize + keep old + '';
-//                               // 'renormalize': like default but the kept
-//                               //   value is re-normalized with persistFallback
-//                               // 'spread': patch passes through, no final line
-//                               // 'never': deleted from the patch, never stored
-//     persistFallback: 'global',// renormalize mode: value fed to normalize when
-//                               // the patch does not carry the key
-//     project: 'set' | 'redact' | 'value' | (value, limits, env) => projected,
-//                               // settingsForRenderer emission. Absent ⇒ the
-//                               // raw settings spread carries the key (or ''
-//                               // from credential redaction for storePath keys)
-//     rendererOmit: true,       // deleted from the renderer settings object
-//     watch: false,             // exclude from LIMIT_PROVIDER_SETTING_KEYS
-//     initial: value | (env, limits) => value | null
-//                               // fresh-install default. Absent ⇒ '' for
-//                               // credential/setting, {} for profiles, [] for
-//                               // managed. null ⇒ no initial key at all.
-//   }
-//
-// status shape (renderer account-status projection):
-//   { credential: 'zedCookie', configuredKey: 'zedCookieConfigured',
-//     sourceKey: 'zedCookieSource', pendingKey: 'zedPendingCheckSince' }
-// With only `status`, the projection is the standard settings|env two-lane
-// source plus a configured flag. `accountStatus` replaces that entirely and
-// returns the flat projection map itself.
-//
-// urlPolicy rule shape:
-//   { hosts: ['qoder.com', 'www.qoder.com'],
-//     pathPrefixes: ['/settings'],   // optional; absent ⇒ any path
-//     exactPaths: ['/x'] }           // optional, checked alongside prefixes
+/**
+ * Provider limits modules have heterogeneous exports and legacy value shapes.
+ * These dynamic callback boundaries remain explicit; declaration keys and
+ * declarative metadata below are closed shapes, with no catch-all index key.
+ * @typedef {Record<string, any>} AccountValues
+ * @typedef {Record<string, any>} AccountLimits
+ *
+ * @typedef {object} AccountField
+ * @property {string} key Settings key (also the wire/config key).
+ * @property {'credential'|'setting'|'profiles'|'managed'} kind
+ * @property {string[]} [storePath] Lives in credentials.json, never settings.json or the renderer.
+ * @property {string} [resolve] Limits module export; also the default write normalizer.
+ * @property {'options'|'explicit'} [resolveStyle] Default: fn(env, {[key]: value}); explicit: fn(env, value).
+ * @property {'secret'|'trim'|{fn: string, style: 'value'|'options'|'optionsEnv'}|((value: any) => any)} [normalize] Write-time normalizer; otherwise raw pass-through. Named styles call fn(value), fn({[key]: value}, {}), or fn({[key]: value}, process.env).
+ * @property {string[]} [envFallback] Consulted after settings, in order.
+ * @property {any} [configDefault] Read-time default when settings and env are absent (otherwise '').
+ * @property {(value: any) => any} [configNormalize] Read-time normalization.
+ * @property {boolean} [contextOverride] Config uses context[key] ?? settings[key].
+ * @property {boolean} [config] False excludes this field from limitsAccountConfig.
+ * @property {'default'|'renormalize'|'spread'|'never'} [persist] Default normalizes, keeps old, then ''; renormalize also normalizes the kept value; spread passes through; never deletes from the patch.
+ * @property {any} [persistFallback] Value fed to normalize when a renormalize patch omits the key.
+ * @property {'set'|'redact'|'value'|((value: any, limits: AccountLimits, env: AccountValues) => any)} [project] Renderer emission; absent keeps the raw spread (or credential redaction).
+ * @property {boolean} [rendererOmit] Delete from renderer settings.
+ * @property {boolean} [watch] False excludes the key from refresh triggers.
+ * @property {string|number|boolean|null|AccountValues|any[]|((env: AccountValues, limits: AccountLimits) => any)} [initial] Absent defaults to '' / {} / [] by kind; null omits the initial key.
+ * @property {boolean} [clearWithCredential] Clear this setting alongside credentials.
+ *
+ * @typedef {object} AccountStatus
+ * @property {string} [credential]
+ * @property {string} configuredKey
+ * @property {string} sourceKey
+ * @property {string} [pendingKey]
+ *
+ * @typedef {object} AccountUrlRule
+ * @property {string[]} hosts
+ * @property {string[]} [pathPrefixes] Absent both path lists means any path; lists are checked together.
+ * @property {string[]} [exactPaths]
+ *
+ * @typedef {{byField: string, values: Record<string, string>}} AccountFormValue
+ * @typedef {string|Array<string|{code: string|AccountFormValue}|{text: string}>} AccountFormStep
+ * @typedef {object} AccountFormBlock
+ * @property {string} [field]
+ * @property {AccountFormStep[]} [steps]
+ * @property {string} [note]
+ * @property {{field: string, values: string[]}} [when]
+ * @property {string} [whenCredential]
+ *
+ * @typedef {object} AccountFormField
+ * @property {string} key
+ * @property {'input'|'text'|'password'|'textarea'|'select'} [input]
+ * @property {string} [labelKey]
+ * @property {string} [ariaLabelKey]
+ * @property {string} [placeholderKey]
+ * @property {string} [placeholder]
+ * @property {string} [configuredKey]
+ * @property {{value: string, labelKey: string}[]} [options]
+ * @property {boolean} [saveOnChange]
+ * @property {string[]} [clears]
+ * @property {boolean} [required]
+ * @property {boolean} [prefill]
+ * @property {boolean} [secret]
+ * @property {boolean} [submitWithCredential]
+ *
+ * @typedef {object} AccountForm
+ * @property {'custom'} [kind] Custom panels may borrow only the shared save path.
+ * @property {{labelKey: string}} [loginAction]
+ * @property {string} [titleKey]
+ * @property {string} [openKey]
+ * @property {string} [clearKey]
+ * @property {string} [saveKey]
+ * @property {string} [emptyKey]
+ * @property {string} [failedKey]
+ * @property {string} [field] Legacy single-field form.
+ * @property {'input'|'text'|'password'|'textarea'|'select'} [input]
+ * @property {string} [placeholderKey]
+ * @property {string} [ariaLabelKey]
+ * @property {string} [noteKey]
+ * @property {string} [url]
+ * @property {AccountFormStep[]} [steps]
+ * @property {AccountFormField[]} [fields]
+ * @property {AccountFormBlock[]} [manual]
+ * @property {AccountFormBlock[]} [top]
+ * @property {{url?: string, byField?: string, byStatus?: string, urls?: Record<string, string>, statusUrls?: Record<string, string>, default?: string, pathByField?: AccountFormValue}} [openUrl]
+ * @property {{required?: string, invalidFormat?: string, rejected?: string}} [messages]
+ * @property {boolean} [multipleAccounts]
+ * @property {{fn: string, credential: string, selection: string}} [discover]
+ * @property {{key: string, labelKey: string, fields: string[]}} [credentialChoice]
+ * @property {{fn: string, field: string}} [rememberProbe]
+ *
+ * @typedef {object} DiscoveredAccount
+ * @property {AccountValues} values In-memory form-shaped credentials, never persisted.
+ * @property {string} sourceName Fallback display name and sign-out location.
+ * @property {string} [accountKey]
+ * @property {string} [accountName]
+ * @property {string} [accountEmail]
+ * @property {AccountValues} [fetchDeps] Provider-owned isolated dispatch dependencies.
+ * @property {boolean} [combineMatchingCredential] Preserve a combined pool fetch for an exact form-value match.
+ * @property {AccountValues} [combinedFetchDeps]
+ *
+ * @typedef {object} AccountSource
+ * @property {string} id Stable, provider-local read lane.
+ * @property {'cli'|'desktop'|'web'|'apiKey'|'env'|'file'|'oauth'} kind
+ * @property {'alternative'|'complement'|'single'} relation Alternative lanes follow fallback order; complements may contribute together.
+ * @property {string[]} products Stable provider-local entitlement IDs, independent of source and region.
+ * @property {string} labelKey
+ * @property {string} descriptionKey
+ *
+ * @typedef {object} AccountDeclaration
+ * @property {string} id
+ * @property {AccountSource[]} sources Ordered read sources.
+ * @property {boolean} [environmentWhenSaved]
+ * @property {boolean} [dedupeAccounts]
+ * @property {string} fetch Limits export called by the collector.
+ * @property {AccountField[]} fields
+ * @property {string[]} [accountCredentialKeys] Ordered independently authenticating credentials; companions are never cleared.
+ * @property {(values: Record<string, string>, key: string) => boolean} [accountCredentialReady] Compound credential completeness check.
+ * @property {boolean} [accountSlotOwner] Provider owns authentication and collector union; slots persist main-only owner records.
+ * @property {boolean} [accountSlots] Requires a form, no managed/profiles fields, credentials only from declared fields, no singleton credential write-back, and an audit of module-level state.
+ * @property {(env: AccountValues, limits: AccountLimits, deps: AccountValues) => DiscoveredAccount[]} [discoveredAccounts] Ephemeral main-only credentials; never projected or saved.
+ * @property {string} [serverAccountKey] Limits export testing whether a resolved key proves a server identity.
+ * @property {boolean} [accountRefresh] Fetch honors account-scoped limitRefreshScope and returns only that row.
+ * @property {AccountStatus} [status] Standard settings/env source and configured flag.
+ * @property {(input: {settings: AccountValues, env: AccountValues, limits: AccountLimits, discovered?: any}) => AccountValues} [accountStatus] Replaces standard status with a flat projection map.
+ * @property {(env: AccountValues, limits: AccountLimits) => any} [discover] Local credential discovery.
+ * @property {{key: string, fn: (env: AccountValues, limits: AccountLimits) => boolean}} [envProbe]
+ * @property {AccountUrlRule[]} [urlPolicy]
+ * @property {string} [fetchDep] Dependency key consulted before fetching.
+ * @property {(deps: AccountValues, limits: AccountLimits) => any} [resolveFetch]
+ * @property {string[]} [extraSettingKeys] Non-field keys that scope refresh (such as feature toggles).
+ * @property {AccountForm} [form]
+ */
 
 // A provider registers here and nowhere else: its account leaf, plus a lazy
 // loader for its limits module. The loader stays unevaluated until
 // src/shared/limits/registry.js binds it, so credentialStore (which reads this
 // index) never pulls in provider probes — factory/limits.js requires
 // credentialStore, and an eager require here would be a cycle.
+/** @param {AccountDeclaration} account @param {() => AccountLimits} loadLimits */
 function registerProvider(account, loadLimits) {
-  return { ...account, loadLimits };
+  for (const source of account.sources) {
+    if (!Array.isArray(source.products) || !source.products.length
+      || new Set(source.products).size !== source.products.length
+      || source.products.some(id => !id || normalizeLimitProductId(id) !== id)) {
+      throw new Error(`limits accounts: invalid source products for ${account.id}:${source.id}`);
+    }
+  }
+  return { ...account, fields: [...(account.accountSlots ? [...account.fields, accountSlotField(account), ...(account.discoveredAccounts ? [{ key: `${account.id}AmbientAccounts`, kind: 'setting', configDefault: {}, configNormalize: (/** @type {any} */ value) => normalizeAmbientAccounts(account, value), storePath: ['providers', account.id, 'ambientAccounts'], rendererOmit: true, persist: 'never', initial: null, watch: false }] : []), { key: defaultIdentityKey(account), kind: 'setting', configDefault: {}, storePath: ['providers', account.id, 'defaultAccountIdentity'], persist: 'never', rendererOmit: true, watch: false, initial: null }] : account.fields)], loadLimits };
 }
 
 const LIMIT_PROVIDER_ACCOUNTS = Object.freeze([
@@ -132,10 +203,12 @@ const LIMIT_PROVIDER_ACCOUNTS = Object.freeze([
   fields: Object.freeze((decl.fields || []).map((field) => Object.freeze(field)))
 })));
 
+/** @param {string} provider */
 function limitAccountDeclaration(provider) {
   return LIMIT_PROVIDER_ACCOUNTS.find((decl) => decl.id === provider) || null;
 }
 
+/** @param {string} provider @param {string} key */
 function limitAccountField(provider, key) {
   const decl = limitAccountDeclaration(provider);
   return decl ? decl.fields.find((field) => field.key === key) || null : null;
@@ -145,6 +218,7 @@ function limitAccountField(provider, key) {
 // store stays a leaf consumer and a new provider's storePath is declared once.
 // Hub keys are not provider fields; credentialStore prepends them itself.
 function providerCredentialSettingPaths() {
+  /** @type {Record<string, string[]>} */
   const paths = {};
   for (const decl of LIMIT_PROVIDER_ACCOUNTS) {
     for (const field of decl.fields) {
@@ -156,6 +230,7 @@ function providerCredentialSettingPaths() {
 
 // Settings keys whose change scopes a limits refresh to this provider.
 function limitProviderSettingKeys() {
+  /** @type {Record<string, string[]>} */
   const keys = {};
   for (const decl of LIMIT_PROVIDER_ACCOUNTS) {
     const watched = decl.fields
@@ -171,6 +246,7 @@ function limitProviderSettingKeys() {
 // host + path rules, one entry per console page a settings panel links to.
 // `providerId` narrows the check to that provider's own policy, so a form can
 // prove its pages pass its own rules rather than the union of everyone's.
+/** @param {string} hostname @param {string} pathname @param {string} [providerId] */
 function limitProviderUrlAllowed(hostname, pathname, providerId = '') {
   const decls = providerId
     ? LIMIT_PROVIDER_ACCOUNTS.filter((decl) => decl.id === providerId)
@@ -189,9 +265,36 @@ function limitProviderUrlAllowed(hostname, pathname, providerId = '') {
   return false;
 }
 
+// The refresh scope for one rendered limits row. LimitsRuntime files every row
+// an account-scoped probe returns under its reported identity, so the scope may
+// only name an account when the provider's fetch filters by it, and only by
+// its account key: providers' name- or email-only paths can fall back to
+// reading every account. Anything else refreshes the whole provider instead.
+/** @param {string} provider @param {{accountKey?: string, accountEmail?: string, accountName?: string, accountLabel?: string, sourceDetail?: string, region?: string}} [row] */
+function limitAccountRefreshScope(provider, row = {}) {
+  /** @param {unknown} value */
+  const text = (value) => (typeof value === 'string' ? value.trim() : '');
+  /** @type {Record<string, string>} */
+  const scope = { provider };
+  const declaration = limitAccountDeclaration(provider);
+  if (!declaration?.accountRefresh && !(declaration?.accountSlots && !declaration.accountSlotOwner)) return scope;
+  const account = {
+    accountKey: text(row.accountKey),
+    accountEmail: text(row.accountEmail).toLowerCase(),
+    accountName: text(row.accountName),
+    accountLabel: text(row.accountLabel),
+    sourceDetail: text(row.sourceDetail)
+  };
+  if (!account.accountKey) return scope;
+  for (const [key, value] of Object.entries(account)) if (value) scope[key] = value;
+  if (provider === 'alibaba' && text(row.region)) scope.region = text(row.region).toLowerCase();
+  return scope;
+}
+
 module.exports = {
   LIMIT_PROVIDER_ACCOUNTS,
   limitAccountDeclaration,
+  limitAccountRefreshScope,
   limitAccountField,
   limitProviderSettingKeys,
   limitProviderUrlAllowed,

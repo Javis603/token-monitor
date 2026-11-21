@@ -115,7 +115,7 @@ test('select and navigation popups share their regular and native glass surface'
   const css = fs.readFileSync(path.join(rendererDir, 'styles.css'), 'utf8');
   const rule = selector => [...css.replace(/\/\*[\s\S]*?\*\//g, '').matchAll(/([^{}]+)\{([^{}]*)\}/g)]
     .find(match => match[1].trim() === selector)?.[2];
-  const surface = rule('.plugin-menu,\n.view-switcher-menu,\n.select-control-popup,\n.sync-content-dialog,\n.plugin-catalog-dialog,\n.settings-help-popover,\n.app-update-popover');
+  const surface = rule('.plugin-menu,\n.view-switcher-menu,\n.select-control-popup,\n.appearance-color-picker,\n.sync-content-dialog,\n.plugin-catalog-dialog,\n.settings-help-popover,\n.app-update-popover');
   assert.ok(surface);
   for (const property of ['border', 'border-radius', 'background', 'box-shadow', 'backdrop-filter']) {
     assert.ok(surface.includes(`${property}:`), property);
@@ -125,7 +125,7 @@ test('select and navigation popups share their regular and native glass surface'
   assert.doesNotMatch(rule('.select-control-popup'), /background:|border-radius:|box-shadow:/);
   assert.doesNotMatch(rule('.sync-content-dialog,\n.settings-help-popover'), /background:|border-radius:|box-shadow:/);
   assert.doesNotMatch(rule('.view-switcher-menu'), /background:|border-radius:|box-shadow:/);
-  assert.ok(rule('html.native-liquid-glass .plugin-menu,\nhtml.native-liquid-glass .select-control-popup,\nhtml.native-liquid-glass .view-switcher-menu,\nhtml.native-liquid-glass .sync-content-dialog,\nhtml.native-liquid-glass .plugin-catalog-dialog,\nhtml.native-liquid-glass .settings-help-popover,\nhtml.native-liquid-glass .app-update-popover'));
+  assert.ok(rule('html.native-liquid-glass .plugin-menu,\nhtml.native-liquid-glass .select-control-popup,\nhtml.native-liquid-glass .appearance-color-picker,\nhtml.native-liquid-glass .view-switcher-menu,\nhtml.native-liquid-glass .sync-content-dialog,\nhtml.native-liquid-glass .plugin-catalog-dialog,\nhtml.native-liquid-glass .settings-help-popover,\nhtml.native-liquid-glass .app-update-popover'));
   assert.ok(rule('html.native-liquid-glass .plugin-menu button,\nhtml.native-liquid-glass .select-control-option,\nhtml.native-liquid-glass .view-switcher-menu-item'));
   const selected = '.select-control-option[data-selected="true"]';
   const highlighted = '.select-control-option[data-highlighted="true"]';
@@ -174,7 +174,7 @@ test('sync method selects the corresponding fields without touching draft input 
       syncContentForm: null,
       state: { settings: { hubMode: mode }, appInfo: { platform: 'win32' } },
       els: {
-        hubModeOptions: {}, syncModeDescription: {}, icloudModeOption: {},
+        hubModeOptions: {}, icloudModeOption: {},
         hubClientFields: field('client'), hubHostFields: field('host'), icloudFields: field('icloud'),
         hubSecretInput: {}, hubUrlInput: { value: 'https://draft.test' }, secretInput: { value: 'draft' }
       },
@@ -187,7 +187,6 @@ test('sync method selects the corresponding fields without touching draft input 
     context.syncHubModeUi();
     assert.equal(context.els.icloudModeOption.disabled, true);
     assert.equal(context.els.hubModeOptions.value, mode);
-    assert.ok(context.els.syncModeDescription.textContent);
     for (const id of ['client', 'host', 'icloud']) {
       assert.equal(hidden[id], mode !== id);
       const node = context.els[id === 'client' ? 'hubClientFields' : id === 'host' ? 'hubHostFields' : 'icloudFields'];
@@ -273,7 +272,10 @@ test('device versions get their own line rather than competing with sync status'
   const metaRule = css.match(/\.sync-device-meta-text\s*\{([^}]+)\}/)?.[1];
   assert.ok(metaRule);
   assert.doesNotMatch(metaRule, /text-overflow:\s*ellipsis|white-space:\s*nowrap/);
-  assert.match(css, /@container\s*\(max-width:\s*340px\)/);
+  // Status sits on its own third row at every width, so online and offline rows line up.
+  assert.match(css.match(/\.sync-device-side\s*\{([^}]+)\}/)?.[1], /grid-column:\s*2 \/ -1;\s*grid-row:\s*3/);
+  assert.match(css.match(/\.sync-device-title\s*\{([^}]+)\}/)?.[1], /grid-column:\s*2 \/ -1/);
+  assert.doesNotMatch(css, /@container\s*\(max-width:\s*340px\)/);
 });
 
 test('empty device list refreshes when the runtime starts syncing', () => {

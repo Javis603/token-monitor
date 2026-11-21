@@ -180,7 +180,7 @@ function parseArkcliPlan(body, updatedAt, product) {
     provider: 'volcengine', source: 'cli', status: 'ok', updatedAt,
     accountKey: arkcliAccountKey(viewer, product),
     accountLabel: PERSONAL_PLANS[product], planLabel: typeof item.tier === 'string' ? item.tier : '',
-    region: viewer.region, windows
+    region: viewer.region, windows: windows.map(window => ({ ...window, productId: product }))
   });
 }
 

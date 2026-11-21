@@ -63,8 +63,10 @@ test('usage publishes immediately without waiting for limits and late limits emi
 });
 
 test('limits arriving before first usage are buffered without fabricating a zero record', () => {
-  const { limitsDeps, records, usageOptions } = harness();
+  const updates = [];
+  const { limitsDeps, records, usageOptions } = harness({ limitsDeps: { onUpdate: limits => updates.push(limits) } });
   limitsDeps.onUpdate({ updatedAt: 'limits-time', refreshMs: 300000, providers: [] });
+  assert.equal(updates[0].updatedAt, 'limits-time', 'local limits observers do not need a usage baseline');
   assert.equal(records.length, 0);
   usageOptions.onUpdate({ updatedAt: 'usage-time', today: { totalTokens: 7 } }, 'startup');
   assert.equal(records.length, 1);
@@ -76,6 +78,19 @@ test('initial limits seed composes with the first usage record', () => {
   const { records, usageOptions } = harness({ initialLimits });
   usageOptions.onUpdate({ updatedAt: 'usage-time', today: { totalTokens: 4 } }, 'startup');
   assert.equal(records[0].record.limits.updatedAt, 'seed-time');
+});
+
+test('a throwing limits observer cannot block record delivery', () => {
+  const failure = new Error('observer failed');
+  const errors = [];
+  const { limitsDeps, records, usageOptions } = harness({
+    limitsDeps: { onUpdate() { throw failure; } },
+    onError: (...args) => errors.push(args)
+  });
+  usageOptions.onUpdate({ today: { totalTokens: 1 } });
+  limitsDeps.onUpdate({ providers: [{ provider: 'grok', status: 'ok' }] });
+  assert.equal(records.at(-1).record.limits.providers[0].status, 'ok');
+  assert.deepEqual(errors, [[failure, 'limits-observer']]);
 });
 
 test('usage transforms run only for usage events, not limits-only publishes', () => {
@@ -114,6 +129,23 @@ test('summaries a worker-hosted runtime already transformed are not transformed 
   assert.equal(records.at(-1).record.transformedHere, true);
 });
 
+test('worker-owned usage is sanitized on intake and outgoing records stay isolated', () => {
+  const { records, runtime, usageOptions } = harness();
+  const summary = structuredClone({
+    today: { sessions: { 'reasonix:private': { client: 'reasonix' } } },
+    month: { totalTokens: 20 },
+    allTime: { totalTokens: 30 }
+  });
+  usageOptions.onUpdate(summary, 'watch', { transformed: true, ownsSummary: true });
+
+  assert.deepEqual(summary.today.sessions, {}, 'sanitation uses the deserialized graph');
+  assert.deepEqual(records[0].record.today.sessions, {});
+  records[0].record.month.totalTokens = 99;
+  assert.equal(runtime.getSnapshot().month.totalTokens, 20);
+  usageOptions.onUpdate({ today: { totalTokens: 10 } }, 'watch');
+  assert.equal(records[1].record.month.totalTokens, 20);
+});
+
 test('progressive cold-start previews wait for the first complete usage record', () => {
   const { records, usageOptions } = harness({ progressive: true });
   usageOptions.onPreview({ updatedAt: 'preview-time', today: { totalTokens: 2 } });
@@ -127,6 +159,47 @@ test('progressive cold-start previews wait for the first complete usage record',
   }, 'startup');
   assert.equal(records.length, 1);
   assert.equal(records[0].record.allTime.totalTokens, 5);
+});
+
+test('held-back cold previews reach the cold-preview observer, not the record path', () => {
+  const cold = [];
+  const { records, usageOptions } = harness({
+    progressive: true,
+    sink: { enqueue: (record) => records.push({ record, sunk: true }) },
+    onColdPreview: (record, meta) => cold.push({ record, meta })
+  });
+  usageOptions.onPreview({ updatedAt: 'preview-time', today: { totalTokens: 2 } }, 'progress');
+  usageOptions.onPreview({ updatedAt: 'preview-time', today: { totalTokens: 2 }, month: { totalTokens: 9 } }, 'progress');
+
+  assert.equal(records.length, 0, 'neither published nor handed to the sink');
+  assert.equal(cold.length, 2);
+  assert.equal(cold[0].record.deviceId, 'device-1');
+  assert.equal(cold[0].record.today.totalTokens, 2);
+  assert.equal(Object.prototype.hasOwnProperty.call(cold[0].record, 'month'), false);
+  assert.equal(cold[1].record.month.totalTokens, 9);
+  assert.equal(cold[1].meta.reason, 'progress');
+
+  usageOptions.onUpdate({
+    updatedAt: 'usage-time',
+    today: { totalTokens: 3 },
+    month: { totalTokens: 4 },
+    allTime: { totalTokens: 5 }
+  }, 'startup');
+  usageOptions.onPreview({ updatedAt: 'preview-time-2', today: { totalTokens: 6 } }, 'progress');
+  // Warm previews publish as records again; the observer is for cold ones.
+  assert.equal(cold.length, 2);
+  assert.equal(records.filter(entry => !entry.sunk).at(-1).record.today.totalTokens, 6);
+});
+
+test('a throwing cold-preview observer is reported, not thrown into the collector', () => {
+  const errors = [];
+  const { usageOptions } = harness({
+    progressive: true,
+    onColdPreview: () => { throw new Error('observer failed'); },
+    onError: (error, reason) => errors.push(reason)
+  });
+  assert.doesNotThrow(() => usageOptions.onPreview({ updatedAt: 'preview-time', today: { totalTokens: 2 } }, 'progress'));
+  assert.deepEqual(errors, ['cold-preview']);
 });
 
 test('a throwing record observer cannot block the ordered sink', () => {

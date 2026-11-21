@@ -17,6 +17,8 @@ Token Monitor requests `GET https://app.devin.ai/api/<organization>/billing/quot
 
 The response supplies Daily and Weekly percentages and reset timestamps. When Devin sets `hide_daily_quota` to `true`, Token Monitor omits Daily while retaining Weekly. `overage_balance` (or `overage_balance_cents`) is shown as the USD Extra usage balance. The quota payload carries no plan field for most accounts, so when `plan_name` is absent the plan label comes from a best-effort `GET /api/billing/subscription` call (same headers, org scoped through `x-cog-org-id`), reading the subscription `slug`. Headless installs can set `DEVIN_BEARER_TOKEN` and `DEVIN_ORGANIZATION`; `TOKEN_MONITOR_DEVIN_BEARER_TOKEN` and `TOKEN_MONITOR_DEVIN_ORGANIZATION` are also accepted.
 
+The widget supports multiple accounts, each with its own token and organization. A migrated stored token keeps its effective organization, including an environment-backed organization. Environment credentials remain a read-only account.
+
 ## Sources
 
 **Devin CLI** stores one `sessions.db` SQLite database. Tokscale reads it under the XDG data root (`$XDG_DATA_HOME/devin/cli/sessions.db`, fallback `~/.local/share/devin/cli/sessions.db`) on every platform, plus `%APPDATA%/devin/cli/sessions.db` and the home-relative `AppData/Roaming/devin/cli/sessions.db` on Windows. Token usage comes from assistant `message_nodes.chat_message` JSON (`metadata.metrics`); `metadata.generation_model` names the model, and the `adaptive` routing value is not a real model id.

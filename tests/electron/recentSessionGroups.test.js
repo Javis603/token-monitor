@@ -475,10 +475,10 @@ test('Dock retains child activity flare history and scopes expansion pruning to 
     }, translate, ''
   );
   const child = group.groupRows.find(row => row.client === 'claude');
-  assert.doesNotMatch(activityApi.stateMark(child, child.key, 'running').className, /pulse/);
+  assert.equal(activityApi.stateMark(child, child.key, 'running').dataset.activityPulse, undefined);
   activityApi.pruneActivity([group]);
   const updated = { ...child, lastUsedAt: new Date(Date.parse(child.lastUsedAt) + 1).toISOString() };
-  assert.match(activityApi.stateMark(updated, child.key, 'running').className, /pulse/);
+  assert.equal(activityApi.stateMark(updated, child.key, 'running').dataset.activityPulse, String(Date.parse(updated.lastUsedAt)));
 
   const expansion = dock.slice(dock.indexOf('const expandedSessionGroups ='), dock.indexOf('function sessionsContainer('));
   const state = { payload: { cell: { id: 'sessions' } } };

@@ -4,7 +4,7 @@
 // local Go ledger in ./goLimits.js and the profile store in ./profiles.js.
 // Reached through providerFetchers() in src/shared/limits/collector.js.
 
-const crypto = require('node:crypto');
+const { openCodeCookieAccountKey } = require('./identity');
 const opencodeGoApi = require('./goApi');
 const opencodeLimits = require('./goLimits');
 const opencodeProfiles = require('./profiles');
@@ -33,14 +33,15 @@ function openCodeWebIdentity(goWeb, zen, cookie) {
       accountKey: hashKey('opencode', `workspace:${workspaceId}`),
       aliases: [
         hashKey('opencode', `go:${workspaceId}`),
-        hashKey('opencode', `zen:${workspaceId}`)
+        hashKey('opencode', `zen:${workspaceId}`),
+        // This response resolves this exact cookie, never another session.
+        openCodeCookieAccountKey(cookie)
       ],
       includeZen
     };
   }
   if (cookie && hasSuccessfulWebProbe) {
-    const cookieHash = crypto.createHash('sha256').update(cookie).digest('hex').slice(0, 12);
-    return { accountKey: hashKey('opencode', `cookie:${cookieHash}`), aliases: [], includeZen };
+    return { accountKey: openCodeCookieAccountKey(cookie), aliases: [], includeZen };
   }
   return { accountKey: '', aliases: [], includeZen };
 }
@@ -81,6 +82,7 @@ function openCodeZenBalanceWindow(balanceUsd) {
   return {
     kind: 'billing',
     metric: 'credits',
+    productId: 'zen',
     label: 'Balance',
     remaining: balanceUsd,
     currency: 'USD',
@@ -219,17 +221,17 @@ async function fetchOpenCodeLimits(options = {}, deps = {}) {
     // truth from opencode.ai — and the finer provenance rides on the
     // provider-level source below.
     if (goApi.status === 'ok' && goApi.windows.length > 0) {
-      windows.push(...goApi.windows.map((window) => ({ ...window, source: 'web' })));
+      windows.push(...goApi.windows.map((window) => ({ ...window, source: 'web', productId: 'go' })));
       status = 'ok'; source = 'api'; accountLabel = 'Go';
       accountKey = hashKey('opencode', goApi.identity || 'go-api');
     } else if (goWeb && goWeb.status === 'ok' && goWeb.windows.length > 0) {
-      windows.push(...goWeb.windows.map((window) => ({ ...window, source: 'web' })));
+      windows.push(...goWeb.windows.map((window) => ({ ...window, source: 'web', productId: 'go' })));
       status = 'ok'; source = 'web'; accountLabel = 'Go';
       accountKey = hashKey('opencode', `go:${goWeb.workspaceId || ''}`);
     } else if (goLocal.status === 'ok' && goApi.entitled !== false && goWeb?.entitled !== false) {
       // An explicit API or Console no-subscription answer outranks old local
       // rows: the estimate cannot know whether their Go plan has since ended.
-      windows.push(...goLocal.windows.map((window) => ({ ...window, source: 'local' })));
+      windows.push(...goLocal.windows.map((window) => ({ ...window, source: 'local', productId: 'go' })));
       status = 'ok'; accountLabel = 'Go';
       accountKey = hashKey('opencode', goLocal.identity || 'go');
     } else if (goLocal.status === 'unavailable' && goApi.entitled !== false && goWeb?.entitled !== false) {
@@ -238,7 +240,7 @@ async function fetchOpenCodeLimits(options = {}, deps = {}) {
 
     if (zen && webIdentity.includeZen) {
       const supplemental = openCodeSupplementalZenWindows(windows, zen)
-        .map((window) => ({ ...window, source: 'web' }));
+        .map((window) => ({ ...window, source: 'web', productId: 'zen' }));
       windows.push(...supplemental);
       status = 'ok';
       // The provider-level source is the compatibility envelope used by Hubs
@@ -366,12 +368,12 @@ async function fetchOpenCodeProfile(name, cookie, fetchGoWeb, fetchZen, nowMs, u
     let source = 'web';
 
     if (goApi && goApi.status === 'ok' && goApi.windows.length > 0) {
-      windows.push(...goApi.windows.map((window) => ({ ...window, source: 'web' })));
+      windows.push(...goApi.windows.map((window) => ({ ...window, source: 'web', productId: 'go' })));
       status = 'ok';
       planLabel = 'Go';
       source = 'api';
     } else if (goWeb && goWeb.status === 'ok' && goWeb.windows.length > 0) {
-      windows.push(...goWeb.windows.map((window) => ({ ...window, source: 'web' })));
+      windows.push(...goWeb.windows.map((window) => ({ ...window, source: 'web', productId: 'go' })));
       status = 'ok';
       planLabel = 'Go';
     }
@@ -379,7 +381,7 @@ async function fetchOpenCodeProfile(name, cookie, fetchGoWeb, fetchZen, nowMs, u
     const webIdentity = openCodeWebIdentity(goWeb, zen, cookie);
     if (zen && webIdentity.includeZen) {
       const supplemental = openCodeSupplementalZenWindows(windows, zen)
-        .map((window) => ({ ...window, source: 'web' }));
+        .map((window) => ({ ...window, source: 'web', productId: 'zen' }));
       windows.push(...supplemental);
       status = 'ok';
       if (!planLabel) planLabel = 'Zen';
@@ -417,8 +419,7 @@ async function fetchOpenCodeProfile(name, cookie, fetchGoWeb, fetchZen, nowMs, u
     // while a cookie is per-browser-session.
     let accountKey = webIdentity.accountKey || keyIdentity;
     if (!accountKey && cookie) {
-      const cookieHash = crypto.createHash('sha256').update(cookie).digest('hex').slice(0, 12);
-      accountKey = hashKey('opencode', `cookie:${cookieHash}`);
+      accountKey = openCodeCookieAccountKey(cookie);
     }
     const boundKeyAlias = accountKey === keyIdentity ? '' : keyIdentity;
 
@@ -454,8 +455,7 @@ async function fetchOpenCodeProfile(name, cookie, fetchGoWeb, fetchZen, nowMs, u
     // account a different accountKey than the one already on the Hub.
     let accountKey = api.apiKey ? hashKey('opencode', opencodeGoApi.goApiIdentity(api.apiKey)) : '';
     if (!accountKey && cookie) {
-      const cookieHash = crypto.createHash('sha256').update(cookie).digest('hex').slice(0, 12);
-      accountKey = hashKey('opencode', `cookie:${cookieHash}`);
+      accountKey = openCodeCookieAccountKey(cookie);
     }
     return normalizeLimitProvider({
       // No webAccountKey: this row probed nothing, so it has no workspace

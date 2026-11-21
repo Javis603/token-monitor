@@ -1,8 +1,14 @@
+// @ts-check
 'use strict';
 
 // Alibaba Cloud limits account wiring. Leaf module: no requires.
-module.exports = {
+module.exports = /** @satisfies {import('../../limits/accounts').AccountDeclaration} */ ({
   id: 'alibaba',
+  accountSlots: true,
+  sources: [
+    { id: 'cli', kind: 'cli', relation: 'alternative', products: ['token-plan-team', 'token-plan-personal'], labelKey: 'settings.limits.sources.cli', descriptionKey: 'settings.limits.sources.cliDescription' },
+    { id: 'web', kind: 'web', relation: 'alternative', products: ['token-plan-team', 'token-plan-personal'], labelKey: 'settings.limits.sources.web', descriptionKey: 'settings.limits.sources.alibabaWebDescription' }
+  ],
   fetch: 'fetchAlibabaLimits',
   fields: [
     {
@@ -64,8 +70,11 @@ module.exports = {
         required: true
       }
     ],
-    manual: [
+    top: [
       { field: 'alibabaVariant' },
+      { note: 'settings.alibaba.cliNote' }
+    ],
+    manual: [
       {
         steps: [
           'settings.alibaba.step1',
@@ -106,4 +115,4 @@ module.exports = {
     { hosts: ['bailian.console.aliyun.com'], pathPrefixes: ['/cn-beijing'] },
     { hosts: ['modelstudio.console.alibabacloud.com'], pathPrefixes: ['/ap-southeast-1'] }
   ]
-};
+});

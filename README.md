@@ -30,7 +30,7 @@
 
 ## What is Token Monitor?
 
-A desktop app that shows live token usage and AI Tool Limits across 54+ AI coding tools — Claude Code, Codex, Cursor, GitHub Copilot, Cherry Studio, and more — with real-time multi-device sync, historical usage trends, and breakdowns by tool, device, model, session, or project. It lives wherever you look: the main window, the MacBook notch, the menu bar or system tray, the edge of the screen, a floating bubble, and native macOS widgets.
+A desktop app that shows live token usage and AI Tool Limits across 56+ AI coding tools — Claude Code, Codex, Cursor, GitHub Copilot, Cherry Studio, and more — with real-time multi-device sync, historical usage trends, and breakdowns by tool, device, model, session, or project. It lives wherever you look: the main window, the MacBook notch, the menu bar or system tray, the edge of the screen, a floating bubble, and native macOS widgets.
 
 ## Supported Tools
 
@@ -79,6 +79,8 @@ Token usage, AI Tool Limits and session details from the AI coding tools and pro
     <img src=".github/assets/tools-icon/mistral.png" width="40" alt="Mistral Vibe" title="Mistral Vibe" />
     <img src=".github/assets/tools-icon/prime-agent.png" width="40" alt="Prime Agent" title="Prime Agent" />
     <img src=".github/assets/tools-icon/jcode.png" width="40" alt="Jcode" title="Jcode" />
+    <img src=".github/assets/tools-icon/junie.png" width="40" alt="Junie" title="Junie" />
+    <img src=".github/assets/tools-icon/opencodereview.png" width="40" alt="OpenCodeReview" title="OpenCodeReview" />
     <img src=".github/assets/tools-icon/typesafe.png" width="40" alt="TypeSafe" title="TypeSafe" />
     <img src=".github/assets/tools-icon/openrouter.png" width="40" alt="OpenRouter" title="OpenRouter" />
     <img src=".github/assets/tools-icon/volcengine.png" width="40" alt="Volcengine" title="Volcengine" />
@@ -160,7 +162,7 @@ Launch the app to start tracking this device locally, with no hub setup required
 
 ### Tracking usage
 
-- **Live token tracking** — Claude Code, Codex, Cursor, GitHub Copilot, Antigravity, OpenCode, and 42+ AI tools, with the UI updating within seconds of each turn (full list in the table above)
+- **Live token tracking** — Claude Code, Codex, Cursor, GitHub Copilot, Antigravity, OpenCode, and 44+ AI tools, with the UI updating within seconds of each turn (full list in the table above)
 - **Live token rate** — an optional live readout of generation speed in `tok/s` or total burn in `tok/min`
 - **Per-session detail** — open a session to see tokens per prompt, expandable to each reply's exact token split and tools used (read on-demand from local transcripts or databases, never synced)
 - **Cache hit statistics** — click any tool or model to expand a detailed breakdown of input tokens (cache hit vs miss), output tokens, and hit-rate percentages
@@ -245,7 +247,7 @@ Token Monitor supports token usage, account-limit checks, and session details se
 | <img src=".github/assets/tools-icon/workbuddy.png" width="28" alt="WorkBuddy" /> | WorkBuddy | `~/.workbuddy/projects/`, `~/.workbuddy/workbuddy.db` | ✅ | ✅ | ✅ |
 | <img src=".github/assets/tools-icon/proma.png" width="28" alt="Proma" /> | Proma | `~/.proma/` (`agent-sessions/`, `sdk-config/sessions/`, `sdk-config/projects/`), `~/.proma-dev/` | ✅ | — | — |
 | <img src=".github/assets/tools-icon/catpaw.png" width="28" alt="CatPaw" /> | CatPaw | `<platform-app-data>/` (`catpaw-moon/`, `catpaw-overseas/`, `catpaw-memory-*.db`) | ✅ | — | — |
-| <img src=".github/assets/tools-icon/qoder.png" width="28" alt="Qoder" /> | Qoder | `~/.qoder-cn/projects/**/*.jsonl`, legacy `<platform-app-data>/QoderCN/SharedClientCache/cache/db/local.db` (CN only) | ✅ | ✅ | — |
+| <img src=".github/assets/tools-icon/qoder.png" width="28" alt="Qoder" /> | Qoder | `~/.qoder/projects/**/*.jsonl` (global), `~/.qoder-cn/projects/**/*.jsonl` (CN) | ✅ | ✅ | — |
 | <img src=".github/assets/tools-icon/reasonix.png" width="28" alt="Reasonix" /> | Reasonix | `~/.reasonix/` (`stats/`, `sessions/`, `projects/*/sessions/`) | ✅ | — | — |
 | <img src=".github/assets/tools-icon/deepseek.png" width="28" alt="DeepSeek" /> | DeepSeek / DeepSeek Harness | `~/.dsh/sessions/` (`session.jsonl`, `session.jsonl.zstd`) | ✅ | ✅ | ✅ |
 | <img src=".github/assets/tools-icon/cherrystudio.png" width="28" alt="Cherry Studio" /> | Cherry Studio | `<platform-app-data>/CherryStudio/` (`Data/Agents/.claude/projects/` V2, `.claude/projects/` legacy) | ✅ | — | — |
@@ -257,6 +259,8 @@ Token Monitor supports token usage, account-limit checks, and session details se
 | <img src=".github/assets/tools-icon/mistral.png" width="28" alt="Mistral" /> | Mistral Vibe | `$VIBE_HOME/logs/session/` (`~/.vibe/logs/session/`); Mistral Admin cookie (Included API / Vibe monthly allowance and credit balance) | ✅ | ✅ | — |
 | <img src=".github/assets/tools-icon/prime-agent.png" width="28" alt="Prime Agent" /> | Prime Agent | `~/.prime/agent/` (`sessions/`, `session-artifacts/`) | ✅ | — | — |
 | <img src=".github/assets/tools-icon/jcode.png" width="28" alt="Jcode" /> | Jcode | `~/.jcode/sessions/` | ✅ | — | — |
+| <img src=".github/assets/tools-icon/junie.png" width="28" alt="Junie" /> | Junie | `~/.junie/sessions/**/events.jsonl` | ✅ | — | — |
+| <img src=".github/assets/tools-icon/opencodereview.png" width="28" alt="OpenCodeReview" /> | OpenCodeReview | `~/.opencodereview/sessions/**/*.jsonl` | ✅ | — | — |
 | <img src=".github/assets/tools-icon/typesafe.png" width="28" alt="TypeSafe" /> | TypeSafe | TypeSafe Console Cookie (billing balance and estimated token spend via usage data) | — | ✅ | — |
 | <img src=".github/assets/tools-icon/openrouter.png" width="28" alt="OpenRouter" /> | OpenRouter | OpenRouter API key (usage/key limit; balance when credits access is authorized, documented for Management keys) | — | ✅ | — |
 | <img src=".github/assets/tools-icon/volcengine.png" width="28" alt="Volcengine" /> | Volcengine | Ark API key or Volcengine AK/SK (Ark Coding Plan & Agent Plan quota via Volcengine API) | — | ✅ | — |
@@ -293,7 +297,7 @@ Token Monitor supports token usage, account-limit checks, and session details se
 - The Cursor cache comes from Cursor's account-level usage export, so it covers usage from Cursor IDE, Cursor CLI, and Grok Bot. Token Monitor automatically detects accounts signed in through the Cursor desktop app and also supports adding accounts manually in Settings. The cache re-syncs automatically when stale, but newly finished sessions can take a few minutes to reach Cursor's dashboard, so recent usage may still appear with a delay.
 
 - Custom maps numeric JSON fields from one GET balance endpoint; OpenAI or Anthropic compatibility alone is not enough.
-- Qoder CN is off by default; enable it in Settings → tools. Current sessions are JSONL under `~/.qoder-cn/projects` (`TOKEN_MONITOR_QODER_CN_PROJECTS_PATH`, then `QODERCN_CONFIG_DIR/projects`); older builds used a SQLite database, overridable with `TOKEN_MONITOR_QODER_CN_DB_PATH`. An unreadable source keeps its last complete read. Legacy database sessions record only a project name, so they appear without a project. Plan-billed JSONL rows that report credits but no token counts are omitted from token totals; those credits stay in AI Tool Limits, and BYOK rows with measured tokens are counted. See [Qoder source notes](docs/providers/qodercn.md).
+- Qoder: the Qoder group in Settings → tools tracks the international and CN editions independently. Fresh installations track both; existing selections are preserved. The tool usage list combines them unless **Show versions separately** is on. International transcripts are read from `QODER_CONFIG_DIR/projects` (default `~/.qoder/projects`); CN transcripts from `TOKEN_MONITOR_QODER_CN_PROJECTS_PATH`, then `QODERCN_CONFIG_DIR/projects` (default `~/.qoder-cn/projects`). Only token counts recorded in transcripts are counted: managed-model rows that record credits without tokens are left out, and those credits stay in AI Tool Limits. Qoder CN CLI 1.1.62 has been reported to record future counters with `QODERCN_EXPOSE_TOKEN_USAGE=1`; existing records are not backfilled. Dynamic model slots such as `dfmodel` are shown as recorded. Older Qoder CN releases that stored usage only in SQLite are no longer collected; existing Token Monitor history files are kept. See [Qoder source notes](docs/providers/qodercn.md).
 </details>
 
 ### Additional Feature Support
@@ -302,7 +306,7 @@ Token Monitor supports token usage, account-limit checks, and session details se
 |---------|-------------------------|------------|
 | Session titles | Claude Code, Codex, OpenCode, Cursor, Antigravity, Cline CLI, Factory Droid, Kimi CLI, Grok Build, Pi, Oh My Pi, OmO Native, MiMo, ZCode, CodeBuddy, WorkBuddy, Reasonix, DeepSeek Harness, Cherry Studio, Devin CLI, fx, MiniMax Code | — |
 | Per-prompt/reply usage and tool calls | Claude Code, Codex, OpenCode, Pi, Oh My Pi, OmO Native, CodeBuddy, WorkBuddy, Reasonix, DeepSeek Harness | Details are read locally and are not synced. |
-| Context usage/remaining space | Claude Code, Codex, DeepSeek Harness | Claude Code's context limit is estimated from the model. |
+| Context usage/remaining space | Claude Code, Codex, DeepSeek Harness, Grok Build, WorkBuddy, CatPaw | Claude Code's context limit is estimated from the model. |
 | Cache usage/session cache hit rate | Sources exposing cache fields, including Claude Code, Codex, OpenCode, Cursor, Kimi, Pi, Oh My Pi, OmO Native, DeepSeek Harness | Hit rate is shown when cache usage data is available. |
 | Estimated cache time remaining | Claude Code | 5 minutes or 1 hour, based on the recorded cache tier. |
 | Output speed/token consumption rate | Claude Code, Codex, OpenCode, Antigravity, Kimi, GitHub Copilot, Pi, Oh My Pi, OmO Native, Kilo CLI, MiMo Code/MiMo Desktop, Muse Code, ZCode CLI, Kiro, DeepSeek Harness, Devin CLI | Output speed in `tok/s`, total token consumption in `tok/min`; timing can include waiting. |
@@ -482,7 +486,7 @@ Token Monitor processes usage logs locally and sends no analytics or telemetry t
 
 ## Contributing
 
-Issues and PRs are welcome. Project conventions, architecture notes, and the command reference live in [AGENTS.md](AGENTS.md) — written for coding agents, but it doubles as the contributor guide.
+Issues and PRs are welcome. Start with [CONTRIBUTING.md](CONTRIBUTING.md); project conventions, architecture notes, and the command reference live in [AGENTS.md](AGENTS.md).
 
 ## Acknowledgments
 

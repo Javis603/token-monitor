@@ -10,7 +10,6 @@ const { claudeSessionRoots } = require('./providers/claude/paths');
 const { hermesProfileWatchDirs, resolveHermesHome } = require('./providers/hermes/profiles');
 const { kimiCodeSessionsHome, kimiWorkSessionsRoots } = require('./providers/kimi/sessionMetadata');
 const { catpawDataSources, nativeWindowsFolders } = require('./providers/catpaw/paths');
-const { qoderCnDataPaths } = require('./providers/qodercn/paths');
 const { primeAgentSessionRoots } = require('./providers/prime-agent/paths');
 const { MCODE_SOURCE_CHECK_ID, mcodeSessionDirs } = require('./providers/mcode/paths');
 const { resolveReasonixStatsDir, REASONIX_SOURCE_CHECK_ID } = require('./providers/reasonix/paths');
@@ -240,6 +239,8 @@ function clientSourceRoots(clientsCsv, options = {}) {
     add('prime-agent', ['prime-agent-sessions', sessions], ['prime-agent-artifacts', artifacts]);
   }
   const xdgHome = xdgDataHome(tokscaleHome, env);
+  add('junie', ...simpleHostSourceRoots('junie', tokscaleHome));
+  add('opencodereview', ...simpleHostSourceRoots('opencodereview', tokscaleHome));
   const gooseFiles = enabled.has('goose')
     ? gooseSessionFiles({ homeDir: home, platform, env, windowsFolders: options.windowsFolders }) : [];
   add('goose', ...gooseFiles.map((file) => ['goose-db', path.dirname(file), file]));
@@ -424,14 +425,11 @@ function clientSourceRoots(clientsCsv, options = {}) {
       ...catpaw.dbPaths.map((file) => ['catpaw-db', path.dirname(file), file])
     );
   }
-  // Qoder CN — legacy SQLite DB under the platform Application Support dir,
-  // or the JSONL transcript tree used by current builds.
-  const qoderCnPaths = qoderCnDataPaths({ homeDir: home, platform, env });
-  add(
-    'qodercn',
-    ...qoderCnPaths.dbPaths.map((dbPath) => ['qodercn-db', path.dirname(dbPath), dbPath]),
-    ['qodercn-projects', qoderCnPaths.projectsDir]
-  );
+  add('qoder', ['qoder-projects', path.join(nonBlankEnvPath('QODER_CONFIG_DIR', path.join(tokscaleHome, '.qoder'), env), 'projects')]);
+  const qoderCnConfig = String(env.QODERCN_CONFIG_DIR || '').trim();
+  const qoderCnProjects = String(env.TOKEN_MONITOR_QODER_CN_PROJECTS_PATH || '').trim();
+  add('qodercn', ['qodercn-projects', qoderCnProjects ? path.resolve(qoderCnProjects)
+    : qoderCnConfig ? path.resolve(qoderCnConfig, 'projects') : path.join(tokscaleHome, '.qoder-cn', 'projects')]);
   // MiniMax Code — upstream reads only captured `tokscale headless mcode exec`
   // streams; the fork adds the CLI and desktop runtime store from tokscale's
   // effective home (providers/mcode/paths.js). Only the default `.minimax`
@@ -455,9 +453,9 @@ function clientSourceRoots(clientsCsv, options = {}) {
   // both CLI and IDE, the Kiro IDE globalStorage root (native macOS / Linux /
   // Windows), and the kiro-cli sqlite dir. None falls back to a host-absolute
   // path under --home (unlike Zed), so every root remains a valid source and
-  // presence signal. The globalStorage kind is deliberately interval-only in
-  // clientWatchCandidates() because real trees can contain tens of thousands of
-  // files; the sessions and sqlite roots retain seconds-level refresh.
+  // presence signal. GlobalStorage stays interval-only: the scanner still
+  // traverses its checkpoint/index trees on every scan. The separate sessions
+  // and SQLite roots retain live updates, with session snapshots unwatched.
   //
   // Note the deliberate Kiro-vs-kiro casing asymmetry below (do not "fix" it to
   // list both cases everywhere): tokscale scans both `Kiro` and `kiro` cased

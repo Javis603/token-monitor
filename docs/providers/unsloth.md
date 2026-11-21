@@ -14,7 +14,7 @@ Unsloth is a regular Tokscale client (`unsloth`), enabled by default on new inst
 
 Tokscale 4.15.1 reads `~/.unsloth/studio/studio.db`, or `studio.db` directly under `UNSLOTH_STUDIO_HOME` when that override is nonblank. Token Monitor checks for the database itself, not merely the Studio installation directory.
 
-The watcher observes only `studio.db`, `studio.db-wal`, and `studio.db-shm` directly under that directory. Watching the parent allows SQLite sidecars created after startup to trigger a targeted refresh, without recursively watching model weights, environments, or logs. A missing parent is discovered on a later full collection.
+Changes to `studio.db` and `studio.db-wal` directly under that directory trigger a targeted refresh. The collector ignores `studio.db-shm` events because its own read-only scans can rewrite that wal-index. Watching the parent allows a database or WAL created after startup to be detected, without recursively watching model weights, environments, or logs. A missing parent is discovered on a later full collection.
 
 The upstream parser reads scalar inference metadata from Studio chat messages and local API usage events. It does not select message content, prompts, or response previews. Training tokens and native session-detail views are outside this integration.
 

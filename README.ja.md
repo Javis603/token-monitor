@@ -30,7 +30,7 @@
 
 ## Token Monitor とは
 
-Claude Code、Codex、Cursor、GitHub Copilot、Cherry Studio など 54+ 種類の AI コーディングツールのリアルタイムトークン使用量と AI ツール制限を表示するデスクトップアプリです。複数デバイス間のリアルタイム同期、使用履歴トレンド、ツール・デバイス・モデル・セッション・プロジェクト別の内訳表示に対応しています。メインウィンドウ、MacBook のノッチ、メニューバーやシステムトレイ、画面の端、フローティングバブル、ネイティブ macOS ウィジェットなど、目に入るあらゆる場所で確認できます。
+Claude Code、Codex、Cursor、GitHub Copilot、Cherry Studio など 56+ 種類の AI コーディングツールのリアルタイムトークン使用量と AI ツール制限を表示するデスクトップアプリです。複数デバイス間のリアルタイム同期、使用履歴トレンド、ツール・デバイス・モデル・セッション・プロジェクト別の内訳表示に対応しています。メインウィンドウ、MacBook のノッチ、メニューバーやシステムトレイ、画面の端、フローティングバブル、ネイティブ macOS ウィジェットなど、目に入るあらゆる場所で確認できます。
 
 ## 対応ツール
 
@@ -79,6 +79,8 @@ Claude Code、Codex、Cursor、GitHub Copilot、Cherry Studio など 54+ 種類�
     <img src=".github/assets/tools-icon/mistral.png" width="40" alt="Mistral Vibe" title="Mistral Vibe" />
     <img src=".github/assets/tools-icon/prime-agent.png" width="40" alt="Prime Agent" title="Prime Agent" />
     <img src=".github/assets/tools-icon/jcode.png" width="40" alt="Jcode" title="Jcode" />
+    <img src=".github/assets/tools-icon/junie.png" width="40" alt="Junie" title="Junie" />
+    <img src=".github/assets/tools-icon/opencodereview.png" width="40" alt="OpenCodeReview" title="OpenCodeReview" />
     <img src=".github/assets/tools-icon/typesafe.png" width="40" alt="TypeSafe" title="TypeSafe" />
     <img src=".github/assets/tools-icon/openrouter.png" width="40" alt="OpenRouter" title="OpenRouter" />
     <img src=".github/assets/tools-icon/volcengine.png" width="40" alt="Volcengine" title="Volcengine" />
@@ -160,7 +162,7 @@ brew install --cask token-monitor
 
 ### 使用量の追跡
 
-- **リアルタイムトークン追跡** — Claude Code、Codex、Cursor、GitHub Copilot、Antigravity、OpenCode など 42+ 種類の AI ツール、各ターンから数秒以内に UI 更新（全リストは上の表を参照）
+- **リアルタイムトークン追跡** — Claude Code、Codex、Cursor、GitHub Copilot、Antigravity、OpenCode など 44+ 種類の AI ツール、各ターンから数秒以内に UI 更新（全リストは上の表を参照）
 - **リアルタイムトークンレート** — 生成速度を `tok/s`、総消費を `tok/min` で表示する任意のライブ表示
 - **セッション別詳細** — セッションを開くとプロンプトごとのトークン、各応答のトークン分割・使用ツールまで展開（ローカル transcript/DB を必要時のみ読み込み、同期しない）
 - **キャッシュヒット統計** — ツール・モデルをクリックすると入力トークン（キャッシュ hit/miss）、出力トークン、ヒット率の詳細
@@ -245,7 +247,7 @@ Token Monitor は **トークン使用量**、**アカウント制限**、**セ�
 | <img src=".github/assets/tools-icon/workbuddy.png" width="28" alt="WorkBuddy" /> | WorkBuddy | `~/.workbuddy/projects/`, `~/.workbuddy/workbuddy.db` | ✅ | ✅ | ✅ |
 | <img src=".github/assets/tools-icon/proma.png" width="28" alt="Proma" /> | Proma | `~/.proma/` (`agent-sessions/`, `sdk-config/sessions/`, `sdk-config/projects/`), `~/.proma-dev/` | ✅ | — | — |
 | <img src=".github/assets/tools-icon/catpaw.png" width="28" alt="CatPaw" /> | CatPaw | `<platform-app-data>/` (`catpaw-moon/`, `catpaw-overseas/`, `catpaw-memory-*.db`) | ✅ | — | — |
-| <img src=".github/assets/tools-icon/qoder.png" width="28" alt="Qoder" /> | Qoder | `~/.qoder-cn/projects/**/*.jsonl`, legacy `<platform-app-data>/QoderCN/SharedClientCache/cache/db/local.db`（中国版のみ） | ✅ | ✅ | — |
+| <img src=".github/assets/tools-icon/qoder.png" width="28" alt="Qoder" /> | Qoder | `~/.qoder/projects/**/*.jsonl` (global), `~/.qoder-cn/projects/**/*.jsonl` (CN) | ✅ | ✅ | — |
 | <img src=".github/assets/tools-icon/reasonix.png" width="28" alt="Reasonix" /> | Reasonix | `~/.reasonix/`（`stats/`、`sessions/`、`projects/*/sessions/`） | ✅ | — | — |
 | <img src=".github/assets/tools-icon/deepseek.png" width="28" alt="DeepSeek" /> | DeepSeek / DeepSeek Harness | `~/.dsh/sessions/`（`session.jsonl`、`session.jsonl.zstd`） | ✅ | ✅ | ✅ |
 | <img src=".github/assets/tools-icon/cherrystudio.png" width="28" alt="Cherry Studio" /> | Cherry Studio | `<platform-app-data>/CherryStudio/`（`Data/Agents/.claude/projects/` V2、`.claude/projects/` legacy） | ✅ | — | — |
@@ -257,6 +259,8 @@ Token Monitor は **トークン使用量**、**アカウント制限**、**セ�
 | <img src=".github/assets/tools-icon/mistral.png" width="28" alt="Mistral" /> | Mistral Vibe | `$VIBE_HOME/logs/session/` (`~/.vibe/logs/session/`); Mistral Admin Cookie（Included API／Vibe 月間割当とクレジット残高） | ✅ | ✅ | — |
 | <img src=".github/assets/tools-icon/prime-agent.png" width="28" alt="Prime Agent" /> | Prime Agent | `~/.prime/agent/` (`sessions/`, `session-artifacts/`) | ✅ | — | — |
 | <img src=".github/assets/tools-icon/jcode.png" width="28" alt="Jcode" /> | Jcode | `~/.jcode/sessions/` | ✅ | — | — |
+| <img src=".github/assets/tools-icon/junie.png" width="28" alt="Junie" /> | Junie | `~/.junie/sessions/**/events.jsonl` | ✅ | — | — |
+| <img src=".github/assets/tools-icon/opencodereview.png" width="28" alt="OpenCodeReview" /> | OpenCodeReview | `~/.opencodereview/sessions/**/*.jsonl` | ✅ | — | — |
 | <img src=".github/assets/tools-icon/typesafe.png" width="28" alt="TypeSafe" /> | TypeSafe | TypeSafe Console の Cookie（請求残高とトークン使用量からの推定支出） | — | ✅ | — |
 | <img src=".github/assets/tools-icon/openrouter.png" width="28" alt="OpenRouter" /> | OpenRouter | OpenRouter API キー（使用量／キー上限。creditsアクセス許可時は残高も表示。公式文書ではManagementキーを指定） | — | ✅ | — |
 | <img src=".github/assets/tools-icon/volcengine.png" width="28" alt="Volcengine" /> | Volcengine | Ark API key または Volcengine AK/SK（Volcengine API で Ark Coding Plan / Agent Plan クォータ取得） | — | ✅ | — |
@@ -294,11 +298,7 @@ Token Monitor は **トークン使用量**、**アカウント制限**、**セ�
 
 - Custom は1つの GET 残高エンドポイントから数値 JSON フィールドをマッピングします。OpenAI または Anthropic API 互換だけでは不十分です。
 
-#### Qoder CN（ローカルアダプター）
-
-Qoder CN のトークン使用量は API ではなくアプリのローカルデータから読み取ります。Settings → tools で有効化します（オプトイン、デフォルト無効）。現行版は Qoder 設定ディレクトリの `projects` JSONL（通常 `~/.qoder-cn/projects`）、旧版は SQLite を使用し、Token Monitor 同梱の tokscale が両方を読み取ります。JSONL パスの優先順位は `TOKEN_MONITOR_QODER_CN_PROJECTS_PATH`、`QODERCN_CONFIG_DIR/projects`、既定値です。旧データベースは `TOKEN_MONITOR_QODER_CN_DB_PATH` で上書きできます。[Qoder のデータソース](docs/providers/qodercn.md)も参照してください。
-
-これは高度なローカル統合ですが、どちらの形式にも追加ランタイムは不要です。読み取れないソースは、最後に完全に読み取れたデータを保持します。旧データベースのセッションはパスではなくプロジェクト名だけを記録するため、プロジェクトなしで表示されます。実測トークン欄がある JSONL 行だけを集計します。現行のファーストパーティープラン行は credits と context 比率だけの場合があり、信頼できるセッション単位の context window がないためトークンを推測しません。Credits は AI Tool Limits に表示され、実測トークンを持つ BYOK／カスタムモデルは通常どおり集計されます。
+- Qoder：「設定 → ツール」の Qoder グループで、国際版と CN を個別に追跡できます。新規インストールでは両方を追跡し、既存の選択は維持されます。ツール使用量は既定で合算され、「バージョン別に表示」をオンにすると 2 行に分かれます。国際版は `QODER_CONFIG_DIR/projects`（既定 `~/.qoder/projects`）を、CN は `TOKEN_MONITOR_QODER_CN_PROJECTS_PATH`、`QODERCN_CONFIG_DIR/projects`（既定 `~/.qoder-cn/projects`）の順に読み取ります。transcript に実際に記録されたトークンだけを集計します。マネージドモデルで credits のみ記録されトークンがない行は含まれず、その credits は AI ツール制限で確認できます。Qoder CN CLI 1.1.62 では `QODERCN_EXPOSE_TOKEN_USAGE=1` を設定すると以後のトークンが記録されたという報告があります。既存の記録は補完されません。`dfmodel` などの動的モデルコードは記録どおりに表示されます。使用量を SQLite にのみ保存する旧版 Qoder CN は収集対象外で、Token Monitor の既存の履歴ファイルは保持されます。[Qoder のデータソース](docs/providers/qodercn.md)も参照してください。
 </details>
 
 ### 追加機能の対応状況
@@ -307,7 +307,7 @@ Qoder CN のトークン使用量は API ではなくアプリのローカルデ
 |---------|-------------------------|------------|
 | セッションタイトル | Claude Code, Codex, OpenCode, Cursor, Antigravity, Cline CLI, Factory Droid, Kimi CLI, Grok Build, Pi, Oh My Pi, OmO Native, MiMo, ZCode, CodeBuddy, WorkBuddy, Reasonix, DeepSeek Harness, Cherry Studio, Devin CLI, fx, MiniMax Code | — |
 | プロンプト／応答ごとの使用量とツール呼び出し | Claude Code, Codex, OpenCode, Pi, Oh My Pi, OmO Native, CodeBuddy, WorkBuddy, Reasonix, DeepSeek Harness | 詳細はローカルで読み取り、同期されません。 |
-| コンテキスト使用量／残り容量 | Claude Code, Codex, DeepSeek Harness | Claude Code のコンテキスト上限はモデルから推定します。 |
+| コンテキスト使用量／残り容量 | Claude Code, Codex, DeepSeek Harness, Grok Build, WorkBuddy, CatPaw | Claude Code のコンテキスト上限はモデルから推定します。 |
 | キャッシュ使用量／セッションのキャッシュヒット率 | キャッシュ項目を提供するデータソース。例： Claude Code, Codex, OpenCode, Cursor, Kimi, Pi, Oh My Pi, OmO Native, DeepSeek Harness | キャッシュ使用量のデータがある場合にヒット率を表示します。 |
 | キャッシュ残存時間の推定 | Claude Code | 記録されたキャッシュの種類に基づき、5 分または 1 時間と推定します。 |
 | 出力速度／トークン消費速度 | Claude Code, Codex, OpenCode, Antigravity, Kimi, GitHub Copilot, Pi, Oh My Pi, OmO Native, Kilo CLI, MiMo Code/MiMo Desktop, Muse Code, ZCode CLI, Kiro, DeepSeek Harness, Devin CLI | 出力速度は `tok/s`、総トークン消費速度は `tok/min`。計測時間には待機を含む場合があります。 |
@@ -485,7 +485,7 @@ Token Monitor は使用ログをローカルで処理し、プロジェクトの
 
 ## コントリビュート
 
-Issue や PR を歓迎します。プロジェクトの規約、アーキテクチャノート、コマンドリファレンスは [AGENTS.md](AGENTS.md) にあります — コーディングエージェント向けに書かれていますが、コントリビューターガイドとしても使えます。
+Issue や PR を歓迎します。まず [CONTRIBUTING.md](CONTRIBUTING.md) をお読みください。プロジェクトの規約、アーキテクチャノート、コマンドリファレンスは [AGENTS.md](AGENTS.md) にあります。
 
 ## 謝辞
 

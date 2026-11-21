@@ -1844,7 +1844,7 @@ test('balance without tranches omits the field entirely', () => {
   assert.equal('tranches' in provider.balance, false);
 });
 
-test('public limits drop per-grant balance tranches but keep the amount', () => {
+test('public limits drop per-grant balance tranches and console tool fees but keep the amount', () => {
   const summary = publicLimits({
     providers: [{
       provider: 'claude',
@@ -1856,7 +1856,9 @@ test('public limits drop per-grant balance tranches but keep the amount', () => 
         amount: 113.44,
         currency: 'USD',
         quotaGroup: 'default',
-        tranches: [{ amount: 13.43, currency: 'USD', expiresAt: '2026-08-09T00:00:00Z' }]
+        tranches: [{ amount: 13.43, currency: 'USD', expiresAt: '2026-08-09T00:00:00Z' }],
+        searchSpend: 0.1,
+        fetchSpend: 0.2
       }
     }]
   });
@@ -1865,6 +1867,8 @@ test('public limits drop per-grant balance tranches but keep the amount', () => 
   assert.equal(balance.currency, 'USD');
   assert.equal(Object.hasOwn(balance, 'tranches'), false, 'per-grant expiry detail must stay private');
   assert.equal(Object.hasOwn(balance, 'quotaGroup'), false);
+  assert.equal(Object.hasOwn(balance, 'searchSpend'), false);
+  assert.equal(Object.hasOwn(balance, 'fetchSpend'), false);
 });
 
 function claudeDeviceRecord({ deviceId, source, agoMs, balance, nowMs }) {

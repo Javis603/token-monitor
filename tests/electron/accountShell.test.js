@@ -16,7 +16,8 @@ function node() {
       toggle: (name, enabled) => enabled ? classes.add(name) : classes.delete(name)
     },
     setAttribute: (key, value) => { attributes[key] = value; },
-    getAttribute: (key) => attributes[key]
+    getAttribute: (key) => attributes[key],
+    contains: () => false
   };
 }
 
@@ -43,10 +44,23 @@ test('expansion updates accessibility and follows the provider row', () => {
   setExpanded({ toggle, details, group, expanded: true, onChange: (open) => changes.push(open) });
   assert.equal(toggle.getAttribute('aria-expanded'), 'true');
   assert.equal(details.classList.contains('hidden'), false);
+  assert.equal(details.inert, false);
   assert.equal(group.classList.contains('expanded'), true);
   setExpanded({ toggle, details, group, expanded: false, onChange: (open) => changes.push(open) });
   assert.equal(details.classList.contains('hidden'), true);
+  assert.equal(details.inert, true);
   assert.deepEqual(changes, [true, false]);
+});
+
+test('error text renders as a warning tone without the error color', () => {
+  const error = node();
+  render({ error, errorText: 'Saved, but period spend is missing', errorTone: 'warning' });
+  assert.equal(error.classList.contains('hidden'), false);
+  assert.equal(error.classList.contains('warning'), true);
+  assert.equal(error.classList.contains('error'), false);
+  render({ error, errorText: 'Rejected' });
+  assert.equal(error.classList.contains('warning'), false);
+  assert.equal(error.classList.contains('error'), true);
 });
 
 test('profile saves prevent same-provider reentry and restore controls on rejection', async () => {

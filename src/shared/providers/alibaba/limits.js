@@ -1,5 +1,6 @@
 'use strict';
 
+
 // Alibaba Cloud Token Plan limits.
 //
 // One provider, four console variants — the mainland Bailian console and the
@@ -14,7 +15,7 @@
 //   cn-personal    Bailian       Personal  rolling-window API     -> reported windows
 //   intl-personal  Model Studio  Personal  rolling-window API     -> reported windows
 //
-// Auth is a console Cookie header, not an API token. The Personal variants read
+// Auth tries a configured Bailian CLI before a console Cookie header. The Personal variants read
 // their quota from a *different host* than the dashboard, so a Personal cookie
 // has to be copied from the quota request rather than from the dashboard page;
 // the settings panel says so in its numbered steps.
@@ -30,10 +31,14 @@
 const crypto = require('node:crypto');
 
 const { normalizeLimitProvider } = require('../../limits/core');
+const { alibabaAccountSlotsForScope } = require('./runtimeIdentity');
 const { hashKey } = require('../../hashKey');
 const { runWithProbeDeadline } = require('../../probeDeadline');
 const { throwIfAborted } = require('../../abortSignal');
 const { BROWSER_USER_AGENT } = require('../../browserUserAgent');
+const { fetchBailianCLI, validatePersonalCLIUsage } = require('./cli');
+const { accountIdentityDescriptor, rowMatchesScope } = require('../../limits/accountScope');
+const { providerStatusFromError } = require('../../limits/providerHelpers');
 
 const ALIBABA_FETCH_TIMEOUT_MS = 20_000;
 const ALIBABA_SEC_TOKEN_TIMEOUT_MS = 10_000;
@@ -542,6 +547,7 @@ function teamWindows(summary) {
   // and the renderer supplies "Monthly" for a billing window. Naming the product
   // here instead would both break that convention and repeat the account label.
   return [{
+    productId: 'token-plan-team',
     kind: 'billing',
     used: summary.used,
     limit: summary.total,
@@ -623,6 +629,7 @@ function personalWindows(usage) {
   const windows = [];
   if (usage.fiveHourPercent !== null) {
     windows.push({
+      productId: 'token-plan-personal',
       kind: 'session',
       label: '5-hour',
       usedPercent: usage.fiveHourPercent,
@@ -633,6 +640,7 @@ function personalWindows(usage) {
   }
   if (usage.weeklyPercent !== null) {
     windows.push({
+      productId: 'token-plan-personal',
       kind: 'weekly',
       label: 'Weekly',
       usedPercent: usage.weeklyPercent,
@@ -646,6 +654,7 @@ function personalWindows(usage) {
     // as the row's single window — the same 'billing' kind the Team pool uses,
     // which every surface already labels "Monthly".
     windows.push({
+      productId: 'token-plan-personal',
       kind: 'billing',
       usedPercent: usage.monthlyPercent,
       limit: usage.monthlyTotal,
@@ -915,14 +924,66 @@ function statusRow(status, updatedAt, variantId, personal) {
   });
 }
 
+function selectedAlibabaResult(provider, options, deps) {
+  if (deps.probe) return [provider];
+  // One selected login: a successful source switch retires the previous row,
+  // including CLI readings whose only local identity was their display label.
+  // Never copy that label into the cross-device account key.
+  const identity = accountIdentityDescriptor(provider)?.part;
+  const removals = (options.previousLimits?.providers || [])
+    .filter(row => row.provider === 'alibaba' && (!row.region || row.region === provider.region)
+      && accountIdentityDescriptor(row)?.part !== identity)
+    .map(row => ({ provider: 'alibaba', accountKey: row.accountKey,
+      accountName: row.accountName, accountEmail: row.accountEmail, accountLabel: row.accountLabel, region: row.region,
+      removed: true, replacementAccount: { accountKey: provider.accountKey, accountLabel: provider.accountLabel, region: provider.region } }));
+  return [provider, ...removals];
+}
+
 async function fetchAlibabaLimits(options = {}, deps = {}) {
   const env = deps.env || process.env;
   const updatedAt = new Date((deps.now || Date.now)()).toISOString();
   const variantId = alibabaVariant(options, env);
   const variant = alibabaVariantConfig(variantId);
-  const cookieHeader = alibabaCookie(env, options);
+  // `alibabaLane` is private to fetchAccountSlotSnapshot, which reads the CLI and
+  // the saved Cookies as separate lanes; every other caller tries CLI first.
+  const source = deps.accountSlotSaved ? 'web' : options.alibabaLane || 'auto';
+  const cookieHeader = source === 'cli' ? '' : alibabaCookie(env, options);
 
-  if (!cookieHeader) return [statusRow('notConfigured', updatedAt, variantId, variant.personal)];
+  // A save-time probe validates the submitted cookie alone. An unrelated CLI
+  // login must never make a bad credential look valid.
+  if (!deps.probe && source !== 'web' && !deps.accountSlotSaved) {
+    throwIfAborted(deps.signal);
+    try {
+      const result = await fetchBailianCLI(variant, deps);
+      if (result) {
+        let summary;
+        if (variant.personal) {
+          const payload = parseConsoleBody(result.usageText);
+          validatePersonalCLIUsage(payload);
+          summary = parsePersonalUsage(payload, null, null);
+        } else summary = result.summary;
+        const provider = normalizeLimitProvider({
+          provider: 'alibaba', source: 'cli', status: 'ok', updatedAt,
+          accountKey: summary.uid ? hashKey('alibaba', summary.uid) : '',
+          accountLabel: summary.planName, planLabel: summary.planName,
+          windows: variant.personal ? personalWindows(summary) : teamWindows(summary),
+          region: variantId,
+          ...(variant.personal ? { workspaceKind: 'personal' } : {})
+        });
+        return selectedAlibabaResult(provider, options, deps);
+      }
+    } catch (error) {
+      if (deps.signal?.aborted || error?.name === 'AbortError') throw error;
+      deps.noteLimitFailure?.(error, { source: 'cli' });
+      if (!cookieHeader) return [normalizeLimitProvider({
+        provider: 'alibaba', source: 'cli', status: providerStatusFromError(error), updatedAt,
+        windows: [], region: variantId,
+        ...(variant.personal ? { workspaceKind: 'personal' } : {})
+      })];
+    }
+  }
+
+  if (!cookieHeader) return [{ ...statusRow('notConfigured', updatedAt, variantId, variant.personal), ...(source === 'cli' ? { source: 'cli' } : {}) }];
 
   try {
     throwIfAborted(deps.signal);
@@ -930,7 +991,7 @@ async function fetchAlibabaLimits(options = {}, deps = {}) {
 
     if (variant.personal) {
       const usage = await fetchPersonalUsage(cookieHeader, variant, secToken, deps);
-      return [normalizeLimitProvider({
+      return selectedAlibabaResult(normalizeLimitProvider({
         provider: 'alibaba',
         accountKey: usage.uid ? hashKey('alibaba', usage.uid) : '',
         accountLabel: usage.planName,
@@ -941,12 +1002,12 @@ async function fetchAlibabaLimits(options = {}, deps = {}) {
         windows: personalWindows(usage),
         region: variantId,
         workspaceKind: 'personal'
-      })];
+      }), options, deps);
     }
 
     const payload = await fetchTeamSummary(cookieHeader, variant, secToken, deps);
     const summary = parseTeamSummary(payload);
-    return [normalizeLimitProvider({
+    return selectedAlibabaResult(normalizeLimitProvider({
       provider: 'alibaba',
       accountKey: summary.uid ? hashKey('alibaba', summary.uid) : '',
       accountLabel: summary.planName,
@@ -956,7 +1017,7 @@ async function fetchAlibabaLimits(options = {}, deps = {}) {
       updatedAt,
       windows: teamWindows(summary),
       region: variantId
-    })];
+    }), options, deps);
   } catch (error) {
     // An aborted refresh is not a provider outcome. Swallowing it here would
     // record a fabricated `unavailable` over the last real answer, which is the
@@ -967,7 +1028,23 @@ async function fetchAlibabaLimits(options = {}, deps = {}) {
   }
 }
 
-module.exports = {
+async function fetchAccountSlotSnapshot(options, deps, collect) {
+  if (deps.probe) return collect(options, deps);
+  const previous = options.previousLimits?.providers || [];
+  const cliPrevious = previous.filter(row => row.provider === 'alibaba' && row.source === 'cli');
+  const previousLimits = { providers: previous.filter(row => row.source !== 'cli') };
+  const scope = options.limitRefreshScope;
+  const localOptions = scope?.provider === 'alibaba' && scope.region
+    ? { ...options, alibabaVariant: scope.region } : options;
+  const unprovenCliScope = scope?.provider === 'alibaba' && scope.accountKey && !cliPrevious.some(row => rowMatchesScope(row, scope));
+  if (unprovenCliScope) return collect({ ...options, alibabaLane: 'web', previousLimits }, deps);
+  if (!options.alibabaAccountSlots?.length) return collect(localOptions, deps);
+  const local = await fetchAlibabaLimits({ ...localOptions, alibabaLane: 'cli', previousLimits: { providers: cliPrevious } }, deps);
+  // Replacement removals carry identity only, without a source field.
+  return [...local.filter(row => row.removed || row.source === 'cli' && row.status !== 'notConfigured'), ...await collect({ ...options, alibabaLane: 'web', previousLimits }, deps)];
+}
+
+module.exports = { accountSlotsForScope: (accounts, scope, options, deps) => alibabaAccountSlotsForScope(accounts, scope, alibabaVariant(options, deps.env)), accountSlotRowKey: row => `${row.accountKey}:${row.region || ''}`, fetchAccountSlotSnapshot,
   ALIBABA_FETCH_TIMEOUT_MS,
   ALIBABA_VARIANTS,
   ALIBABA_VARIANT_IDS,

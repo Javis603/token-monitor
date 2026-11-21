@@ -1,8 +1,14 @@
+// @ts-check
 'use strict';
 
 // OpenDesign limits account wiring. Leaf module: no requires.
-module.exports = {
+module.exports = /** @satisfies {import('../../limits/accounts').AccountDeclaration} */ ({
   id: 'opendesign',
+  accountSlots: true,
+  serverAccountKey: 'isOpendesignServerAccountKey',
+  sources: [
+    { id: 'web', kind: 'web', relation: 'single', products: ['opendesign'], labelKey: 'settings.limits.sources.web', descriptionKey: 'settings.limits.sources.webDescription' }
+  ],
   fetch: 'fetchOpendesignLimits',
   fields: [
     {
@@ -43,4 +49,4 @@ module.exports = {
   urlPolicy: [
     { hosts: ['open-design.ai'], pathPrefixes: ['/cloud/'] }
   ]
-};
+});

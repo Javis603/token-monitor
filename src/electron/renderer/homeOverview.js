@@ -112,8 +112,8 @@
   // `isWindowHidden(providerId, window)` drops the rows the user unchecked on
   // the provider's usage-item list. It runs after the MiMo plan is synthesized,
   // so hiding the plan hides the placeholder built from the balance as well.
-  function homeLimitAccounts(accounts, limit = 3, { sort = 'remaining', isWindowHidden = null } = {}) {
-    return (accounts || [])
+  function homeLimitAccounts(accounts, limit = 3, { sort = 'remaining', isWindowHidden = null, orderedAccountProviders = [] } = {}) {
+    const rows = (accounts || [])
       .map((account, index) => {
         const providerId = String(account?.providerId || '').trim().toLowerCase();
         const windows = accountWindows(account)
@@ -167,8 +167,15 @@
       .filter(Boolean)
       .sort((a, b) => sort === 'configured'
         ? a.index - b.index
-        : a.lowestRemaining - b.lowestRemaining || a.index - b.index)
-      .slice(0, Math.max(0, Number(limit) || 0))
+        : a.lowestRemaining - b.lowestRemaining || a.index - b.index);
+    // Retain the quota sort's provider positions, but fill each slot provider's
+    // positions in input order before applying the card limit.
+    for (const id of orderedAccountProviders) {
+      const positions = rows.flatMap((row, index) => row.providerId === id ? [index] : []);
+      const ordered = positions.map(index => rows[index]).sort((a, b) => a.index - b.index);
+      positions.forEach((position, index) => { rows[position] = ordered[index]; });
+    }
+    return rows.slice(0, Math.max(0, Number(limit) || 0))
       .map(({ index: _index, ...account }) => account);
   }
 
@@ -255,6 +262,7 @@
     colors = {},
     limit = 3,
     sort = 'remaining',
+    orderedAccountProviders = [],
     accountName,
     accountPlan,
     accountColor,
@@ -271,7 +279,7 @@
       const providerEntries = byId.get(id) || [];
       providerEntries.forEach((provider, index) => {
         accounts.push({
-          key: `${id}:${index}`,
+          key: `${id}:${provider.accountKey || provider.workspaceAccountId || provider.providerAccountId || index}`,
           providerId: id,
           name: typeof accountName === 'function' ? accountName(provider, index, providerEntries) : label,
           plan: typeof accountPlan === 'function' ? accountPlan(provider, index, providerEntries) : '',
@@ -284,7 +292,7 @@
         });
       });
     }
-    return homeLimitAccounts(accounts, limit, { sort, isWindowHidden });
+    return homeLimitAccounts(accounts, limit, { sort, isWindowHidden, orderedAccountProviders });
   }
 
   // True when at least one enabled, unhidden limit provider has no entry yet in
@@ -361,24 +369,27 @@
 
   // The full-year homeHistory is fetched once per session and then frozen, so its today
   // bucket lags the live headline total as usage accrues within the day (the trends
-  // sparkline avoids this via patchTodayBar). Overwrite today's tokens AND cost with the
-  // live period totals so the home heatmap/trend agree with the number shown above them
+  // sparkline avoids this via patchTodayBar). Overwrite today's tokens, cost and unpriced
+  // coverage with the live period totals so the home heatmap/trend agree with the number shown above them
   // — cost matters because dailyWithHeatIntensity colours cells by cost when any exists,
   // so an appended today with cost 0 would render as an empty cell. Append a today row
   // when the frozen snapshot predates today (app opened before midnight). Returns a new
   // array; the input is never mutated.
-  function patchDailyToday(daily, todayDate, todayTotal, todayCost) {
+  function patchDailyToday(daily, todayDate, todayTotal, todayCost, todayUnpricedTokens = 0) {
     const rows = Array.isArray(daily) ? daily.slice() : [];
     const date = String(todayDate || '').slice(0, 10);
     if (!date) return rows;
     const tokens = finiteNumber(todayTotal) || 0;
     const cost = finiteNumber(todayCost) || 0;
+    const unpricedTokens = finiteNumber(todayUnpricedTokens) || 0;
     const idx = rows.findIndex((row) => String(row?.date).slice(0, 10) === date);
     if (idx === -1) {
-      rows.push({ date, tokens, cost });
+      rows.push({ date, tokens, cost, ...(unpricedTokens > 0 ? { unpricedTokens } : {}) });
       return rows;
     }
     rows[idx] = Object.assign({}, rows[idx], { tokens, cost });
+    if (unpricedTokens > 0) rows[idx].unpricedTokens = unpricedTokens;
+    else delete rows[idx].unpricedTokens;
     return rows;
   }
 

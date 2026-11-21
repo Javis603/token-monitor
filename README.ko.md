@@ -30,7 +30,7 @@
 
 ## Token Monitor란?
 
-Claude Code, Codex, Cursor, GitHub Copilot, Cherry Studio 등 54개 이상의 AI 코딩 도구의 실시간 토큰 사용량과 AI 도구 한도를 보여 주는 데스크톱 앱입니다. 여러 기기 간 실시간 동기화, 사용 추세 기록, 도구·기기·모델·세션·프로젝트별 분류 보기를 지원합니다. 메인 창, MacBook 노치, 메뉴 막대나 시스템 트레이, 화면 가장자리, 플로팅 버블, 네이티브 macOS 위젯 등 시선이 닿는 곳 어디서나 확인할 수 있습니다.
+Claude Code, Codex, Cursor, GitHub Copilot, Cherry Studio 등 56개 이상의 AI 코딩 도구의 실시간 토큰 사용량과 AI 도구 한도를 보여 주는 데스크톱 앱입니다. 여러 기기 간 실시간 동기화, 사용 추세 기록, 도구·기기·모델·세션·프로젝트별 분류 보기를 지원합니다. 메인 창, MacBook 노치, 메뉴 막대나 시스템 트레이, 화면 가장자리, 플로팅 버블, 네이티브 macOS 위젯 등 시선이 닿는 곳 어디서나 확인할 수 있습니다.
 
 ## 지원 도구
 
@@ -79,6 +79,8 @@ Claude Code, Codex, Cursor, GitHub Copilot, Cherry Studio 등 54개 이상의 AI
     <img src=".github/assets/tools-icon/mistral.png" width="40" alt="Mistral Vibe" title="Mistral Vibe" />
     <img src=".github/assets/tools-icon/prime-agent.png" width="40" alt="Prime Agent" title="Prime Agent" />
     <img src=".github/assets/tools-icon/jcode.png" width="40" alt="Jcode" title="Jcode" />
+    <img src=".github/assets/tools-icon/junie.png" width="40" alt="Junie" title="Junie" />
+    <img src=".github/assets/tools-icon/opencodereview.png" width="40" alt="OpenCodeReview" title="OpenCodeReview" />
     <img src=".github/assets/tools-icon/typesafe.png" width="40" alt="TypeSafe" title="TypeSafe" />
     <img src=".github/assets/tools-icon/openrouter.png" width="40" alt="OpenRouter" title="OpenRouter" />
     <img src=".github/assets/tools-icon/volcengine.png" width="40" alt="Volcengine" title="Volcengine" />
@@ -160,7 +162,7 @@ brew install --cask token-monitor
 
 ### 사용량 추적
 
-- **실시간 토큰 추적** — Claude Code, Codex, Cursor, GitHub Copilot, Antigravity, OpenCode 등 42개 이상의 AI 도구, 턴당 수 초 내 UI 갱신 (전체 목록은 위 표 참고)
+- **실시간 토큰 추적** — Claude Code, Codex, Cursor, GitHub Copilot, Antigravity, OpenCode 등 44개 이상의 AI 도구, 턴당 수 초 내 UI 갱신 (전체 목록은 위 표 참고)
 - **실시간 토큰 속도** — 생성 속도를 `tok/s`로, 총 소모를 `tok/min`으로 보여주는 선택형 실시간 표시
 - **세션별 상세** — 세션을 열면 프롬프트별 토큰, 응답별 토큰 분할·사용 도구까지 확장 (로컬 transcript/DB를 필요할 때만 읽으며 동기화하지 않음)
 - **캐시 히트 통계** — 도구·모델 클릭 시 입력 토큰(캐시 hit/miss), 출력 토큰, 히트율 상세
@@ -245,7 +247,7 @@ Token Monitor는 **토큰 사용량**, **계정 한도**, **세션 상세**를 �
 | <img src=".github/assets/tools-icon/workbuddy.png" width="28" alt="WorkBuddy" /> | WorkBuddy | `~/.workbuddy/projects/`, `~/.workbuddy/workbuddy.db` | ✅ | ✅ | ✅ |
 | <img src=".github/assets/tools-icon/proma.png" width="28" alt="Proma" /> | Proma | `~/.proma/` (`agent-sessions/`, `sdk-config/sessions/`, `sdk-config/projects/`), `~/.proma-dev/` | ✅ | — | — |
 | <img src=".github/assets/tools-icon/catpaw.png" width="28" alt="CatPaw" /> | CatPaw | `<platform-app-data>/` (`catpaw-moon/`, `catpaw-overseas/`, `catpaw-memory-*.db`) | ✅ | — | — |
-| <img src=".github/assets/tools-icon/qoder.png" width="28" alt="Qoder" /> | Qoder | `~/.qoder-cn/projects/**/*.jsonl`, legacy `<platform-app-data>/QoderCN/SharedClientCache/cache/db/local.db`(중국판 전용) | ✅ | ✅ | — |
+| <img src=".github/assets/tools-icon/qoder.png" width="28" alt="Qoder" /> | Qoder | `~/.qoder/projects/**/*.jsonl` (global), `~/.qoder-cn/projects/**/*.jsonl` (CN) | ✅ | ✅ | — |
 | <img src=".github/assets/tools-icon/reasonix.png" width="28" alt="Reasonix" /> | Reasonix | `~/.reasonix/` (`stats/`, `sessions/`, `projects/*/sessions/`) | ✅ | — | — |
 | <img src=".github/assets/tools-icon/deepseek.png" width="28" alt="DeepSeek" /> | DeepSeek / DeepSeek Harness | `~/.dsh/sessions/` (`session.jsonl`, `session.jsonl.zstd`) | ✅ | ✅ | ✅ |
 | <img src=".github/assets/tools-icon/cherrystudio.png" width="28" alt="Cherry Studio" /> | Cherry Studio | `<platform-app-data>/CherryStudio/` (`Data/Agents/.claude/projects/` V2, `.claude/projects/` legacy) | ✅ | — | — |
@@ -257,6 +259,8 @@ Token Monitor는 **토큰 사용량**, **계정 한도**, **세션 상세**를 �
 | <img src=".github/assets/tools-icon/mistral.png" width="28" alt="Mistral" /> | Mistral Vibe | `$VIBE_HOME/logs/session/` (`~/.vibe/logs/session/`); Mistral Admin 쿠키 (Included API / Vibe 월간 할당량 및 크레딧 잔액) | ✅ | ✅ | — |
 | <img src=".github/assets/tools-icon/prime-agent.png" width="28" alt="Prime Agent" /> | Prime Agent | `~/.prime/agent/` (`sessions/`, `session-artifacts/`) | ✅ | — | — |
 | <img src=".github/assets/tools-icon/jcode.png" width="28" alt="Jcode" /> | Jcode | `~/.jcode/sessions/` | ✅ | — | — |
+| <img src=".github/assets/tools-icon/junie.png" width="28" alt="Junie" /> | Junie | `~/.junie/sessions/**/events.jsonl` | ✅ | — | — |
+| <img src=".github/assets/tools-icon/opencodereview.png" width="28" alt="OpenCodeReview" /> | OpenCodeReview | `~/.opencodereview/sessions/**/*.jsonl` | ✅ | — | — |
 | <img src=".github/assets/tools-icon/typesafe.png" width="28" alt="TypeSafe" /> | TypeSafe | TypeSafe Console Cookie (청구 잔액 및 토큰 사용량 기반 예상 지출) | — | ✅ | — |
 | <img src=".github/assets/tools-icon/openrouter.png" width="28" alt="OpenRouter" /> | OpenRouter | OpenRouter API 키 (사용량/키 한도, credits 접근 승인 시 잔액 표시; 공식 문서는 Management 키 지정) | — | ✅ | — |
 | <img src=".github/assets/tools-icon/volcengine.png" width="28" alt="Volcengine" /> | Volcengine | Ark API key 또는 Volcengine AK/SK (Volcengine API로 Ark Coding Plan / Agent Plan 할당량 조회) | — | ✅ | — |
@@ -294,11 +298,7 @@ Token Monitor는 **토큰 사용량**, **계정 한도**, **세션 상세**를 �
 
 - Custom은 하나의 GET 잔액 엔드포인트에서 숫자 JSON 필드를 매핑합니다. OpenAI 또는 Anthropic API 호환만으로는 충분하지 않습니다.
 
-#### Qoder CN(로컬 어댑터)
-
-Qoder CN 토큰 사용량은 API가 아닌 앱의 로컬 데이터에서 읽습니다. Settings → tools에서 활성화합니다(옵트인, 기본 꺼짐). 현재 버전은 Qoder 설정 디렉터리의 `projects` JSONL(보통 `~/.qoder-cn/projects`)을, 이전 버전은 SQLite를 사용하며 Token Monitor에 포함된 tokscale이 둘 다 읽습니다. JSONL 경로 우선순위는 `TOKEN_MONITOR_QODER_CN_PROJECTS_PATH`, `QODERCN_CONFIG_DIR/projects`, 기본 경로 순입니다. 이전 데이터베이스는 `TOKEN_MONITOR_QODER_CN_DB_PATH`로 재정의할 수 있습니다. [Qoder 데이터 소스 설명](docs/providers/qodercn.md)을 참고하세요.
-
-고급 로컬 통합이지만 두 형식 모두 추가 런타임이 필요 없습니다. 읽을 수 없는 소스는 마지막으로 완전히 읽은 데이터를 유지합니다. 이전 데이터베이스 세션은 경로가 아닌 프로젝트 이름만 기록하므로 프로젝트 없이 표시됩니다. 실제 토큰 필드가 있는 JSONL 행만 집계합니다. 현재 자사 플랜 행은 credits와 context 비율만 기록할 수 있고 신뢰할 수 있는 세션별 context window가 없으므로 토큰을 추측하지 않습니다. Credits는 AI Tool Limits에 표시되며 실제 토큰이 있는 BYOK/사용자 지정 모델은 정상 집계됩니다.
+- Qoder: "설정 → 도구"의 Qoder 그룹에서 국제판과 CN을 각각 추적할 수 있습니다. 새로 설치하면 둘 다 추적하며 기존 선택은 유지됩니다. 도구 사용량은 기본적으로 합산되며, "버전별로 표시"를 켜면 두 행으로 나뉩니다. 국제판은 `QODER_CONFIG_DIR/projects`(기본 `~/.qoder/projects`)를, CN은 `TOKEN_MONITOR_QODER_CN_PROJECTS_PATH`, `QODERCN_CONFIG_DIR/projects`(기본 `~/.qoder-cn/projects`) 순으로 읽습니다. transcript에 실제로 기록된 토큰만 집계합니다. 관리형 모델에서 credits만 기록되고 토큰이 없는 행은 포함되지 않으며, 해당 credits는 AI 도구 한도에서 확인할 수 있습니다. Qoder CN CLI 1.1.62에서는 `QODERCN_EXPOSE_TOKEN_USAGE=1`을 설정하면 이후 토큰이 기록된다는 보고가 있습니다. 기존 기록은 채워지지 않습니다. `dfmodel` 같은 동적 모델 코드는 기록된 그대로 표시됩니다. 사용량을 SQLite에만 저장하는 이전 Qoder CN 버전은 더 이상 수집하지 않으며, 기존 Token Monitor 기록 파일은 유지됩니다. [Qoder 데이터 소스 설명](docs/providers/qodercn.md)을 참고하세요.
 </details>
 
 ### 추가 기능 지원
@@ -307,7 +307,7 @@ Qoder CN 토큰 사용량은 API가 아닌 앱의 로컬 데이터에서 읽습�
 |---------|-------------------------|------------|
 | 세션 제목 | Claude Code, Codex, OpenCode, Cursor, Antigravity, Cline CLI, Factory Droid, Kimi CLI, Grok Build, Pi, Oh My Pi, OmO Native, MiMo, ZCode, CodeBuddy, WorkBuddy, Reasonix, DeepSeek Harness, Cherry Studio, Devin CLI, fx, MiniMax Code | — |
 | 프롬프트／응답별 사용량 및 도구 호출 | Claude Code, Codex, OpenCode, Pi, Oh My Pi, OmO Native, CodeBuddy, WorkBuddy, Reasonix, DeepSeek Harness | 상세 정보는 로컬에서만 읽으며 동기화하지 않습니다. |
-| 컨텍스트 사용량／남은 공간 | Claude Code, Codex, DeepSeek Harness | Claude Code의 컨텍스트 한도는 모델을 기준으로 추정합니다. |
+| 컨텍스트 사용량／남은 공간 | Claude Code, Codex, DeepSeek Harness, Grok Build, WorkBuddy, CatPaw | Claude Code의 컨텍스트 한도는 모델을 기준으로 추정합니다. |
 | 캐시 사용량／세션 캐시 적중률 | 캐시 필드를 제공하는 소스. 예: Claude Code, Codex, OpenCode, Cursor, Kimi, Pi, Oh My Pi, OmO Native, DeepSeek Harness | 캐시 사용량 데이터가 있을 때 적중률을 표시합니다. |
 | 예상 캐시 잔여 시간 | Claude Code | 기록된 캐시 유형에 따라 5분 또는 1시간으로 추정합니다. |
 | 출력 속도／토큰 소비 속도 | Claude Code, Codex, OpenCode, Antigravity, Kimi, GitHub Copilot, Pi, Oh My Pi, OmO Native, Kilo CLI, MiMo Code/MiMo Desktop, Muse Code, ZCode CLI, Kiro, DeepSeek Harness, Devin CLI | 출력 속도는 `tok/s`, 전체 토큰 소비 속도는 `tok/min`이며, 측정 시간에 대기가 포함될 수 있습니다. |
@@ -485,7 +485,7 @@ Token Monitor는 사용 로그를 로컬에서 처리하며 프로젝트 관리�
 
 ## 기여하기
 
-Issue와 PR을 환영합니다. 프로젝트 규약, 아키텍처 노트, 명령어 레퍼런스는 [AGENTS.md](AGENTS.md)에 있습니다 — 코딩 에이전트용으로 작성되었지만 기여자 가이드로도 사용할 수 있습니다.
+Issue와 PR을 환영합니다. 먼저 [CONTRIBUTING.md](CONTRIBUTING.md)를 읽어 주세요. 프로젝트 규약, 아키텍처 노트, 명령어 레퍼런스는 [AGENTS.md](AGENTS.md)에 있습니다.
 
 ## 감사의 글
 

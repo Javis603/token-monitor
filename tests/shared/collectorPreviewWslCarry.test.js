@@ -174,10 +174,14 @@ test('warm progressive preview keeps the frozen WSL contribution in today and mo
     assert.equal('month' in warm[0], false, 'today-stage preview omits month');
     assert.equal('allTime' in warm[0], false, 'preview never carries allTime');
     assert.equal('clientStatus' in warm[0], false, 'preview never carries clientStatus');
+    // The scan's windows travel with every stage; DeviceState applies them only
+    // to the periods a preview carries, so the previous Month keeps its window.
+    assert.equal(typeof warm[0].periodWindows.today.key, 'string', 'today-stage preview carries the scan windows');
 
     // month-stage preview
     assert.equal(warm[1].today.totalTokens, 110, 'warm today still carries WSL after the month scan');
     assert.equal(warm[1].month.totalTokens, 330, 'warm month carries WSL (host 300 + WSL 30)');
+    assert.equal(typeof warm[1].periodWindows.month.key, 'string', 'month-stage preview carries the scan windows');
     assert.equal('allTime' in warm[1], false, 'preview never carries allTime');
     assert.equal('clientStatus' in warm[1], false, 'preview never carries clientStatus');
 

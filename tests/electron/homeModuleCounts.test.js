@@ -28,6 +28,12 @@ class Element {
   }
   append(...children) { this.children.push(...children); }
   appendChild(child) { this.append(child); }
+  insertBefore(child, before) {
+    const index = this.children.indexOf(before);
+    if (index < 0) this.append(child);
+    else this.children.splice(index, 0, child);
+  }
+  querySelector() { return null; }
   addEventListener(name, fn) { this.events[name] = fn; }
   setAttribute(name, value) { this.attributes[name] = value; }
 }
@@ -188,7 +194,7 @@ test('Home sessions respect a smaller count while retaining an active session be
 
 test('all supported locales translate the Home count controls and active-session explanation', () => {
   for (const { value: locale } of i18n.LANGUAGE_OPTIONS.filter(option => option.value !== 'auto')) {
-    for (const key of ['settings.home.itemCount', 'settings.home.configureModule', 'settings.home.sessionCountNote']) {
+    for (const key of ['settings.home.itemCount', 'settings.home.itemCountValue', 'settings.home.sessionCountNote']) {
       assert.notEqual(i18n.translate(locale, key, { name: 'Models' }), key);
     }
   }

@@ -188,6 +188,8 @@ function createFixture(options = {}) {
     windowsBackdrop: options.windowsBackdrop,
     canRefreshLimits: options.canRefreshLimits,
     onRefreshLimits: options.onRefreshLimits,
+    onRefreshLimitAccount: options.onRefreshLimitAccount,
+    limitProbes: options.limitProbes,
     onWebSurfaceChanged: options.onWebSurfaceChanged,
     prefersReducedMotion: options.prefersReducedMotion || (() => true),
     cardSpring: options.cardSpring,
@@ -2848,4 +2850,35 @@ test('Windows recreates a shaped bubble when both updating and clearing its regi
   assert.deepEqual(replacement.getBounds(), bounds, 'a motion cancelled during its first frame must not restart a timer');
   advance(720);
   assert.deepEqual(replacement.getBounds(), bounds, 'the rectangular fallback stays fixed after the old spring deadline');
+});
+
+test('the card refreshes one quota row and follows the probes in flight', async (t) => {
+  const requests = [];
+  let probes = [{ provider: 'codex', account: null }];
+  const fixture = createFixture({
+    onRefreshLimitAccount: (provider, account) => {
+      requests.push({ provider, account });
+      return { ok: true };
+    },
+    limitProbes: () => probes
+  });
+  t.after(() => fixture.controller.stop());
+  const bubble = fixture.windowFor('bubble');
+  const probeMessages = () => bubble.webContents.messages
+    .filter((message) => message.channel === 'edgeDock:limitProbes').map((message) => message.payload);
+
+  // A card that (re)loads mid-probe learns what is already running.
+  fixture.ipcMain.emit('edgeDock:ready', { sender: bubble.webContents });
+  assert.deepEqual(probeMessages(), [[{ provider: 'codex', account: null }]]);
+  probes = [];
+  fixture.controller.setLimitProbes(probes);
+  assert.deepEqual(probeMessages().at(-1), []);
+
+  const handler = fixture.ipcMain.handlers.get('edgeDock:refreshLimitAccount');
+  const account = { accountKey: 'key-a' };
+  assert.deepEqual(await handler({ sender: bubble.webContents }, { provider: 'codex', account }), { ok: true });
+  assert.deepEqual(requests, [{ provider: 'codex', account }]);
+  // Only the card carries quota rows.
+  assert.equal((await handler({ sender: fixture.windowFor('rail').webContents }, { provider: 'codex' })).ok, false);
+  assert.equal(requests.length, 1);
 });

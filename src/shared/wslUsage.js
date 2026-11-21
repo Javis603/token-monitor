@@ -8,7 +8,7 @@ const { REASONIX_CLIENT } = require('./providers/reasonix/paths');
 const { WSL_DATA_MARKERS, MARKER_CLIENTS } = require('./clientSourceRegistration');
 const { isMcodeProfileDir } = require('./providers/mcode/paths');
 
-const WSL_EXCLUDED_CLIENTS = new Set([REASONIX_CLIENT, 'catpaw', 'qodercn']);
+const WSL_EXCLUDED_CLIENTS = new Set([REASONIX_CLIENT, 'catpaw']);
 
 const LXSS_KEY = 'HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Lxss';
 
@@ -128,7 +128,7 @@ function probeWslState(deps = {}) {
 }
 
 async function collectWslUsage(options = {}, deps = {}) {
-  const { clients, trackedClients = clients, allTimeSince, commandTimeoutMs, runTokscale, logger, decoratePeriods } = options;
+  const { clients, trackedClients = clients, allTimeSince, commandTimeoutMs, allTimeTimeoutMs = commandTimeoutMs, runTokscale, logger, decoratePeriods } = options;
   const existsSync = deps.existsSync || fs.existsSync;
   const readdirSync = deps.readdirSync || fs.readdirSync;
   const bundle = emptyWslBundle();
@@ -140,9 +140,7 @@ async function collectWslUsage(options = {}, deps = {}) {
   // Reasonix aggregate usage is supported on the host, but remains excluded
   // from WSL scans: Tokscale's Windows PathRoot::ReasonixHome conflicts with
   // the Linux-default `.reasonix/stats` path inside WSL. Native session files
-  // are local-only as well. Qoder CN is excluded for the same kind of reason:
-  // under a Windows host the fork resolves its legacy database from the host's
-  // APPDATA rather than from --home, so a WSL scan would recount host usage.
+  // are local-only as well.
   const tracked = new Set(String(trackedClients).split(',').map((c) => c.trim()).filter(Boolean));
   const clientsCsv = String(clients || '').split(',').map((c) => c.trim()).filter(Boolean)
     .filter((client) => !WSL_EXCLUDED_CLIENTS.has(client))
@@ -164,7 +162,7 @@ async function collectWslUsage(options = {}, deps = {}) {
       throwIfAborted(options.signal, 'WSL usage scan aborted');
       const monthJson = await runTokscale({ clients: clientsCsv, flags: ['--month', '--home', home], commandTimeoutMs, signal: options.signal });
       throwIfAborted(options.signal, 'WSL usage scan aborted');
-      const allTimeJson = await runTokscale({ clients: clientsCsv, flags: ['--since', allTimeSince, '--home', home], commandTimeoutMs, signal: options.signal });
+      const allTimeJson = await runTokscale({ clients: clientsCsv, flags: ['--since', allTimeSince, '--home', home], commandTimeoutMs: allTimeTimeoutMs, signal: options.signal });
       throwIfAborted(options.signal, 'WSL usage scan aborted');
       const periods = {
         today: extractUsageFromTokscale(todayJson),

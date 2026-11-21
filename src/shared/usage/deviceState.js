@@ -37,8 +37,8 @@ function cloneValue(value, seen = new Map()) {
   return copy;
 }
 
-function sanitizeUsagePeriods(value) {
-  const next = cloneValue(value || {});
+function sanitizeUsagePeriods(value, ownsSummary) {
+  const next = ownsSummary && value ? value : cloneValue(value || {});
   const periods = next?.periods && typeof next.periods === 'object' ? next.periods : next;
   for (const periodName of ['today', 'month', 'allTime']) {
     const period = periods?.[periodName];
@@ -57,13 +57,11 @@ function normalizedEnvelope(value) {
   return envelope;
 }
 
-// The usage part is copied once on the way in and never mutated afterwards:
-// every update builds a new part, and everything handed out is a copy. That is
-// what lets a carried field be shared with the previous part by reference. A
-// carried period in particular needs no second sanitize, because it was
-// filtered when it arrived.
-function mergeUsagePart(previous, incoming) {
-  const next = sanitizeUsagePeriods(incoming || {});
+// Take ownership of a freshly deserialized worker summary. Other producers
+// may retain their input, so copy it before sanitizing. After sanitation, the
+// parts are immutable and carried fields can be shared across usage parts.
+function mergeUsagePart(previous, incoming, ownsSummary) {
+  const next = sanitizeUsagePeriods(incoming, ownsSummary);
   delete next.limits;
   if (!previous) return next;
 
@@ -73,6 +71,16 @@ function mergeUsagePart(previous, incoming) {
 
   const partial = !hasOwn(next, 'month') || !hasOwn(next, 'allTime');
   if (partial) {
+    // A carried period keeps the window it was collected under; only the
+    // periods this update scanned take its windows. Otherwise last month's
+    // total would read as this month's after a month boundary.
+    if (hasOwn(next, 'periodWindows') && hasOwn(previous, 'periodWindows')) {
+      const windows = { ...previous.periodWindows };
+      for (const period of ['today', 'month', 'allTime']) {
+        if (hasOwn(next, period) && next.periodWindows?.[period]) windows[period] = next.periodWindows[period];
+      }
+      next.periodWindows = windows;
+    }
     for (const field of PARTIAL_USAGE_CARRY_FIELDS) {
       if (!hasOwn(next, field) && hasOwn(previous, field)) {
         next[field] = previous[field];
@@ -86,7 +94,14 @@ function createDeviceState(options = {}) {
   const epoch = options.epoch ?? 0;
   const envelope = normalizedEnvelope(options.envelope);
   const onRecord = typeof options.onRecord === 'function' ? options.onRecord : null;
+  const onColdPreview = typeof options.onColdPreview === 'function' ? options.onColdPreview : null;
   let usagePart = null;
+  // Previews received before the first complete baseline. Kept out of usagePart
+  // because every publish, limits-only ones included, sends usagePart, and a
+  // record is taken as complete by everything downstream (display, exports,
+  // archive capture, uploads): a Today-only part there reads as a device whose
+  // month and all-time are zero.
+  let coldUsagePart = null;
   let limitsPart = hasOwn(options, 'initialLimits') ? cloneValue(options.initialLimits) : undefined;
   // The parts as of the last publish. The parts are never mutated in place, so
   // holding them is enough to rebuild that record on demand.
@@ -122,17 +137,31 @@ function createDeviceState(options = {}) {
 
   function updateUsage(summary, reason = 'usage', meta = {}) {
     if (!accepts(meta)) return null;
-    usagePart = mergeUsagePart(usagePart, summary);
-    if (hasOwn(usagePart, 'month') && hasOwn(usagePart, 'allTime')) {
+    const cold = meta.preview === true && !hasCompleteUsageBaseline;
+    const next = mergeUsagePart(cold ? coldUsagePart : usagePart, summary, meta.ownsSummary === true);
+    if (hasOwn(next, 'month') && hasOwn(next, 'allTime')) {
       hasCompleteUsageBaseline = true;
     }
-    if (meta.preview === true && !hasCompleteUsageBaseline) return null;
+    if (cold && !hasCompleteUsageBaseline) {
+      coldUsagePart = next;
+      // Not a record, for the same reason. A caller holding last-known values
+      // for the missing windows can still show the fresh ones, unexported.
+      if (onColdPreview) onColdPreview(recordFrom({ usagePart: next, limitsPart }), { source: 'usage', reason, epoch });
+      return null;
+    }
+    coldUsagePart = null;
+    usagePart = next;
     return publish('usage', reason);
   }
 
   function updateLimits(limits, reason = 'limits', meta = {}) {
     if (!accepts(meta)) return null;
     limitsPart = cloneValue(limits);
+    // Limits often land long before the first complete usage. They cannot ride
+    // a record yet, but the cold-preview observer can show them.
+    if (!hasCompleteUsageBaseline && onColdPreview) {
+      onColdPreview(recordFrom({ usagePart: coldUsagePart || {}, limitsPart }), { source: 'limits', reason, epoch });
+    }
     return publish('limits', reason);
   }
 

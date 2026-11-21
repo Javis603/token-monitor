@@ -1,8 +1,14 @@
+// @ts-check
 'use strict';
 
 // Manual-only account declaration. Leaf module: no requires.
-module.exports = {
+module.exports = /** @satisfies {import('../../limits/accounts').AccountDeclaration} */ ({
   id: 'notion',
+  accountSlots: true,
+  serverAccountKey: 'isNotionServerAccountKey',
+  sources: [
+    { id: 'web', kind: 'web', relation: 'single', products: ['notion'], labelKey: 'settings.limits.sources.web', descriptionKey: 'settings.limits.sources.webDescription' }
+  ],
   fetch: 'fetchNotionLimits',
   fields: [
     {
@@ -62,4 +68,4 @@ module.exports = {
     openUrl: { url: 'https://app.notion.com/' }
   },
   urlPolicy: [{ hosts: ['app.notion.com'] }]
-};
+});

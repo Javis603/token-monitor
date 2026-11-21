@@ -231,7 +231,11 @@ async function fetchNotionLimits(options = {}, deps = {}) {
   }
 }
 
+// Notion emits a key only after getSpaces verifies both user and workspace.
+function isNotionServerAccountKey(key) { return Boolean(key); }
+
 module.exports = {
+  isNotionServerAccountKey,
   NOTION_FETCH_TIMEOUT_MS,
   NOTION_SPACES_URL,
   NOTION_ALLOWANCE_URL,

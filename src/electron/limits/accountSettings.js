@@ -10,6 +10,7 @@
 // Adding a provider with a simple cookie/API-key account touches none of this
 // file; its account.js declaration is the whole change.
 
+const { accountSlotKey, normalizeAccountSlots } = require('../../shared/limits/accountSlots');
 const { limitProviderUrlAllowed } = require('../../shared/limits/accounts');
 const {
   LIMIT_PROVIDER_REGISTRY,
@@ -88,6 +89,7 @@ function redactThirdPartyProfilesForRenderer(profiles) {
   for (const [name, profile] of Object.entries(profiles)) {
     const adapter = thirdPartyLimits.normalizeAdapterId(profile?.adapter);
     out[name] = {
+      accountKey: thirdPartyLimits.thirdPartyAccountKey(name, profile),
       enabled: profile?.enabled !== false,
       adapter,
       baseUrl: thirdPartyLimits.normalizeThirdPartyBaseUrl(profile?.baseUrl, {
@@ -146,13 +148,19 @@ function defaultAccountStatus(entry, settings, env) {
   const stored = settings?.[field.key];
   const resolved = field.resolve ? field.resolve(env) : '';
   return {
-    [entry.status.configuredKey]: Boolean(stored || resolved),
+    // A stored fixed credential left by a failed migration is still collected
+    // (the slot fetcher passes it through when no slot exists), so it counts.
+    [entry.status.configuredKey]: Boolean(entry.accountSlots ? normalizeAccountSlots(entry, settings?.[accountSlotKey(entry)]).length || stored || resolved : stored || resolved),
     [entry.status.sourceKey]: stored ? 'settings' : resolved ? 'env' : ''
   };
 }
 
 // settingsForRenderer — the *Configured/*Source key pairs plus provider extras
 // (env probes, discovery-driven lanes like zcode-auto and cline-signin).
+function hasRetainedFixedCredential(entry, settings) {
+  return entry?.id === 'volcengine' && accountForm(entry).fields.some(field => field.secret && settings?.[field.key]);
+}
+
 function accountStatusProjection(settings, env = process.env) {
   const out = {};
   for (const entry of LIMIT_PROVIDER_REGISTRY) {
@@ -162,6 +170,10 @@ function accountStatusProjection(settings, env = process.env) {
     } else if (entry.status) {
       Object.assign(out, defaultAccountStatus(entry, settings, env));
     }
+    if (entry.status && entry.accountSlots && normalizeAccountSlots(entry, settings?.[accountSlotKey(entry)]).length) {
+      out[entry.status.configuredKey] = true;
+    }
+    if (entry.id === 'volcengine') out.volcengineFixedCredentialsStored = hasRetainedFixedCredential(entry, settings);
     if (entry.envProbe) out[entry.envProbe.key] = entry.envProbe.probe(env);
   }
   return out;
@@ -204,6 +216,16 @@ function limitsAccountConfig(settings = {}, context = {}) {
       ? field.configNormalize(value)
       : (value || field.configDefault || '');
   }
+  // The credential-store marker is authoritative even if stale source fields
+  // survived a previous cleanup. Legacy credentials never reach the renderer.
+  if (!context.openrouterSlotsMigrated && Object.keys(settings.openrouterProfiles || {}).length) {
+    out.openrouterProfiles = settings.openrouterProfiles;
+  }
+  if (context.openrouterSlotsMigrated) out.openrouterApiKey = '';
+  if (!context.copilotSlotsMigrated && Object.keys(settings.copilotProfiles || {}).length) {
+    out.copilotProfiles = settings.copilotProfiles;
+  }
+  if (context.copilotSlotsMigrated) out.copilotApiToken = '';
   return out;
 }
 
@@ -286,6 +308,7 @@ function formUrls(openUrl) {
 }
 
 function assertAccountForm(entry, form) {
+  if (entry.accountSlotOwner && form.kind === 'custom') return;
   const fail = (reason) => { throw new Error(`limits form: ${reason} for ${entry.id}`); };
   const declared = new Map(entry.fields.map((field) => [field.key, field]));
   if (!form.fields.length) fail('no fields');
@@ -326,6 +349,10 @@ function assertAccountForm(entry, form) {
 
 // The renderer only needs the form's display and action schema. Never send
 // field declarations, store paths, resolvers, or credential values over IPC.
+function limitConnectionSourcesForRenderer() {
+  return LIMIT_PROVIDER_REGISTRY.map(({ id, sources }) => ({ id, sources }));
+}
+
 function limitAccountFormsForRenderer() {
   return LIMIT_PROVIDER_REGISTRY.filter((entry) => entry.form).flatMap((entry) => {
     const form = accountForm(entry);
@@ -335,6 +362,9 @@ function limitAccountFormsForRenderer() {
     return [JSON.parse(JSON.stringify({
       id: entry.id,
       kind: form.kind,
+      ...(entry.accountSlots ? { accountSlots: true } : {}),
+      ...(entry.accountSlotOwner ? { accountSlotOwner: true } : {}),
+      ...(form.loginAction ? { loginAction: form.loginAction } : {}),
       titleKey: form.titleKey,
       openKey: form.openKey,
       clearKey: form.clearKey,
@@ -357,10 +387,12 @@ module.exports = {
   accountForm,
   accountFieldProjection,
   accountStatusProjection,
+  hasRetainedFixedCredential,
   currentAccountField,
   finalAccountSettings,
   initialAccountSettings,
   limitAccountFormsForRenderer,
+  limitConnectionSourcesForRenderer,
   limitsAccountConfig,
   normalizeAccountField,
   normalizeAccountPatch,

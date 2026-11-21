@@ -26,6 +26,7 @@ test('Cursor quota rows display the period and retain their saved visibility ide
     });
     vm.runInContext(['tagUsageItem', 'limitMeterNode', 'formatLimitWindowValue', 'limitWindowNode',
       'repairWindowPairs', 'renderProviderWindows'].map(extract).join('\n'), context);
+    context.windowOwners = require('../../src/electron/renderer/limits/windowOwners').createOwners(context);
     const row = context.renderProviderWindows({ provider: 'cursor', windows: [window] }, 'white').children[0];
     assert.equal(row.children[0].children[0].textContent, label);
     assert.equal(row.dataset.usageItem, usageItems.limitUsageItemId(window));
