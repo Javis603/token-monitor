@@ -14638,12 +14638,14 @@ async function init() {
   // Tray startup also needs its saved appearance prepared before native show.
   applyVisibleSettingsAppearance();
   initialSettingsApplied = true;
-  if (state.windowVisible) {
+  const hibernateReveal = new URLSearchParams(window.location.search).get('hibernateReveal') === '1';
+  if (state.windowVisible || hibernateReveal) {
     const signalAppearanceReady = () => window.tokenMonitor.signalAppearanceReady?.();
     // A retained WebContentsView can be document.hidden until its native host
     // shows. Prepare it now, without waiting on animation frames that pause while
-    // hidden. windowVisible still excludes intentionally hidden tray startup.
-    if (document.hidden) signalAppearanceReady();
+    // hidden. The hibernate query also bypasses frames because the hidden
+    // BrowserWindow was constructed with painting deferred until show.
+    if (document.hidden || hibernateReveal) signalAppearanceReady();
     else requestAnimationFrame(() => requestAnimationFrame(signalAppearanceReady));
   }
   try { await pluginApi?.list(); } catch (_) {}

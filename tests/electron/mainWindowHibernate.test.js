@@ -1,0 +1,204 @@
+'use strict';
+
+const assert = require('node:assert/strict');
+const { EventEmitter } = require('node:events');
+const fs = require('node:fs');
+const path = require('node:path');
+const test = require('node:test');
+const vm = require('node:vm');
+const { popoverToggleAction, trayToggleAction } = require('../../src/electron/trayModeSettings');
+const { windowToggleShortcutAction } = require('../../src/electron/windowShortcut');
+
+const electronDir = path.join(__dirname, '../../src/electron');
+const main = fs.readFileSync(path.join(electronDir, 'main.js'), 'utf8');
+const section = (first, next) => main.slice(main.indexOf(first), main.indexOf(next, main.indexOf(first)));
+
+function fixture(platform = 'linux') {
+  const timers = new Set();
+  const windows = new Set();
+  const summons = [];
+  const app = new EventEmitter();
+  let quits = 0;
+  app.quit = () => { quits += 1; };
+  class Window extends EventEmitter {
+    constructor(options) {
+      super();
+      windows.add(this);
+      this.options = options;
+      this.visible = false;
+      this.bounds = { width: options.width, height: options.height };
+      this.webContents = new EventEmitter();
+      this.webContents.setWindowOpenHandler = () => {};
+      this.webContents.loadFile = (_file, loadOptions) => {
+        this.query = loadOptions.query;
+        return Promise.resolve();
+      };
+    }
+    isDestroyed() { return !windows.has(this); }
+    isVisible() { return this.visible; }
+    isFocused() { return this.visible; }
+    getBounds() { return this.bounds; }
+    setBounds(bounds) { this.bounds = bounds; }
+    show() { this.visible = true; if (!this.silentVisibility) this.emit('show'); }
+    hide() { this.visible = false; if (!this.silentVisibility) this.emit('hide'); }
+    isMinimized() { return false; }
+    destroy() {
+      windows.delete(this);
+      this.emit('closed');
+      if (!windows.size) app.emit('window-all-closed');
+    }
+  }
+  const context = vm.createContext({
+    app, path, console, __dirname: electronDir, process: { platform },
+    mainWindow: null, quitRequested: false, lastRendererStatsFingerprint: 'old',
+    settings: { trayMode: true, showTrayIcon: true, zoomFactor: 1.25 },
+    BrowserWindow: Window, BaseWindow: { getAllWindows: () => [...windows] },
+    edgeDockController: { owns: win => win.kind === 'dock' },
+    notchController: { owns: win => win.kind === 'notch' },
+    limitsHistoryController: { isIdleWindow: win => win.kind === 'parked-history', hide() {} },
+    ipcMain: new EventEmitter(),
+    DEFAULT_WINDOW: { width: 340, height: 650 }, WINDOW_LIMITS: {},
+    floatingBubbleState: { collapsed: false }, mainWindowChrome: {}, rendererViewState: { breakdown: 'limits' },
+    tray: {}, recentPopoverBlur: null, suppressNextBlurHide: false,
+    pluginWindowActions: { hide: win => win.hide() }, popoverToggleAction, trayToggleAction, windowToggleShortcutAction,
+    rendererHiddenStatsNeeded: () => false, popoverBounds: (_tray, width, height, { clickPoint }) => ({ width, height, x: clickPoint?.x }),
+    restoredBounds: () => ({ width: 420, height: 660 }),
+    clampZoom: value => value, applyZoomFactor() {}, ensureSettingsLoaded() {}, skipTaskbarForSettings: () => true,
+    createRetainedWindow: (_electron, options) => new Window(options), WebContentsView: {},
+    refreshWindowsBackdrop() {}, stopFloatingBubbleAutoCollapseTimer() {},
+    appWindowIcon: () => ({}), floatingBubbleWindowChrome: () => ({}),
+    floatingBubbleInitialRendererQuery: (_state, { viewState }) => ({ breakdown: viewState.breakdown }),
+    applyMacActivationPolicy() {}, applyMacSpaceBehavior() {}, applyWindowsChrome() {}, suppressLinuxSystemContextMenu() {},
+    applyWindowSettings() {}, attachNativeMaterialVisibility() {}, applyNativeMaterial() {},
+    syncTaskbarZOrder() {}, stopTaskbarZOrderKeeper() {}, syncPluginWindowVisibility() {}, handleZoomShortcut() {},
+    scheduleMainWindowShowSync() {}, sendFloatingBubbleState() {}, sendMainWindowVisibility() {},
+    restoreWindowMaximizedForReveal: () => false, revealWindow: win => win.show(),
+    sendMainWindowEvent: channel => summons.push(channel),
+    setTimeout(callback, ms) {
+      const timer = { callback, ms, unref() { this.unrefed = true; } };
+      timers.add(timer);
+      return timer;
+    },
+    clearTimeout: timer => timers.delete(timer)
+  });
+  vm.runInContext([
+    section('const MAIN_WINDOW_HIBERNATE_MS', 'function stopPersistBoundsTimer('),
+    section('function showPopover(', 'function currentWindowToggleShortcutStatus('),
+    section('function handleWindowToggleShortcut(', 'function trayMenuLocale('),
+    section('function loadWindowFile(', 'function handleZoomShortcut('),
+    section("app.on('window-all-closed'", '// Every window shares')
+  ].join('\n'), context);
+  context.createWindow();
+  const original = context.mainWindow;
+  return {
+    context, original, windows, summons, quits: () => quits,
+    timer: ms => [...timers].find(timer => timer.ms === ms),
+    fire(ms) {
+      const timer = this.timer(ms);
+      assert.ok(timer, `expected a ${ms} ms timer`);
+      timers.delete(timer);
+      timer.callback();
+    }
+  };
+}
+
+const HIBERNATE_MS = 600_000;
+
+test('explicit popover hide and show manage the timer without native visibility events', () => {
+  const run = fixture('darwin');
+  run.original.silentVisibility = true;
+  run.original.visible = true;
+  run.context.hidePopover();
+  assert.ok(run.timer(HIBERNATE_MS));
+  run.context.showPopover();
+  assert.equal(run.timer(HIBERNATE_MS), undefined);
+});
+
+test('native hide arms an unrefed one-shot and showing, focusing, restoring or replacing cancels it', () => {
+  for (const cancel of ['show', 'focus', 'restore', 'replacement']) {
+    const run = fixture();
+    assert.equal(run.timer(HIBERNATE_MS), undefined, 'tray startup stays loaded');
+    run.original.show();
+    run.original.hide();
+    assert.equal(run.timer(HIBERNATE_MS)?.unrefed, true);
+    if (cancel === 'replacement') run.context.createWindow();
+    else run.original.emit(cancel);
+    assert.equal(run.timer(HIBERNATE_MS), undefined, cancel);
+  }
+});
+
+test('hibernate rechecks eligibility and retains the renderer for live tray artwork', () => {
+  for (const change of [
+    run => { run.original.visible = true; },
+    run => { run.context.settings.trayMode = false; },
+    run => { run.context.quitRequested = true; },
+    run => { run.context.rendererHiddenStatsNeeded = () => true; },
+    ...['dashboard', 'limits-history', 'plugin-page'].map(kind => run => run.windows.add({ kind }))
+  ]) {
+    const run = fixture();
+    run.original.hide();
+    change(run);
+    run.fire(HIBERNATE_MS);
+    assert.equal(run.original.isDestroyed(), false);
+    assert.equal(run.context.mainWindow, run.original);
+    assert.equal(run.timer(HIBERNATE_MS), undefined);
+  }
+  const win = fixture('win32');
+  win.original.hide();
+  assert.equal(win.timer(HIBERNATE_MS), undefined);
+});
+
+test('hibernate destroys just the hidden main window and keeps Linux running with or without other surfaces', () => {
+  for (const surfaces of [[], [{ kind: 'dock' }, { kind: 'notch' }, { kind: 'parked-history' }]]) {
+    const run = fixture();
+    for (const win of surfaces) run.windows.add(win);
+    run.original.once('close', () => assert.fail('destroy must bypass the close-to-hide handler'));
+    run.original.hide();
+    run.fire(HIBERNATE_MS);
+    assert.equal(run.original.isDestroyed(), true);
+    assert.equal(run.context.mainWindow, null);
+    assert.deepEqual([...run.windows], surfaces);
+    assert.equal(run.quits(), 0);
+  }
+});
+
+for (const route of ['tray', 'shortcut', 'focus']) {
+  test(`${route} recreates a hibernated window and reveals on its own appearance signal`, () => {
+    const run = fixture();
+    const { context } = run;
+    run.original.hide();
+    run.fire(HIBERNATE_MS);
+    const open = route === 'tray' ? () => context.handleTrayToggle(null, { x: 35 }, false, false, true)
+      : route === 'shortcut' ? context.handleWindowToggleShortcut : context.focusExistingWindow;
+    open();
+    const next = context.mainWindow;
+    open();
+    assert.equal(context.mainWindow, next, 'repeated wake requests reuse the loading window');
+    assert.notEqual(next, run.original);
+    assert.equal(next.options.webPreferences.zoomFactor, 1.25);
+    assert.equal(next.query.breakdown, 'limits');
+    assert.equal(next.query.windowHidden, '1');
+    assert.equal(next.query.hibernateReveal, '1');
+    next.webContents.emit('did-finish-load');
+    context.ipcMain.emit('window:appearanceReady', { sender: {} });
+    assert.equal(next.visible, false);
+    context.ipcMain.emit('window:appearanceReady', { sender: next.webContents });
+    assert.equal(next.visible, true);
+    assert.equal(next.bounds.width, 420);
+    if (route === 'tray') assert.equal(next.bounds.x, 35);
+    assert.deepEqual(run.summons, route === 'focus' ? [] : ['window:summoned']);
+    assert.equal(run.timer(800), undefined);
+  });
+}
+
+test('a wake without an appearance signal falls back in 800 ms', () => {
+  const run = fixture();
+  run.original.hide();
+  run.fire(HIBERNATE_MS);
+  run.context.focusExistingWindow();
+  const next = run.context.mainWindow;
+  assert.equal(next.visible, false);
+  run.fire(800);
+  assert.equal(next.visible, true);
+  assert.equal(run.context.ipcMain.listenerCount('window:appearanceReady'), 0);
+});

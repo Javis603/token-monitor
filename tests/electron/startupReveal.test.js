@@ -124,7 +124,7 @@ test('early appearance does not consume a plugin-dependent initial Limits prefer
   assert.equal(context.state.breakdown, 'limits');
 });
 
-function initialAppearance({ nativeHidden, windowVisible }) {
+function initialAppearance({ nativeHidden, windowVisible, search = '' }) {
   let applied = 0;
   let signaled = 0;
   const frames = [];
@@ -133,7 +133,8 @@ function initialAppearance({ nativeHidden, windowVisible }) {
     document: { hidden: nativeHidden },
     isRendererWindowHidden: () => nativeHidden || !windowVisible,
     applyVisibleSettingsAppearance: () => { applied += 1; },
-    window: { tokenMonitor: { signalAppearanceReady: () => { signaled += 1; } } },
+    URLSearchParams,
+    window: { location: { search }, tokenMonitor: { signalAppearanceReady: () => { signaled += 1; } } },
     requestAnimationFrame: callback => { frames.push(callback); }
   });
   const init = app.slice(app.indexOf('async function init()'));
@@ -141,6 +142,13 @@ function initialAppearance({ nativeHidden, windowVisible }) {
   vm.runInContext(`let initialSettingsApplied = false;\n${early}`, context);
   return { applied: () => applied, signaled: () => signaled, frames };
 }
+
+test('a hibernated tray window signals appearance while hidden without waiting for frames', () => {
+  const run = initialAppearance({ nativeHidden: false, windowVisible: false, search: '?windowHidden=1&hibernateReveal=1' });
+  assert.equal(run.applied(), 1);
+  assert.equal(run.signaled(), 1);
+  assert.equal(run.frames.length, 0);
+});
 
 test('an initially hidden retained startup view prepares appearance without waiting for hidden-page frames', () => {
   const run = initialAppearance({ nativeHidden: true, windowVisible: true });
