@@ -199,6 +199,49 @@ test('fetchDevinLimits sends scoped auth and maps all quota surfaces', async () 
   assert.equal(provider.balance.amount, 10);
 });
 
+test('Devin caches membership by token and organization and retries missing email sooner', async () => {
+  let now = 0;
+  let membershipReads = 0;
+  let quotaReads = 0;
+  let membershipAvailable = true;
+  const deps = {
+    env: {},
+    now: () => now,
+    providerRuntimeState: new Map(),
+    fetch: async (url, { headers }) => {
+      if (url.endsWith('/users/current-membership')) {
+        membershipReads += 1;
+        return membershipAvailable
+          ? Response.json({ org: { org_id: headers['x-cog-org-id'] }, user: { email: 'member@example.com' } })
+          : new Response(null, { status: 503 });
+      }
+      quotaReads += 1;
+      return Response.json({ plan_name: 'pro', weekly_percentage: 25 });
+    }
+  };
+  const refresh = (token = 'first-token', org = 'org_example') =>
+    fetchDevinLimits({ devinBearerToken: token, devinOrganization: org }, deps);
+
+  assert.equal((await refresh()).accountEmail, 'member@example.com');
+  now = 59 * 60_000;
+  assert.equal((await refresh()).accountEmail, 'member@example.com');
+  assert.equal(membershipReads, 1);
+  await refresh('second-token');
+  await refresh('first-token', 'org_other');
+  assert.equal(membershipReads, 3);
+
+  now = 60 * 60_000;
+  membershipAvailable = false;
+  assert.equal((await refresh()).accountEmail, '');
+  assert.equal((await refresh()).accountName, 'org_example');
+  assert.equal(membershipReads, 4);
+  now += 5 * 60_000;
+  membershipAvailable = true;
+  assert.equal((await refresh()).accountEmail, 'member@example.com');
+  assert.equal(membershipReads, 5);
+  assert.equal(quotaReads, 7);
+});
+
 test('parses the Devin subscription plan slug', () => {
   assert.equal(parseDevinSubscriptionPlan({ slug: 'teams-v2', status: 'active' }), 'Teams');
   assert.equal(parseDevinSubscriptionPlan({ slug: 'pro' }), 'Pro');

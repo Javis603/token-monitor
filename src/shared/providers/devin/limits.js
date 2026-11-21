@@ -16,6 +16,8 @@ const { BROWSER_USER_AGENT } = require('../../browserUserAgent');
 const DEVIN_ORIGIN = 'https://app.devin.ai';
 const DEVIN_FETCH_TIMEOUT_MS = 15_000;
 const DEVIN_MEMBERSHIP_TIMEOUT_MS = 3_000;
+const DEVIN_EMAIL_TTL_MS = 60 * 60_000;
+const DEVIN_EMAIL_RETRY_MS = 5 * 60_000;
 
 function devinBearerToken(env = process.env, options = {}) {
   const candidates = [
@@ -309,18 +311,27 @@ async function fetchJson(url, headers, deps = {}) {
   }, { signal: deps.signal, deadlineMs });
 }
 
-async function fetchDevinAccountEmail(headers, internalId, deps) {
+async function fetchDevinAccountEmail(headers, internalId, accountKey, deps) {
   if (!internalId) return '';
+  const cache = deps.providerRuntimeState;
+  const cacheKey = `devin-email:${accountKey}`;
+  const now = deps.now || Date.now;
+  const cached = cache?.get(cacheKey);
+  if (cached && cached.expiresAt > now()) return cached.email;
+  let email = '';
   try {
     const { response, body } = await fetchJson(`${DEVIN_ORIGIN}/api/users/current-membership`, headers, {
       ...deps,
       devinFetchTimeoutMs: DEVIN_MEMBERSHIP_TIMEOUT_MS
     });
     if (response.ok && body?.org?.org_id === internalId && typeof body?.user?.email === 'string') {
-      return body.user.email;
+      email = body.user.email.trim();
     }
   } catch (_) {}
-  return '';
+  if (!deps.signal?.aborted) {
+    cache?.set(cacheKey, { email, expiresAt: now() + (email ? DEVIN_EMAIL_TTL_MS : DEVIN_EMAIL_RETRY_MS) });
+  }
+  return email;
 }
 
 async function fetchDevinLimits(options = {}, deps = {}) {
@@ -333,6 +344,7 @@ async function fetchDevinLimits(options = {}, deps = {}) {
     return normalizeLimitProvider({ provider: 'devin', source: 'web', status: 'notConfigured', updatedAt, windows: [] });
   }
   const internalId = internalOrganizationId(organization);
+  const accountKey = hashKey('devin', token, organization);
   const headers = {
     Accept: 'application/json',
     'Accept-Language': 'en-US,en;q=0.9',
@@ -348,7 +360,7 @@ async function fetchDevinLimits(options = {}, deps = {}) {
         const usage = parseDevinUsage(body, organization);
         const [planName, accountEmail] = await Promise.all([
           usage.planName || fetchDevinPlanName(headers, organization, deps),
-          fetchDevinAccountEmail(headers, internalId, deps)
+          fetchDevinAccountEmail(headers, internalId, accountKey, deps)
         ]);
         const windows = [
           quotaWindow('daily', 'Daily', usage.daily, 24 * 60),
@@ -366,7 +378,7 @@ async function fetchDevinLimits(options = {}, deps = {}) {
         }
         return normalizeLimitProvider({
           provider: 'devin',
-          accountKey: hashKey('devin', token, organization),
+          accountKey,
           accountLabel: planName,
           planLabel: planName,
           accountName: usage.organization,
