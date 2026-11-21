@@ -17,7 +17,7 @@ Token Monitor requests `GET https://app.devin.ai/api/<organization>/billing/quot
 
 The response supplies Daily and Weekly percentages and reset timestamps. When Devin sets `hide_daily_quota` to `true`, Token Monitor omits Daily while retaining Weekly. `overage_balance` (or `overage_balance_cents`) is shown as the USD Extra usage balance. The quota payload carries no plan field for most accounts, so when `plan_name` is absent the plan label comes from a best-effort `GET /api/billing/subscription` call (same headers, org scoped through `x-cog-org-id`), reading the subscription `slug`. Headless installs can set `DEVIN_BEARER_TOKEN` and `DEVIN_ORGANIZATION`; `TOKEN_MONITOR_DEVIN_BEARER_TOKEN` and `TOKEN_MONITOR_DEVIN_ORGANIZATION` are also accepted.
 
-The widget supports multiple accounts, each with its own token and organization. A migrated stored token keeps its effective organization, including an environment-backed organization. Environment credentials remain a read-only account.
+The widget supports multiple accounts, each with its own token and organization. When configured with an internal org ID, Token Monitor also checks the current membership with the same credentials. The card can display the member's email when the returned organization matches, and falls back to the configured organization when the lookup is unavailable. Membership results are cached in memory for that token and organization. A migrated stored token keeps its effective organization, including an environment-backed organization. Environment credentials remain a read-only account.
 
 ## Sources
 

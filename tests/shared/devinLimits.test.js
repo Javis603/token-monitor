@@ -156,6 +156,16 @@ test('fetchDevinLimits sends scoped auth and maps all quota surfaces', async () 
     now: () => Date.parse('2026-09-23T12:00:00Z'),
     fetch: async (url, init) => {
       calls.push({ url, init });
+      if (url.endsWith('/users/current-membership')) {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({
+            org: { org_id: 'org_GQ6LhcfkW1TSinM6' },
+            user: { email: 'member@example.com' }
+          })
+        };
+      }
       return {
         ok: true,
         status: 200,
@@ -170,18 +180,66 @@ test('fetchDevinLimits sends scoped auth and maps all quota surfaces', async () 
       };
     }
   });
-  assert.equal(calls.length, 1);
+  assert.equal(calls.length, 2);
   assert.equal(calls[0].url, 'https://app.devin.ai/api/org_GQ6LhcfkW1TSinM6/billing/quota/usage');
   assert.equal(calls[0].init.headers.Authorization, 'Bearer secret-token');
   assert.equal(calls[0].init.headers['x-cog-org-id'], 'org_GQ6LhcfkW1TSinM6');
   assert.equal(calls[0].init.credentials, 'omit');
+  assert.equal(calls[1].url, 'https://app.devin.ai/api/users/current-membership');
+  assert.deepEqual(calls[1].init.headers, calls[0].init.headers);
+  assert.equal(calls[1].init.credentials, 'omit');
   assert.equal(provider.status, 'ok');
   assert.equal(provider.accountLabel, 'Pro');
+  assert.equal(provider.accountEmail, 'member@example.com');
+  assert.equal(provider.accountName, 'org_GQ6LhcfkW1TSinM6');
   assert.equal(provider.windows[0].kind, 'daily');
   assert.equal(provider.windows[1].kind, 'weekly');
   assert.equal(provider.windows[2].metric, 'credits');
   assert.equal(provider.windows[2].remaining, 10);
   assert.equal(provider.balance.amount, 10);
+});
+
+test('Devin caches membership by token and organization and retries missing email sooner', async () => {
+  let now = 0;
+  let membershipReads = 0;
+  let quotaReads = 0;
+  let membershipAvailable = true;
+  const deps = {
+    env: {},
+    now: () => now,
+    providerRuntimeState: new Map(),
+    fetch: async (url, { headers }) => {
+      if (url.endsWith('/users/current-membership')) {
+        membershipReads += 1;
+        return membershipAvailable
+          ? Response.json({ org: { org_id: headers['x-cog-org-id'] }, user: { email: 'member@example.com' } })
+          : new Response(null, { status: 503 });
+      }
+      quotaReads += 1;
+      return Response.json({ plan_name: 'pro', weekly_percentage: 25 });
+    }
+  };
+  const refresh = (token = 'first-token', org = 'org_example') =>
+    fetchDevinLimits({ devinBearerToken: token, devinOrganization: org }, deps);
+
+  assert.equal((await refresh()).accountEmail, 'member@example.com');
+  now = 59 * 60_000;
+  assert.equal((await refresh()).accountEmail, 'member@example.com');
+  assert.equal(membershipReads, 1);
+  await refresh('second-token');
+  await refresh('first-token', 'org_other');
+  assert.equal(membershipReads, 3);
+
+  now = 60 * 60_000;
+  membershipAvailable = false;
+  assert.equal((await refresh()).accountEmail, '');
+  assert.equal((await refresh()).accountName, 'org_example');
+  assert.equal(membershipReads, 4);
+  now += 5 * 60_000;
+  membershipAvailable = true;
+  assert.equal((await refresh()).accountEmail, 'member@example.com');
+  assert.equal(membershipReads, 5);
+  assert.equal(quotaReads, 7);
 });
 
 test('parses the Devin subscription plan slug', () => {
@@ -235,7 +293,7 @@ test('fetchDevinLimits falls back to the subscription endpoint for the plan labe
   assert.ok(calls.some((url) => url === 'https://app.devin.ai/api/billing/subscription'));
 });
 
-test('fetchDevinLimits keeps working when the subscription lookup fails', async () => {
+test('fetchDevinLimits keeps quotas and uses the configured org when optional lookups fail', async () => {
   const provider = await fetchDevinLimits({
     devinBearerToken: 'Bearer secret-token',
     devinOrganization: 'org_example'
@@ -246,6 +304,13 @@ test('fetchDevinLimits keeps working when the subscription lookup fails', async 
       if (url.includes('/billing/subscription')) {
         return { ok: false, status: 404, json: async () => ({ detail: 'Not found' }) };
       }
+      if (url.endsWith('/users/current-membership')) {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({ org: { org_id: 'org_other' }, user: { email: 'other@example.com' } })
+        };
+      }
       return {
         ok: true,
         status: 200,
@@ -255,6 +320,8 @@ test('fetchDevinLimits keeps working when the subscription lookup fails', async 
   });
   assert.equal(provider.status, 'ok');
   assert.equal(provider.planLabel, '');
+  assert.equal(provider.accountEmail, '');
+  assert.equal(provider.accountName, 'org_example');
   assert.equal(provider.windows.length, 2);
 });
 

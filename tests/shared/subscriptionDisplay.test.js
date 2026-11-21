@@ -261,6 +261,16 @@ test('matchProviderAccount falls back to email when the key rotated', () => {
   assert.equal(matchProviderAccount(sub, providers).accountKey, 'sha256:new');
 });
 
+test('Devin subscriptions follow the organization when a login shares multiple orgs and a token rotates', () => {
+  const alpha = { provider: 'devin', accountName: 'org_alpha', accountKey: 'sha256:old', accountEmail: 'same@example.com' };
+  const beta = { ...alpha, accountName: 'org_beta', accountKey: 'sha256:beta' };
+  const rotatedAlpha = { ...alpha, accountKey: 'sha256:new' };
+  const sub = subscription({ provider: 'devin', binding: bindingFromAccount(alpha) });
+
+  assert.equal(matchProviderAccount(sub, [beta, rotatedAlpha]), rotatedAlpha);
+  assert.equal(matchProviderAccount(sub, [beta]), null);
+});
+
 // The self-healing case: qoder hashes the cookie, so re-pasting an expired one
 // changes accountKey. With a single account there is no ambiguity to resolve.
 test('matchProviderAccount claims the sole account when every candidate misses', () => {
