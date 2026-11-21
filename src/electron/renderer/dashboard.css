@@ -62,6 +62,7 @@ html.native-high-contrast .dash-cards { border-color: var(--line-strong); }
 /* The overview reads as a centred content column (like a profile page) so the summary
    strip and heatmap share one width and a wide window gets symmetric margins, not a right gap. */
 #activityPane { align-self: center; width: 100%; max-width: 1200px; margin-inline: auto; }
+.dash-summary-note { margin: 6px 0 0; font-size: 12px; }
 .dash-heatmap-block { flex: none; display: flex; flex-direction: column; gap: 10px; }
 .dash-heatmap-title { font-size: 13px; font-weight: 600; opacity: 0.9; }
 .dash-heatmap-title-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
