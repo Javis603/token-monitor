@@ -4,6 +4,8 @@ const { abortError } = require('../../probeDeadline');
 
 const { spawn } = require('node:child_process');
 const fs = require('node:fs/promises');
+const { once } = require('node:events');
+const net = require('node:net');
 const os = require('node:os');
 const path = require('node:path');
 const https = require('node:https');
@@ -396,22 +398,62 @@ function statusFromHttpCode(code) {
   return 'unavailable';
 }
 
+async function connectVerifiedDesktopSocket(port, pid, timeoutMs, parentSignal) {
+  const timeout = AbortSignal.timeout(timeoutMs);
+  const signal = parentSignal ? AbortSignal.any([timeout, parentSignal]) : timeout;
+  const socket = net.createConnection({ host: '127.0.0.1', port, signal });
+  // The HTTP client has not attached its socket listeners yet.
+  const ignoreSocketError = () => {};
+  socket.on('error', ignoreSocketError);
+  try {
+    await once(socket, 'connect', { signal });
+    const localPort = socket.localPort;
+    let owned;
+    if (process.platform === 'win32') {
+      const script = `Get-NetTCPConnection -OwningProcess ${pid} -State Established -LocalAddress 127.0.0.1 -LocalPort ${port} -RemoteAddress 127.0.0.1 -RemotePort ${localPort} -ErrorAction SilentlyContinue | Select-Object -ExpandProperty OwningProcess`;
+      const output = await runProcessText('powershell', ['-NoProfile', '-NonInteractive', '-Command', script], { timeoutMs, deps: { signal } });
+      owned = output.split(/\r?\n/).some((line) => line.trim() === String(pid));
+    } else {
+      const output = await runProcessText('lsof', ['-nP', '-a', '-p', String(pid), '-i4TCP', '-sTCP:ESTABLISHED', '-Fn'], { timeoutMs, deps: { signal } });
+      owned = output.split(/\r?\n/).includes(`n127.0.0.1:${port}->127.0.0.1:${localPort}`);
+    }
+    throwIfAborted(signal);
+    if (!owned || socket.destroyed) throw errorWithStatus('unavailable', 'Antigravity no longer owns the connected RPC socket');
+    return socket;
+  } catch (error) {
+    socket.destroy();
+    throw error;
+  }
+}
+
 function callLs({
   scheme,
   port,
   csrfToken,
+  desktopPid,
   method,
   body,
   host = '127.0.0.1',
   timeoutMs = DEFAULT_RPC_TIMEOUT_MS,
   signal
 }) {
+  if (desktopPid && (scheme !== 'http' || host !== '127.0.0.1' || !Number.isSafeInteger(desktopPid) || desktopPid <= 0)) {
+    return Promise.reject(errorWithStatus('unavailable', 'Invalid Antigravity desktop RPC endpoint'));
+  }
   const transport = scheme === 'https' ? https : http;
   const payload = Buffer.from(JSON.stringify(body || {}));
   return new Promise((resolve, reject) => {
     const req = transport.request({
       host,
       port,
+      ...(desktopPid ? {
+        // Supplying createConnection without an agent keeps the request buffered
+        // until the callback hands it the verified socket.
+        createConnection: (_options, done) => {
+          void connectVerifiedDesktopSocket(port, desktopPid, timeoutMs, signal)
+            .then((socket) => done(null, socket), done);
+        }
+      } : {}),
       method: 'POST',
       path: `/${LS_SERVICE}/${method}`,
       headers: {
@@ -570,7 +612,7 @@ function endpointCandidates(processInfo, listenPorts) {
   if (processInfo.desktopRpcPort) {
     const port = processInfo.desktopRpcPort;
     // Require the port to still belong to the matching process before sending its token.
-    return listenPorts.includes(port) ? [{ scheme: 'http', port, csrfToken: processInfo.csrfToken }] : [];
+    return listenPorts.includes(port) ? [{ scheme: 'http', port, csrfToken: processInfo.csrfToken, desktopPid: processInfo.pid }] : [];
   }
   const candidates = [];
   // Try explicit hub port first if available (most authoritative and fastest).
@@ -628,13 +670,15 @@ function prioritizeCandidate(resolved, candidates) {
     candidate.scheme !== resolved.scheme
     || candidate.port !== resolved.port
     || candidate.csrfToken !== resolved.csrfToken
+    || candidate.desktopPid !== resolved.desktopPid
   ))];
 }
 
 function sameEndpoint(left, right) {
   return left.scheme === right.scheme
     && left.port === right.port
-    && left.csrfToken === right.csrfToken;
+    && left.csrfToken === right.csrfToken
+    && left.desktopPid === right.desktopPid;
 }
 
 function dedupeCandidates(candidates) {

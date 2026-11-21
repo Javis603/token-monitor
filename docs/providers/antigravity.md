@@ -85,7 +85,7 @@ An account-scoped manual refresh fetches only the requested OAuth account. With 
 
 ### Local RPC
 
-The probe discovers the running process and connects to its loopback RPC service. For Antigravity desktop builds that advertise a host bridge token on stdin, it reads the RPC port and credential from the matching PID’s `~/.gemini/antigravity/daemon/hub_*.json` descriptor and verifies that the process owns the listener. Older builds provide the RPC credential on the process command line.
+The probe discovers the running process and connects to its loopback RPC service. For Antigravity desktop builds that advertise a host bridge token on stdin, it reads the RPC port and credential from the matching PID’s `~/.gemini/antigravity/daemon/hub_*.json` descriptor and verifies that the process owns the listener and the connected socket before sending the credential. Older builds provide the RPC credential on the process command line.
 
 Local quota comes from the grouped quota summary. If a source cannot provide a usable summary, the probe tries the next local source. When all sources fail, the limits runtime applies its existing last-good policy. User status supplies account identity and plan information after a successful quota lookup.
 
