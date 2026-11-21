@@ -4,6 +4,7 @@ const os = require('node:os');
 const path = require('node:path');
 const { NOTCH_METRICS, notchPeekBounds, notchCanvasBounds, notchGeometry, notchBounds, notchCommands, translateCommands, interpolateCommands, rectContains } = require('./geometry');
 const { toSvgPath, toPolygons } = require('../renderer/edgeDock/shapes');
+const { themePaletteKey, themePalette } = require('../renderer/themePresets');
 const { notchGlassGeometry } = require('../renderer/notch/renderer');
 const { readMacNotchScreens } = require('./screen');
 const { notchBlurBounds } = require('./blur');
@@ -262,13 +263,13 @@ function createNotchController({ BrowserWindow, ipcMain, screen, getSettings,
     return edgeDockBackdropMode({ macBackdrop: settings().macBackdrop, edgeDockMacBackdrop: normalizeNotchStyle(settings().notchStyle) });
   }
 
-  function glassOptions(surface) {
+  function glassOptions(surface, current = layout()) {
     const mode = backdropMode();
     // An attached panel joins a black camera housing, so its material keeps a
     // dark appearance even when the widget uses a light palette. The hardware
     // scrim owns its tint: applying the widget tint too would darken it twice.
     // Detached capsules retain the widget's appearance/tint.
-    const attached = surface === 'notch' && layout()?.geometry.notched;
+    const attached = surface === 'notch' && current?.geometry.notched;
     return { dark: attached || liquidGlass()?.dark === true, style: liquidGlassStyle(mode),
       tintOpacity: attached ? 0 : liquidGlassTint(settings(), mode) };
   }
@@ -294,8 +295,11 @@ function createNotchController({ BrowserWindow, ipcMain, screen, getSettings,
     onWebSurfaceChanged();
     const win = windows[surface];
     if (!alive(win) || !ready[surface] || !current) return;
+    const scheme = glass[surface] && (glassOptions(surface, current).dark ? 'dark' : 'light');
+    const themeColors = themePalette(appearance, themePaletteKey(appearance, scheme));
     const base = { surface, notch: true, shape: shapes[surface], platform, osRelease: os.release(),
-      appearance: { ...appearance, zoomFactor: zoom(), notchWarnColors: settings().notchWarnColors === true,
+      appearance: { ...appearance, themeColors,
+        zoomFactor: zoom(), notchWarnColors: settings().notchWarnColors === true,
         edgeDockWarnColors: settings().notchWarnColors === true,
         edgeDockRunningIndicatorEnabled: settings().notchRunningIndicatorEnabled === true }, style: normalizeNotchStyle(settings().notchStyle), glass: nativeMaterial[surface] === true, liquidGlass: Boolean(glass[surface]) };
     const hasSummary = summaryVisible();
@@ -875,10 +879,12 @@ function createNotchController({ BrowserWindow, ipcMain, screen, getSettings,
     if (settings().notchProgressiveBlur === false || blurAvailable() !== true) blurFailed = false;
     if (!blurEnabled()) destroyBlur();
     if (!screenListeners) { for (const event of ['display-added', 'display-removed', 'display-metrics-changed']) screen.on(event, invalidateGeometry); screenListeners = true; }
+    // A failed appearance update disposes the glass; publish its fallback too.
+    const hadGlass = Boolean(glass.notch);
     updateGlassAppearance();
     startScrollMonitor();
     refreshGeometry(); visibility();
-    if (restoreSummary) refreshLayout();
+    if (restoreSummary || hadGlass) refreshLayout();
     if (!pollTimer) schedulePoll();
   }
   function stop() {

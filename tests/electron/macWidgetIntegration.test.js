@@ -682,7 +682,7 @@ test('uses AppIntent configuration and in-place refresh interactions', () => {
   assert.match(widgetIntentSource, /struct RefreshWidgetIntent: AppIntent/);
   assert.match(widgetIntentSource, /static var openAppWhenRun: Bool \{ false \}/);
   assert.match(widgetIntentSource, /WidgetCenter\.shared\.reloadAllTimelines\(\)/);
-  assert.match(widgetSource, /StaticConfiguration\(kind: TokenMonitorWidgetConfiguration\.activityKind/);
+  assert.match(widgetSource, /AppIntentConfiguration\(kind: TokenMonitorWidgetConfiguration\.activityKind, intent: ActivityWidgetIntent\.self/);
   assert.match(widgetSource, /AppIntentConfiguration\(kind: TokenMonitorWidgetConfiguration\.quotaKind, intent: QuotaWidgetIntent\.self/);
   assert.doesNotMatch(widgetBundleSource, /TokenMonitorLegacyQuotaWidget/);
   assert.match(widgetBundleSource, /TokenMonitorQuotaWidget\(\)/);
@@ -861,7 +861,7 @@ test('Widget build provenance fields are injected into the extension Info.plist'
   }
   assert.match(widgetProject, /TOKEN_MONITOR_WIDGET_KIND = com\.tokenmonitor\.dashboard;/);
   assert.match(widgetProject, /TOKEN_MONITOR_WIDGET_GIT_REVISION = unknown;/);
-  assert.match(widgetBuildSource, /const WIDGET_UI_VERSION = 47;/);
+  assert.match(widgetBuildSource, /const WIDGET_UI_VERSION = 49;/);
   assert.match(widgetBuildSource, /const WIDGET_SCHEMA_VERSION = 10;/);
   assert.match(widgetDevSource, /fs\.rmSync\(extension, \{ recursive: true, force: true \}\)/);
   assert.match(widgetDevSource, /`TOKEN_MONITOR_MARKETING_VERSION=\$\{targetMarketingVersion\}`/);
@@ -1017,6 +1017,9 @@ test('Widget user-facing strings are localized in every supported language', () 
   for (const key of [
     'Breakdown',
     'Quota Mode',
+    'Appearance',
+    'Light',
+    'Dark',
     'Automatic',
     'Custom',
     'Quota 1',
@@ -1050,6 +1053,17 @@ test('Widget layout uses system margins without retaining the superseded scaffol
   assert.match(widgetInfo, /<key>TMWidgetSchemaVersion<\/key>\s*<string>\$\(TOKEN_MONITOR_WIDGET_SCHEMA_VERSION\)<\/string>/);
   assert.match(widgetProject, /TOKEN_MONITOR_WIDGET_KIND = com\.tokenmonitor\.dashboard;/);
 })
+
+test('all five Widget editors expose a per-instance appearance and allow WidgetKit to replace the background', () => {
+  for (const name of ['UsageSummary', 'Activity', 'Breakdown', 'Quota', 'Dashboard']) {
+    const start = widgetIntentSource.indexOf(`struct ${name}WidgetIntent: WidgetConfigurationIntent {`);
+    assert.notEqual(start, -1, name);
+    const intent = widgetIntentSource.slice(start, widgetIntentSource.indexOf('\n}', start));
+    assert.match(intent, /@Parameter\(title: "Appearance", default: \.automatic\)\s+var appearance: WidgetAppearance/);
+  }
+  assert.match(widgetSource, /\.containerBackground\(for: \.widget\)/);
+  assert.doesNotMatch(widgetSource, /\.containerBackgroundRemovable\(false\)/);
+});
 
 test('registered Widget families stay fixed to their purpose-built sizes', () => {
   assert.match(widgetSource, /TokenMonitorSummaryWidget[\s\S]*\.supportedFamilies\(\[\.systemSmall\]\)/);

@@ -224,7 +224,7 @@ function applyAppearance(settings) {
   root.setProperty('--line-alpha', (0.1 + depth * 0.09).toFixed(3));
   applyReduceMotionPreference(settings?.reduceMotion);
   applyFontSettings(settings);
-  applyThemeColors(settings?.themeColors);
+  applyThemeColors(themePresetsApi.themePalette(settings, themePresetsApi.themePaletteKey(settings, nativeMaterialState.colorScheme)));
   applyVendorColorOverrides(settings?.vendorColors);
   els.body.classList.toggle('flat', state.flat);
 }

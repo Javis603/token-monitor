@@ -24,6 +24,39 @@
         "pt-BR": { "stringUnit": { "state": "translated", "value": "Modo de cota" } }
       }
     },
+    "Appearance": {
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Appearance" } },
+        "es": { "stringUnit": { "state": "translated", "value": "Apariencia" } },
+        "zh-Hans": { "stringUnit": { "state": "translated", "value": "外观" } },
+        "zh-Hant": { "stringUnit": { "state": "translated", "value": "外觀" } },
+        "ja": { "stringUnit": { "state": "translated", "value": "外観" } },
+        "ko": { "stringUnit": { "state": "translated", "value": "화면 모드" } },
+        "pt-BR": { "stringUnit": { "state": "translated", "value": "Aparência" } }
+      }
+    },
+    "Light": {
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Light" } },
+        "es": { "stringUnit": { "state": "translated", "value": "Claro" } },
+        "zh-Hans": { "stringUnit": { "state": "translated", "value": "浅色" } },
+        "zh-Hant": { "stringUnit": { "state": "translated", "value": "淺色" } },
+        "ja": { "stringUnit": { "state": "translated", "value": "ライト" } },
+        "ko": { "stringUnit": { "state": "translated", "value": "라이트" } },
+        "pt-BR": { "stringUnit": { "state": "translated", "value": "Claro" } }
+      }
+    },
+    "Dark": {
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Dark" } },
+        "es": { "stringUnit": { "state": "translated", "value": "Oscuro" } },
+        "zh-Hans": { "stringUnit": { "state": "translated", "value": "深色" } },
+        "zh-Hant": { "stringUnit": { "state": "translated", "value": "深色" } },
+        "ja": { "stringUnit": { "state": "translated", "value": "ダーク" } },
+        "ko": { "stringUnit": { "state": "translated", "value": "다크" } },
+        "pt-BR": { "stringUnit": { "state": "translated", "value": "Escuro" } }
+      }
+    },
     "Automatic": {
       "localizations": {
         "en": { "stringUnit": { "state": "translated", "value": "Automatic" } },

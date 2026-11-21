@@ -11,12 +11,12 @@ struct SmallUsageWidgetView: View {
             VStack(alignment: .leading, spacing: 4) {
                 Text(period.displayTitle)
                     .font(.caption.weight(.medium))
-                    .foregroundStyle(WidgetDesignTokens.muted)
+                    .foregroundStyle(.secondary)
 
                 Text(WidgetFormat.tokens(snapshot.overview.totalTokens, style: "compact", presentation: snapshot.presentation))
                     .font(.system(size: 37, weight: .semibold))
                     .monospacedDigit()
-                    .foregroundStyle(WidgetDesignTokens.number)
+                    .foregroundStyle(.primary)
                     .lineLimit(1)
                     .minimumScaleFactor(0.68)
                     .contentTransition(.numericText())
@@ -26,7 +26,7 @@ struct SmallUsageWidgetView: View {
                 if snapshot.presentation.showCost {
                     Text(WidgetFormat.cost(snapshot.overview.costUsd, presentation: snapshot.presentation))
                         .font(.subheadline.weight(.medium))
-                        .foregroundStyle(WidgetDesignTokens.muted)
+                        .foregroundStyle(.secondary)
                 }
             }
 
@@ -133,7 +133,7 @@ struct LargeDashboardWidgetView: View {
                                 Text(trendCaption)
                                     .font(.caption.weight(.medium))
                                     .monospacedDigit()
-                                    .foregroundStyle(WidgetDesignTokens.muted)
+                                    .foregroundStyle(.secondary)
                                 SmoothTrendChart(points: snapshot.trend.points)
                                     .frame(maxWidth: .infinity)
                                     .frame(height: WidgetDesignTokens.dashboardTrendHeight)
@@ -219,11 +219,11 @@ struct WidgetMetricBlock: View {
         VStack(alignment: .leading, spacing: 3) {
             Text(period.displayTitle.uppercased())
                 .font(.caption2.weight(.medium))
-                .foregroundStyle(WidgetDesignTokens.muted)
+                .foregroundStyle(.secondary)
             Text(WidgetFormat.tokens(snapshot.overview.totalTokens, style: "compact", presentation: snapshot.presentation))
                 .font(.system(size: metricSize, weight: .semibold))
                 .monospacedDigit()
-                .foregroundStyle(WidgetDesignTokens.number)
+                .foregroundStyle(.primary)
                 .lineLimit(1)
                 .minimumScaleFactor(0.7)
                 .contentTransition(.numericText())
@@ -231,7 +231,7 @@ struct WidgetMetricBlock: View {
                 Text(WidgetFormat.cost(snapshot.overview.costUsd, presentation: snapshot.presentation))
                     .font(.caption.weight(.medium))
                     .monospacedDigit()
-                    .foregroundStyle(WidgetDesignTokens.muted)
+                    .foregroundStyle(.secondary)
             }
         }
     }
@@ -442,12 +442,12 @@ private struct DashboardQuotaProviderRow: View {
                     WidgetVendorMark(vendorID: provider.provider, size: 12, isMuted: isStale)
                     Text(provider.displayName ?? WidgetFormat.provider(provider.provider))
                         .font(.system(size: WidgetDesignTokens.dashboardRowLabelSize, weight: .semibold))
-                        .foregroundStyle(isStale ? WidgetDesignTokens.muted : Color.primary)
+                        .foregroundStyle(isStale ? Color.secondary : Color.primary)
                         .lineLimit(1)
                     if isStale, differentiateWithoutColor {
                         Image(systemName: "clock.badge.exclamationmark")
                             .font(.system(size: WidgetDesignTokens.dashboardDetailSize, weight: .semibold))
-                            .foregroundStyle(WidgetDesignTokens.muted)
+                            .foregroundStyle(.secondary)
                             .accessibilityHidden(true)
                     }
                 }
@@ -506,12 +506,12 @@ private struct DashboardQuotaWindowCell: View {
                 Spacer(minLength: 2)
                 Text(value)
                     .font(.system(size: WidgetDesignTokens.dashboardValueSize, weight: .semibold))
-                    .foregroundStyle(isStale ? WidgetDesignTokens.muted : Color.primary)
+                    .foregroundStyle(isStale ? Color.secondary : Color.primary)
                     .monospacedDigit()
                     .lineLimit(1)
             }
             if window.showMeter, let remaining = window.remainingPercent {
-                PercentageBar(value: remaining, color: isStale ? WidgetDesignTokens.muted : color)
+                PercentageBar(value: remaining, color: isStale ? Color.secondary : color)
             }
             if window.resetsAt != nil {
                 Text(WidgetFormat.boundary(window))
@@ -542,7 +542,7 @@ struct QuotaProviderRow: View {
                 WidgetVendorMark(vendorID: provider.provider, size: 13, isMuted: isStale)
                 Text(provider.displayName ?? WidgetFormat.provider(provider.provider))
                     .font(.caption.weight(.semibold))
-                    .foregroundStyle(isStale ? WidgetDesignTokens.muted : Color.primary)
+                    .foregroundStyle(isStale ? Color.secondary : Color.primary)
                     .lineLimit(1)
                 if showAccountLabel, let accountLabel = provider.accountLabel, !accountLabel.isEmpty {
                     Text(accountLabel)
@@ -554,7 +554,7 @@ struct QuotaProviderRow: View {
                 if isStale, differentiateWithoutColor {
                     Image(systemName: "clock.badge.exclamationmark")
                         .font(.caption2.weight(.semibold))
-                        .foregroundStyle(WidgetDesignTokens.muted)
+                        .foregroundStyle(.secondary)
                         .accessibilityHidden(true)
                 }
                 Spacer(minLength: 6)
@@ -599,13 +599,13 @@ struct QuotaWindowCell: View {
                 Spacer(minLength: 4)
                 Text(value)
                     .font(.caption2.weight(.semibold))
-                    .foregroundStyle(isStale ? WidgetDesignTokens.muted : Color.primary)
+                    .foregroundStyle(isStale ? Color.secondary : Color.primary)
                     .monospacedDigit()
                     .lineLimit(1)
                     .minimumScaleFactor(0.8)
             }
             if window.showMeter, let remaining = window.remainingPercent {
-                PercentageBar(value: remaining, color: isStale ? WidgetDesignTokens.muted : color)
+                PercentageBar(value: remaining, color: isStale ? Color.secondary : color)
             }
             if window.resetsAt != nil {
                 Text(WidgetFormat.boundary(window))
@@ -632,7 +632,7 @@ struct ModuleTitle: View {
     var body: some View {
         Text(title.uppercased())
             .font(.system(size: WidgetDesignTokens.dashboardSectionTitleSize, weight: .medium))
-            .foregroundStyle(WidgetDesignTokens.muted)
+            .foregroundStyle(.secondary)
     }
 }
 
@@ -677,7 +677,7 @@ enum WidgetVendorIdentity {
 extension WidgetVendorPalette {
     func color(for vendorID: String, model: Bool = false) -> Color {
         switch ink(for: vendorID, model: model) {
-        case .adaptive: Color.white.opacity(0.86)
+        case .adaptive: Color.primary.opacity(0.86)
         case .hex(let hex): Color(widgetHex: hex)
         }
     }
@@ -704,15 +704,20 @@ struct WidgetVendorMark: View {
     var body: some View {
         Group {
             if let image = image {
-                Image(nsImage: image)
-                    .resizable()
-                    .renderingMode(!isModel && vendorPalette.styles[vendorID]?.fullColor == true ? .original : .template)
-                    .scaledToFit()
+                let mark = Image(nsImage: image).resizable()
+                if !image.isTemplate, #available(macOS 15.0, *) {
+                    mark.renderingMode(.original)
+                        .widgetAccentedRenderingMode(.desaturated)
+                        .scaledToFit()
+                } else {
+                    mark.renderingMode(image.isTemplate ? .template : .original)
+                        .scaledToFit()
+                }
             } else {
                 Circle()
             }
         }
-        .foregroundStyle(isMuted ? WidgetDesignTokens.muted : Color.primary.opacity(0.88))
+        .foregroundStyle(isMuted ? Color.secondary : Color.primary.opacity(0.88))
         .frame(width: size, height: size)
         .accessibilityHidden(true)
     }
@@ -756,14 +761,19 @@ private extension Color {
 
 struct PercentageBar: View {
     let value: Double
-    var color: Color = WidgetDesignTokens.chartBlue
+    let color: Color
+    @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.widgetRenderingMode) private var renderingMode
 
     var body: some View {
         GeometryReader { proxy in
             ZStack(alignment: .leading) {
-                Capsule().fill(.white.opacity(0.07))
+                Capsule().fill(.primary.opacity(0.14))
                 Capsule()
-                    .fill(color.opacity(0.82))
+                    .fill(renderingMode == .fullColor ? color : .white)
+                    // Keep even white and pastel vendor fills visible on Porcelain.
+                    .colorMultiply(renderingMode == .fullColor && colorScheme == .light ? Color(white: 0.56) : .white)
+                    .widgetAccentable()
                     .frame(width: proxy.size.width * max(0, min(1, value / 100)))
             }
         }
@@ -773,15 +783,17 @@ struct PercentageBar: View {
 }
 
 struct SmoothTrendChart: View {
+    @Environment(\.colorScheme) private var colorScheme
     let points: [WidgetTrendPoint]
 
     var body: some View {
         GeometryReader { proxy in
             SmoothTrendShape(values: points.map { Double($0.totalTokens) })
                 .stroke(
-                    WidgetDesignTokens.chartBlue,
+                    WidgetDesignTokens.chartBlue(for: colorScheme),
                     style: StrokeStyle(lineWidth: 1.8, lineCap: .round, lineJoin: .round)
                 )
+                .widgetAccentable()
                 .frame(width: proxy.size.width, height: proxy.size.height)
         }
         .accessibilityHidden(true)

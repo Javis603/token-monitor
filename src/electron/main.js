@@ -490,13 +490,13 @@ const {
   normalizeEdgeDockBackdropMode,
   edgeDockBackdropMode
 } = require('./macBackdropMode');
+const { isLightHex, normalizeOverrides, INTERFACE_COLOR_KEYS } = require('./renderer/themePresets');
 const {
   attachNativeMaterialVisibility,
   syncNativeMaterialVisibility,
   getNativeMaterialState
 } = require('./nativeMaterialVisibility');
 const { createMacLiquidGlass } = require('./macLiquidGlass');
-const { isLightHex } = require('./renderer/themePresets');
 
 if (!app.isPackaged) loadDotEnv();
 
@@ -644,6 +644,9 @@ function defaultSettings() {
     sessionTitlesEnabled: true,
     periodMonthMode: 'month',
     themeColors: {},
+    macGlassFollowSystem: true,
+    macGlassLightColors: {},
+    macGlassDarkColors: {},
     vendorColors: {},
     textSize: 'standard',
     interfaceFontFamily: '',
@@ -2090,6 +2093,10 @@ function readSettings() {
     merged.sessionTitlesEnabled = parseBoolean(merged.sessionTitlesEnabled, true);
     merged.sessionContextMetric = normalizeSessionContextMetric(merged.sessionContextMetric);
     merged.reduceMotion = motionPreferenceApi.normalize(merged.reduceMotion);
+    merged.macGlassFollowSystem = parseBoolean(merged.macGlassFollowSystem, true);
+    for (const key of ['macGlassLightColors', 'macGlassDarkColors']) {
+      merged[key] = normalizeOverrides(merged[key], INTERFACE_COLOR_KEYS);
+    }
     merged.macGlassTint = normalizeLiquidGlassTint(merged.macGlassTint, 'liquid-glass');
     merged.macClearGlassTint = normalizeLiquidGlassTint(merged.macClearGlassTint, 'liquid-glass-clear');
     merged.tokenNumberAnimation = tokenNumberAnimationApi.normalize(merged.tokenNumberAnimation);
@@ -2504,7 +2511,7 @@ function nativeMaterialOptions(source = settings, dashboard = false) {
     opaque: dashboard && source.dashboardFlat === true,
     reducedTransparency: nativeTheme.prefersReducedTransparency === true,
     highContrast: nativeTheme.shouldUseHighContrastColors === true,
-    dark: !isLightHex(source.themeColors?.bg),
+    dark: source.macGlassFollowSystem === false ? !isLightHex(source.themeColors?.bg) : nativeTheme.shouldUseDarkColors,
     radius: !dashboard && floatingBubbleState.collapsed ? 17 : 14
   };
 }
@@ -2620,10 +2627,12 @@ async function limitsHistoryPayload(key) {
     label: historyProviderCatalog.find(entry => entry.id === provider.provider)?.label || provider.provider,
     account: presented.accountDisplayName || account || provider.accountName || provider.accountLabel || '',
     updatedAt: provider.updatedAt,
-    locale, colors: settings?.themeColors, textScale: fontSettingsApi.textScaleForSize(settings?.textSize),
+    locale, textScale: fontSettingsApi.textScaleForSize(settings?.textSize),
     color: palette[colorId] || palette.default,
     interfaceFont: fontSettingsApi.resolveEffectiveFontSettings(settings, windowsFontContext(locale)).interfaceFont,
     appearance: {
+      themeColors: settings.themeColors, macGlassFollowSystem: settings.macGlassFollowSystem,
+      macGlassLightColors: settings.macGlassLightColors, macGlassDarkColors: settings.macGlassDarkColors,
       glassOpacity: settings.glassOpacity, glassBlur: settings.glassBlur, systemGlass: settings.systemGlass, reduceMotion: settings.reduceMotion,
       systemReducedMotion: systemPreferences.getAnimationSettings?.().prefersReducedMotion === true,
     }
@@ -5432,6 +5441,9 @@ function edgeDockAppearance(rendererSettings = settingsForRenderer()) {
     compactTokenUnits: source.compactTokenUnits,
     showCompactTotalTokens: source.showCompactTotalTokens,
     themeColors: source.themeColors,
+    macGlassFollowSystem: source.macGlassFollowSystem,
+    macGlassLightColors: source.macGlassLightColors,
+    macGlassDarkColors: source.macGlassDarkColors,
     vendorColors: source.vendorColors,
     glassOpacity: source.glassOpacity,
     glassBlur: source.glassBlur,
@@ -7904,6 +7916,10 @@ app.whenReady().then(() => {
     if (patch.noProxy !== undefined) {
       const bypassError = noProxyError(patch.noProxy);
       if (bypassError) throw new Error(bypassError);
+    }
+    if (patch.macGlassFollowSystem !== undefined) normalizedPatch.macGlassFollowSystem = parseBoolean(patch.macGlassFollowSystem, true);
+    for (const key of ['macGlassLightColors', 'macGlassDarkColors']) {
+      if (patch[key] !== undefined) normalizedPatch[key] = normalizeOverrides(patch[key], INTERFACE_COLOR_KEYS);
     }
     if (patch.vendorColors !== undefined) normalizedPatch.vendorColors = migrateVendorColors(patch.vendorColors);
     if (patch.deviceIconOverrides !== undefined) normalizedPatch.deviceIconOverrides = require('./renderer/deviceIcons').normalizeDeviceIconOverrides(patch.deviceIconOverrides);

@@ -38,19 +38,24 @@
     muted: '#a3adbb'
   };
 
-  // Curated one-click themes. Each is a full palette — accent + background tint
-  // + text + muted swap together, so picking one changes the whole mood, not
-  // just the accent. All stay dark (the stylesheet's overlays/borders assume a
-  // dark base); a true light mode is a separate, larger piece of work. The
-  // non-default themes borrow from well-known palettes for a familiar feel.
-  // Three themes: the shipped graphite default (also the reset point), a
-  // near-black "Carbon", and a light "Paper". Paper relies on the light-mode
-  // flip in themeCssVarEntries() so borders/panels stay visible on a pale base.
+  // The light palette also switches surfaces and native controls in themeCssVarEntries().
   const THEME_PRESETS = [
     { id: 'default', colors: { ...DEFAULT_THEME } },
-    { id: 'obsidian', colors: { accent: '#e6e8ec', chart: DEFAULT_THEME.chart, bg: '#0b0c0e', text: '#eceef2', muted: '#8f949c' } },
+    { id: 'obsidian', colors: { accent: '#e6e8ec', chart: DEFAULT_THEME.chart, bg: '#0b0c0e', text: '#eceef2', muted: '#c1c5ca' } },
     { id: 'porcelain', colors: { accent: '#2563eb', chart: DEFAULT_THEME.chart, bg: '#f6f7f9', text: '#1c1f26', muted: '#5b626d' } }
   ];
+
+  function themePaletteKey(settings, glassScheme) {
+    if (!glassScheme || settings?.macGlassFollowSystem === false) return 'themeColors';
+    return glassScheme === 'dark' ? 'macGlassDarkColors' : 'macGlassLightColors';
+  }
+
+  function themePalette(settings, key) {
+    if (key === 'themeColors') return settings?.themeColors;
+    const id = key === 'macGlassDarkColors' ? 'obsidian' : 'porcelain';
+    const base = THEME_PRESETS.find(preset => preset.id === id).colors;
+    return { ...base, ...normalizeOverrides(settings?.[key], INTERFACE_COLOR_KEYS) };
+  }
 
   // Surface RGBs used when the background is light, so overlays/borders read as
   // subtle dark-on-light, the settings/tooltip card becomes a white card, and
@@ -228,6 +233,8 @@
     THEME_VAR_MAP,
     DEFAULT_THEME,
     THEME_PRESETS,
+    themePaletteKey,
+    themePalette,
     VENDOR_ORDER,
     VENDOR_LABELS,
     isValidHex,

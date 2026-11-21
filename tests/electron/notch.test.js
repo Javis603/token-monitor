@@ -1,6 +1,7 @@
 'use strict';
 const assert = require('node:assert/strict');
 const test = require('node:test');
+const { THEME_PRESETS } = require('../../src/electron/renderer/themePresets');
 const { EventEmitter } = require('node:events');
 const fs = require('node:fs');
 const path = require('node:path');
@@ -1871,9 +1872,10 @@ test('Liquid Glass follows both theme directions without recreating windows', (t
   assert.equal(updates.at(-1), true);
   for (const next of [false, true]) {
     dark = next;
-    if (next) f.controller.setAppearance({ theme: 'dark' });
-    else f.controller.sync();
+    f.controller.sync();
     assert.equal(updates.at(-1), next);
+    const preset = THEME_PRESETS.find(p => p.id === (dark ? 'obsidian' : 'porcelain'));
+    assert.deepEqual(last(f.windows[0]).appearance.themeColors, preset.colors);
     assert.equal(f.windows.length, 1);
   }
 });
@@ -1911,7 +1913,8 @@ test('Notch glass previews preserve currency and subscriptions across hidden rev
     f.controller.setAppearance({ glassOpacity, glassBlur: 75, currency: 'USD', subscriptions: [],
       themeColors: {}, notchStyle: 'liquid-glass' }, { preview: true });
     const appearance = last(f.windows[0]).appearance;
-    for (const key of Object.keys(original)) assert.deepEqual(appearance[key], key === 'glassOpacity' ? glassOpacity : key === 'glassBlur' ? 75 : original[key]);
+    const expected = { ...original, themeColors: THEME_PRESETS.find(p => p.id === 'obsidian').colors, glassOpacity, glassBlur: 75 };
+    for (const [key, value] of Object.entries(expected)) assert.deepEqual(appearance[key], value);
     assert.equal(updates.at(-1).style, 'clear');
     assert.equal(updates.at(-1).tintOpacity, 0, 'attached glass uses only its camera scrim tint');
   }
@@ -1962,6 +1965,29 @@ test('material failure still falls back when native cleanup also throws', (t) =>
   assert.equal(last(f.windows[0]).glass, false);
   assert.ok(messages.some(text => text.includes('fixture material failure')));
   assert.doesNotThrow(() => f.controller.stop());
+});
+
+test('a failed notch glass appearance update publishes the saved palette with unchanged geometry', (t) => {
+  const screens = { screens: [native], mainDisplayId: 1 };
+  let failUpdate = false;
+  const f = fixture(t, { notchStyle: 'liquid-glass', notchShape: 'pill' }, {
+    readScreens: () => screens, liquidGlass: () => ({ dark: false }),
+    createGlass: () => ({
+      update() { if (failUpdate) throw new Error('fixture appearance update failed'); },
+      dispose() {}
+    })
+  });
+  const win = notchWindow(f);
+  const themeColors = { bg: '#123456' };
+  f.controller.setAppearance({ themeColors });
+  assert.equal(last(win).liquidGlass, true);
+  assert.deepEqual(last(win).appearance.themeColors, THEME_PRESETS.find(p => p.id === 'porcelain').colors);
+
+  failUpdate = true;
+  f.controller.sync();
+  assert.equal(last(win).liquidGlass, false);
+  assert.equal(last(win).glass, false);
+  assert.deepEqual(last(win).appearance.themeColors, themeColors);
 });
 
 test('a mid-animation material failure restores fallback state on the failing frame', (t) => {
