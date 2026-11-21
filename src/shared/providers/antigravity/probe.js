@@ -3,6 +3,12 @@
 const { abortError } = require('../../probeDeadline');
 
 const { spawn } = require('node:child_process');
+const fs = require('node:fs/promises');
+const { once } = require('node:events');
+const { setTimeout: delay } = require('node:timers/promises');
+const net = require('node:net');
+const os = require('node:os');
+const path = require('node:path');
 const https = require('node:https');
 const http = require('node:http');
 const { appVersion } = require('../../appVersion');
@@ -167,7 +173,41 @@ function commandForMatching(command) {
   return command.replace(/^"([^"]+)"(?=\s|$)/, '$1').toLowerCase();
 }
 
-function parseProcessLine(line) {
+function isDesktopHubCommand(command) {
+  return /(?:^|\s)--read_host_bridge_token_from_stdin(?:\s|$)/.test(command)
+    && extractFlag('--app_data_dir', command) === 'antigravity';
+}
+
+async function readDesktopHubs(homeDir) {
+  const directory = path.join(homeDir, '.gemini', 'antigravity', 'daemon');
+  const hubs = new Map();
+  let entries;
+  try {
+    entries = await fs.readdir(directory, { withFileTypes: true });
+  } catch {
+    return hubs;
+  }
+  for (const entry of entries) {
+    const port = Number(/^hub_(\d+)\.json$/.exec(entry.name)?.[1]);
+    if (!entry.isFile() || !(port > 0 && port < 65536)) continue;
+    const file = path.join(directory, entry.name);
+    try {
+      const stat = await fs.lstat(file);
+      if (!stat.isFile() || stat.size > 4096) continue;
+      const { pid, httpPort, csrfToken } = JSON.parse(await fs.readFile(file, 'utf8'));
+      if (!Number.isSafeInteger(pid) || pid <= 0 || httpPort !== port
+          || typeof csrfToken !== 'string' || !/^[a-f0-9-]{32,}$/i.test(csrfToken)) continue;
+      if (!hubs.has(pid) || stat.mtimeMs > hubs.get(pid).modifiedAt) {
+        hubs.set(pid, { httpPort, csrfToken, modifiedAt: stat.mtimeMs });
+      }
+    } catch {
+      // The service can replace or remove its descriptor during discovery.
+    }
+  }
+  return hubs;
+}
+
+function parseProcessLine(line, desktopHubs) {
   const trimmed = String(line || '').trim();
   if (!trimmed) return null;
   const split = trimmed.indexOf(' ');
@@ -180,18 +220,21 @@ function parseProcessLine(line) {
   const kind = antigravityProcessKind(lower);
   if (!kind) return null;
   const csrfToken = extractFlag('--csrf_token', command);
+  const desktopHub = !csrfToken && kind === 'app' && isDesktopHubCommand(lower)
+    ? desktopHubs?.get(pid)
+    : null;
   const isHubMode = isHubModeCommand(command);
   const hubPort = extractPortFlag('--hub-port', command);
-  // Desktop app/IDE language servers authenticate local requests with
-  // `--csrf_token`; tokenless matches are skipped so a later valid process can
-  // still be used. The CLI language server exposes no token flag and needs none,
+  // Desktop app/IDE language servers require a credential; newer desktop
+  // builds supply it in their hub descriptor. The CLI generally needs none,
   // EXCEPT when running in hub mode (--hub flag), which acts as a network-facing
   // RPC service and requires CSRF protection like app/IDE.
-  if ((kind !== 'cli' || isHubMode) && !csrfToken) return null;
+  if ((kind !== 'cli' || isHubMode) && !csrfToken && !desktopHub) return null;
   return {
     pid,
     kind,
-    csrfToken: csrfToken || '',
+    csrfToken: csrfToken || desktopHub?.csrfToken || '',
+    ...(desktopHub ? { desktopRpcPort: desktopHub.httpPort } : {}),
     extensionPort: extractPortFlag('--extension_server_port', command),
     extensionCsrfToken: extractFlag('--extension_server_csrf_token', command),
     hubPort: hubPort,
@@ -199,7 +242,7 @@ function parseProcessLine(line) {
   };
 }
 
-function runProcessText(cmd, args, { timeoutMs = 10000, deps = {} } = {}) {
+function runProcessText(cmd, args, { timeoutMs = 10000, deps = {}, emptyOnExitOne = false } = {}) {
   const spawnFn = deps.spawn || spawn;
   return new Promise((resolve, reject) => {
     const child = spawnFn(cmd, args, { windowsHide: true });
@@ -226,7 +269,9 @@ function runProcessText(cmd, args, { timeoutMs = 10000, deps = {} } = {}) {
     child.stderr.on('data', (chunk) => { stderr += chunk.toString(); });
     child.on('error', (err) => finish(reject, err));
     child.on('close', (code) => {
-      if (code !== 0) {
+      if (emptyOnExitOne && code === 1 && !stderr.trim()) {
+        finish(resolve, '');
+      } else if (code !== 0) {
         finish(reject, errorWithStatus('unavailable', stderr.trim() || `${cmd} exited ${code}`));
       } else {
         finish(resolve, stdout);
@@ -236,13 +281,13 @@ function runProcessText(cmd, args, { timeoutMs = 10000, deps = {} } = {}) {
   });
 }
 
-function processInfosFromText(stdout) {
+function processInfosFromText(stdout, desktopHubs) {
   const infos = [];
   let sawTokenlessCsrfClient = false;
   for (const line of String(stdout || '').split(/\r?\n/)) {
     const trimmed = line.trim();
     if (!trimmed) continue;
-    const info = parseProcessLine(trimmed);
+    const info = parseProcessLine(trimmed, desktopHubs);
     if (info) {
       infos.push(info);
       continue;
@@ -260,8 +305,11 @@ function processInfosFromText(stdout) {
   return { infos: sortProcessInfos(infos), sawTokenlessCsrfClient };
 }
 
-function requireDetectedProcessInfos(stdout) {
-  const { infos, sawTokenlessCsrfClient } = processInfosFromText(stdout);
+async function requireDetectedProcessInfos(stdout, deps) {
+  const desktopHubs = stdout.includes('--read_host_bridge_token_from_stdin')
+    ? await readDesktopHubs(deps.homeDir || os.homedir())
+    : undefined;
+  const { infos, sawTokenlessCsrfClient } = processInfosFromText(stdout, desktopHubs);
   if (infos.length > 0) return infos;
   if (sawTokenlessCsrfClient) throw errorWithStatus('unavailable', 'Antigravity LS missing --csrf_token');
   throw errorWithStatus('notConfigured', 'Antigravity language server not running');
@@ -272,7 +320,7 @@ async function detectProcessInfosPosix(deps = {}) {
     deps,
     timeoutMs: Math.min(8000, Number(deps.timeoutMs) || 8000)
   });
-  return requireDetectedProcessInfos(stdout);
+  return requireDetectedProcessInfos(stdout, deps);
 }
 
 async function detectProcessInfosWin32(deps = {}) {
@@ -284,7 +332,7 @@ async function detectProcessInfosWin32(deps = {}) {
     deps,
     timeoutMs: Math.min(10000, Number(deps.timeoutMs) || 10000)
   });
-  return requireDetectedProcessInfos(stdout);
+  return requireDetectedProcessInfos(stdout, deps);
 }
 
 async function detectProcessInfos(deps = {}) {
@@ -301,7 +349,8 @@ async function detectProcessInfo(deps = {}) {
 async function listeningPortsPosix(pid, deps = {}) {
   let stdout;
   try {
-    stdout = await runProcessText('lsof', ['-nP', '-iTCP', '-sTCP:LISTEN', '-a', '-p', String(pid)], {
+    const sockets = deps.ipv4LoopbackOnly ? '-i4TCP' : '-iTCP';
+    stdout = await runProcessText('lsof', ['-nP', sockets, '-sTCP:LISTEN', '-a', '-p', String(pid)], {
       deps,
       timeoutMs: Math.min(6000, Number(deps.timeoutMs) || 6000)
     });
@@ -309,7 +358,7 @@ async function listeningPortsPosix(pid, deps = {}) {
     throw errorWithStatus('unavailable', `lsof failed: ${err.message}`);
   }
   const ports = new Set();
-  const re = /:(\d+)\s+\(LISTEN\)/g;
+  const re = deps.ipv4LoopbackOnly ? /\s127\.0\.0\.1:(\d+)\s+\(LISTEN\)/g : /:(\d+)\s+\(LISTEN\)/g;
   let match;
   while ((match = re.exec(stdout)) !== null) {
     const n = Number(match[1]);
@@ -320,7 +369,8 @@ async function listeningPortsPosix(pid, deps = {}) {
 }
 
 async function listeningPortsWin32(pid, deps = {}) {
-  const script = `Get-NetTCPConnection -OwningProcess ${pid} -State Listen -ErrorAction SilentlyContinue | Select-Object -ExpandProperty LocalPort`;
+  const loopbackFilter = deps.ipv4LoopbackOnly ? " | Where-Object LocalAddress -eq '127.0.0.1'" : '';
+  const script = `Get-NetTCPConnection -OwningProcess ${pid} -State Listen -ErrorAction SilentlyContinue${loopbackFilter} | Select-Object -ExpandProperty LocalPort`;
   const stdout = await runProcessText('powershell', ['-NoProfile', '-NonInteractive', '-Command', script], {
     deps,
     timeoutMs: Math.min(6000, Number(deps.timeoutMs) || 6000)
@@ -350,22 +400,73 @@ function statusFromHttpCode(code) {
   return 'unavailable';
 }
 
+async function desktopSocketOwned(port, pid, localPort, timeoutMs, deps) {
+  if ((deps.platform || process.platform) === 'win32') {
+    const script = `Get-NetTCPConnection -OwningProcess ${pid} -State Established -LocalAddress 127.0.0.1 -LocalPort ${port} -RemoteAddress 127.0.0.1 -RemotePort ${localPort} -ErrorAction SilentlyContinue | Select-Object -ExpandProperty OwningProcess`;
+    const output = await runProcessText('powershell', ['-NoProfile', '-NonInteractive', '-Command', script], { timeoutMs, deps });
+    return output.split(/\r?\n/).some((line) => line.trim() === String(pid));
+  }
+  const output = await runProcessText('lsof', ['-nP', '-a', '-p', String(pid), '-i4TCP', '-sTCP:ESTABLISHED', '-Fn'], { timeoutMs, deps, emptyOnExitOne: true });
+  return output.split(/\r?\n/).includes(`n127.0.0.1:${port}->127.0.0.1:${localPort}`);
+}
+
+async function connectVerifiedDesktopSocket(port, pid, timeoutMs, parentSignal, deps) {
+  const timeout = AbortSignal.timeout(timeoutMs);
+  const signal = parentSignal ? AbortSignal.any([timeout, parentSignal]) : timeout;
+  const socket = net.createConnection({ host: '127.0.0.1', port, signal });
+  // The HTTP client has not attached its socket listeners yet.
+  const ignoreSocketError = () => {};
+  socket.on('error', ignoreSocketError);
+  try {
+    await once(socket, 'connect', { signal });
+    const localPort = socket.localPort;
+    const ownershipDeps = { ...deps, signal };
+    let owned = await desktopSocketOwned(port, pid, localPort, timeoutMs, ownershipDeps);
+    throwIfAborted(signal);
+    if (!owned && !socket.destroyed) {
+      // The handshake can finish before the server accepts the connection.
+      await delay(20, undefined, { signal });
+      if (!socket.destroyed) {
+        owned = await desktopSocketOwned(port, pid, localPort, timeoutMs, ownershipDeps);
+      }
+    }
+    throwIfAborted(signal);
+    if (!owned || socket.destroyed) throw errorWithStatus('unavailable', 'Antigravity no longer owns the connected RPC socket');
+    return socket;
+  } catch (error) {
+    socket.destroy();
+    throw error;
+  }
+}
+
 function callLs({
   scheme,
   port,
   csrfToken,
+  desktopPid,
   method,
   body,
   host = '127.0.0.1',
   timeoutMs = DEFAULT_RPC_TIMEOUT_MS,
   signal
-}) {
+}, deps = {}) {
+  if (desktopPid && (scheme !== 'http' || host !== '127.0.0.1' || !Number.isSafeInteger(desktopPid) || desktopPid <= 0)) {
+    return Promise.reject(errorWithStatus('unavailable', 'Invalid Antigravity desktop RPC endpoint'));
+  }
   const transport = scheme === 'https' ? https : http;
   const payload = Buffer.from(JSON.stringify(body || {}));
   return new Promise((resolve, reject) => {
     const req = transport.request({
       host,
       port,
+      ...(desktopPid ? {
+        // Supplying createConnection without an agent keeps the request buffered
+        // until the callback hands it the verified socket.
+        createConnection: (_options, done) => {
+          void connectVerifiedDesktopSocket(port, desktopPid, timeoutMs, signal, deps)
+            .then((socket) => done(null, socket), done);
+        }
+      } : {}),
       method: 'POST',
       path: `/${LS_SERVICE}/${method}`,
       headers: {
@@ -549,6 +650,11 @@ function collapsePools(models) {
 }
 
 function endpointCandidates(processInfo, listenPorts) {
+  if (processInfo.desktopRpcPort) {
+    const port = processInfo.desktopRpcPort;
+    // Require the port to still belong to the matching process before sending its token.
+    return listenPorts.includes(port) ? [{ scheme: 'http', port, csrfToken: processInfo.csrfToken, desktopPid: processInfo.pid }] : [];
+  }
   const candidates = [];
   // Try explicit hub port first if available (most authoritative and fastest).
   if (processInfo.hubPort) {
@@ -605,13 +711,15 @@ function prioritizeCandidate(resolved, candidates) {
     candidate.scheme !== resolved.scheme
     || candidate.port !== resolved.port
     || candidate.csrfToken !== resolved.csrfToken
+    || candidate.desktopPid !== resolved.desktopPid
   ))];
 }
 
 function sameEndpoint(left, right) {
   return left.scheme === right.scheme
     && left.port === right.port
-    && left.csrfToken === right.csrfToken;
+    && left.csrfToken === right.csrfToken
+    && left.desktopPid === right.desktopPid;
 }
 
 function dedupeCandidates(candidates) {
@@ -838,7 +946,7 @@ async function probe(deps = {}) {
           const discovery = (async () => {
             try {
               const ports = await promiseBeforeDeadline(
-                (timeoutMs) => listPorts(info.pid, { ...runtimeDeps, timeoutMs }),
+                (timeoutMs) => listPorts(info.pid, { ...runtimeDeps, timeoutMs, ipv4LoopbackOnly: Boolean(info.desktopRpcPort) }),
                 discoveryBudgetMs,
                 DEFAULT_RPC_TIMEOUT_MS,
                 signal
