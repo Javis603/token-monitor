@@ -20,6 +20,11 @@
     const settings = payload.appearance || {};
     glass.applyNativeMaterialClasses(material);
     const root = document.documentElement.style;
+    const colors = material.themeColors ?? payload.colors;
+    for (const { name, value } of window.TokenMonitorThemePresets.themeCssVarEntries({ ...colors, ...(payload.color ? { accent: payload.color } : {}) })) {
+      if (value === null) root.removeProperty(name);
+      else root.setProperty(name, value);
+    }
     const depth = (glass.usesNativeMaterial(material) ? 32 : Math.max(0, Math.min(100, settings.glassBlur ?? 32))) / 100;
     root.setProperty('--glass-alpha', glass.renderedGlassOpacity(settings, { userAgent: navigator.userAgent }).toFixed(2));
     root.setProperty('--line-alpha', (0.1 + depth * 0.09).toFixed(3));
@@ -232,10 +237,6 @@
     const frameStyle = getComputedStyle($('history'));
     const inset = ['paddingLeft', 'paddingRight', 'borderLeftWidth', 'borderRightWidth'].reduce((sum, key) => sum + parseFloat(frameStyle[key]), 0);
     $('history-content').style.width = `${Math.max(1, next.layoutWidth - inset)}px`;
-    for (const { name, value } of window.TokenMonitorThemePresets.themeCssVarEntries({ ...next.colors, ...(next.color ? { accent: next.color } : {}) })) {
-      if (value === null) document.documentElement.style.removeProperty(name);
-      else document.documentElement.style.setProperty(name, value);
-    }
     document.documentElement.style.setProperty('--ui-text-scale', String(next.textScale || 1));
     if (next.interfaceFont) document.documentElement.style.setProperty('--ui-font', next.interfaceFont);
     material = glass.normalizeNativeMaterialState(next.nativeMaterial);

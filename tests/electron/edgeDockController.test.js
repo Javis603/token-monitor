@@ -3,6 +3,7 @@
 const assert = require('node:assert/strict');
 const { EventEmitter } = require('node:events');
 const test = require('node:test');
+const { THEME_PRESETS } = require('../../src/electron/renderer/themePresets');
 
 const { createEdgeDockController } = require('../../src/electron/edgeDock/controller');
 const { EDGE_DOCK_METRICS, EDGE_DOCK_TIMING, edgeDockBubbleBounds, edgeDockCellLayout, edgeDockPlacementForDrop, scaledEdgeDockMetrics } = require('../../src/electron/edgeDock/geometry');
@@ -1140,11 +1141,13 @@ test('Regular and Clear update the retained dock glass without rebuilding window
   t.after(() => fixture.controller.stop());
   const rail = fixture.windowFor('rail');
   for (const [style, tintOpacity] of [['clear', 0.35], ['clear', 0.7], ['regular', 0.12]]) {
-    wanted = { dark: false, style, tintOpacity };
+    wanted = { dark: !wanted.dark, style, tintOpacity };
     fixture.controller.sync();
-    fixture.controller.setAppearance({});
+    const preset = THEME_PRESETS.find(p => p.id === (wanted.dark ? 'obsidian' : 'porcelain'));
+    assert.deepEqual(sentPayload(rail, 'rail').appearance.themeColors, preset.colors);
     assert.equal(fixture.windowFor('rail'), rail);
     for (const glass of factory.glasses) {
+      assert.equal(glass.updates.at(-1).dark, wanted.dark);
       assert.equal(glass.updates.at(-1).style, style);
       assert.equal(glass.updates.at(-1).tintOpacity, tintOpacity);
     }
@@ -1161,6 +1164,7 @@ for (const style of ['frosted', 'regular', 'clear']) {
     const original = { language: 'zh-TW', currency: 'HKD', currencyRatesEffective: { HKD: 7.8 },
       subscriptions: [{ id: 'subscription', amount: 20 }], themeColors: { bg: '#123456' },
       glassOpacity: 68, glassBlur: 32 };
+    const themeColors = wanted ? THEME_PRESETS.find(p => p.id === 'obsidian').colors : original.themeColors;
     fixture.controller.setAppearance(original);
     const rail = fixture.windowFor('rail'), card = fixture.windowFor('bubble');
     const windowCount = FakeBrowserWindow.instances.length;
@@ -1170,7 +1174,7 @@ for (const style of ['frosted', 'regular', 'clear']) {
       fixture.controller.setAppearance({ glassOpacity, glassBlur: 75, currency: 'USD',
         subscriptions: [], themeColors: {}, style: 'other', macClearGlassTint: 99 }, { preview: true });
       for (const [win, surface] of [[rail, 'rail'], [card, 'bubble']]) {
-        assert.deepEqual(sentPayload(win, surface).appearance, { ...original, glassOpacity, glassBlur: 75 });
+        assert.deepEqual(sentPayload(win, surface).appearance, { ...original, themeColors, glassOpacity, glassBlur: 75 });
       }
       if (wanted) for (const glass of factory.glasses) {
         assert.equal(glass.updates.at(-1).style, style);
@@ -1185,7 +1189,7 @@ for (const style of ['frosted', 'regular', 'clear']) {
     const next = { ...original, currency: 'TWD', currencyRatesEffective: { TWD: 32 }, subscriptions: [{ id: 'updated' }] };
     fixture.controller.setAppearance(next);
     fixture.controller.setAppearance({ glassOpacity: 25 }, { preview: true });
-    assert.deepEqual(sentPayload(rail, 'rail').appearance, { ...next, glassOpacity: 25 });
+    assert.deepEqual(sentPayload(rail, 'rail').appearance, { ...next, themeColors, glassOpacity: 25 });
   });
 }
 

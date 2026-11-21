@@ -495,7 +495,6 @@ const {
   getNativeMaterialState
 } = require('./nativeMaterialVisibility');
 const { createMacLiquidGlass } = require('./macLiquidGlass');
-const { isLightHex } = require('./renderer/themePresets');
 
 if (!app.isPackaged) loadDotEnv();
 
@@ -2503,7 +2502,7 @@ function nativeMaterialOptions(source = settings, dashboard = false) {
     opaque: dashboard && source.dashboardFlat === true,
     reducedTransparency: nativeTheme.prefersReducedTransparency === true,
     highContrast: nativeTheme.shouldUseHighContrastColors === true,
-    dark: !isLightHex(source.themeColors?.bg),
+    dark: nativeTheme.shouldUseDarkColors,
     radius: !dashboard && floatingBubbleState.collapsed ? 17 : 14
   };
 }

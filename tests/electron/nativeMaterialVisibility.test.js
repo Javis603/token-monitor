@@ -4,6 +4,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
 const test = require('node:test');
+const { THEME_PRESETS } = require('../../src/electron/renderer/themePresets');
 
 const {
   attachNativeMaterialVisibility,
@@ -81,6 +82,30 @@ test('an unchanged material preference does not recreate its native container', 
   assert.equal(disposals, 0);
   syncNativeMaterialVisibility(win, { enabled: false }, 'darwin', deps);
   assert.equal(disposals, 1);
+});
+
+test('the renderer receives the system palette only while native Liquid Glass is active', () => {
+  const win = fakeWindow();
+  const updates = [], messages = [];
+  const deps = { osRelease: '25.0', createGlass: () => ({ update: options => updates.push(options), dispose() {} }) };
+  win.webContents.send = (_channel, state) => messages.push(state);
+  for (const style of ['regular', 'clear']) {
+    const options = { enabled: true, liquidGlass: true, style, tintOpacity: 0.25 };
+    for (const dark of [false, true, false]) {
+      const count = messages.length;
+      syncNativeMaterialVisibility(win, { ...options, dark }, 'darwin', deps);
+      const preset = THEME_PRESETS.find(p => p.id === (dark ? 'obsidian' : 'porcelain'));
+      assert.equal(messages.length, count + 1);
+      assert.deepEqual(messages.at(-1).themeColors, preset.colors);
+      assert.equal(updates.at(-1).dark, dark);
+      assert.equal(updates.at(-1).style, style);
+      assert.equal(updates.at(-1).tintOpacity, 0.25);
+    }
+    for (const fallback of [{ reducedTransparency: true }, { opaque: true }, { liquidGlass: false }, { enabled: false }]) {
+      syncNativeMaterialVisibility(win, { ...options, ...fallback }, 'darwin', deps);
+      assert.equal(getNativeMaterialState(win).themeColors, undefined);
+    }
+  }
 });
 
 test('Regular and Clear update in place while older macOS and reduced transparency keep their fallbacks', () => {

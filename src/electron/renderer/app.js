@@ -619,6 +619,7 @@ Object.assign(els, {
   chooseBackgroundImageButton: document.getElementById('chooseBackgroundImageButton'),
   clearBackgroundImageButton: document.getElementById('clearBackgroundImageButton'),
   subscriptionsSettingsSummary: document.getElementById('subscriptionsSettingsSummary'),
+  liquidGlassThemeNote: document.getElementById('liquidGlassThemeNote'),
   themePresetChips: document.getElementById('themePresetChips'),
   themeColorGrid: document.getElementById('themeColorGrid'),
   themeCodeInput: document.getElementById('themeCodeInput'),
@@ -8710,6 +8711,7 @@ function applyAppearanceSettings(settings) {
   document.documentElement.classList.toggle('system-glass-disabled', systemGlassDisabled);
   const nativeMaterial = glassRenderingApi.usesNativeMaterial(nativeMaterialState);
   const nativeTint = nativeMaterialState.type === 'liquid-glass';
+  els.liquidGlassThemeNote?.classList.toggle('hidden', !nativeMaterialState.liquidGlassSupported);
   els.glassOpacityRow?.classList.toggle('hidden', nativeTint);
   for (const [key, mode] of nativeGlassTintSettings) {
     const active = nativeTint && macGlass.backdropMode === mode;
@@ -8889,6 +8891,7 @@ function matchingThemePresetId(overrides) {
 }
 
 function applyThemeColors(overrides) {
+  overrides = nativeMaterialState.themeColors ?? overrides;
   appliedThemeOverrides = themePresetsApi.normalizeOverrides(overrides, themePresetsApi.INTERFACE_COLOR_KEYS);
   const root = document.documentElement.style;
   for (const { name, value } of themePresetsApi.themeCssVarEntries(appliedThemeOverrides)) {
@@ -9002,9 +9005,10 @@ function renderAppearanceColorRows(container, keys, { rowClass, nameClass, reset
 }
 
 function renderThemeColorGrid() {
+  const saved = themePresetsApi.mergeThemeColors(state.settings?.themeColors);
   renderAppearanceColorRows(els.themeColorGrid, ['bg', 'text', 'muted', 'accent', 'chart'], {
     rowClass: 'color-picker-row', nameClass: 'color-picker-name', resetLabel: 'settings.appearance.resetColor',
-    nameFor: key => t(`settings.appearance.color.${key}`), colorFor: resolvedThemeColor,
+    nameFor: key => t(`settings.appearance.color.${key}`), colorFor: key => saved[key],
     preview: previewThemeColor, save: saveThemeColor, reset: resetThemeColor
   });
 }
@@ -10514,10 +10518,6 @@ function syncSettingsForm() {
     // while hidden so the first tray/reopen frame cannot paint old fonts/title.
     applyAppearanceSettings(Object.assign({}, state.settings, ...pendingSettingsPatches, appearancePreview));
     applyVendorColorOverrides(state.settings.vendorColors);
-    appliedThemeOverrides = themePresetsApi.normalizeOverrides(
-      state.settings.themeColors,
-      themePresetsApi.INTERFACE_COLOR_KEYS
-    );
     settingsDomSyncPending = true;
     return;
   }
