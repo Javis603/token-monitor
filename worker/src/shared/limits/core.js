@@ -661,7 +661,15 @@ function providerFreshnessKey(provider) {
 
 function aggregateLimits(devices, staleAfterMs = 0, nowMs = Date.now(), accountPresentation, links = []) {
   const aggregate = { updatedAt: new Date(nowMs).toISOString(), providers: [] };
-  const multiAccountProviders = new Set((devices || []).flatMap(device =>
+  const inputDevices = devices || [];
+  // A private snapshot can be re-aggregated after transport. Use the same
+  // device order on both sides when carrying a same-account balance.
+  const orderedDevices = accountPresentation ? [...inputDevices].sort((a, b) => {
+    const left = String(a?.deviceId || '');
+    const right = String(b?.deviceId || '');
+    return left < right ? -1 : left > right ? 1 : 0;
+  }) : inputDevices;
+  const multiAccountProviders = new Set(orderedDevices.flatMap(device =>
     normalizeLimitsSummary(device?.limits).multiAccountProviders || []));
   const byKey = new Map();
   const candidatesByKey = new Map();
@@ -674,7 +682,7 @@ function aggregateLimits(devices, staleAfterMs = 0, nowMs = Date.now(), accountP
   // account-scoped one is still one lane.
   const configuredLanes = new Set();
 
-  for (const device of devices || []) {
+  for (const device of orderedDevices) {
     const summary = normalizeLimitsSummary(device?.limits);
     for (const provider of summary.providers) {
       const candidate = {
