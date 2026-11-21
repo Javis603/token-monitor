@@ -425,10 +425,14 @@ test('Home configures heatmap color in Settings while keeping token tooltips', (
   assert.match(app, /: id === 'trends' \? renderHomeActivitySettings\(\)/);
   assert.match(app, /function renderHomeActivitySettings/);
   assert.match(app, /saveSettings\(\{ heatmapMetric: metric \}\)/);
+  // Activity reuses the nested list and settings rows the other Home modules use.
+  const activity = app.slice(app.indexOf('function renderHomeActivitySettings('), app.indexOf('function renderLimitsViewSettingsList('));
   assert.match(app, /data-home-activity-tooltip-count[^\n]*formatCompact\(Number\(cell\.dataset\.t/);
   assert.match(app, /data-home-activity-tooltip-label[^\n]*textContent = 'tokens'/);
   assert.doesNotMatch(app, /home-heatmap-metric/);
-  assert.match(css, /\.home-activity-settings/);
+  assert.match(activity, /wrap\.className = 'settings-nested-list'/);
+  assert.match(activity, /label\.className = 'settings-item'/);
+  assert.doesNotMatch(app + css, /home-activity-settings/);
   assert.doesNotMatch(css, /\.home-heatmap-metric/);
 });
 
