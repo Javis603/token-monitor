@@ -8677,10 +8677,18 @@ function applyControlLayout(swapSettingsAndRefresh) {
   }
 }
 
+function resolveMainWindowFonts(settings) {
+  return fontSettingsApi.resolveEffectiveFontSettings(settings, {
+    platform: state.appInfo?.platform,
+    locale: currentLocale(),
+    preferredLanguages: state.appInfo?.preferredSystemLanguages ?? preferredLanguages()
+  });
+}
+
 function applyFontSettings(settings) {
   const source = { ...(state.settings || {}), ...(settings || {}) };
   const root = document.documentElement.style;
-  const { interfaceFont, displayFont } = fontSettingsApi.resolveEffectiveFontSettings(source);
+  const { interfaceFont, displayFont } = resolveMainWindowFonts(source);
   document.documentElement.dataset.textSize = fontSettingsApi.normalizeTextSize(source.textSize);
   root.setProperty('--ui-text-scale', String(fontSettingsApi.textScaleForSize(source.textSize)));
   root.setProperty('--ui-font', interfaceFont);
@@ -9567,7 +9575,7 @@ function fontFamilyFromControls(role) {
 }
 
 function fontPreviewForControls(role) {
-  const resolved = fontSettingsApi.resolveEffectiveFontSettings({
+  const resolved = resolveMainWindowFonts({
     interfaceFontFamily: fontFamilyFromControls('interface'),
     displayFontFamily: fontFamilyFromControls('display')
   });

@@ -8479,6 +8479,7 @@ app.whenReady().then(() => {
     notchCapabilities: notchController?.getCapabilities() || null,
     version: app.getVersion(),
     platform: process.platform,
+    preferredSystemLanguages: app.getPreferredSystemLanguages?.(),
     arch: process.arch,
     osRelease: require('os').release(),
     isPackaged: app.isPackaged,
