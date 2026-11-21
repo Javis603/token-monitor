@@ -164,11 +164,14 @@ test('remote paired history retains a balance carried from another device', asyn
     windows: [{ kind: 'weekly', usedPercent: 30 }],
     ...extra
   });
+  // Upload order and snapshot device order differ. Both fresh balance readings
+  // belong to the hidden account, while the freshest reading has no balance.
   const devices = [
-    row(keys[0], 1000),
-    row(keys[0], 60_000, { balance: { amount: 123, currency: 'USD' } }),
-    row(keys[1], 0)
-  ].map((reading, index) => ({ deviceId: `device-${index}`, limits: { providers: [reading] } }));
+    ['z-balance', row(keys[0], 70_000, { balance: { amount: 95, currency: 'USD' } })],
+    ['b-latest', row(keys[0], 1000)],
+    ['a-balance', row(keys[0], 60_000, { balance: { amount: 123, currency: 'USD' } })],
+    ['peer', row(keys[1], 0)]
+  ].map(([deviceId, reading]) => ({ deviceId, limits: { providers: [reading] } }));
   const limitAccountPresentation = { devin: { labels: Object.fromEntries(keys.map(key => [key, 'Work'])) } };
   const stats = aggregateDevices(devices, 0, nowMs, { limitAccountPresentation });
   const hidden = stats.limits.providers.find(reading => reading.accountKey === keys[0]);
@@ -178,7 +181,7 @@ test('remote paired history retains a balance carried from another device', asyn
   assert.deepEqual(remote.limits.providers.map(reading => reading.accountKey), [keys[1]]);
   await store.record('hub', remote.limits, remote);
   const result = await store.query('hub', hidden);
-  assert.deepEqual(result.windows.find(window => window.balance).points.map(point => point.value), [123]);
+  assert.deepEqual(result.windows.find(window => window.balance).points.map(point => point.value), [hidden.balance.amount]);
 });
 
 test('SQLite stores one unchanged value across hours with only hourly coverage records', t => {
