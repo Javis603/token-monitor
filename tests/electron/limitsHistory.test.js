@@ -115,7 +115,7 @@ test('SQLite queries use Claude semantic session bounds and retain only actual o
 test('paired quota readings both keep recording history under their original keys', async t => {
   const { aggregateDevices } = require('../../src/shared/usage');
   const { withLimitAccountLinks } = require('../../src/shared/limits/core');
-  const { limitsForAccountHistory } = require('../../src/electron/limits/limitAccountLinks');
+  const { composeLocalSyncSummary } = require('../../src/electron/syncDisplayStats');
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'quota-pair-history-'));
   const nowMs = at(3, 12);
   const store = createLimitsHistoryStore(path.join(directory, 'history.sqlite'), { now: () => nowMs });
@@ -124,17 +124,28 @@ test('paired quota readings both keep recording history under their original key
   const devices = keys.map((accountKey, index) => ({
     deviceId: 'device-' + index,
     limits: { providers: [{ provider: 'kimi', source: 'api', status: 'ok', accountKey,
-      updatedAt: new Date(nowMs - index * 1000).toISOString(), windows: [{ kind: 'weekly', usedPercent: 30 + index }] }] }
+      updatedAt: new Date(nowMs - index * 60_000).toISOString(), windows: [{ kind: 'weekly', usedPercent: 30 + index }] }] }
   }));
   const limitAccountPresentation = { kimi: { labels: Object.fromEntries(keys.map(key => [key, 'Work'])) } };
   const stats = aggregateDevices(devices, 0, nowMs, { limitAccountPresentation });
   const pair = { provider: 'kimi', scope: stats.limits.linkCandidates[0].scope, keys };
-  const linked = withLimitAccountLinks(stats, { value: [pair] });
+  const linked = JSON.parse(JSON.stringify(withLimitAccountLinks({ ...stats, staleAfterMs: 0 }, { value: [pair] })));
   assert.equal(linked.limits.providers.length, 1);
-  await store.record('hub', limitsForAccountHistory(linked));
+  await store.record('hub', linked.limits, linked);
+
+  // A newer local reading can replace a peer as the best observation for the
+  // hidden account before the Hub has ever received it from this device.
   const hidden = stats.limits.providers.find(row => row.accountKey === keys[1]);
+  const local = { deviceId: 'collecting-client', limits: { providers: [{
+    ...hidden, updatedAt: new Date(nowMs - 1000).toISOString(), windows: [{ kind: 'weekly', usedPercent: 42 }]
+  }] } };
+  const overlaid = composeLocalSyncSummary(linked, local, { nowMs, limitAccountPresentation });
+  assert.equal(overlaid.limits.providers.length, 1);
+  assert.equal(overlaid.limitAccountLinkCandidates.length, 1);
+  await store.record('hub', overlaid.limits, overlaid);
+
   const result = await store.query('hub', hidden);
-  assert.deepEqual(result.windows[0].points.map(point => point.at), [nowMs - 1000]);
+  assert.deepEqual(result.windows[0].points.map(point => point.at), [nowMs - 60_000, nowMs - 1000]);
 });
 
 test('SQLite stores one unchanged value across hours with only hourly coverage records', t => {

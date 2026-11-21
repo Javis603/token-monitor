@@ -200,6 +200,7 @@ for (const runtime of ['Node', 'Worker']) {
         limits: { providers: [
           { ...common, provider: 'commandcode', source: 'web', accountKey: key, accountKeyPortable: index === 0 },
           { ...common, provider: 'copilot', source: 'api', accountKey: key, accountName: index === 0 ? 'alice' : 'bob' },
+          { ...common, provider: 'grok', source: 'web', accountKey: key, accountKeyPortable: true },
           { ...common, provider: 'devin', source: 'web', accountKey: key, accountQuotaScope: hashKey('devin-organization', index) },
           { ...common, provider: 'minimax', source: 'api', region: 'global', accountKey: key,
             accountLabel: index === 0 ? 'Pay-as-you-go' : 'Token Plan',
@@ -215,6 +216,8 @@ for (const runtime of ['Node', 'Worker']) {
     const candidates = provider => stats.limitAccountLinkCandidates.filter(row => row.provider === provider);
     assert.deepEqual(candidates('commandcode').map(row => row.accountKey), [keys[1]]);
     assert.deepEqual(candidates('copilot'), [], 'old clients with unidentified provenance cannot offer verified logins');
+    assert.deepEqual(candidates('grok'), []);
+    assert.equal(stats.limits.providers.filter(row => row.provider === 'grok').length, 2, 'verified identities remain separate without custom names');
     assert.equal(candidates('devin').length, 2);
     assert.notEqual(candidates('devin')[0].scope, candidates('devin')[1].scope);
     assert.equal(candidates('minimax').length, 2);

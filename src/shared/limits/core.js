@@ -11,6 +11,7 @@ const { openCodeWindowKey, groupOpenCodeCandidates, mergeOpenCodeProviderCompone
 });
 
 const DEFAULT_LIMITS_REFRESH_MS = 5 * 60 * 1000;
+const hiddenLinkedLimitReadings = Symbol('hiddenLinkedLimitReadings');
 const PORTABLE_ACCOUNT_PROVIDERS = new Set(LIMIT_PROVIDER_CATALOG.filter(provider => provider.portableAccountKey).map(provider => provider.id));
 const MIXED_ACCOUNT_IDENTITY_PROVIDERS = new Set(LIMIT_PROVIDER_CATALOG.filter(provider => provider.mixedAccountIdentity).map(provider => provider.id));
 const VALID_PROVIDERS = new Set(LIMIT_PROVIDER_IDS);
@@ -737,8 +738,9 @@ function aggregateLimits(devices, staleAfterMs = 0, nowMs = Date.now(), accountP
       labelKey, deviceId: candidate.sourceDeviceId, region: candidate.region
     });
     const explicitlyNamed = labelKey && Object.hasOwn(accountPresentation[candidate.provider]?.labels || {}, labelKey);
-    const named = explicitlyNamed || linked.has(id);
-    const knownAccount = candidate.accountKey && (named || multiAccount
+    const preserveIdentity = explicitlyNamed || linked.has(id)
+      || (accountPresentation && candidate.accountKeyPortable === true && isConfiguredProvider(candidate));
+    const knownAccount = candidate.accountKey && (preserveIdentity || multiAccount
       || providerPolicies[candidate.provider]?.preserveStaleAccount?.(candidate));
     const freshnessKey = providerFreshnessKey(candidate);
     // A keyless row says nothing once its lane has a configured account. A lane
@@ -753,7 +755,7 @@ function aggregateLimits(devices, staleAfterMs = 0, nowMs = Date.now(), accountP
       ? providersWithFreshConfiguredAccounts
       : providersWithConfiguredAccounts;
     if (!knownAccount && !isConfiguredProvider(candidate) && configuredProviders.has(freshnessKey)) continue;
-    const collapseKey = providerCollapseKey(candidate, named || multiAccount);
+    const collapseKey = providerCollapseKey(candidate, preserveIdentity || multiAccount);
     byProvider.set(collapseKey, pickBetterProvider(byProvider.get(collapseKey), candidate, multiAccount));
   }
   aggregate.providers = Array.from(byProvider.values())
@@ -796,6 +798,7 @@ function linkMemberId(provider, scope, key) {
 
 function withLimitAccountLinks(stats, document) {
   const limitAccountLinks = document.value || [];
+  const { [hiddenLinkedLimitReadings]: _previousHidden, ...visibleStats } = stats;
   const { linkCandidates: limitAccountLinkCandidates, providers, ...limits } = stats.limits;
   const eligible = new Map(providers.filter(linkableAccount)
     .map(row => [linkMemberId(row.provider, linkScope(row), row.accountKey), row]));
@@ -807,7 +810,10 @@ function withLimitAccountLinks(stats, document) {
     hidden.add(winner === a ? b : a);
   }
   return {
-    ...stats, limitAccountLinks, limitAccountLinkCandidates: limitAccountLinkCandidates || [],
+    ...visibleStats, limitAccountLinks, limitAccountLinkCandidates: limitAccountLinkCandidates || [],
+    // Electron can record these exact readings even when a local overlay
+    // changes the winning device. Symbol properties stay off the wire.
+    ...(hidden.size ? { [hiddenLinkedLimitReadings]: [...hidden] } : {}),
     limits: { ...limits, providers: hidden.size ? providers.filter(row => !hidden.has(row)) : providers }
   };
 }
@@ -860,6 +866,7 @@ module.exports = {
   DEFAULT_LIMITS_REFRESH_MS,
   aggregateLimits,
   withLimitAccountLinks,
+  hiddenLinkedLimitReadings,
   limitAccountLinkScope: linkScope,
   isProviderStale,
   mergeCodexTransientWindows,
