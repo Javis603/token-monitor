@@ -326,6 +326,7 @@ const {
 } = require('./macWidget/historyStore');
 const { createMacWidgetLaunchServicesRecovery } = require('./macWidget/launchServicesRecovery');
 const { projectLimitStatsForDisplay } = require('./limits/statsPresentation');
+const { changeLimitAccountLink, limitsForAccountHistory } = require('./limits/limitAccountLinks');
 const { DEFAULT_WIDGET_KIND, requestMacWidgetReload, resetMacWidgetReloadThrottle } = require('./macWidget/reloader');
 const { WIDGET_DEMAND_MARKER, WIDGET_DEMAND_PROVISIONAL_MARKER, createMacWidgetDemandState } = require('./macWidget/demand');
 const linuxAutostart = require('./linuxAutostart');
@@ -4860,7 +4861,7 @@ function sendPush(payload, options = {}) {
     getSyncContentRuntime().notifyStats(latestStats);
     getAccountPresentationSync().notifyStats(latestStats);
     const visibleStats = electronPresentationStats(latestStats);
-    getLimitsHistoryStore().record(currentHubStatsIdentity(), visibleStats.limits);
+    getLimitsHistoryStore().record(currentHubStatsIdentity(), limitsForAccountHistory(visibleStats));
     limitsHistoryController?.refresh();
     migrateCodexAdditionalLimits(visibleStats);
     if (wantsRenderer || wantsDashboard) {
@@ -8493,7 +8494,6 @@ app.whenReady().then(() => {
     const context = syncContentContext();
     if (!['client', 'host'].includes(context.mode) || !context.url) return { ok: false };
     const stats = context.mode === 'host' ? embeddedHub?.hub.getStats() : currentHubStatsCache();
-    const { changeLimitAccountLink } = require('./limits/limitAccountLinks');
     return changeLimitAccountLink(stats, input, settings.limitAccountPresentation || {},
       payload => requestSyncContent(context, '/api/sync/settings/limitAccountLinks', 'PUT', payload));
   });
