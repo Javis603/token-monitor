@@ -878,10 +878,12 @@ function createNotchController({ BrowserWindow, ipcMain, screen, getSettings,
     if (settings().notchProgressiveBlur === false || blurAvailable() !== true) blurFailed = false;
     if (!blurEnabled()) destroyBlur();
     if (!screenListeners) { for (const event of ['display-added', 'display-removed', 'display-metrics-changed']) screen.on(event, invalidateGeometry); screenListeners = true; }
+    // A failed appearance update disposes the glass; publish its fallback too.
+    const hadGlass = Boolean(glass.notch);
     updateGlassAppearance();
     startScrollMonitor();
     refreshGeometry(); visibility();
-    if (restoreSummary || glass.notch) refreshLayout();
+    if (restoreSummary || hadGlass) refreshLayout();
     if (!pollTimer) schedulePoll();
   }
   function stop() {

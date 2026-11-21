@@ -1967,6 +1967,29 @@ test('material failure still falls back when native cleanup also throws', (t) =>
   assert.doesNotThrow(() => f.controller.stop());
 });
 
+test('a failed notch glass appearance update publishes the saved palette with unchanged geometry', (t) => {
+  const screens = { screens: [native], mainDisplayId: 1 };
+  let failUpdate = false;
+  const f = fixture(t, { notchStyle: 'liquid-glass', notchShape: 'pill' }, {
+    readScreens: () => screens, liquidGlass: () => ({ dark: false }),
+    createGlass: () => ({
+      update() { if (failUpdate) throw new Error('fixture appearance update failed'); },
+      dispose() {}
+    })
+  });
+  const win = notchWindow(f);
+  const themeColors = { bg: '#123456' };
+  f.controller.setAppearance({ themeColors });
+  assert.equal(last(win).liquidGlass, true);
+  assert.deepEqual(last(win).appearance.themeColors, THEME_PRESETS.find(p => p.id === 'porcelain').colors);
+
+  failUpdate = true;
+  f.controller.sync();
+  assert.equal(last(win).liquidGlass, false);
+  assert.equal(last(win).glass, false);
+  assert.deepEqual(last(win).appearance.themeColors, themeColors);
+});
+
 test('a mid-animation material failure restores fallback state on the failing frame', (t) => {
   for (const cleanupThrows of [false, true]) {
     let fail = false, updates = 0, disposals = 0;
