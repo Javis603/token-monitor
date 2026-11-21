@@ -131,16 +131,50 @@
 
   const antigravityQuotaWindowVisible = policies.antigravity.antigravityQuotaWindowVisible;
 
+  function antigravityVisibleWindows(windows) {
+    return windows.every(antigravityQuotaWindowVisible)
+      ? windows
+      : windows.filter(antigravityQuotaWindowVisible);
+  }
+
   function limitProviderCompactWindows(providerOrId, windows = []) {
     return policies[providerId(providerOrId)]?.compactWindows?.(windows) ?? windows;
   }
 
+  // The classic Text / Progress bars layouts keep their compact pick, so
+  // their labels still disambiguate within that pick.
   function limitProviderCompactWindowLabel(providerOrId, window, visibleWindows = []) {
     return policies[providerId(providerOrId)]?.compactWindowLabel?.(window, visibleWindows) || '';
   }
 
   function limitProviderCompactWindowPeriodLabel(providerOrId, window, visibleWindows = []) {
     return policies[providerId(providerOrId)]?.compactWindowPeriodLabel?.(window, visibleWindows) || '';
+  }
+
+  // Home lists every window an account reports, so none of the compact picks
+  // above apply: Codex keeps its additional model quotas and Antigravity every
+  // model group. What remains is display shaping, and Antigravity's rule that
+  // a legacy pool without a measured percentage offers no useful row.
+  function limitProviderHomeWindows(providerOrId, windows = []) {
+    const provider = providerId(providerOrId);
+    if (provider === 'codex') return windows;
+    if (provider === 'antigravity') return windows ? antigravityVisibleWindows(windows) : windows;
+    return limitProviderCompactWindows(providerOrId, windows);
+  }
+
+  // The label a Home row needs to stay unambiguous beside its account's other
+  // rows. Antigravity's grouped quotas name their group and period ("Gemini
+  // Weekly"); a legacy pool keeps its own name. '' falls back to the generic
+  // period wording.
+  function limitProviderHomeWindowLabel(providerOrId, window) {
+    const provider = providerId(providerOrId);
+    if (provider === 'zai' && normalizeId(window?.kind) === 'daily') {
+      return String(window?.label || '').trim();
+    }
+    if (provider !== 'antigravity') return '';
+    const quota = antigravityQuotaWindow(window);
+    if (quota) return `${quota.groupLabel} ${quota.windowLabel}`;
+    return String(window?.label || '').trim();
   }
 
   function limitResetRemainingMs(value, nowMs = Date.now(), resetNowGraceMs = 60 * 1000) {
@@ -467,6 +501,8 @@
     limitProviderCompactWindowLabel,
     limitProviderCompactWindowPeriodLabel,
     limitProviderCompactWindows,
+    limitProviderHomeWindowLabel,
+    limitProviderHomeWindows,
     limitProviderFreshness,
     limitProviderDisplayLabel,
     limitProviderPlanDisplayLabel,
