@@ -8,6 +8,7 @@ const { runWithProbeDeadline } = require('../../probeDeadline');
 const NOTION_FETCH_TIMEOUT_MS = 12_000;
 const NOTION_SPACES_URL = 'https://app.notion.com/api/v3/getSpaces';
 const NOTION_ALLOWANCE_URL = 'https://app.notion.com/api/v3/getCreditRateLimitStatus';
+const NOTION_MEMBER_USAGE_URL = 'https://app.notion.com/api/v3/getMemberIncludedUsage';
 const COOKIE_ENV = ['TOKEN_MONITOR_NOTION_COOKIE', 'NOTION_COOKIE'];
 const WORKSPACE_ENV = ['TOKEN_MONITOR_NOTION_WORKSPACE_ID', 'NOTION_WORKSPACE_ID'];
 
@@ -113,6 +114,7 @@ function parseNotionSpaces(body, workspaceId) {
   if (!workspace || canonicalUuid(workspace.id) !== workspaceId) throw invalidResponse();
   const tier = typeof workspace.subscription_tier === 'string' ? workspace.subscription_tier.toLowerCase() : '';
   return {
+    userId,
     accountKey: hashKey('notion', userId + workspaceId),
     planLabel: tier === 'business' ? 'Business' : tier === 'enterprise' ? 'Enterprise' : ''
   };
@@ -162,8 +164,56 @@ function parseAllowanceWindow(raw, rolling, resets, nowMs) {
   return window;
 }
 
-function parseNotionAllowance(body, nowMs = Date.now()) {
+function parseCreditsPool(raw, label, endMs, fallbackLimit) {
+  if (raw === undefined && fallbackLimit) {
+    raw = { usage: 0, limit: fallbackLimit };
+  }
+  if (!isObject(raw)
+    || typeof raw.usage !== 'number' || !Number.isFinite(raw.usage) || raw.usage < 0
+    || typeof raw.limit !== 'number' || !Number.isFinite(raw.limit) || raw.limit <= 0
+  ) throw invalidResponse();
+  const usedPercent = (raw.usage / raw.limit) * 100;
+  if (!Number.isFinite(usedPercent)) throw invalidResponse();
+  return {
+    kind: 'billing',
+    label,
+    used: raw.usage,
+    limit: raw.limit,
+    usedPercent,
+    remaining: Math.max(0, raw.limit - raw.usage),
+    resetDescription: 'Monthly',
+    resetsAt: resetIso(endMs),
+    showMeter: true
+  };
+}
+
+function parseNotionAllowance(body, nowMs = Date.now(), userId = '') {
   if (!isObject(body)) throw invalidResponse();
+
+  if (isObject(body.period)) {
+    const endMs = optionalReset(body.period.endMs, Object.hasOwn(body.period, 'endMs'), Number.MIN_VALUE);
+    if (endMs === null) throw invalidResponse();
+    let member = null;
+    if (Array.isArray(body.members)) {
+      if (userId) {
+        member = body.members.find((entry) => isObject(entry) && canonicalUuid(entry.entityId) === canonicalUuid(userId)) || null;
+      }
+      if (!member && body.members.length === 1 && isObject(body.members[0])) {
+        member = body.members[0];
+      }
+    } else if (body.members !== undefined) {
+      throw invalidResponse();
+    }
+    const source = member || (isObject(body.standardCredits) || isObject(body.selectCredits) ? body : null);
+    const standardRaw = source?.standardCredits ?? (source === null ? { usage: 0, limit: 1500 } : undefined);
+    const selectRaw = source?.selectCredits ?? (source === null ? { usage: 0, limit: 500 } : undefined);
+    const windows = [
+      parseCreditsPool(standardRaw, 'Standard', endMs, 1500),
+      parseCreditsPool(selectRaw, 'Select', endMs, 500)
+    ];
+    return { windows };
+  }
+
   if (body.status === 'not_applicable') {
     const error = invalidResponse();
     error.code = 'NOTION_ALLOWANCE_NOT_APPLICABLE';
@@ -211,23 +261,56 @@ async function fetchNotionLimits(options = {}, deps = {}) {
           // a source outage, not evidence that the submitted session expired.
           const sourceChallenge = response.status === 403
             && String(response.headers?.get?.('cf-mitigated') || '').toLowerCase() === 'challenge';
-          throw errorWithStatus(sourceChallenge ? 'unavailable' : statusForHttp(response.status), 'Notion request failed');
+          const error = errorWithStatus(sourceChallenge ? 'unavailable' : statusForHttp(response.status), 'Notion request failed');
+          error.statusCode = response.status;
+          throw error;
         }
         return response.json();
       };
       const spaces = await post(NOTION_SPACES_URL, {});
       if (signal.aborted) throw invalidResponse();
       identity = parseNotionSpaces(spaces, workspaceId);
-      const usage = await post(NOTION_ALLOWANCE_URL, { spaceId: workspaceId });
-      if (signal.aborted) throw invalidResponse();
-      return parseNotionAllowance(usage, nowMs);
+
+      let usage = null;
+      let shouldFallback = false;
+      try {
+        usage = await post(NOTION_ALLOWANCE_URL, { spaceId: workspaceId });
+      } catch (err) {
+        if (err?.statusCode === 404) {
+          shouldFallback = true;
+        } else {
+          throw err;
+        }
+      }
+
+      if (usage) {
+        try {
+          return parseNotionAllowance(usage, nowMs, identity.userId);
+        } catch (parseErr) {
+          if (parseErr?.code === 'NOTION_ALLOWANCE_NOT_APPLICABLE') {
+            shouldFallback = true;
+          } else {
+            throw parseErr;
+          }
+        }
+      }
+
+      if (shouldFallback) {
+        if (signal.aborted) throw invalidResponse();
+        const memberUsage = await post(NOTION_MEMBER_USAGE_URL, { spaceId: workspaceId });
+        return parseNotionAllowance(memberUsage, nowMs, identity.userId);
+      }
+
+      throw invalidResponse();
     }, { signal: deps.signal, deadlineMs: deps.notionFetchTimeoutMs || NOTION_FETCH_TIMEOUT_MS });
-    return normalizeLimitProvider({ ...base, ...identity, ...parsed, status: 'ok' });
+    const { userId, ...identityClean } = identity;
+    return normalizeLimitProvider({ ...base, ...identityClean, ...parsed, status: 'ok' });
   } catch (error) {
+    const { userId, ...identityClean } = identity;
     // Only statuses created by the HTTP classifier are carried. Transport
     // errors and response text may contain credentials and stay out of the wire.
     const status = ['unauthorized', 'sourceRateLimited'].includes(error?.status) ? error.status : 'unavailable';
-    return normalizeLimitProvider({ ...base, ...identity, status });
+    return normalizeLimitProvider({ ...base, ...identityClean, status });
   }
 }
 
@@ -239,6 +322,7 @@ module.exports = {
   NOTION_FETCH_TIMEOUT_MS,
   NOTION_SPACES_URL,
   NOTION_ALLOWANCE_URL,
+  NOTION_MEMBER_USAGE_URL,
   fetchNotionLimits,
   normalizeNotionCookieHeader,
   normalizeNotionWorkspaceId,

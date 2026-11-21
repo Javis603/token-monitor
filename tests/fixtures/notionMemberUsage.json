@@ -1,0 +1,19 @@
+{
+  "period": {
+    "startMs": 1791277200000,
+    "endMs": 1793955600000
+  },
+  "members": [
+    {
+      "entityId": "8f24ac06-1807-4d51-9317-87d2f1a5f394",
+      "standardCredits": {
+        "usage": 19.442195,
+        "limit": 1500
+      },
+      "selectCredits": {
+        "usage": 569.575849,
+        "limit": 500
+      }
+    }
+  ]
+}

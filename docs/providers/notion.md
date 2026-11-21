@@ -17,14 +17,19 @@ The workspace must be selected explicitly with `notionWorkspaceId`, a workspace 
 
 ## Data sources
 
-The integration uses two internal POST endpoints at `https://app.notion.com`. Token Monitor implements its own parser and transport integration.
+The integration uses internal POST endpoints at `https://app.notion.com`. Token Monitor implements its own parser and transport integration.
 
 - `/api/v3/getSpaces`, with `{}`, supplies corroborated user/workspace records and subscription tier.
-- `/api/v3/getCreditRateLimitStatus`, with `{ "spaceId": "<workspace UUID>" }`, supplies the allowance windows.
+- `/api/v3/getCreditRateLimitStatus`, with `{ "spaceId": "<workspace UUID>" }`, supplies the legacy allowance windows.
+- `/api/v3/getMemberIncludedUsage`, with `{ "spaceId": "<workspace UUID>" }`, supplies the migrated Standard and Select credit pools. When `getCreditRateLimitStatus` returns HTTP 404 or `status: 'not_applicable'`, Token Monitor falls back to `getMemberIncludedUsage`.
 
 For product context, see Notion's official [Manage your usage allowance for Notion AI](https://www.notion.com/help/manage-your-usage-allowance-for-notion-ai). That help page is not a public API contract for these endpoints.
 
-The parser accepts the fixture's `basic_ai_credits` / `per_user` shape. `window.window === '6h'` identifies the rolling allowance (`session`, 360 minutes); `resetsInSeconds` supplies its reset when present. `billingPeriodWindow.cadence === 'billing_period'` identifies the Monthly billing window; `periodEndMs` supplies its reset when present. Percentages come from the returned `used / limit`, not an assumed 100-unit limit. Missing reset fields remain unknown. No monthly `windowMinutes`, calendar duration or 30-day sentinel is invented from an end timestamp.
+The parser accepts two allowance shapes:
+- The legacy fixture's `basic_ai_credits` / `per_user` shape: `window.window === '6h'` identifies the rolling allowance (`session`, 360 minutes); `resetsInSeconds` supplies its reset when present. `billingPeriodWindow.cadence === 'billing_period'` identifies the Monthly billing window; `periodEndMs` supplies its reset when present.
+- The migrated credit system shape: `period.endMs` supplies the monthly reset. `members[].standardCredits` (default limit 1500) and `members[].selectCredits` (default limit 500) identify the monthly billing pools. When a member has no usage in the current cycle, Notion returns an empty `members: []` array, which defaults to 0 used and official limits.
+
+Percentages come from the returned `used / limit`, not an assumed 100-unit limit. Missing reset fields remain unknown. No monthly `windowMinutes`, calendar duration or 30-day sentinel is invented from an end timestamp.
 
 ## Source precedence
 

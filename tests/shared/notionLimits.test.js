@@ -14,11 +14,13 @@ const {
   parseNotionAllowance,
   parseNotionSpaces,
   NOTION_SPACES_URL,
-  NOTION_ALLOWANCE_URL
+  NOTION_ALLOWANCE_URL,
+  NOTION_MEMBER_USAGE_URL
 } = require('../../src/shared/providers/notion/limits');
 
 const spacesFixture = require('../fixtures/notionSpaces.json');
 const allowanceFixture = require('../fixtures/notionAllowance.json');
+const memberUsageFixture = require('../fixtures/notionMemberUsage.json');
 const USER = '8f24ac06-1807-4d51-9317-87d2f1a5f394';
 const USER_B = 'ad5e1e56-1a69-42a5-aede-c8fde578f1a5';
 const SPACE = 'f190126b-0445-43ec-94dd-f069ad1aa064';
@@ -31,7 +33,7 @@ const options = { notionCookie: COOKIE, notionWorkspaceId: SPACE };
 const clone = (value) => structuredClone(value);
 const response = (body, status = 200) => ({ status, ok: status === 200, json: async () => clone(body) });
 
-function mockDeps({ spaces = spacesFixture, allowance = allowanceFixture, status = 200, failAt = 'allowance' } = {}) {
+function mockDeps({ spaces = spacesFixture, allowance = allowanceFixture, memberUsage = null, status = 200, failAt = 'allowance' } = {}) {
   const calls = [];
   return {
     calls,
@@ -39,9 +41,14 @@ function mockDeps({ spaces = spacesFixture, allowance = allowanceFixture, status
     now: () => NOW,
     fetch: async (url, init) => {
       calls.push({ url, init });
-      assert.ok([NOTION_SPACES_URL, NOTION_ALLOWANCE_URL].includes(url), 'fixed endpoints only');
-      const discovery = url === NOTION_SPACES_URL;
-      return response(discovery ? spaces : allowance, (discovery === (failAt === 'spaces')) ? status : 200);
+      assert.ok([NOTION_SPACES_URL, NOTION_ALLOWANCE_URL, NOTION_MEMBER_USAGE_URL].includes(url), 'fixed endpoints only');
+      if (url === NOTION_SPACES_URL) {
+        return response(spaces, failAt === 'spaces' ? status : 200);
+      }
+      if (url === NOTION_MEMBER_USAGE_URL) {
+        return response(memberUsage || allowance, failAt === 'memberUsage' ? status : 200);
+      }
+      return response(allowance, failAt === 'allowance' ? status : 200);
     }
   };
 }
@@ -479,4 +486,76 @@ test('Notion empty injected env and incomplete manual options perform no discove
     assert.equal(provider.status, 'ok');
     assert.equal(deps.calls.length, 2);
   }
+});
+
+test('Notion parses migrated Standard and Select credits with monthly reset', async () => {
+  const parsed = parseNotionAllowance(memberUsageFixture, NOW, USER);
+  assert.equal(parsed.windows.length, 2);
+  const [standard, select] = parsed.windows;
+
+  assert.equal(standard.kind, 'billing');
+  assert.equal(standard.label, 'Standard');
+  assert.equal(standard.used, 19.442195);
+  assert.equal(standard.limit, 1500);
+  assert.equal(standard.usedPercent, 19.442195 / 1500 * 100);
+  assert.equal(standard.remaining, 1500 - 19.442195);
+  assert.equal(standard.resetsAt, new Date(memberUsageFixture.period.endMs).toISOString());
+  assert.equal(standard.resetDescription, 'Monthly');
+
+  assert.equal(select.kind, 'billing');
+  assert.equal(select.label, 'Select');
+  assert.equal(select.used, 569.575849);
+  assert.equal(select.limit, 500);
+  assert.equal(select.usedPercent, 569.575849 / 500 * 100);
+  assert.equal(select.remaining, 0);
+  assert.equal(select.resetsAt, new Date(memberUsageFixture.period.endMs).toISOString());
+  assert.equal(select.resetDescription, 'Monthly');
+
+  const provider = await fetchNotionLimits(options, mockDeps({
+    status: 404,
+    failAt: 'allowance',
+    memberUsage: memberUsageFixture
+  }));
+  assert.equal(provider.status, 'ok');
+  assert.equal(provider.windows.length, 2);
+  assert.equal(provider.windows[0].label, 'Standard');
+  assert.equal(provider.windows[1].label, 'Select');
+  assert.equal(provider.windows[1].usedPercent, 100, 'display percent clamps to 100 on overage');
+});
+
+test('Notion migrated member usage with zero usage (empty members array) defaults to 0 used and official limits', async () => {
+  const emptyMembersUsage = {
+    period: { startMs: 1791277200000, endMs: 1793955600000 },
+    members: []
+  };
+  const parsed = parseNotionAllowance(emptyMembersUsage, NOW, USER);
+  assert.equal(parsed.windows.length, 2);
+  const [standard, select] = parsed.windows;
+
+  assert.equal(standard.kind, 'billing');
+  assert.equal(standard.label, 'Standard');
+  assert.equal(standard.used, 0);
+  assert.equal(standard.limit, 1500);
+  assert.equal(standard.usedPercent, 0);
+  assert.equal(standard.remaining, 1500);
+  assert.equal(standard.resetsAt, new Date(emptyMembersUsage.period.endMs).toISOString());
+
+  assert.equal(select.kind, 'billing');
+  assert.equal(select.label, 'Select');
+  assert.equal(select.used, 0);
+  assert.equal(select.limit, 500);
+  assert.equal(select.usedPercent, 0);
+  assert.equal(select.remaining, 500);
+  assert.equal(select.resetsAt, new Date(emptyMembersUsage.period.endMs).toISOString());
+});
+
+test('Notion fallback to getMemberIncludedUsage when getCreditRateLimitStatus returns not_applicable', async () => {
+  const provider = await fetchNotionLimits(options, mockDeps({
+    allowance: { status: 'not_applicable' },
+    memberUsage: memberUsageFixture
+  }));
+  assert.equal(provider.status, 'ok');
+  assert.equal(provider.windows.length, 2);
+  assert.equal(provider.windows[0].label, 'Standard');
+  assert.equal(provider.windows[1].label, 'Select');
 });
