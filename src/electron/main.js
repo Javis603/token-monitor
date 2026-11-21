@@ -7458,6 +7458,10 @@ function createWindow(boundsOverride, options = {}) {
       ...(settings?.systemGlass === false ? { systemGlassDisabled: '1' } : {})
     }
   });
+  // A tray startup window is created hidden and may never be shown. Start the
+  // same hibernate clock here so a window that never emits a native hide event
+  // still releases its renderer after the quiet period.
+  if (settings?.trayMode) scheduleMainWindowHibernate(win);
 }
 
 function handleZoomShortcut(event, input) {

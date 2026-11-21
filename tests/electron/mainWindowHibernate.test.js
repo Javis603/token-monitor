@@ -117,17 +117,30 @@ test('explicit popover hide and show manage the timer without native visibility 
   assert.equal(run.timer(HIBERNATE_MS), undefined);
 });
 
-test('native hide arms an unrefed one-shot and showing, focusing, restoring or replacing cancels it', () => {
+test('native hide re-arms an unrefed one-shot and showing, focusing or restoring cancels it', () => {
   for (const cancel of ['show', 'focus', 'restore', 'replacement']) {
     const run = fixture();
-    assert.equal(run.timer(HIBERNATE_MS), undefined, 'tray startup stays loaded');
+    assert.equal(run.timer(HIBERNATE_MS)?.unrefed, true, 'tray startup arms hibernation');
     run.original.show();
+    assert.equal(run.timer(HIBERNATE_MS), undefined, 'show cancels startup hibernation');
     run.original.hide();
     assert.equal(run.timer(HIBERNATE_MS)?.unrefed, true);
-    if (cancel === 'replacement') run.context.createWindow();
-    else run.original.emit(cancel);
-    assert.equal(run.timer(HIBERNATE_MS), undefined, cancel);
+    if (cancel === 'replacement') {
+      run.context.createWindow();
+      assert.ok(run.timer(HIBERNATE_MS), 'the replacement arms its own startup timer');
+    } else {
+      run.original.emit(cancel);
+      assert.equal(run.timer(HIBERNATE_MS), undefined, cancel);
+    }
   }
+});
+
+test('a tray window that is never shown still hibernates after the quiet period', () => {
+  const run = fixture();
+  assert.equal(run.timer(HIBERNATE_MS)?.unrefed, true);
+  run.fire(HIBERNATE_MS);
+  assert.equal(run.original.isDestroyed(), true);
+  assert.equal(run.context.mainWindow, null);
 });
 
 test('hibernate rechecks eligibility and retains the renderer for live tray artwork', () => {
