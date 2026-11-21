@@ -234,6 +234,51 @@ test('an all-client fallback refreshes fork-only partitions from the same toksca
   assert.equal(summary.allTime.clients.proma, 7);
 });
 
+for (const missingClientHasUsage of [false, true]) {
+  test(`a missing previously empty target ${missingClientHasUsage ? 'with new usage still needs a full fallback' : 'is checked without scanning unrelated clients'}`, async () => {
+    const { collectUsageOnce, localTodayKey } = freshCollector();
+    const calls = [];
+    const anchor = {
+      dateKey: localTodayKey(),
+      today: combinedPeriod({ codex: 20, proma: 5 }),
+      month: combinedPeriod({ claude: 50, codex: 40, proma: 5 }),
+      allTime: combinedPeriod({ claude: 100, codex: 80, proma: 10 }),
+      todayPartitions: {
+        claude: clientPeriod('claude', 0),
+        codex: clientPeriod('codex', 20),
+        proma: clientPeriod('proma', 5)
+      }
+    };
+    const runTokscale = async ({ clients, flags }) => {
+      assert.deepEqual(flags, ['--today']);
+      calls.push(clients);
+      if (clients === 'claude,codex') return tokscaleRows({ codex: missingClientHasUsage ? 37 : 30 });
+      if (clients === 'claude') return tokscaleRows(missingClientHasUsage ? { claude: 7 } : {});
+      return tokscaleRows(missingClientHasUsage ? { claude: 7, codex: 30, proma: 5 } : { codex: 30, proma: 5 });
+    };
+
+    const summary = await collectUsageOnce({
+      ...baseOptions,
+      clients: 'claude,codex,proma',
+      targetClients: ['claude', 'codex'],
+      todayOnlyAnchor: anchor,
+      runTokscale,
+      historyEnabled: false,
+      projectsEnabled: false
+    });
+
+    const expectedCalls = ['claude,codex', 'claude'];
+    if (missingClientHasUsage) expectedCalls.push('claude,codex,proma');
+    const newClaudeTokens = missingClientHasUsage ? 7 : 0;
+    assert.deepEqual(calls, expectedCalls);
+    assert.deepEqual(summary.today.clients, missingClientHasUsage
+      ? { claude: 7, codex: 30, proma: 5 }
+      : { codex: 30, proma: 5 });
+    assert.deepEqual(summary.month.clients, { claude: 50 + newClaudeTokens, codex: 50, proma: 5 });
+    assert.deepEqual(summary.allTime.clients, { claude: 100 + newClaudeTokens, codex: 90, proma: 10 });
+  });
+}
+
 test('a partial multi-target union falls back instead of trusting a polluted partition', async () => {
   const { collectUsageOnce, localTodayKey } = freshCollector();
   const calls = [];
