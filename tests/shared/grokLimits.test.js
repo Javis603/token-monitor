@@ -1050,6 +1050,49 @@ for (const source of ['rpc', 'web']) {
     }
   });
 
+  test(`Grok ${source} can link named credential fallbacks carrying a display email`, async () => {
+    const { aggregateLimits, withLimitAccountLinks } = require('../../src/shared/limits/core');
+    const { changeLimitAccountLink } = require('../../src/electron/limits/limitAccountLinks');
+    const now = Date.UTC(2026, 10, 9, 9);
+    const readings = await Promise.all(['a', 'b'].map(id => identityReading(`opaque-${id}`, source)));
+    const presentationFor = rows => ({ grok: {
+      labels: Object.fromEntries(rows.map(row => [row.accountKey, 'Work'])), order: []
+    } });
+    const devicesFor = rows => rows.map((row, index) => ({
+      deviceId: `device-${index}`, limits: { providers: [row] }
+    }));
+    for (const row of readings) {
+      assert.equal(row.status, 'ok');
+      assert.equal(row.accountEmail, 'same@example.test');
+      assert.equal(row.accountKeyPortable, false);
+    }
+    const presentation = presentationFor(readings);
+    const devices = devicesFor(readings);
+    const statsFor = (value = [], revision = 0) => withLimitAccountLinks({
+      limits: aggregateLimits(devices, 0, now, presentation, value),
+      syncSettingsRevisions: { limitAccountLinks: revision }
+    }, { value });
+    const before = statsFor();
+    assert.equal(before.limits.providers.length, 2);
+    assert.equal(before.limitAccountLinkCandidates.length, 2);
+    const [first, second] = before.limitAccountLinkCandidates;
+    assert.equal(first.scope, second.scope);
+    const pair = { provider: 'grok', scope: first.scope, keys: readings.map(row => row.accountKey) };
+    let linked;
+    assert.deepEqual(await changeLimitAccountLink(before, { revision: 0, operation: 'link', pair }, presentation,
+      async ({ value }) => { linked = statsFor(value, 1); return { status: 200 }; }), { ok: true });
+    assert.equal(linked.limits.providers.length, 1);
+    let split;
+    assert.deepEqual(await changeLimitAccountLink(linked, { revision: 1, operation: 'split', pair }, presentation,
+      async ({ value }) => { split = statsFor(value, 2); return { status: 200 }; }), { ok: true });
+    assert.deepEqual(split.limits.providers, before.limits.providers);
+
+    const verified = await Promise.all(['a', 'b'].map(sub => identityReading(oidcToken({ iss: 'https://auth.x.ai', sub }), source)));
+    const verifiedLimits = aggregateLimits(devicesFor(verified), 0, now, presentationFor(verified));
+    assert.equal(verifiedLimits.providers.length, 2);
+    assert.equal(verifiedLimits.linkCandidates, undefined);
+  });
+
   test(`Grok ${source} rotated records keep one SQLite history segment at 100% remaining`, async t => {
     const { createLimitsHistoryStore } = require('../../src/electron/limits/historyStore');
     const { segments } = require('../../src/electron/renderer/limits/historyModel');

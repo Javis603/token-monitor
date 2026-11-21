@@ -788,7 +788,9 @@ const PORTABLE_CREDENTIAL_PROVIDERS = new Set(['deepseek', 'hark']);
 function linkableAccount(row) {
   return isConfiguredProvider(row) && row.sourceDeviceId
     && /^sha256:[a-f0-9]{64}$/.test(row.accountKey) && !row.accountKeyPortable
-    && !row.accountEmail && !row.relatedAccountKey
+    // Grok retains the auth.json display email even without an OIDC subject.
+    && (!row.accountEmail || (row.provider === 'grok' && row.accountKeyPortable === false))
+    && !row.relatedAccountKey
     && (!MIXED_ACCOUNT_IDENTITY_PROVIDERS.has(row.provider) || row.accountKeyPortable === false)
     && (row.provider !== 'devin' || row.accountQuotaScope)
     && (!PORTABLE_ACCOUNT_PROVIDERS.has(row.provider) || PORTABLE_CREDENTIAL_PROVIDERS.has(row.provider))
