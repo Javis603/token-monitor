@@ -2621,6 +2621,9 @@ button.settings-help-trigger:focus-visible { outline: 1px solid var(--accent); o
   border-radius: 0;
   font-size: 0.59375rem;
 }
+.tool-preference-row.is-untracked .tool-status-tag {
+  max-width: 8.25rem;
+}
 /* Healthy: a dot, matching the limits list. */
 .tool-status-tag.is-dot {
   flex: 0 0 auto;
@@ -3135,6 +3138,37 @@ button.tool-preference-main:focus-visible {
   background: none;
   font-size: 0.59375rem;
   text-align: right;
+}
+.settings-panel .limit-provider-row.has-reading-devices {
+  grid-template-columns: minmax(0, 1fr) auto auto;
+}
+.limit-provider-reading-devices,
+.limit-provider-reading-devices.limit-detail-tooltip-wrap {
+  display: inline-flex;
+  width: auto;
+  height: auto;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 3px;
+  color: var(--muted);
+  cursor: default;
+}
+.limit-provider-reading-devices:hover,
+.limit-provider-reading-devices:focus-visible {
+  color: var(--text);
+}
+.limit-provider-reading-devices:focus-visible {
+  outline: 1px solid rgba(var(--accent-rgb), 0.62);
+  outline-offset: 2px;
+  border-radius: 3px;
+}
+.limit-provider-reading-devices .device-kind-icon {
+  vertical-align: 0;
+}
+.limit-provider-reading-overflow {
+  font-size: 0.5625rem;
+  font-variant-numeric: tabular-nums;
+  line-height: 1;
 }
 /* Provider options hang under their own row, spanning the full width beneath
    both the label and the actions. The row's spacing is a column gap only: a row
