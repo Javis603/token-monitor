@@ -1,6 +1,7 @@
 // @ts-check
 'use strict';
 
+const { isProviderStale, limitAccountLinkScope } = require('../../shared/limits/core');
 const { normalizeSharedSyncValue } = require('../../shared/syncContent');
 const KIND = 'limitAccountLinks';
 
@@ -30,4 +31,33 @@ async function changeLimitAccountLink(stats, input, presentation, write) {
   }
 }
 
-module.exports = { changeLimitAccountLink };
+/**
+ * Include the observation a confirmed pair hid when writing quota history.
+ * Its original account and device keys let it keep collecting points while
+ * the user sees a single quota in Limits.
+ * @param {any} stats
+ */
+function limitsForAccountHistory(stats) {
+  const { limits } = stats;
+  if (!stats.limitAccountLinks?.length || !limits?.providers) return limits;
+  const nowMs = Date.parse(limits.updatedAt) || Date.now();
+  const hidden = [];
+  for (const pair of stats.limitAccountLinks) {
+    const keys = new Set(limits.providers.filter((/** @type {any} */ row) => row.provider === pair.provider
+      && pair.keys.includes(row.accountKey) && limitAccountLinkScope(row) === pair.scope)
+      .map((/** @type {any} */ row) => row.accountKey));
+    if (keys.size !== 1) continue;
+    const member = stats.limitAccountLinkCandidates?.find((/** @type {any} */ row) => row.provider === pair.provider
+      && row.scope === pair.scope && pair.keys.includes(row.accountKey) && !keys.has(row.accountKey));
+    if (!member) continue;
+    const device = stats.devices?.find((/** @type {any} */ row) => row.deviceId === member.deviceId);
+    const reading = device?.limits?.providers?.find((/** @type {any} */ row) => row.provider === pair.provider
+      && row.accountKey === member.accountKey && limitAccountLinkScope(row) === pair.scope);
+    if (!reading) continue;
+    hidden.push({ ...reading, sourceDeviceId: device.deviceId,
+      stale: isProviderStale(reading, device.limits, device, stats.staleAfterMs || 0, nowMs) });
+  }
+  return hidden.length ? { ...limits, providers: [...limits.providers, ...hidden] } : limits;
+}
+
+module.exports = { changeLimitAccountLink, limitsForAccountHistory };

@@ -736,7 +736,7 @@ function aggregateLimits(devices, staleAfterMs = 0, nowMs = Date.now(), accountP
       provider: candidate.provider, accountKey: candidate.accountKey, scope,
       labelKey, deviceId: candidate.sourceDeviceId, region: candidate.region
     });
-    const explicitlyNamed = labelKey && Boolean(accountPresentation[candidate.provider]?.labels?.[labelKey]);
+    const explicitlyNamed = labelKey && Object.hasOwn(accountPresentation[candidate.provider]?.labels || {}, labelKey);
     const named = explicitlyNamed || linked.has(id);
     const knownAccount = candidate.accountKey && (named || multiAccount
       || providerPolicies[candidate.provider]?.preserveStaleAccount?.(candidate));
@@ -784,7 +784,8 @@ function linkableAccount(row) {
 
 function linkScope(row) {
   const products = [...new Set(row.windows.map(window => window.productId).filter(Boolean))].sort();
-  return JSON.stringify([row.region, row.source, row.adapterId || '', row.workspaceKind, products, row.accountQuotaScope || '']);
+  return JSON.stringify([row.region, row.source, row.adapterId || '', row.workspaceKind, products,
+    row.accountQuotaScope || '', providerPolicies[row.provider]?.linkScope?.(row) || '']);
 }
 
 // Confirmed links affect the selected reading only. Raw device observations
@@ -859,6 +860,7 @@ module.exports = {
   DEFAULT_LIMITS_REFRESH_MS,
   aggregateLimits,
   withLimitAccountLinks,
+  limitAccountLinkScope: linkScope,
   isProviderStale,
   mergeCodexTransientWindows,
   normalizeLimitProvider,

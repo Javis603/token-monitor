@@ -163,6 +163,10 @@ for (const runtime of ['Node', 'Worker']) {
       .map(row => row.windows[0].remaining), [51, 51], 'pick the better reading without summing the two');
     assert.equal(linked.devices.flatMap(device => device.limits.providers).length, 6);
     assert.deepEqual(linked.limitAccountLinks, pairs);
+    const cleared = names('');
+    cleared.kimi.labels[keys[0]] = '';
+    assert.equal((await client.send(namesEndpoint, 'PUT', { baseRevision: 2, value: cleared })).status, 200);
+    assert.deepEqual(counts(await read()), [1, 1, 2], 'clearing names keeps a confirmed pair');
     if (runtime === 'Worker') {
       const publicStats = await (await client.send('/api/public/stats', 'GET', undefined, false)).json();
       assert.deepEqual(counts(publicStats), [2, 1, 2]);
@@ -184,7 +188,7 @@ for (const runtime of ['Node', 'Worker']) {
     const { hashKey } = require('../../src/shared/hashKey');
     const keys = ['a', 'b'].map(letter => 'sha256:' + letter.repeat(64));
     const museDefault = hashKey('muse', 'account-slot', 'default');
-    const providers = ['commandcode', 'copilot', 'devin', 'muse'];
+    const providers = ['commandcode', 'copilot', 'devin', 'minimax', 'muse'];
     const names = Object.fromEntries(providers.map(provider => [provider, {
       labels: Object.fromEntries([...keys, museDefault].map(key => [key, 'Work'])), order: []
     }]));
@@ -197,6 +201,9 @@ for (const runtime of ['Node', 'Worker']) {
           { ...common, provider: 'commandcode', source: 'web', accountKey: key, accountKeyPortable: index === 0 },
           { ...common, provider: 'copilot', source: 'api', accountKey: key, accountName: index === 0 ? 'alice' : 'bob' },
           { ...common, provider: 'devin', source: 'web', accountKey: key, accountQuotaScope: hashKey('devin-organization', index) },
+          { ...common, provider: 'minimax', source: 'api', region: 'global', accountKey: key,
+            accountLabel: index === 0 ? 'Pay-as-you-go' : 'Token Plan',
+            windows: common.windows.map(window => ({ ...window, productId: 'api' })) },
           { ...common, provider: 'muse', source: 'web', accountKey: museDefault },
           { ...common, provider: 'muse', source: 'web', accountKey: key }
         ] }
@@ -210,8 +217,10 @@ for (const runtime of ['Node', 'Worker']) {
     assert.deepEqual(candidates('copilot'), [], 'old clients with unidentified provenance cannot offer verified logins');
     assert.equal(candidates('devin').length, 2);
     assert.notEqual(candidates('devin')[0].scope, candidates('devin')[1].scope);
+    assert.equal(candidates('minimax').length, 2);
+    assert.notEqual(candidates('minimax')[0].scope, candidates('minimax')[1].scope, 'cash and token plan are separate');
     assert.equal(candidates('muse').some(row => row.accountKey === museDefault), false);
-    for (const [provider, keysToLink] of [['commandcode', keys], ['devin', keys], ['muse', [keys[1], museDefault]]]) {
+    for (const [provider, keysToLink] of [['commandcode', keys], ['devin', keys], ['minimax', keys], ['muse', [keys[1], museDefault]]]) {
       const candidate = candidates(provider).find(row => row.accountKey === keys[1]);
       assert.deepEqual(await changeLimitAccountLink(stats, {
         revision: 0, operation: 'link', pair: { provider, scope: candidate.scope, keys: keysToLink }

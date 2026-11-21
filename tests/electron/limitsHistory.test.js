@@ -112,6 +112,31 @@ test('SQLite queries use Claude semantic session bounds and retain only actual o
   assert.deepEqual(result.windows[1].points.map(p => p.at), [at(3, 9), at(3, 11)]);
 });
 
+test('paired quota readings both keep recording history under their original keys', async t => {
+  const { aggregateDevices } = require('../../src/shared/usage');
+  const { withLimitAccountLinks } = require('../../src/shared/limits/core');
+  const { limitsForAccountHistory } = require('../../src/electron/limits/limitAccountLinks');
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'quota-pair-history-'));
+  const nowMs = at(3, 12);
+  const store = createLimitsHistoryStore(path.join(directory, 'history.sqlite'), { now: () => nowMs });
+  t.after(async () => { await store.close(); fs.rmSync(directory, { recursive: true, force: true }); });
+  const keys = ['a', 'b'].map(letter => 'sha256:' + letter.repeat(64));
+  const devices = keys.map((accountKey, index) => ({
+    deviceId: 'device-' + index,
+    limits: { providers: [{ provider: 'kimi', source: 'api', status: 'ok', accountKey,
+      updatedAt: new Date(nowMs - index * 1000).toISOString(), windows: [{ kind: 'weekly', usedPercent: 30 + index }] }] }
+  }));
+  const limitAccountPresentation = { kimi: { labels: Object.fromEntries(keys.map(key => [key, 'Work'])) } };
+  const stats = aggregateDevices(devices, 0, nowMs, { limitAccountPresentation });
+  const pair = { provider: 'kimi', scope: stats.limits.linkCandidates[0].scope, keys };
+  const linked = withLimitAccountLinks(stats, { value: [pair] });
+  assert.equal(linked.limits.providers.length, 1);
+  await store.record('hub', limitsForAccountHistory(linked));
+  const hidden = stats.limits.providers.find(row => row.accountKey === keys[1]);
+  const result = await store.query('hub', hidden);
+  assert.deepEqual(result.windows[0].points.map(point => point.at), [nowMs - 1000]);
+});
+
 test('SQLite stores one unchanged value across hours with only hourly coverage records', t => {
   const fixture = databaseFixture(t);
   const raw = [];
