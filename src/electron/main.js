@@ -5493,6 +5493,7 @@ function settingsForRenderer() {
     windowsAccentActive: windowsAccentActive(mainWindow),
     windowsBackdropFallback: windowsBackdropFallback(mainWindow),
     syncContentStatus: getSyncContentRuntime().status(),
+    hubStatsSource: hubModeGeneration,
     locale,
     calendarLocale: collectorCalendarLocale(),
     syncWeekStartsOn: SYNC_WEEK_STARTS_ON,
@@ -8491,6 +8492,8 @@ app.whenReady().then(() => {
     }
   });
   ipcMain.handle('limits:limitAccountLink', async (_event, input) => {
+    // The snapshot's generation changes on a Hub, credential, or device switch.
+    if (input?.source !== hubModeGeneration) return { ok: false };
     const context = syncContentContext();
     if (!['client', 'host'].includes(context.mode) || !context.url) return { ok: false };
     const stats = context.mode === 'host' ? embeddedHub?.hub.getStats() : currentHubStatsCache();
@@ -8595,6 +8598,7 @@ app.whenReady().then(() => {
     // Presentation writes use the serialized account command lane.
     delete normalizedPatch.limitAccountPresentation;
     delete normalizedPatch.limitAccountPresentationCacheIdentity;
+    delete normalizedPatch.hubStatsSource;
     delete normalizedPatch.limitAccountPresentationPending;
     // Derived for the renderer from the hub document, not settings. Persisting a
     // copy would leave a key on disk that describes a hub as of whenever a form

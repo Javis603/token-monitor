@@ -17,29 +17,34 @@
     let pending = false;
     let failed = false;
 
-    async function submit(operation, pair, button) {
-      if (pending) return;
+    function actionButton(pair, operation) {
+      return [...root.querySelectorAll('button')].find(button => button.dataset.pair === pair
+        && (!operation || button.dataset.operation === operation));
+    }
+
+    async function submit(request, button) {
+      if (pending || input.source !== request.source || input.revision !== request.revision) return;
       pending = true;
       failed = false;
       render();
-      try {
-        failed = !(await save({ revision: input.revision, operation, pair }))?.ok;
-      } catch (_) {
-        failed = true;
-      }
+      let ok = false;
+      try { ok = (await save(request))?.ok === true; } catch (_) {}
+      if (input.source !== request.source) return;
       pending = false;
+      failed = !ok;
       render();
-      if (document.activeElement === document.body) {
-        const action = [...root.querySelectorAll('button')].find(next => next.dataset.pair === button.dataset.pair);
-        action?.focus({ preventScroll: true });
+      if (root.isConnected && document.activeElement === document.body) {
+        actionButton(button.dataset.pair)?.focus({ preventScroll: true });
       }
     }
 
-    function render() {
+    function render(restoreFocus = true) {
+      const active = document.activeElement;
+      const focused = restoreFocus && root.contains(active) ? active : null;
       root.replaceChildren();
       root.hidden = true;
       if (!Number.isSafeInteger(input?.revision)) return;
-      const { candidates, links, labels, devices } = input;
+      const { source, revision, candidates, links, labels, devices } = input;
       const members = new Map(candidates.map(row => [memberId(row.scope, row.accountKey), row]));
       const occupied = new Set(links.flatMap(pair => pair.keys.map(key => memberId(pair.scope, key))));
       const deviceNames = new Map(devices.map(({ deviceId, name }) => [deviceId, name]));
@@ -74,8 +79,9 @@
         button.textContent = tr(operation);
         button.disabled = pending;
         button.dataset.pair = JSON.stringify([pair.scope, pair.keys]);
+        button.dataset.operation = operation;
         button.setAttribute('aria-description', description.textContent);
-        button.addEventListener('click', () => submit(operation, pair, button));
+        button.addEventListener('click', () => submit({ source, revision, operation, pair }, button));
         actions.append(button);
         item.append(description, actions);
         root.append(item);
@@ -105,6 +111,9 @@
         root.append(error);
       }
       root.hidden = !root.childElementCount;
+      if (focused && !pending) {
+        actionButton(focused.dataset.pair, focused.dataset.operation)?.focus({ preventScroll: true });
+      }
     }
 
     return {
@@ -112,9 +121,14 @@
       update(next) {
         const key = JSON.stringify(next);
         if (key === signature) return;
+        const sameSource = next.source === input?.source;
         signature = key;
         input = next;
-        render();
+        if (!sameSource) {
+          pending = false;
+          failed = false;
+        }
+        render(sameSource);
       }
     };
   }

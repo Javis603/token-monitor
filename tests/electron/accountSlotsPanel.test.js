@@ -1,6 +1,7 @@
 'use strict';
 const test = require('node:test');
 const assert = require('node:assert/strict');
+const { createAccountLinkPanel } = require('../../src/electron/renderer/limits/accountLinkPanel');
 const { accountName, accountStatus, applyAccountOrder, createPanel } = require('../../src/electron/renderer/limits/accountSlotsPanel');
 const { createCredentialPanel, resolveOpenUrl } = require('../../src/electron/renderer/limits/accountPanels');
 const { limitAccountFormsForRenderer } = require('../../src/electron/limits/accountSettings');
@@ -534,6 +535,68 @@ test('provider settings can rename a remote fallback before it appears in aggreg
   assert.deepEqual(Array.from(context.limitAccountContext('qoder').records), [local]);
   context.state.stats.limits.providers.push({ ...remote, sourceDeviceId: 'peer' });
   assert.equal(context.limitAccountContext('kimi').records.length, 2);
+});
+
+test('pair actions keep keyboard focus on background updates within the same Hub', async () => {
+  const { document } = harness();
+  const calls = [];
+  const panel = createAccountLinkPanel({ document, t, provider: 'kimi', label: 'Kimi',
+    save: async request => { calls.push(request); return { ok: true }; } });
+  document.root.append(panel.element);
+  const pair = { provider: 'kimi', scope: 'scope', keys: ['a', 'b'] };
+  const input = { source: 4, revision: 1, links: [pair], candidates: [], labels: {}, devices: [] };
+  const action = () => panel.element.querySelectorAll('button')[0];
+
+  panel.update(input);
+  const old = action();
+  old.focus();
+  panel.update({ ...input, revision: 2 });
+  assert.notEqual(action(), old);
+  assert.equal(document.activeElement, action());
+  await old.click();
+  assert.equal(calls.length, 0, 'a replaced action cannot silently adopt the new revision');
+
+  const outside = document.createElement('input');
+  document.root.append(outside);
+  outside.focus();
+  panel.update({ ...input, revision: 3 });
+  assert.equal(document.activeElement, outside);
+  const oldHub = action();
+  panel.update({ ...input, source: 5, revision: 3 });
+  await oldHub.click();
+  assert.equal(calls.length, 0, 'an action from the former Hub retains its captured source');
+  await action().click();
+  assert.deepEqual(calls, [{ source: 5, revision: 3, operation: 'split', pair }]);
+});
+
+test('link IPC rejects a former Hub generation even if the new Hub has the identical pair and revision', async () => {
+  const fs = require('node:fs');
+  const vm = require('node:vm');
+  const { changeLimitAccountLink } = require('../../src/electron/limits/limitAccountLinks');
+  const source = fs.readFileSync(require.resolve('../../src/electron/main.js'), 'utf8');
+  const start = source.indexOf("ipcMain.handle('limits:limitAccountLink',");
+  const end = source.indexOf("\n  for (const operation", start);
+  const pair = { provider: 'kimi', scope: 'scope', keys: ['a', 'b'].map(letter => 'sha256:' + letter.repeat(64)) };
+  const stats = { syncSettingsRevisions: { limitAccountLinks: 1 }, limitAccountLinks: [pair] };
+  const writes = [];
+  let handle;
+  const context = vm.createContext({
+    hubModeGeneration: 5, settings: {}, changeLimitAccountLink,
+    ipcMain: { handle: (_channel, callback) => { handle = callback; } },
+    syncContentContext: () => ({ mode: 'client', url: 'https://hub-b.example' }),
+    currentHubStatsCache: () => stats,
+    requestSyncContent: async (hub, _path, _method, payload) => {
+      writes.push({ url: hub.url, value: payload.value });
+      return { status: 200 };
+    }
+  });
+  vm.runInContext(source.slice(start, end), context);
+  const action = { revision: 1, operation: 'split', pair };
+
+  assert.equal((await handle(null, { ...action, source: 4 })).ok, false);
+  assert.equal(writes.length, 0);
+  assert.equal((await handle(null, { ...action, source: 5 })).ok, true);
+  assert.deepEqual(writes, [{ url: 'https://hub-b.example', value: [] }]);
 });
 
 test('a probe starting or finishing repaints only its provider account rows in visible Settings', () => {
