@@ -15,6 +15,7 @@ const { BROWSER_USER_AGENT } = require('../../browserUserAgent');
 
 const DEVIN_ORIGIN = 'https://app.devin.ai';
 const DEVIN_FETCH_TIMEOUT_MS = 15_000;
+const DEVIN_MEMBERSHIP_TIMEOUT_MS = 3_000;
 
 function devinBearerToken(env = process.env, options = {}) {
   const candidates = [
@@ -308,6 +309,20 @@ async function fetchJson(url, headers, deps = {}) {
   }, { signal: deps.signal, deadlineMs });
 }
 
+async function fetchDevinAccountEmail(headers, internalId, deps) {
+  if (!internalId) return '';
+  try {
+    const { response, body } = await fetchJson(`${DEVIN_ORIGIN}/api/users/current-membership`, headers, {
+      ...deps,
+      devinFetchTimeoutMs: DEVIN_MEMBERSHIP_TIMEOUT_MS
+    });
+    if (response.ok && body?.org?.org_id === internalId && typeof body?.user?.email === 'string') {
+      return body.user.email;
+    }
+  } catch (_) {}
+  return '';
+}
+
 async function fetchDevinLimits(options = {}, deps = {}) {
   const env = deps.env || process.env;
   const now = (deps.now || Date.now)();
@@ -331,7 +346,10 @@ async function fetchDevinLimits(options = {}, deps = {}) {
       const { response, body } = await fetchJson(url, headers, deps);
       if (response.ok) {
         const usage = parseDevinUsage(body, organization);
-        const planName = usage.planName || await fetchDevinPlanName(headers, organization, deps);
+        const [planName, accountEmail] = await Promise.all([
+          usage.planName || fetchDevinPlanName(headers, organization, deps),
+          fetchDevinAccountEmail(headers, internalId, deps)
+        ]);
         const windows = [
           quotaWindow('daily', 'Daily', usage.daily, 24 * 60),
           quotaWindow('weekly', 'Weekly', usage.weekly, 7 * 24 * 60)
@@ -352,6 +370,7 @@ async function fetchDevinLimits(options = {}, deps = {}) {
           accountLabel: planName,
           planLabel: planName,
           accountName: usage.organization,
+          accountEmail,
           source: 'web',
           status: 'ok',
           updatedAt,

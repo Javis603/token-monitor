@@ -539,7 +539,8 @@
       // saved key never heals through email/name or sole-account fallback.
       if (subscription?.provider === 'workbuddy') return null;
     }
-    if (binding.accountEmail) {
+    // The same Devin login can belong to multiple quota organizations.
+    if (binding.accountEmail && cleanText(subscription?.provider).toLowerCase() !== 'devin') {
       const byEmail = accounts.find(
         (account) => cleanText(account?.accountEmail || account?.email).toLowerCase() === binding.accountEmail
       );
