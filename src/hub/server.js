@@ -14,6 +14,7 @@ const {
   SHARED_SYNC_KINDS, emptySharedSyncDocument, nextSharedSyncDocument,
   syncContentCapability, syncSessionTitlesEnabled, normalizeTitlePolicy, nextTitlePolicy, acceptsSessionTitles
 } = require('../shared/syncContent');
+const { withLimitAccountLinks } = require('../shared/limits/core');
 const { DEFAULT_STALE_AFTER_MS } = require('../shared/syncUploadInterval');
 const { deviceHistoryRevision, historyPreview, historyRevision } = require('../shared/history');
 const {
@@ -122,7 +123,9 @@ function createHub({
   }
 
   function getStats() {
-    const stats = aggregateDevices(Object.values(store.devices), staleAfterMs);
+    const limitAccountPresentation = getSyncSettings('limitAccountPresentation').value || {};
+    const links = getSyncSettings('limitAccountLinks');
+    const stats = aggregateDevices(Object.values(store.devices), staleAfterMs, Date.now(), { limitAccountPresentation, limitAccountLinks: links.value || [] });
     stats.staleAfterMs = staleAfterMs;
     const history = aggregateHistory(Object.values(store.devices));
     stats.historyPreview = historyPreview(history);
@@ -134,7 +137,7 @@ function createHub({
     // the steady state and does not put what the user pays into every frame.
     stats.subscriptionsUpdatedAt = store.subscriptions?.updatedAt || '';
     stats.syncSettingsRevisions = Object.fromEntries(SHARED_SYNC_KINDS.map((kind) => [kind, getSyncSettings(kind).revision]));
-    return stats;
+    return withLimitAccountLinks(stats, links);
   }
 
   function getHistory() {
@@ -421,7 +424,7 @@ function createHub({
 
     if (req.method === 'GET' && url.pathname === '/api/sync/content') return sendJson(res, 200, getSyncContent());
 
-    const settingsMatch = url.pathname.match(/^\/api\/sync\/settings\/(modelAliases|customPricing|limitAccountPresentation)$/);
+    const settingsMatch = url.pathname.match(/^\/api\/sync\/settings\/(modelAliases|customPricing|limitAccountPresentation|limitAccountLinks)$/);
     if (settingsMatch && req.method === 'GET') return sendJson(res, 200, { ok: true, ...getSyncSettings(settingsMatch[1]) });
     const titlesMatch = url.pathname.match(/^\/api\/sync\/titles\/([^/]+)$/);
     if (req.method === 'PUT' && (settingsMatch || titlesMatch)) {

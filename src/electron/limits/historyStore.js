@@ -5,6 +5,7 @@ const path = require('node:path');
 const { Worker } = require('node:worker_threads');
 const { limitWindowKey } = require('../../shared/limits/usageItems');
 const { hashKey } = require('../../shared/hashKey');
+const { limitsForAccountHistory } = require('./limitAccountLinks');
 const { historyAccountKey, portableHistoryAccount: hasHistoryAccountIdentity } = require('./historyIdentity');
 const { dayKey, historyReadings } = require('../renderer/limits/historyModel');
 
@@ -105,7 +106,8 @@ function createLimitsHistoryStore(filePath, { now = Date.now, onError = () => {}
     }
     return mappings;
   }
-  async function record(scope, limits) {
+  async function record(scope, limits, projectedStats) {
+    if (projectedStats) limits = limitsForAccountHistory(projectedStats);
     const actions = [];
     for (const provider of limits?.providers || []) {
       const account = accountId(scope, provider);

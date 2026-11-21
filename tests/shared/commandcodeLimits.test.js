@@ -438,17 +438,19 @@ test('every catalogued plan spends less in a window than it grants in a month', 
 });
 
 test('accountKey follows the account, not the credential', async () => {
-  const keyFor = async (subscriptionData, cookie = `${SESSION_COOKIE}; ${SESSION_DATA_COOKIE}`) => (
-    await fetchCommandcodeLimits({ commandcodeCookie: cookie }, {
+  const readingFor = (subscriptionData, cookie = `${SESSION_COOKIE}; ${SESSION_DATA_COOKIE}`) =>
+    fetchCommandcodeLimits({ commandcodeCookie: cookie }, {
       env: {},
       fetch: stubFetch({
         [COMMANDCODE_CREDITS_URL]: CREDITS_BODY,
         [COMMANDCODE_SUBSCRIPTIONS_URL]: { success: true, data: { ...SUBSCRIPTION_BODY.data, ...subscriptionData } }
       })
-    })
-  ).accountKey;
+    });
+  const keyFor = async (...args) => (await readingFor(...args)).accountKey;
 
-  const base = await keyFor({ userId: 'user-abc' });
+  const reported = await readingFor({ userId: 'user-abc' });
+  assert.equal(reported.accountKeyPortable, true);
+  const base = reported.accountKey;
   assert.ok(base.startsWith('sha256:'));
   // A re-pasted cookie, a rotated session_data cache, and a cancel-and-resubscribe
   // are all the same person — the key is what dedupes them across devices.
@@ -488,6 +490,7 @@ test('accountKey follows the account, not the credential', async () => {
     }) }
   );
   assert.equal(withoutPlan.accountKey, withRotatedCache.accountKey);
+  assert.equal(withoutPlan.accountKeyPortable, false);
 });
 
 test('a live Go account maps onto the windows the dashboard shows', async () => {

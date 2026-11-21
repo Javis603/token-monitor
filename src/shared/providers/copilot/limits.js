@@ -229,6 +229,7 @@ function mapCopilotUsageToProvider(usage, meta = {}) {
   return normalizeLimitProvider({
     provider: 'copilot',
     accountKey: meta.accountKey || '',
+    accountKeyPortable: meta.accountKeyPortable,
     accountLabel: meta.accountLabel || displayPlanLabel(usage.copilotPlan),
     accountName: meta.accountName || '',
     accountEmail: meta.accountEmail || '',
@@ -442,8 +443,18 @@ async function fetchCopilotAccountLimits(options = {}, deps = {}) {
         fingerprint, accountKey: copilotAccountKey(accountSeed, enterpriseHost), accountName: login
       });
     }
+    const credentialKey = copilotAccountKey(token, enterpriseHost);
+    const accountKey = options.accountKey || (accountSeed ? copilotAccountKey(accountSeed, enterpriseHost) : remembered?.accountKey) || credentialKey;
+    // A legacy profile can retain an earlier token hash. Verify the selected
+    // key against a GitHub identity, including the login saved with a profile.
+    const credentialFallback = accountKey === credentialKey;
+    const identitySeeds = [login, identity.id == null ? '' : String(identity.id), options.accountName];
+    const verified = !credentialFallback && (accountKey === remembered?.accountKey
+      || identitySeeds.some(seed => seed && accountKey === copilotAccountKey(seed, enterpriseHost)));
+    const pairableFallback = credentialFallback && normalizedEnterpriseHost(enterpriseHost) === COPILOT_DEFAULT_HOST;
     return mapCopilotUsageToProvider(usage, {
-      accountKey: options.accountKey || (accountSeed ? copilotAccountKey(accountSeed, enterpriseHost) : remembered?.accountKey) || copilotAccountKey(token, enterpriseHost),
+      accountKey,
+      ...(verified || pairableFallback ? { accountKeyPortable: verified } : {}),
       accountLabel: displayPlanLabel(usage.copilotPlan),
       accountName: login || options.accountName || remembered?.accountName,
       accountEmail: '',

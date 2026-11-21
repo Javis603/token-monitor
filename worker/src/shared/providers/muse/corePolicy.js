@@ -3,6 +3,9 @@
 
 // @ts-check
 'use strict';
+
+// The default web slot is shared by every device that has an ambient cookie.
+const DEFAULT_WEB_SLOT_KEY = 'sha256:d32ae458cbf86ee438b89dc09e045d8317fa338d1e62b8785ca34151e0161c32';
 /** @param {any} row @param {string} key */
 function aggregateKey(row, key) {
   const sourceKey = `${key}:source:${row.source || ''}`;
@@ -12,4 +15,6 @@ function aggregateKey(row, key) {
 function collapseKey(row, key) { return row.source === 'web' ? `${row.provider}:source:web` : key; }
 /** @param {any} row */
 function freshnessKey(row) { return `${row.provider}:${row.source}`; }
-module.exports = { aggregateKey, collapseKey, freshnessKey };
+/** @param {any} row */
+const canLinkAccount = row => row.accountKey !== DEFAULT_WEB_SLOT_KEY;
+module.exports = { DEFAULT_WEB_SLOT_KEY, canLinkAccount, aggregateKey, collapseKey, freshnessKey };

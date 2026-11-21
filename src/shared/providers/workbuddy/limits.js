@@ -484,6 +484,8 @@ async function fetchWorkbuddyAccount(options, deps, account = null, managed = fa
       const usage = enterpriseId ? parseEnterpriseUsage(body) : parsePersonalUsage(body);
       return row('ok', {
         accountKey: managed || userId ? accountKey : workbuddyAccountKey(explicitToken, userId, enterpriseId, usage.accountId, realm),
+        // Only a personal token fallback can be paired without a server ID.
+        ...(!managed && explicitToken && !enterpriseId ? { accountKeyPortable: Boolean(userId || usage.accountId) } : {}),
         windows: usage.window ? [usage.window] : [],
         ...(usage.window ? { balance: { amount: usage.remaining, currency: 'CREDITS' } } : {})
       });

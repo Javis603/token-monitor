@@ -650,8 +650,8 @@ function shouldTryGrokRpc(credential, deps = {}) {
     && typeof credential.source === 'string' && credential.source.startsWith('auth.json');
 }
 
-function grokAccountKey(credential) {
-  if (!credential) return '';
+function grokAccountIdentity(credential) {
+  if (!credential) return {};
   // Identity only: billing still authenticates the credential. xAI OIDC tokens
   // rotate, but their issuer/subject pair identifies the same account. Email
   // is display metadata, not a safe substitute for a missing subject.
@@ -664,11 +664,11 @@ function grokAccountKey(credential) {
         && header.alg.trim() && header.alg === header.alg.trim() && header.alg !== 'none'
         && claims?.iss === 'https://auth.x.ai' && typeof claims.sub === 'string'
         && claims.sub.trim() && claims.sub === claims.sub.trim()) {
-        return hashKey('grok', 'oidc', claims.iss, claims.sub);
+        return { accountKey: hashKey('grok', 'oidc', claims.iss, claims.sub), accountKeyPortable: true };
       }
     } catch (_) { /* Unknown token formats keep their isolated legacy key. */ }
   }
-  return hashKey('grok', credential.token);
+  return { accountKey: hashKey('grok', credential.token), accountKeyPortable: false };
 }
 
 function unauthorizedGrokProvider(updatedAt, source = 'web', sourceDetail = '') {
@@ -766,7 +766,7 @@ async function fetchGrokLimits(options = {}, deps = {}) {
       const windows = parseGrokBilling(rpcBody);
       return normalizeLimitProvider({
         provider: 'grok',
-        accountKey: grokAccountKey(credential),
+        ...grokAccountIdentity(credential),
         accountLabel: 'SuperGrok',
         accountEmail: credential?.email || '',
         source: 'rpc',
@@ -823,7 +823,7 @@ async function fetchGrokLimits(options = {}, deps = {}) {
   try {
     return normalizeLimitProvider({
       provider: 'grok',
-      accountKey: grokAccountKey(credential),
+      ...grokAccountIdentity(credential),
       accountLabel: 'SuperGrok',
       accountEmail: credential.email || '',
       source: 'web',

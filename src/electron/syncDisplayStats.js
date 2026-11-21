@@ -1,6 +1,7 @@
 'use strict';
 
 const { aggregateDevices, normalizeDeviceRecord, normalizePeriod } = require('../shared/usage');
+const { withLimitAccountLinks } = require('../shared/limits/core');
 const { deviceHistoryRevision } = require('../shared/history');
 const { pickRecentUsageActivity } = require('../shared/trayText');
 const { grokBotSessionIdsForMaps } = require('./renderer/sessionRows');
@@ -173,7 +174,10 @@ function composeLocalSyncStats(hubStats, localDevice, options = {}) {
   const summarize = (record) => (record === localDevice
     ? normalizedLocalSummary(localDevice)
     : withoutAllTimeSessions(normalizedHubRecord(record)));
+  const rebuildLimits = hasHubStaleAfterMs || !hasOwn(hubStats, 'limits');
+  const links = rebuildLimits && Array.isArray(hubStats?.limitAccountLinks) ? hubStats.limitAccountLinks : null;
   const aggregate = aggregateDevices(devices, hubStaleAfterMs ?? 0, options.nowMs, {
+    ...(links ? { limitAccountLinks: links, limitAccountPresentation: options.limitAccountPresentation || {} } : {}),
     normalizeRecord: options.allTimeSessions === false ? summarize : normalize,
     copyNormalizedMonthSessions: true
   });
@@ -202,7 +206,7 @@ function composeLocalSyncStats(hubStats, localDevice, options = {}) {
     periods: aggregate.periods,
     devices: aggregate.devices,
     projectsIncomplete: aggregate.projectsIncomplete,
-    limits: hasHubStaleAfterMs || !hasOwn(hubStats, 'limits') ? aggregate.limits : hubStats.limits
+    limits: rebuildLimits ? aggregate.limits : hubStats.limits
   };
   // The local collector can own fresher History than the Hub copy currently
   // represented by its revision. Include that overlay in the display cache key
@@ -217,7 +221,15 @@ function composeLocalSyncStats(hubStats, localDevice, options = {}) {
     else delete displayStats[key];
   }
 
-  return displayStats;
+  if (!links) return displayStats;
+  const projected = withLimitAccountLinks(displayStats, { value: links });
+  // The Hub can confirm only observations it has received. A newly collected
+  // local key can appear in Limits immediately, then become pairable after upload.
+  const published = hubStats.limitAccountLinkCandidates || [];
+  projected.limitAccountLinkCandidates = projected.limitAccountLinkCandidates.filter(row => published.some(candidate =>
+    candidate.provider === row.provider && candidate.scope === row.scope
+    && candidate.accountKey === row.accountKey && candidate.deviceId === row.deviceId));
+  return projected;
 }
 
 // Most of a recompose is merging this machine's all-time sessions, which no
@@ -250,9 +262,9 @@ function localActivityPatch(stats) { return localActivity.get(stats)?.patch; }
 
 function composeLocalSyncSummary(hubStats, localDevice, options = {}) {
   const nowMs = options.nowMs ?? Date.now();
-  const summary = composeLocalSyncStats(hubStats, localDevice, { nowMs, allTimeSessions: false });
+  const summary = composeLocalSyncStats(hubStats, localDevice, { ...options, nowMs, allTimeSessions: false });
   if (summary && summary !== hubStats) {
-    completions.set(summary, { compose: () => composeLocalSyncStats(hubStats, localDevice, { nowMs }), complete: null });
+    completions.set(summary, { compose: () => composeLocalSyncStats(hubStats, localDevice, { ...options, nowMs }), complete: null });
   }
   return summary;
 }

@@ -1,5 +1,6 @@
 'use strict';
 
+const { accountSelectionKey } = require('./accountScope');
 const { normalizeLimitProductId } = require('./products');
 const { staleAfterMsForSyncUpload } = require('../syncUploadInterval');
 const { LIMIT_PROVIDER_CATALOG, LIMIT_PROVIDER_IDS, VALID_LIMIT_WINDOW_METRICS } = require('./providers');
@@ -10,7 +11,9 @@ const { openCodeWindowKey, groupOpenCodeCandidates, mergeOpenCodeProviderCompone
 });
 
 const DEFAULT_LIMITS_REFRESH_MS = 5 * 60 * 1000;
+const hiddenLinkedLimitReadings = Symbol('hiddenLinkedLimitReadings');
 const PORTABLE_ACCOUNT_PROVIDERS = new Set(LIMIT_PROVIDER_CATALOG.filter(provider => provider.portableAccountKey).map(provider => provider.id));
+const MIXED_ACCOUNT_IDENTITY_PROVIDERS = new Set(LIMIT_PROVIDER_CATALOG.filter(provider => provider.mixedAccountIdentity).map(provider => provider.id));
 const VALID_PROVIDERS = new Set(LIMIT_PROVIDER_IDS);
 const VALID_STATUSES = new Set(['ok', 'disabled', 'notConfigured', 'unauthorized', 'rateLimited', 'sourceRateLimited', 'unavailable', 'error']);
 const VALID_SOURCES = new Set(['oauth', 'cli', 'web', 'rpc', 'local', 'api']);
@@ -511,7 +514,9 @@ function normalizeLimitProvider(input) {
     provider,
     ...(adapterId ? { adapterId } : {}),
     accountKey,
-    ...(provider === 'qoder' && accountKey && input.accountKeyPortable === true ? { accountKeyPortable: true } : {}),
+    ...(accountKey && typeof input.accountKeyPortable === 'boolean' ? { accountKeyPortable: input.accountKeyPortable } : {}),
+    ...(provider === 'devin' && accountKey && typeof input.accountQuotaScope === 'string'
+      && /^sha256:[a-f0-9]{64}$/.test(input.accountQuotaScope) ? { accountQuotaScope: input.accountQuotaScope } : {}),
     ...(relatedAccountKey ? { relatedAccountKey } : {}),
     ...(provider === 'opencode' && input.webAccountKey
       ? { webAccountKey: String(input.webAccountKey) }
@@ -630,7 +635,9 @@ function pickBetterProvider(current, candidate, multiAccount = false) {
   // In multi-account mode a balance and its credits window belong only to
   // their exact account, in both aggregation passes.
   if (multiAccount && winner.accountKey !== loser.accountKey) return winner;
-  const balanced = carryProviderBalance(winner, loser);
+  const identity = winner.accountKey && winner.accountKey === loser.accountKey
+    && loser.accountKeyPortable && !winner.accountKeyPortable ? { ...winner, accountKeyPortable: true } : winner;
+  const balanced = carryProviderBalance(identity, loser);
   return providerPolicies[winner.provider]?.carryObservation?.(balanced, loser, normalizeAccountKeyAliases) || balanced;
 }
 
@@ -649,9 +656,17 @@ function providerFreshnessKey(provider) {
   return providerPolicies[provider.provider]?.freshnessKey?.(provider) || provider.provider;
 }
 
-function aggregateLimits(devices, staleAfterMs = 0, nowMs = Date.now()) {
+function aggregateLimits(devices, staleAfterMs = 0, nowMs = Date.now(), accountPresentation, links = []) {
   const aggregate = { updatedAt: new Date(nowMs).toISOString(), providers: [] };
-  const multiAccountProviders = new Set((devices || []).flatMap(device =>
+  const inputDevices = devices || [];
+  // A private snapshot can be re-aggregated after transport. Use the same
+  // device order on both sides when carrying a same-account balance.
+  const orderedDevices = accountPresentation ? [...inputDevices].sort((a, b) => {
+    const left = String(a?.deviceId || '');
+    const right = String(b?.deviceId || '');
+    return left < right ? -1 : left > right ? 1 : 0;
+  }) : inputDevices;
+  const multiAccountProviders = new Set(orderedDevices.flatMap(device =>
     normalizeLimitsSummary(device?.limits).multiAccountProviders || []));
   const byKey = new Map();
   const candidatesByKey = new Map();
@@ -664,7 +679,7 @@ function aggregateLimits(devices, staleAfterMs = 0, nowMs = Date.now()) {
   // account-scoped one is still one lane.
   const configuredLanes = new Set();
 
-  for (const device of devices || []) {
+  for (const device of orderedDevices) {
     const summary = normalizeLimitsSummary(device?.limits);
     for (const provider of summary.providers) {
       const candidate = {
@@ -717,10 +732,23 @@ function aggregateLimits(devices, staleAfterMs = 0, nowMs = Date.now()) {
     for (const row of omitted) suppressed.add(row);
   }
   const byProvider = new Map();
+  const candidates = new Map();
+  const linked = new Set(links.flatMap(pair => pair.keys.map(key => linkMemberId(pair.provider, pair.scope, key))));
   for (const candidate of byKey.values()) {
     if (suppressed.has(candidate)) continue;
     const multiAccount = multiAccountProviders.has(candidate.provider);
-    const knownAccount = candidate.accountKey && (multiAccount
+    const scope = accountPresentation && linkableAccount(candidate) ? linkScope(candidate) : '';
+    const id = scope ? linkMemberId(candidate.provider, scope, candidate.accountKey) : '';
+    const labelKey = accountPresentation && isConfiguredProvider(candidate)
+      ? accountSelectionKey(candidate.provider, candidate.accountKey, candidate.region) : '';
+    if (scope) candidates.set(id, {
+      provider: candidate.provider, accountKey: candidate.accountKey, scope,
+      labelKey, deviceId: candidate.sourceDeviceId, region: candidate.region
+    });
+    const explicitlyNamed = labelKey && Object.hasOwn(accountPresentation[candidate.provider]?.labels || {}, labelKey);
+    const preserveIdentity = explicitlyNamed || linked.has(id)
+      || (accountPresentation && candidate.accountKeyPortable === true && isConfiguredProvider(candidate));
+    const knownAccount = candidate.accountKey && (preserveIdentity || multiAccount
       || providerPolicies[candidate.provider]?.preserveStaleAccount?.(candidate));
     const freshnessKey = providerFreshnessKey(candidate);
     // A keyless row says nothing once its lane has a configured account. A lane
@@ -735,7 +763,7 @@ function aggregateLimits(devices, staleAfterMs = 0, nowMs = Date.now()) {
       ? providersWithFreshConfiguredAccounts
       : providersWithConfiguredAccounts;
     if (!knownAccount && !isConfiguredProvider(candidate) && configuredProviders.has(freshnessKey)) continue;
-    const collapseKey = providerCollapseKey(candidate, multiAccount);
+    const collapseKey = providerCollapseKey(candidate, preserveIdentity || multiAccount);
     byProvider.set(collapseKey, pickBetterProvider(byProvider.get(collapseKey), candidate, multiAccount));
   }
   aggregate.providers = Array.from(byProvider.values())
@@ -746,7 +774,58 @@ function aggregateLimits(devices, staleAfterMs = 0, nowMs = Date.now()) {
       const bLabel = b.accountEmail || b.accountName || b.accountLabel || b.accountKey;
       return aLabel.localeCompare(bLabel);
     });
+  if (candidates.size) aggregate.linkCandidates = [...candidates.values()];
   return aggregate;
+}
+
+// Some portable identities are credential hashes. Two keys may still belong
+// to one account and can be linked explicitly when their quota lane agrees.
+const PORTABLE_CREDENTIAL_PROVIDERS = new Set(['deepseek', 'hark']);
+
+function linkableAccount(row) {
+  return isConfiguredProvider(row) && row.sourceDeviceId
+    && /^sha256:[a-f0-9]{64}$/.test(row.accountKey) && !row.accountKeyPortable
+    // Grok retains the auth.json display email even without an OIDC subject.
+    && (!row.accountEmail || (row.provider === 'grok' && row.accountKeyPortable === false))
+    && !row.relatedAccountKey
+    && (!MIXED_ACCOUNT_IDENTITY_PROVIDERS.has(row.provider) || row.accountKeyPortable === false)
+    && (row.provider !== 'devin' || row.accountQuotaScope)
+    && (!PORTABLE_ACCOUNT_PROVIDERS.has(row.provider) || PORTABLE_CREDENTIAL_PROVIDERS.has(row.provider))
+    && providerPolicies[row.provider]?.canLinkAccount?.(row) !== false;
+}
+
+function linkScope(row) {
+  const products = [...new Set(row.windows.map(window => window.productId).filter(Boolean))].sort();
+  return JSON.stringify([row.region, row.source, row.adapterId || '', row.workspaceKind, products,
+    row.accountQuotaScope || '', providerPolicies[row.provider]?.linkScope?.(row) || '']);
+}
+
+// Confirmed links affect the selected reading only. Raw device observations
+// and their account keys stay intact so splitting a pair is reversible.
+function linkMemberId(provider, scope, key) {
+  return JSON.stringify([provider, scope, key]);
+}
+
+function withLimitAccountLinks(stats, document) {
+  const limitAccountLinks = document.value || [];
+  const { [hiddenLinkedLimitReadings]: _previousHidden, ...visibleStats } = stats;
+  const { linkCandidates: limitAccountLinkCandidates, providers, ...limits } = stats.limits;
+  const eligible = new Map(providers.filter(linkableAccount)
+    .map(row => [linkMemberId(row.provider, linkScope(row), row.accountKey), row]));
+  const hidden = new Set();
+  for (const { provider, scope, keys } of limitAccountLinks) {
+    const [a, b] = keys.map(key => eligible.get(linkMemberId(provider, scope, key)));
+    if (!a || !b) continue;
+    const winner = betterProvider(a, b);
+    hidden.add(winner === a ? b : a);
+  }
+  return {
+    ...visibleStats, limitAccountLinks, limitAccountLinkCandidates: limitAccountLinkCandidates || [],
+    // Electron can record these exact readings even when a local overlay
+    // changes the winning device. Symbol properties stay off the wire.
+    ...(hidden.size ? { [hiddenLinkedLimitReadings]: [...hidden] } : {}),
+    limits: { ...limits, providers: hidden.size ? providers.filter(row => !hidden.has(row)) : providers }
+  };
 }
 
 function publicLimits(limits) {
@@ -757,6 +836,7 @@ function publicLimits(limits) {
     providers: normalized.providers.map(({
       accountKey,
       accountKeyPortable,
+      accountQuotaScope,
       relatedAccountKey,
       webAccountKey,
       accountKeyAliases,
@@ -795,6 +875,8 @@ function syncLimits(limits) {
 module.exports = {
   DEFAULT_LIMITS_REFRESH_MS,
   aggregateLimits,
+  withLimitAccountLinks,
+  hiddenLinkedLimitReadings,
   isProviderStale,
   mergeCodexTransientWindows,
   normalizeLimitProvider,

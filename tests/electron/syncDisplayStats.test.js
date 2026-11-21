@@ -6,6 +6,7 @@ const path = require('node:path');
 const test = require('node:test');
 
 const { aggregateDevices } = require('../../src/shared/usage');
+const { withLimitAccountLinks } = require('../../src/shared/limits/core');
 const { pickRecentUsageProviderId } = require('../../src/shared/trayText');
 const {
   attachLocalPresentationNativeViews,
@@ -302,6 +303,32 @@ test('composeLocalSyncStats uses the Hub threshold to refresh local limits witho
   assert.equal(result.limits.providers[0].sourceDeviceId, 'local');
   assert.equal(result.limits.providers[0].windows[0].remainingPercent, 60);
   assert.equal(result.limits.providers[0].stale, false);
+});
+
+test('collecting clients preserve shared fallback names, candidates and links with the local overlay', () => {
+  const nowMs = Date.parse('2026-07-16T00:00:00.000Z');
+  const keys = ['a', 'b'].map(letter => 'sha256:' + letter.repeat(64));
+  const reading = (accountKey, remaining) => ({ provider: 'kimi', source: 'api', accountKey,
+    status: 'ok', updatedAt: new Date(nowMs).toISOString(),
+    windows: [{ kind: 'weekly', metric: 'requests', remaining }] });
+  const local = device('local', 5, { limits: { providers: [reading(keys[0], 70)] } });
+  const remote = device('remote', 5, { limits: { providers: [reading(keys[1], 40)] } });
+  const limitAccountPresentation = { kimi: { labels: { [keys[0]]: 'Work', [keys[1]]: 'work' } } };
+  const options = { nowMs, limitAccountPresentation };
+  const aggregate = aggregateDevices([local, remote], 0, nowMs, { limitAccountPresentation });
+  const snapshot = withLimitAccountLinks({ ...aggregate, staleAfterMs: 0 }, { value: [] });
+  const separate = composeLocalSyncSummary(snapshot, local, options);
+  assert.deepEqual(separate.limits.providers.map(row => row.accountKey), keys);
+  const scope = separate.limitAccountLinkCandidates[0].scope;
+  const linkedSnapshot = { ...snapshot, limitAccountLinks: [{ provider: 'kimi', scope, keys }] };
+  const linked = composeLocalSyncSummary(linkedSnapshot, local, options);
+  assert.equal(linked.limits.providers.length, 1);
+  assert.equal(completeLocalSyncStats(linked).limits.providers.length, 1);
+  assert.equal(linked.devices.flatMap(device => device.limits.providers).length, 2);
+  assert.equal(composeLocalSyncSummary(snapshot, local, options).limits.providers.length, 2);
+  const unsent = device('local', 5, { limits: { providers: [reading('sha256:' + 'c'.repeat(64), 85)] } });
+  const composed = composeLocalSyncSummary(snapshot, unsent, options);
+  assert.deepEqual(composed.limitAccountLinkCandidates.map(row => row.accountKey), [keys[1]]);
 });
 
 test('composeLocalSyncStats honors a custom Hub staleness threshold', () => {

@@ -3,7 +3,7 @@
 
 'use strict';
 
-const SHARED_SYNC_KINDS = Object.freeze(['modelAliases', 'customPricing', 'limitAccountPresentation']);
+const SHARED_SYNC_KINDS = Object.freeze(['modelAliases', 'customPricing', 'limitAccountPresentation', 'limitAccountLinks']);
 const RATE_KEYS = Object.freeze(['inputPerM', 'outputPerM', 'cacheReadPerM', 'cacheWritePerM', 'cacheWrite1hPerM']);
 const MAX_ENTRIES = 4096;
 const MAX_MODEL_LENGTH = 256;
@@ -38,6 +38,24 @@ function aliasKey(value) {
 // Refuse malformed replacements rather than filtering them into successful
 // clears. This whitelist is intentionally independent of settings.json.
 function normalizeSharedSyncValue(kind, value) {
+  if (kind === 'limitAccountLinks') {
+    const { LIMIT_PROVIDER_IDS } = require('./limits/providers');
+    if (!Array.isArray(value) || value.length > 100) throw badRequest('invalid limit account links');
+    const seen = new Set();
+    return value.map(pair => {
+      onlyKeys(pair, ['provider', 'scope', 'keys']);
+      const { provider, scope, keys } = pair;
+      if (!LIMIT_PROVIDER_IDS.includes(provider) || typeof scope !== 'string' || !scope || scope.length > 1024
+        || !Array.isArray(keys) || keys.length !== 2
+        || !keys.every(key => typeof key === 'string' && /^sha256:[a-f0-9]{64}$/.test(key))) throw badRequest('invalid limit account pair');
+      for (const key of keys) {
+        const member = JSON.stringify([provider, scope, key]);
+        if (seen.has(member)) throw badRequest('a limit account already belongs to a pair');
+        seen.add(member);
+      }
+      return { provider, scope, keys: [...keys].sort() };
+    });
+  }
   if (kind === 'limitAccountPresentation') {
     const { LIMIT_PROVIDER_IDS } = require('./limits/providers');
     const { normalizeLimitProvider } = require('./limits/core');

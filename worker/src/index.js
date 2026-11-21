@@ -1,5 +1,5 @@
 import uploadDelta from './shared/uploadDelta.js';
-import { publicLimits } from './shared/limits/core.js';
+import { publicLimits, withLimitAccountLinks } from './shared/limits/core.js';
 import subscriptionDisplay from './shared/subscriptionDisplay.js';
 import currency from './shared/currency.js';
 import syncContent from './shared/syncContent.js';
@@ -276,9 +276,9 @@ export class HubDO {
     return Array.from(entries.values());
   }
 
-  async getStats() {
+  async getStats(options) {
     const devices = await this.listDevices();
-    const stats = aggregateDevices(devices, this.staleAfterMs);
+    const stats = aggregateDevices(devices, this.staleAfterMs, Date.now(), options);
     stats.staleAfterMs = this.staleAfterMs;
     const history = aggregateHistory(devices);
     stats.historyPreview = historyPreview(history);
@@ -298,10 +298,12 @@ export class HubDO {
   // path. Adding it here means the public route neither reads it nor has to
   // remember to drop it back out — every caller below is behind the secret.
   async statsWithSubscriptionVersion() {
-    const stats = await this.getStats();
+    const documents = Object.fromEntries(await Promise.all(syncContent.SHARED_SYNC_KINDS.map(async kind => [kind, await this.getSyncSettings(kind)])));
+    const presentation = documents.limitAccountPresentation.value || {};
+    const stats = await this.getStats({ limitAccountPresentation: presentation, limitAccountLinks: documents.limitAccountLinks.value || [] });
     stats.subscriptionsUpdatedAt = (await this.getSubscriptions())?.updatedAt || '';
-    stats.syncSettingsRevisions = Object.fromEntries(await Promise.all(syncContent.SHARED_SYNC_KINDS.map(async (kind) => [kind, (await this.getSyncSettings(kind)).revision])));
-    return stats;
+    stats.syncSettingsRevisions = Object.fromEntries(Object.entries(documents).map(([kind, document]) => [kind, document.revision]));
+    return withLimitAccountLinks(stats, documents.limitAccountLinks);
   }
 
   ensureHeartbeat() {
@@ -503,7 +505,7 @@ export class HubDO {
     if ((request.method === 'GET' || request.method === 'HEAD') && url.pathname === '/api/sync/content') {
       return jsonResponse(200, syncContent.syncContentCapability(this.syncSessionTitles));
     }
-    const settingsMatch = url.pathname.match(/^\/api\/sync\/settings\/(modelAliases|customPricing|limitAccountPresentation)$/);
+    const settingsMatch = url.pathname.match(/^\/api\/sync\/settings\/(modelAliases|customPricing|limitAccountPresentation|limitAccountLinks)$/);
     if (settingsMatch && (request.method === 'GET' || request.method === 'HEAD')) {
       return jsonResponse(200, { ok: true, ...(await this.getSyncSettings(settingsMatch[1])) });
     }

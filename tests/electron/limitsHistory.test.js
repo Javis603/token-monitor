@@ -112,6 +112,78 @@ test('SQLite queries use Claude semantic session bounds and retain only actual o
   assert.deepEqual(result.windows[1].points.map(p => p.at), [at(3, 9), at(3, 11)]);
 });
 
+test('paired quota readings both keep recording history under their original keys', async t => {
+  const { aggregateDevices } = require('../../src/shared/usage');
+  const { withLimitAccountLinks } = require('../../src/shared/limits/core');
+  const { composeLocalSyncSummary } = require('../../src/electron/syncDisplayStats');
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'quota-pair-history-'));
+  const nowMs = at(3, 12);
+  const store = createLimitsHistoryStore(path.join(directory, 'history.sqlite'), { now: () => nowMs });
+  t.after(async () => { await store.close(); fs.rmSync(directory, { recursive: true, force: true }); });
+  const keys = ['a', 'b'].map(letter => 'sha256:' + letter.repeat(64));
+  const devices = keys.map((accountKey, index) => ({
+    deviceId: 'device-' + index,
+    limits: { providers: [{ provider: 'kimi', source: 'api', status: 'ok', accountKey,
+      updatedAt: new Date(nowMs - index * 60_000).toISOString(), windows: [{ kind: 'weekly', usedPercent: 30 + index }] }] }
+  }));
+  const limitAccountPresentation = { kimi: { labels: Object.fromEntries(keys.map(key => [key, 'Work'])) } };
+  const stats = aggregateDevices(devices, 0, nowMs, { limitAccountPresentation });
+  const pair = { provider: 'kimi', scope: stats.limits.linkCandidates[0].scope, keys };
+  const linked = JSON.parse(JSON.stringify(withLimitAccountLinks({ ...stats, staleAfterMs: 0 }, { value: [pair] })));
+  assert.equal(linked.limits.providers.length, 1);
+  await store.record('hub', linked.limits, linked);
+
+  // A newer local reading can replace a peer as the best observation for the
+  // hidden account before the Hub has ever received it from this device.
+  const hidden = stats.limits.providers.find(row => row.accountKey === keys[1]);
+  const local = { deviceId: 'collecting-client', limits: { providers: [{
+    ...hidden, updatedAt: new Date(nowMs - 1000).toISOString(), windows: [{ kind: 'weekly', usedPercent: 42 }]
+  }] } };
+  const overlaid = composeLocalSyncSummary(linked, local, { nowMs, limitAccountPresentation });
+  assert.equal(overlaid.limits.providers.length, 1);
+  assert.equal(overlaid.limitAccountLinkCandidates.length, 1);
+  await store.record('hub', overlaid.limits, overlaid);
+
+  const result = await store.query('hub', hidden);
+  assert.deepEqual(result.windows[0].points.map(point => point.at), [nowMs - 60_000, nowMs - 1000]);
+});
+
+test('remote paired history retains a balance carried from another device', async t => {
+  const { aggregateDevices } = require('../../src/shared/usage');
+  const { hashKey } = require('../../src/shared/hashKey');
+  const { withLimitAccountLinks } = require('../../src/shared/limits/core');
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'quota-pair-balance-history-'));
+  const nowMs = at(3, 12);
+  const store = createLimitsHistoryStore(path.join(directory, 'history.sqlite'), { now: () => nowMs });
+  t.after(async () => { await store.close(); fs.rmSync(directory, { recursive: true, force: true }); });
+  const keys = ['first', 'second'].map(key => hashKey('devin', key));
+  const row = (accountKey, offset, extra = {}) => ({
+    provider: 'devin', source: 'web', status: 'ok', accountKey,
+    accountQuotaScope: hashKey('devin-organization', 'fixture'),
+    updatedAt: new Date(nowMs - offset).toISOString(),
+    windows: [{ kind: 'weekly', usedPercent: 30 }],
+    ...extra
+  });
+  // Upload order and snapshot device order differ. Both fresh balance readings
+  // belong to the hidden account, while the freshest reading has no balance.
+  const devices = [
+    ['z-balance', row(keys[0], 70_000, { balance: { amount: 95, currency: 'USD' } })],
+    ['b-latest', row(keys[0], 1000)],
+    ['a-balance', row(keys[0], 60_000, { balance: { amount: 123, currency: 'USD' } })],
+    ['peer', row(keys[1], 0)]
+  ].map(([deviceId, reading]) => ({ deviceId, limits: { providers: [reading] } }));
+  const limitAccountPresentation = { devin: { labels: Object.fromEntries(keys.map(key => [key, 'Work'])) } };
+  const stats = aggregateDevices(devices, 0, nowMs, { limitAccountPresentation });
+  const hidden = stats.limits.providers.find(reading => reading.accountKey === keys[0]);
+  assert.equal(hidden.balance.amount, 123);
+  const pair = { provider: 'devin', scope: stats.limits.linkCandidates[0].scope, keys };
+  const remote = JSON.parse(JSON.stringify(withLimitAccountLinks({ ...stats, staleAfterMs: 0 }, { value: [pair] })));
+  assert.deepEqual(remote.limits.providers.map(reading => reading.accountKey), [keys[1]]);
+  await store.record('hub', remote.limits, remote);
+  const result = await store.query('hub', hidden);
+  assert.deepEqual(result.windows.find(window => window.balance).points.map(point => point.value), [hidden.balance.amount]);
+});
+
 test('SQLite stores one unchanged value across hours with only hourly coverage records', t => {
   const fixture = databaseFixture(t);
   const raw = [];

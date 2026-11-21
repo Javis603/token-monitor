@@ -16,4 +16,12 @@ function suppressCandidates(rows) {
   const sources = new Set(rows.filter(row => row.accountKey).map(row => row.source));
   return rows.filter(row => !row.accountKey && (sources.has(row.source) || (sources.size > 0 && !row.source)));
 }
-module.exports = { preserveAccount: true, preserveStaleAccount: () => true, freshnessKey, carryObservation, suppressCandidates };
+/** @param {any} row */
+function linkScope(row) {
+  if (row.source !== 'api') return '';
+  if (row.accountLabel === 'Pay-as-you-go') return 'cash';
+  return row.accountLabel === 'Token Plan' ? 'token-plan' : '';
+}
+/** @param {any} row */
+const canLinkAccount = row => Boolean(linkScope(row));
+module.exports = { canLinkAccount, linkScope, preserveAccount: true, preserveStaleAccount: () => true, freshnessKey, carryObservation, suppressCandidates };
