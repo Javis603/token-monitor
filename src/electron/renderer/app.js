@@ -13220,6 +13220,7 @@ function renderLimitProviderCheckboxesNow() {
     let readingIndicator = null;
     if (readingDevices.length) {
       readingIndicator = document.createElement('span');
+      readingIndicator.id = `limitProviderReadingDevices-${id}`;
       readingIndicator.className = 'limit-provider-reading-devices';
       for (const device of readingDevices.slice(0, MAX_LIMIT_READING_DEVICE_ICONS)) {
         readingIndicator.append(deviceIconsApi.deviceIconNode(document, device.kind));
