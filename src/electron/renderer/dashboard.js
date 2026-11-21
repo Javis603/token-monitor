@@ -232,6 +232,7 @@ function applyAppearance(settings) {
 function applyFontSettings(settings) {
   const root = document.documentElement.style;
   const { interfaceFont, displayFont } = fontSettingsApi.resolveEffectiveFontSettings(settings, {
+    ...settings?.fontContext,
     interfaceDefault: fontSettingsApi.DEFAULT_DASHBOARD_INTERFACE_FONT
   });
   root.setProperty('--ui-font', interfaceFont);
@@ -712,7 +713,6 @@ window.tokenMonitor.onSettingsPush?.((next) => {
   // so a changed preference still repaints below.
   const previousReduceMotion = state.reduceMotion;
   applyAppearance(state.settings);
-  applyFontSettings(next);
   let needsRender = false;
   const nextLocale = i18n.resolveLocale(next.locale || next.language, navigator.languages);
   if (state.locale !== nextLocale) {

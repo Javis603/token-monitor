@@ -610,3 +610,24 @@ for (const changedVariant of ['cn', 'cn-personal']) test(`Alibaba slot retiremen
     assert.equal(runtime.getSnapshot().providers.find(row => row.region === sibling).windows[0].usedPercent, 40);
   } finally { runtime.stop(); }
 });
+
+test('Qoder scoped refresh keeps portability tied to the reported canonical key', async () => {
+  const values = { qoderCookie: 'token=scoped', qoderSite: 'global' };
+  const alias = hashKey('qoder', values.qoderCookie);
+  const canonical = hashKey('qoder', 'global', 'user:scoped');
+  const fetch = createAccountSlotFetcher({
+    ...limitProviderEntry('qoder'),
+    fetchLimits: () => ({
+      provider: 'qoder', status: 'ok', accountKey: canonical, accountKeyPortable: true,
+      accountKeyAliases: [alias], windows: []
+    })
+  });
+  const options = { qoderAccountSlots: [slot('x', values, { accountKey: alias })] };
+
+  const [scoped] = await fetch({ ...options, limitRefreshScope: { provider: 'qoder', accountKey: alias } }, deps());
+  assert.equal(scoped.accountKey, alias);
+  assert.equal(Object.hasOwn(scoped, 'accountKeyPortable'), false);
+  const [resolved] = await fetch(options, deps());
+  assert.equal(resolved.accountKey, canonical);
+  assert.equal(resolved.accountKeyPortable, true);
+});

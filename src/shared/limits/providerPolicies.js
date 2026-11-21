@@ -9,7 +9,7 @@
  * freshnessKey?: (row: any) => string, snapshotRank?: (count: number) => number,
  * preserveAccount?: boolean, isPlaceholder?: (row: any) => boolean,
  * preserveStaleAccount?: (row: any) => boolean,
- * carryObservation?: (winner: any, loser: any) => any,
+ * carryObservation?: (winner: any, loser: any, normalizeAliases: (values: unknown, key: string) => string[]) => any,
  * suppressCandidates?: (rows: any[], multiAccount: boolean, configured: (row: any) => boolean) => any[]}} ProviderPolicy */
 /** @type {Readonly<Record<string, ProviderPolicy>>} */
 const providerPolicies = Object.freeze({
@@ -22,6 +22,7 @@ const providerPolicies = Object.freeze({
   muse: require('../providers/muse/corePolicy'),
   opencode: require('../providers/opencode/corePolicy'),
   opendesign: require('../providers/opendesign/corePolicy'),
+  qoder: require('../providers/qoder/corePolicy'),
   workbuddy: require('../providers/workbuddy/corePolicy')
 });
 module.exports = { providerPolicies };

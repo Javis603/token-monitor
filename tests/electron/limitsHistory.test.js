@@ -2031,8 +2031,10 @@ for (const change of ['activity', 'quota', 'removed', 'backend']) test(`a pendin
     historyRowKey, getLimitsHistoryStore: () => ({ query: () => new Promise(resolve => { complete = resolve; }) }),
     settings: {}, historyWindowHidden: () => false, historyMaskEmail: value => value,
     historyProviderCatalog: [], historyVendorColors: () => ({}),
-    fontSettingsApi: { textScaleForSize: () => 1, resolveEffectiveFontSettings: () => ({ interfaceFont: 'monospace' }) },
-    trayMenuLocale: () => 'en', crypto: require('node:crypto'), systemPreferences: {}
+    fontSettingsApi: require('../../src/shared/fontSettings'),
+    trayMenuLocale: () => 'zh-CN',
+    windowsFontContext: locale => ({ platform: 'win32', locale, preferredLanguages: ['zh-CN'] }),
+    crypto: require('node:crypto'), systemPreferences: {}
   };
   const read = vm.runInNewContext(source.slice(start, end) + '; limitsHistoryPayload;', context);
   const pending = read(historyRowKey(row));
@@ -2049,6 +2051,7 @@ for (const change of ['activity', 'quota', 'removed', 'backend']) test(`a pendin
   if (change === 'activity') {
     assert.ok(result, 'unrelated activity cannot cancel or close a quota preview');
     assert.equal(result.windows.length, 1);
+    assert.match(result.interfaceFont, /^"Token Monitor Noto Sans SC", "Token Monitor YaHei UI", /);
   } else assert.equal(result, change === 'quota' ? undefined : null, 'a changed quota is superseded; a changed backend invalidates the card');
 });
 

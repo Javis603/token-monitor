@@ -2618,6 +2618,7 @@ async function limitsHistoryPayload(key) {
     ? historyMaskEmail(email) : email;
   const colorId = provider.provider === 'factory' ? 'droid' : provider.provider;
   const palette = { ...historyVendorColors(), ...settings?.vendorColors };
+  const locale = trayMenuLocale();
   return {
     ...history, key,
     source: crypto.createHash('sha256').update(scope).digest('hex'),
@@ -2625,9 +2626,9 @@ async function limitsHistoryPayload(key) {
     label: historyProviderCatalog.find(entry => entry.id === provider.provider)?.label || provider.provider,
     account: presented.accountDisplayName || account || provider.accountName || provider.accountLabel || '',
     updatedAt: provider.updatedAt,
-    locale: trayMenuLocale(), textScale: fontSettingsApi.textScaleForSize(settings?.textSize),
+    locale, textScale: fontSettingsApi.textScaleForSize(settings?.textSize),
     color: palette[colorId] || palette.default,
-    interfaceFont: fontSettingsApi.resolveEffectiveFontSettings(settings).interfaceFont,
+    interfaceFont: fontSettingsApi.resolveEffectiveFontSettings(settings, windowsFontContext(locale)).interfaceFont,
     appearance: {
       themeColors: settings.themeColors, macGlassFollowSystem: settings.macGlassFollowSystem,
       macGlassLightColors: settings.macGlassLightColors, macGlassDarkColors: settings.macGlassDarkColors,
@@ -5156,11 +5157,13 @@ function settingsForRenderer() {
   delete rendererSettings.archivedClientUsage;
   rendererSettings.pluginAuthorSkin = normalizePluginAuthorSkin(settings.pluginAuthorSkin);
   for (const key of rendererOmittedAccountKeys()) delete rendererSettings[key];
+  const locale = trayMenuLocale();
   return {
     ...rendererSettings,
     windowsBackdropFallback: windowsBackdropFallback(mainWindow),
     syncContentStatus: getSyncContentRuntime().status(),
-    locale: trayMenuLocale(),
+    locale,
+    fontContext: windowsFontContext(locale),
     deviceIconScope: currentHubIdentity() || 'local',
     ...redactedCredentials,
     hubProfiles: hubProfilesForRenderer(settings),
@@ -5448,6 +5451,7 @@ function edgeDockAppearance(rendererSettings = settingsForRenderer()) {
     tokenNumberAnimation: source.tokenNumberAnimation,
     interfaceFontFamily: source.interfaceFontFamily,
     displayFontFamily: source.displayFontFamily,
+    fontContext: source.fontContext,
     showLimitUsed: source.showLimitUsed,
     // The card's quota rows are built by the same view as the Limits page, so
     // every preference that view reads has to reach this renderer as well —
@@ -5956,6 +5960,11 @@ function trayMenuLocale() {
     ? app.getPreferredSystemLanguages()
     : [app.getLocale()];
   return resolveLocale(settings?.language || 'auto', preferredLanguages);
+}
+
+function windowsFontContext(locale) {
+  if (process.platform !== 'win32') return undefined;
+  return { platform: process.platform, locale, preferredLanguages: app.getPreferredSystemLanguages?.() };
 }
 
 // `isStillCurrent`, when given, is re-checked after the wait: see
@@ -8821,6 +8830,7 @@ app.whenReady().then(() => {
           pushSettingsToRenderer();
         },
         getLocale: () => trayMenuLocale(),
+        getFontContext: windowsFontContext,
         getContext: () => ({ mode, hubMode: settings.hubMode, hubUrl: settings.hubUrl, deviceId: settings.deviceId }),
         // Business reads use captured host records, not renderer DTOs or provider
         // credentials. These adapters never refresh the collector or limits.

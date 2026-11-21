@@ -1,6 +1,7 @@
 'use strict';
 
 const https = require('node:https');
+const { hashKey } = require('../../hashKey');
 const { abortError, runWithProbeDeadline } = require('../../probeDeadline');
 const { BROWSER_USER_AGENT } = require('../../browserUserAgent');
 
@@ -12,6 +13,8 @@ const PLAN_INFO_URL = 'https://cursor.com/api/dashboard/get-plan-info';
 const PREPAID_BILLING_URL = 'https://cursor.com/api/dashboard/get-user-prepaid-billing';
 const CURRENT_PERIOD_USAGE_URL = 'https://api2.cursor.sh/aiserver.v1.DashboardService/GetCurrentPeriodUsage';
 const SAND_TIMEOUT_MS = 5000;
+const USER_INFO_CACHE_KEY = 'cursor-user-info';
+const USER_INFO_TTL_MS = 60 * 60_000;
 
 const DEFAULT_HEADERS = {
   'Accept': '*/*',
@@ -335,15 +338,36 @@ function requestJson(url, sessionToken, {
 async function probe(sessionToken, opts = {}) {
   if (!sessionToken) return { ok: false, error: { kind: 'unauthorized', message: 'no session token' } };
   const configuredTimeoutMs = Number.isFinite(opts.timeoutMs) ? opts.timeoutMs : 15000;
+  const state = opts.providerRuntimeState;
+  let cache = state?.get(USER_INFO_CACHE_KEY);
+  if (state && !cache) {
+    cache = new Map();
+    state.set(USER_INFO_CACHE_KEY, cache);
+  }
+  const cacheKey = cache && hashKey(sessionToken);
+  const nowMs = () => Number((opts.now || Date.now)());
+  if (cache) {
+    const now = nowMs();
+    for (const [key, entry] of cache) {
+      if (entry.expiresAt <= now) cache.delete(key);
+    }
+  }
+  const cachedUser = cache?.get(cacheKey)?.user;
   // Grok Bot and plan info are best effort: neither may fail the account row.
   const grokBotResultPromise = dashboardRpc(SAND_USAGE_URL, sessionToken, opts, configuredTimeoutMs);
   const planInfoResultPromise = dashboardRpc(PLAN_INFO_URL, sessionToken, opts, configuredTimeoutMs);
   const [usageResult, userResult] = await Promise.all([
     requestJson(USAGE_SUMMARY_URL, sessionToken, opts),
-    requestJson(AUTH_ME_URL, sessionToken, opts)
+    cachedUser ? null : requestJson(AUTH_ME_URL, sessionToken, opts)
   ]);
-  if (!usageResult.ok) return usageResult;
-  const user = userResult.ok ? parseUserInfo(userResult.json) : { email: null, name: null, sub: null };
+  if (!usageResult.ok) {
+    if (usageResult.error.kind === 'unauthorized') cache?.delete(cacheKey);
+    return usageResult;
+  }
+  const user = cachedUser || parseUserInfo(userResult?.ok ? userResult.json : null);
+  if (!cachedUser && user.sub && !opts.signal?.aborted) {
+    cache?.set(cacheKey, { user, expiresAt: nowMs() + USER_INFO_TTL_MS });
+  }
   let requestUsage = null;
   if (user.sub) {
     const url = `${REQUEST_USAGE_URL}?user=${encodeURIComponent(user.sub)}`;

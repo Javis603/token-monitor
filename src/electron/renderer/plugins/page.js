@@ -21,7 +21,7 @@
   reduced.addEventListener('change', applyMotion);
   function render(meta) {
     appearance = meta.appearance || {};
-    const fonts = window.TokenMonitorFontSettings.resolveEffectiveFontSettings(appearance);
+    const fonts = window.TokenMonitorFontSettings.resolveEffectiveFontSettings(appearance, meta.fontContext);
     document.documentElement.style.setProperty('--ui-font', fonts.interfaceFont);
     document.documentElement.style.setProperty('--display-font', fonts.displayFont);
     applyMotion();
