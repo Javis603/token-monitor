@@ -178,6 +178,51 @@ for (const runtime of ['Node', 'Worker']) {
     assert.deepEqual(split.limitAccountLinks, []);
   });
 
+  test(`${runtime}: manual pairing respects account proof, organization and shared slots`, async (t) => {
+    const client = await fixture(t, runtime);
+    const { changeLimitAccountLink } = require('../../src/electron/limits/limitAccountLinks');
+    const { hashKey } = require('../../src/shared/hashKey');
+    const keys = ['a', 'b'].map(letter => 'sha256:' + letter.repeat(64));
+    const museDefault = hashKey('muse', 'account-slot', 'default');
+    const providers = ['commandcode', 'copilot', 'devin', 'muse'];
+    const names = Object.fromEntries(providers.map(provider => [provider, {
+      labels: Object.fromEntries([...keys, museDefault].map(key => [key, 'Work'])), order: []
+    }]));
+    for (const [index, key] of keys.entries()) {
+      const common = { status: 'ok', updatedAt: new Date(Date.now() - index * 1000).toISOString(),
+        windows: [{ kind: 'weekly', metric: 'requests', remaining: 60 }] };
+      const response = await client.send('/api/ingest', 'POST', {
+        deviceId: 'device-' + index,
+        limits: { providers: [
+          { ...common, provider: 'commandcode', source: 'web', accountKey: key, accountKeyPortable: index === 0 },
+          { ...common, provider: 'copilot', source: 'api', accountKey: key, accountName: index === 0 ? 'alice' : 'bob' },
+          { ...common, provider: 'devin', source: 'web', accountKey: key, accountQuotaScope: hashKey('devin-organization', index) },
+          { ...common, provider: 'muse', source: 'web', accountKey: museDefault },
+          { ...common, provider: 'muse', source: 'web', accountKey: key }
+        ] }
+      });
+      assert.equal(response.status, 200);
+    }
+    assert.equal((await client.send('/api/sync/settings/limitAccountPresentation', 'PUT', { baseRevision: 0, value: names })).status, 200);
+    const stats = await (await client.send('/api/stats')).json();
+    const candidates = provider => stats.limitAccountLinkCandidates.filter(row => row.provider === provider);
+    assert.deepEqual(candidates('commandcode').map(row => row.accountKey), [keys[1]]);
+    assert.deepEqual(candidates('copilot'), [], 'old clients with unidentified provenance cannot offer verified logins');
+    assert.equal(candidates('devin').length, 2);
+    assert.notEqual(candidates('devin')[0].scope, candidates('devin')[1].scope);
+    assert.equal(candidates('muse').some(row => row.accountKey === museDefault), false);
+    for (const [provider, keysToLink] of [['commandcode', keys], ['devin', keys], ['muse', [keys[1], museDefault]]]) {
+      const candidate = candidates(provider).find(row => row.accountKey === keys[1]);
+      assert.deepEqual(await changeLimitAccountLink(stats, {
+        revision: 0, operation: 'link', pair: { provider, scope: candidate.scope, keys: keysToLink }
+      }, names, () => assert.fail('incompatible accounts cannot be written')), { ok: false });
+    }
+    if (runtime === 'Worker') {
+      const publicStats = await (await client.send('/api/public/stats', 'GET', undefined, false)).json();
+      assert.doesNotMatch(JSON.stringify(publicStats), /accountQuotaScope|accountKeyPortable/);
+    }
+  });
+
   test(`${runtime}: capability, settings and policy share authentication and default off`, async (t) => {
     const client = await fixture(t, runtime);
     assert.deepEqual(await (await client.send('/api/sync/content')).json(), {

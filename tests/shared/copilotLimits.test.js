@@ -211,6 +211,7 @@ test('fetchCopilotLimits uses the GitHub OAuth token directly for Copilot intern
 
   assert.equal(provider.status, 'ok');
   assert.equal(provider.accountName, 'octocat');
+  assert.equal(provider.accountKeyPortable, true);
   assert.equal(provider.accountLabel, 'Free');
   assert.equal(provider.accountEmail, '');
   assert.equal(provider.windows.length, 2);

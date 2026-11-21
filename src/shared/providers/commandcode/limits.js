@@ -456,6 +456,7 @@ async function fetchCommandcodeLimits(options = {}, deps = {}) {
     return normalizeLimitProvider({
       provider: 'commandcode',
       accountKey: hashKey('commandcode', subscription?.accountId || commandcodeAccountSeed(cookie)),
+      accountKeyPortable: Boolean(subscription?.accountId),
       accountLabel: plan?.label || '',
       source: 'web',
       status: 'ok',

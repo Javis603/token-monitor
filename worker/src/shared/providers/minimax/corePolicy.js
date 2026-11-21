@@ -19,4 +19,6 @@ function suppressCandidates(rows) {
   const sources = new Set(rows.filter(row => row.accountKey).map(row => row.source));
   return rows.filter(row => !row.accountKey && (sources.has(row.source) || (sources.size > 0 && !row.source)));
 }
-module.exports = { preserveAccount: true, preserveStaleAccount: () => true, freshnessKey, carryObservation, suppressCandidates };
+/** @param {any} row */
+const canLinkAccount = row => row.source === 'api';
+module.exports = { canLinkAccount, preserveAccount: true, preserveStaleAccount: () => true, freshnessKey, carryObservation, suppressCandidates };
