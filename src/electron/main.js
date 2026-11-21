@@ -7509,16 +7509,10 @@ function focusedAppWindow() {
 }
 
 function appIsIdleForHeapCollection() {
-  if (quitRequested || focusedAppWindow() !== null) return false;
-  // A full collection pauses main for tens of milliseconds. Require a short
-  // break in system input as well as app focus, so it cannot land in the middle
-  // of a hover, drag or animation the user is watching.
-  try {
-    if (typeof powerMonitor.getSystemIdleTime !== 'function') return true;
-    return powerMonitor.getSystemIdleTime() >= 5;
-  } catch (_) {
-    return true;
-  }
+  // A full collection pauses main for tens of milliseconds. Defer while an app
+  // window has focus. Activity elsewhere can otherwise keep GC from ever running
+  // if we wait for the whole system to go idle.
+  return !quitRequested && focusedAppWindow() === null;
 }
 
 app.whenReady().then(() => {
