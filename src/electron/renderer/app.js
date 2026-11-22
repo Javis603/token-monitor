@@ -477,6 +477,8 @@ Object.assign(els, {
   edgeDockMoreOptionsDetails: document.getElementById('edgeDockMoreOptionsDetails'),
   edgeDockSideInputs: Array.from(document.querySelectorAll('input[name="edgeDockSide"]')),
   edgeDockModeInputs: Array.from(document.querySelectorAll('input[name="edgeDockMode"]')),
+  edgeDockTriggerRangeRow: document.getElementById('edgeDockTriggerRangeRow'),
+  edgeDockTriggerRangeInputs: Array.from(document.querySelectorAll('input[name="edgeDockTriggerRange"]')),
   edgeDockBubbleSizeInputs: Array.from(document.querySelectorAll('input[name="edgeDockBubbleSize"]')),
   edgeDockBubbleCustomScaleRow: document.getElementById('edgeDockBubbleCustomScaleRow'),
   edgeDockBubbleCustomScaleInput: document.getElementById('edgeDockBubbleCustomScaleInput'),
@@ -15566,6 +15568,9 @@ function syncDockControls() {
   const modes = (els.edgeDockModeInputs || []).map((input) => input.value);
   const mode = modes.includes(state.settings?.edgeDockMode) ? state.settings.edgeDockMode : 'autoHide';
   for (const input of els.edgeDockModeInputs || []) input.checked = input.value === mode;
+  els.edgeDockTriggerRangeRow?.classList.toggle('hidden', mode === 'always' || floating);
+  const triggerRange = state.settings?.edgeDockTriggerRange ?? 'rail';
+  for (const input of els.edgeDockTriggerRangeInputs || []) input.checked = input.value === triggerRange;
   syncDockSizeControls('edgeDock');
   syncDockSizeControls('edgeDockBubble');
   syncDockSizeControls('notch');
@@ -15747,6 +15752,11 @@ els.edgeDockHapticInput?.addEventListener('change', () => {
 for (const input of els.edgeDockModeInputs || []) {
   input.addEventListener('change', () => {
     if (input.checked) void saveSettings({ edgeDockMode: input.value });
+  });
+}
+for (const input of els.edgeDockTriggerRangeInputs || []) {
+  input.addEventListener('change', () => {
+    if (input.checked) void saveSettings({ edgeDockTriggerRange: input.value });
   });
 }
 for (const surface of ['edgeDock', 'edgeDockBubble', 'notch']) {

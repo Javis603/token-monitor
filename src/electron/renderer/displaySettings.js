@@ -16,7 +16,7 @@
       intro: 'settings.display.edgeDockNote',
       options: ['edgeDockOptions', 'edgeDockComposerRow'],
       cards: [
-        { header: 'settings.displayModes.group.placement', ids: ['edgeDockModeLabel', 'edgeDockSideLabel'] },
+        { header: 'settings.displayModes.group.placement', ids: ['edgeDockModeLabel', 'edgeDockTriggerRangeRow', 'edgeDockSideLabel'] },
         { header: 'settings.displayModes.group.items', ids: ['edgeDockComposer', 'edgeDockWarnColorsInput', 'edgeDockRunningIndicatorInput'] },
         {
           header: 'settings.displayModes.group.sizingAppearance',
