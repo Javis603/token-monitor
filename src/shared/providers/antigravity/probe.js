@@ -12,6 +12,7 @@ const path = require('node:path');
 const https = require('node:https');
 const http = require('node:http');
 const { appVersion } = require('../../appVersion');
+const { limitStage } = require('../../limits/failureDetail');
 const { errorWithStatus } = require('../../limits/providerHelpers');
 const { quotaGroupRank } = require('./corePolicy');
 
@@ -773,7 +774,7 @@ async function groupedQuotaFromCandidates(candidates, call, {
         method: 'RetrieveUserQuotaSummary',
         body: { forceRefresh: true },
         signal
-      }, summaryDeadlineMs);
+      }, summaryDeadlineMs).catch(limitStage('grouped-quota'));
       const windows = quotaSummaryWindows(summary);
       if (windows.some((window) => window.remainingFraction !== null)) {
         let accountPlan = null;
@@ -832,6 +833,7 @@ async function probe(deps = {}) {
   const runtimeDeps = { ...deps, signal };
   const listPorts = deps.listeningPorts || listeningPorts;
   const call = deps.callLs || callLs;
+  const sourceFailures = new Map();
   let lastError = errorWithStatus('notConfigured', 'Antigravity language server not running');
 
   try {
@@ -977,7 +979,14 @@ async function probe(deps = {}) {
       const groupedOutcome = await firstSnapshotOrAll(groupedTasks);
       throwIfAborted(signal);
       if (groupedOutcome.snapshot) return { ...groupedOutcome.snapshot, sourceDetail: kind };
-      for (const result of groupedOutcome.results) lastError = result.lastError || lastError;
+      for (const { lastError: error } of groupedOutcome.results) {
+        if (!error) continue;
+        lastError = error;
+        sourceFailures.set(kind, error);
+      }
+    }
+    if (sourceFailures.size) {
+      throw Object.assign(errorWithStatus(lastError.status, lastError.message), { cause: lastError, sourceFailures });
     }
     throw lastError;
   } finally {

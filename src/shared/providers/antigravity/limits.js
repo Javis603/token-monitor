@@ -125,15 +125,26 @@ async function fetchAntigravityLimits(options = {}, deps = {}) {
     try {
       return mapAntigravitySnapshot(await probeFn(deps), { nowMs, source: 'rpc' });
     } catch (error) {
-      return normalizeLimitProvider({
+      const base = {
         provider: 'antigravity',
-        accountKey: '',
-        accountLabel: '',
         source: 'rpc',
-        status: providerStatusFromError(error),
         updatedAt: nowIso(nowMs),
         windows: []
-      });
+      };
+      const sourceFailures = error?.sourceFailures;
+      if (sourceFailures) {
+        for (const [source, cause] of sourceFailures) deps.noteLimitFailure?.(cause, { source });
+        // Attribute a terminal failure only to a cached row from its source.
+        // A missing or unknown source produces the ordinary unavailable status.
+        const rows = (options.previousLimits?.providers || [])
+          .filter((row) => row.provider === 'antigravity' && row.source === 'rpc' && row.accountKey)
+          .map(({ accountKey, accountLabel, accountEmail, sourceDetail }) => normalizeLimitProvider({
+            ...base, accountKey, accountLabel, accountEmail, sourceDetail,
+            status: providerStatusFromError(sourceFailures.get(sourceDetail))
+          }));
+        if (rows.length) return rows.length === 1 ? rows[0] : rows;
+      } else deps.noteLimitFailure?.(error, { source: 'rpc' });
+      return normalizeLimitProvider({ ...base, status: providerStatusFromError(sourceFailures ? error.cause : error) });
     }
   }
 

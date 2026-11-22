@@ -85,23 +85,32 @@ test('fetchAntigravityLimits does not invent session windows for Starter account
   ]);
 });
 
-test('Antigravity grouped RPC failure retains the previous quota instead of publishing model quotas', async () => {
-  let groupedAvailable = true;
+test('Antigravity retains desktop quota when grouped RPC fails and scopes CLI authentication to its own row', async () => {
+  let appStatus = 200;
+  let cliStatus = null;
+  let nowMs = Date.now();
   const legacyMethods = [];
   const deps = {
-    detectProcessInfo: async () => ({ pid: 1, csrfToken: 'test-token' }),
-    listeningPorts: async () => [54733],
-    callLs: async ({ method }) => {
+    detectProcessInfos: async () => [
+      { pid: 1, kind: 'app', csrfToken: 'app-fixture' },
+      ...(cliStatus === null ? [] : [{ pid: 2, kind: 'cli', csrfToken: 'cli-fixture' }])
+    ],
+    listeningPorts: async (pid) => [54732 + pid],
+    callLs: async ({ method, port }) => {
       if (method === 'GetUnleashData') return {};
+      const status = port === 54733 ? appStatus : cliStatus;
       if (method === 'RetrieveUserQuotaSummary') {
-        return { groups: groupedAvailable ? [{ displayName: 'Gemini Models', buckets: [
+        if (status !== 200) throw Object.assign(new Error(`RPC ${status}`), {
+          status: status === 401 ? 'unauthorized' : 'unavailable', httpStatus: status
+        });
+        return { groups: [{ displayName: 'Gemini Models', buckets: [
           { window: 'session', remainingFraction: 0.7 },
           { window: 'weekly', remainingFraction: 0.9 }
-        ] }] : [] };
+        ] }] };
       }
-      if (!groupedAvailable) legacyMethods.push(method);
+      if (status !== 200) legacyMethods.push(method);
       return { userStatus: {
-        email: 'fixtures@example.com',
+        email: port === 54733 ? 'app@example.com' : 'cli@example.com',
         cascadeModelConfigData: { clientModelConfigs: [
           { label: 'Orchestrator (Neon)', modelOrAlias: { model: 'TEST' }, quotaInfo: { remainingFraction: 0.5 } }
         ] }
@@ -110,22 +119,38 @@ test('Antigravity grouped RPC failure retains the previous quota instead of publ
   };
   const runtime = createLimitsRuntime({ limitProviders: ['antigravity'] }, {
     ...deps,
+    now: () => nowMs,
     autoStart: false,
     autoRetry: false
   });
+  async function refresh(reason = 'manual') {
+    nowMs += 60_000;
+    await runtime.refresh({ provider: 'antigravity' }, reason);
+    return runtime.getSnapshot().providers;
+  }
   try {
-    await runtime.refresh({ provider: 'antigravity' }, 'startup');
-    const [first] = runtime.getSnapshot().providers;
+    const [first] = await refresh('startup');
     assert.equal(first.status, 'ok');
     assert.deepEqual(first.windows.map(window => window.windowMinutes), [300, 10_080]);
-    groupedAvailable = false;
-    await runtime.refresh({ provider: 'antigravity' }, 'manual');
-    assert.equal(runtime.getSnapshot().providers.length, 1);
-    const [second] = runtime.getSnapshot().providers;
-    assert.equal(second.status, 'unavailable');
-    assert.equal(second.accountKey, first.accountKey);
-    assert.equal(second.updatedAt, first.updatedAt);
-    assert.deepEqual(second.windows, first.windows);
+    const assertRetainedDesktop = (rows) => {
+      const app = rows.find(row => row.accountKey === first.accountKey);
+      assert.equal(app?.status, 'unavailable');
+      assert.equal(app.updatedAt, first.updatedAt);
+      assert.deepEqual(app.windows, first.windows);
+    };
+
+    appStatus = 503;
+    assertRetainedDesktop(await refresh());
+
+    cliStatus = 200;
+    const cliReading = (await refresh()).find(row => row.sourceDetail === 'cli');
+    assert.equal(cliReading?.status, 'ok');
+    cliStatus = 401;
+    const rows = await refresh();
+    assertRetainedDesktop(rows);
+    const cli = rows.find(row => row.accountKey === cliReading.accountKey);
+    assert.equal(cli?.status, 'unauthorized');
+    assert.deepEqual(cli.windows, []);
     assert.deepEqual(legacyMethods, []);
   } finally {
     runtime.stop();
