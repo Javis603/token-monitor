@@ -96,6 +96,7 @@ test('Tools, Models and Devices render more than their old hardcoded caps with u
     } else {
       assert.equal(first.className, 'home-device-grid');
       assert.equal(first.children.length, count);
+      assert.equal(first.children[0].children[2].textContent, String(100 / 1395 * 100), 'share uses every device, not just the shown tiles');
     }
     if (name !== 'renderHomeDeviceModule') {
       // Segments and list rows share an index, so hovering either lights its partner.

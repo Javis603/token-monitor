@@ -4790,7 +4790,7 @@ html.is-windows .settings-panel select option {
 .home-limit-account:hover .home-limit-meter {
   background: color-mix(in srgb, var(--home-vendor-color) 16%, transparent);
 }
-.home-limit-account:hover .home-limit-window:not(.is-low) .home-limit-track {
+.home-limit-account:hover .home-limit-window:not(.is-low, .is-exhausted) .home-limit-track {
   --home-limit-bar: var(--home-vendor-color);
   --home-limit-tail: var(--home-vendor-color);
 }
@@ -5245,6 +5245,11 @@ html.is-windows .settings-panel select option {
 .home-limit-window.is-low .home-limit-track {
   --home-limit-bar: var(--yellow);
   --home-limit-tail: var(--yellow);
+}
+/* An exhausted window shows a full meter in Used mode; it reads red there too. */
+.home-limit-window.is-exhausted .home-limit-track {
+  --home-limit-bar: var(--red);
+  --home-limit-tail: var(--red);
 }
 .home-limit-meter {
   position: absolute;

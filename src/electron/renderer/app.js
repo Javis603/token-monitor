@@ -7823,11 +7823,13 @@ function renderHomeSessionModule(rows) {
 
 function renderHomeDeviceModule() {
   const { module, body } = homeModuleShell('device', t('home.devices'), 'device');
-  const rows = homeOverviewApi.homeDeviceRows(fixedPeriodDevices(), {
+  // Shares are of every device's usage; the count setting only caps the tiles.
+  const allRows = homeOverviewApi.homeDeviceRows(fixedPeriodDevices(), {
     localDeviceId: state.settings?.deviceId || '',
     period: state.period,
-    limit: homeModulePreferencesApi.homeModuleCount(state.settings, 'device')
+    limit: Infinity
   });
+  const rows = allRows.slice(0, homeModulePreferencesApi.homeModuleCount(state.settings, 'device'));
   if (rows.length === 0) {
     const empty = document.createElement('div');
     empty.className = 'home-module-empty';
@@ -7837,7 +7839,7 @@ function renderHomeDeviceModule() {
   }
   // Devices are few and differ by identity (this machine, offline) more
   // than by split, so each gets a small tile instead of another list.
-  const total = rows.reduce((sum, row) => sum + row.value, 0);
+  const total = allRows.reduce((sum, row) => sum + row.value, 0);
   const grid = document.createElement('div');
   grid.className = 'home-device-grid';
   // The count picks balanced columns in CSS, so 2 or 4 devices never leave a gap.
@@ -7867,7 +7869,7 @@ function renderHomeDeviceModule() {
     const foot = document.createElement('span');
     foot.className = 'home-device-tile-sub';
     // A lone device owns 100%, which says nothing; its tile becomes one line.
-    if (rows.length > 1) foot.textContent = formatPercent(total > 0 ? (row.value / total) * 100 : 0);
+    if (allRows.length > 1) foot.textContent = formatPercent(total > 0 ? (row.value / total) * 100 : 0);
     // The badge sits on the share line so it never truncates the device name.
     if (row.isLocal) {
       const badge = document.createElement('span');
