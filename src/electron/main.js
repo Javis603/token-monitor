@@ -450,6 +450,7 @@ const {
   normalizeEdgeDockOffset,
   normalizeEdgeDockSide,
   normalizeEdgeDockSize,
+  normalizeEdgeDockTriggerRange,
   normalizeEdgeDockBubbleSize
 } = require('./edgeDock/geometry');
 const { buildEdgeDockCells } = require('./renderer/edgeDock/presentation');
@@ -677,6 +678,7 @@ function defaultSettings() {
     edgeDockRunningIndicatorEnabled: true,
     edgeDockMode: 'autoHide',
     edgeDockHaptic: true,
+    edgeDockTriggerRange: 'rail',
     edgeDockWarnColors: false,
     edgeDockMacBackdrop: 'inherit',
     edgeDockWindowsBackdrop: 'inherit',
@@ -2222,6 +2224,7 @@ function readSettings() {
     merged.edgeDockOffset = normalizeEdgeDockOffset(merged.edgeDockOffset);
     merged.edgeDockDisplayId = normalizeEdgeDockDisplayId(merged.edgeDockDisplayId);
     merged.edgeDockMode = normalizeEdgeDockMode(merged.edgeDockMode);
+    merged.edgeDockTriggerRange = normalizeEdgeDockTriggerRange(merged.edgeDockTriggerRange);
     merged.edgeDockHaptic = parseBoolean(merged.edgeDockHaptic, true);
     merged.edgeDockWarnColors = parseBoolean(merged.edgeDockWarnColors, false);
     merged.edgeDockMacBackdrop = normalizeEdgeDockBackdropMode(merged.edgeDockMacBackdrop);
@@ -8163,6 +8166,7 @@ app.whenReady().then(() => {
       edgeDockOffset: normalizeEdgeDockOffset(patch.edgeDockOffset ?? settings.edgeDockOffset),
       edgeDockDisplayId: normalizeEdgeDockDisplayId(patch.edgeDockDisplayId ?? settings.edgeDockDisplayId),
       edgeDockMode: normalizeEdgeDockMode(patch.edgeDockMode ?? settings.edgeDockMode),
+      edgeDockTriggerRange: normalizeEdgeDockTriggerRange(patch.edgeDockTriggerRange ?? settings.edgeDockTriggerRange),
       edgeDockHaptic: parseBoolean(patch.edgeDockHaptic ?? settings.edgeDockHaptic, true),
       edgeDockWarnColors: parseBoolean(patch.edgeDockWarnColors ?? settings.edgeDockWarnColors, false),
       edgeDockMacBackdrop: normalizeEdgeDockBackdropMode(patch.edgeDockMacBackdrop ?? settings.edgeDockMacBackdrop),

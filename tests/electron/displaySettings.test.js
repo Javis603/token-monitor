@@ -140,6 +140,7 @@ function createWindowSettingsFixture({ platform = 'darwin', prefs = {} } = {}) {
   const edgeDockOptions = reg('div', 'edgeDockOptions');
   edgeDockOptions.append(
     itemWith(reg('span', 'edgeDockModeLabel')),
+    reg('div', 'edgeDockTriggerRangeRow', 'settings-item hidden'),
     itemWith(reg('span', 'edgeDockSideLabel')),
     itemWith(reg('span', 'edgeDockSizeLabel')),
     reg('div', 'edgeDockCustomScaleRow', 'settings-item'),
@@ -272,7 +273,11 @@ test('display switcher defaults to main, adapts tiles per OS, and stops shortcut
   assert.equal(f.controller.active, 'edgeDock');
   assert.equal(f.getShortcutStops(), 1);
   assert.equal(f.root.querySelector('#display-page-main').hidden, true);
-  assert.equal(f.root.querySelector('#display-page-edgeDock').hidden, false);
+  const edgePage = f.root.querySelector('#display-page-edgeDock');
+  assert.equal(edgePage.hidden, false);
+  const visibilityRow = edgePage.querySelector('#edgeDockModeLabel').closest('.settings-item');
+  const placementRows = visibilityRow.parent.children;
+  assert.equal(placementRows[placementRows.indexOf(visibilityRow) + 1].id, 'edgeDockTriggerRangeRow');
 
   f.controller.open('main');
   assert.equal(f.controller.active, 'main');
