@@ -1941,12 +1941,9 @@ span.settings-note.settings-item-desc {
   white-space: pre;
   tab-size: 2;
 }
-.sync-connection-fields { display: grid; min-width: 0; }
-.sync-connection-fields > :not([hidden]) ~ :not([hidden]) { margin-top: 8px; }
 .sync-connection-editor,
 .sync-device-settings { display: grid; min-width: 0; gap: 8px; }
-.sync-connection-heading { display: flex; align-items: center; justify-content: space-between; gap: 8px; flex-wrap: wrap; }
-.sync-connection-status { display: inline-flex; align-items: center; gap: 8px; min-height: 24px; }
+.sync-connection-heading { display: flex; align-items: center; gap: 6px; min-width: 0; }
 .hub-profile-picker { display: flex; min-width: 0; }
 /* Sits in the status card where the endpoint line was, so it reads as that
    line with a disclosure rather than as another boxed field. */
@@ -1965,7 +1962,6 @@ span.settings-note.settings-item-desc {
 .settings-panel .hub-profile-picker .select-control-trigger:hover,
 .settings-panel .hub-profile-picker .select-control-trigger[aria-expanded="true"] { color: var(--text); background: rgba(var(--overlay-rgb), 0.06); }
 .settings-panel .hub-profile-remove { margin-left: auto; color: var(--red); }
-.sync-connection-heading .sync-connection-edit { margin-left: auto; }
 .settings-panel .sync-connection-edit,
 .settings-panel .sync-device-side .device-delete-button {
   display: inline-grid;
@@ -2010,7 +2006,7 @@ span.settings-note.settings-item-desc {
 .settings-panel .sync-connection-edit:focus-visible { background: rgba(var(--overlay-rgb), 0.06); }
 .settings-panel .sync-connection-edit:focus-visible,
 .settings-panel .sync-device-side .device-delete-button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
-.sync-connection-identity { display: grid; min-width: 0; margin-left: 22px; gap: 2px; color: var(--muted); font-size: 0.625rem; line-height: 1.5; }
+.sync-connection-identity { display: flex; flex: 0 1 auto; min-width: 0; max-width: 100%; }
 #syncConnectionEndpoint { min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: clip; }
 #syncConnectionCancel { background: transparent; }
 #hubClientFields { container-type: inline-size; }
@@ -2210,14 +2206,6 @@ button.settings-help-trigger:focus-visible { outline: 1px solid var(--accent); o
   to { transform: rotate(360deg); }
 }
 .sync-panel-state { display: grid; gap: 2px; min-width: 0; }
-.sync-panel-state strong { color: var(--text); font-size: 0.6875rem; font-weight: 500; }
-.sync-panel-state > span {
-  margin-left: 22px;
-  color: var(--muted);
-  font-size: 0.625rem;
-  line-height: 1.35;
-  overflow-wrap: anywhere;
-}
 .sync-panel-connection[data-state="disconnected"] #syncPanelDetail { color: var(--red); }
 .sync-panel-build {
   color: var(--muted);
@@ -2349,6 +2337,185 @@ button.settings-help-trigger:focus-visible { outline: 1px solid var(--accent); o
   :root:not([data-reduce-motion="off"]) .sync-panel-signal > svg { animation: none !important; }
   :root:not([data-reduce-motion="off"]) .sync-panel-link-arrow::before { transition: none; }
 }
+/* Multi-device sync is drawn as a map: the sync target on top, and every
+   device hanging off one rail beneath it. Icons sit on a 30px column whose
+   centre carries the rail; text and forms start on the column after it. */
+.sync-method-row { padding: 2px 0 0; }
+.settings-panel .sync-method-row .sync-mode-select { flex: 0 1 auto; min-width: 0; }
+.settings-panel .sync-method-row .sync-mode-select .select-control-trigger { width: auto; max-width: 100%; }
+#syncSettingsDetails .sync-map {
+  --rail: rgba(var(--line-rgb), 0.18);
+  display: grid;
+  min-width: 0;
+  padding: 12px 12px 0;
+}
+.sync-map > * { min-width: 0; }
+.sync-node {
+  --node-rgb: 163, 173, 187;
+  display: grid;
+  grid-template-columns: 30px minmax(0, 1fr) auto;
+  align-items: start;
+  column-gap: 10px;
+  min-width: 0;
+}
+.sync-node-icon {
+  display: grid;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  border-radius: 50%;
+  background: rgba(var(--node-rgb), 0.12);
+  box-shadow: inset 0 0 0 1px rgba(var(--node-rgb), 0.3);
+  color: rgb(var(--node-rgb));
+}
+.sync-node-icon svg,
+.sync-node-icon .sync-panel-signal,
+.sync-node-icon .sync-panel-signal > svg { width: 15px; height: 15px; flex-basis: 15px; }
+.sync-node-text { display: grid; gap: 2px; min-width: 0; padding-top: 1px; }
+.sync-node-title,
+.sync-node #hubStatusRow,
+.sync-node #icloudStatus {
+  width: auto;
+  min-width: 0;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--text);
+  font-size: 0.75rem;
+  font-weight: 600;
+  line-height: 1.4;
+  overflow-wrap: anywhere;
+}
+.sync-node-sub { color: var(--muted); font-size: 0.625rem; line-height: 1.45; overflow-wrap: anywhere; }
+.sync-node-meta { display: flex; flex-wrap: wrap; align-items: center; gap: 2px 6px; min-width: 0; margin-top: 1px; }
+/* The state colour tints the pill; the label keeps text contrast in both themes. */
+.sync-node-state {
+  flex: 0 0 auto;
+  padding: 1px 6px;
+  border-radius: 999px;
+  background: rgba(var(--node-rgb), 0.14);
+  box-shadow: inset 0 0 0 1px rgba(var(--node-rgb), 0.35);
+  color: var(--text);
+  font-size: 0.5625rem;
+  font-weight: 500;
+  line-height: 1.5;
+  white-space: nowrap;
+}
+.sync-node-placeholder .sync-node-icon {
+  background: transparent;
+  box-shadow: none;
+  border: 1px dashed rgba(var(--line-rgb), 0.4);
+  color: var(--muted);
+}
+.sync-node-placeholder { padding-bottom: 12px; }
+/* The node colour follows what each mode reports about its target. */
+#syncPanelConnection.sync-node { --node-rgb: var(--signal-rgb); padding: 0; }
+.sync-map-hub:has(#hubStatusRow.ok) .sync-node,
+.sync-map-hub:has(#icloudStatus.ok) .sync-node { --node-rgb: var(--success-rgb); }
+.sync-map-hub:has(#hubStatusRow.error) .sync-node,
+.sync-map-hub:has(#icloudStatus.error) .sync-node { --node-rgb: 244, 119, 136; }
+.sync-node #hubStatusRow.error,
+.sync-node #icloudStatus.error { color: var(--red); }
+.sync-panel-state .sync-panel-build::before { content: none; }
+#syncConnectionIdentity #syncConnectionEndpoint { font: inherit; }
+.settings-panel .sync-map .hub-profile-picker .select-control-trigger { color: var(--text); font-weight: 600; }
+.settings-panel .sync-node > .sync-connection-edit {
+  align-self: start;
+  grid-template-columns: 12px;
+  width: 26px;
+  height: 26px;
+  min-height: 0;
+  margin: -1px -4px 0 0;
+  padding: 0;
+  font-size: 0;
+  color: var(--muted);
+}
+.settings-panel .sync-node > .sync-connection-edit:hover { color: var(--text); }
+/* Forms that act on the target take the full card width under a divider, so
+   long URLs and secrets fit at 340px. Notices stay plain and close. */
+.sync-map-form { padding-top: 12px; border-top: 1px solid rgba(var(--line-rgb), 0.08); }
+#syncMap .sync-map-hub > .accordion-animation-inner > .sync-map-form:not([hidden]) { margin-top: 12px; }
+#syncMap .sync-map-hub > .accordion-animation-inner > .sync-map-notice:not([hidden]) { margin-top: 8px; }
+/* Spacing below an open target. A pseudo-element, unlike padding, collapses with
+   the accordion when the mode's fields close. */
+.sync-map-hub > .accordion-animation-inner::after { content: ""; height: 12px; }
+#syncDeviceSettings.sync-map-form { padding-bottom: 12px; }
+#syncConnectionSaveError.sync-map-notice { width: auto; margin-bottom: 12px; }
+.sync-map .settings-actions { justify-content: flex-end; }
+.sync-share { display: grid; gap: 8px; min-width: 0; }
+.sync-share-secret { display: grid; gap: 4px; min-width: 0; }
+.sync-share-secret > label { color: var(--muted); font-size: 0.625rem; }
+.sync-share .settings-note { margin: 0; }
+.hub-address-extra { display: grid; gap: 5px; min-width: 0; }
+.hub-address-more {
+  justify-self: start;
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--accent);
+  font-size: 0.625rem;
+  cursor: pointer;
+}
+.hub-address-more:hover { color: var(--text); }
+.hub-address-more:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+/* The port is one short number: a labelled row, not a full-width field. */
+.settings-panel label.sync-port-field { display: flex; align-items: center; justify-content: space-between; gap: 10px; color: var(--muted); font-size: 0.625rem; }
+.settings-panel .sync-port-field input { flex: 0 0 84px; width: 84px; text-align: right; }
+/* Devices hang off one rail. It reaches up to the target only while nothing
+   sits between them; otherwise it starts at the first device. */
+.sync-map { --rail-link: transparent; }
+.sync-map:has(.sync-device-row):not(:has(> #syncDeviceSettings:not([hidden]))) { --rail-link: var(--rail); }
+.sync-map > .sync-map-hub { background: linear-gradient(var(--rail-link), var(--rail-link)) 14.5px 34px / 1px calc(100% - 34px) no-repeat; }
+.sync-map .sync-panel-heading { background: linear-gradient(var(--rail-link), var(--rail-link)) 14.5px 0 / 1px 100% no-repeat; }
+.sync-map .sync-panel { padding-top: 0; border-top: 0; }
+.sync-map .sync-panel-heading { justify-content: flex-start; gap: 5px; padding: 0 0 4px 40px; }
+.sync-map .sync-panel-count:not(:empty)::before { content: "·"; margin-right: 5px; }
+/* Each device circle sits on its name line with a 3px gap to the rail. */
+.sync-map .sync-device-row {
+  --rail-above: var(--rail);
+  --rail-below: var(--rail);
+  position: relative;
+  grid-template-columns: 30px minmax(0, 1fr);
+  column-gap: 10px;
+  row-gap: 1px;
+  padding: 6px 0;
+  box-shadow: none;
+  background: linear-gradient(var(--rail-above) 0 1px, transparent 1px 29px, var(--rail-below) 29px) 14.5px 0 / 1px 100% no-repeat;
+}
+.sync-map .sync-device-row:first-child { --rail-above: var(--rail-link); }
+.sync-map .sync-device-row:last-child { --rail-below: transparent; }
+.sync-map .sync-device-row::before {
+  content: "";
+  position: absolute;
+  top: 4px;
+  left: 4px;
+  width: 22px;
+  height: 22px;
+  box-sizing: border-box;
+  border: 1px solid rgba(var(--line-rgb), 0.22);
+  border-radius: 50%;
+}
+.sync-map .sync-device-row.is-local::before { border-color: rgba(var(--accent-rgb), 0.55); background: rgba(var(--accent-rgb), 0.1); }
+.sync-map .sync-device-mark { position: relative; grid-row: 1 / span 2; align-self: start; margin-top: 3px; }
+.sync-map .sync-device-title,
+.sync-map .sync-device-meta,
+.sync-map .sync-device-side { grid-column: 2; }
+.sync-map .sync-device-badge {
+  padding: 0 5px;
+  border-radius: 999px;
+  background: rgba(var(--accent-rgb), 0.14);
+  color: var(--accent);
+  font-weight: 500;
+  line-height: 1.6;
+}
+.sync-map .sync-device-empty { padding: 4px 0 12px 40px; }
+.sync-map .sync-panel-link { width: auto; margin: 4px -12px 0; padding: 9px 12px; border-radius: 0 0 11px 11px; }
+.sync-this-device > .settings-item[hidden] + .settings-item { border-top: 0; }
+/* With neither row shown, the disclosure opens the card and needs no divider above it. */
+.sync-this-device > .settings-item[hidden] + .settings-item[hidden] + .theme-color-accordion { margin-top: 0; padding-top: 0; border-top: 0; }
 .currency-rate-row { display: grid; gap: 4px; min-width: 0; }
 /* The rate row is a sub-setting of the Currency row: keep them as one unseparated pair. */
 .settings-subgroup > .settings-item + .currency-rate-row { margin-top: 0; }
