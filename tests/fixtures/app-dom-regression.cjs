@@ -1,4 +1,4 @@
-/* global state, els, renderLimits, renderTrends, renderSessionDetail, renderRows, updateRow, sessionRowsForPeriod, renderSessionGroupDetail, sessionRowsApi, rendererDom, document, PointerEvent, requestAnimationFrame */
+/* global state, els, renderLimits, renderTrends, renderSessionDetail, renderRows, updateRow, sessionRowsForPeriod, renderSessionGroupDetail, sessionRowsApi, rendererDom, document, getComputedStyle, PointerEvent, requestAnimationFrame */
 'use strict';
 (async () => {
   const assert = (ok, message) => { if (!ok) throw new Error(message); };
@@ -49,8 +49,10 @@
   const quotaValue = limitRow.querySelector('[data-limit-motion-value]'), quotaFill = limitRow.querySelector('.limit-meter-fill');
   await new Promise(resolve => setTimeout(resolve, 450));
   limitRow.classList.add('is-history-active'); await settle();
-  const hover = quotaFill.getAnimations().find(animation => animation.transitionProperty === 'filter');
+  const hover = quotaFill.parentElement.getAnimations().find(animation => animation.transitionProperty === 'filter');
   assert(hover, 'App quota hover really transitions');
+  const quotaMeterStyle = getComputedStyle(quotaFill.parentElement);
+  assert(quotaMeterStyle.overflow === 'hidden' && quotaMeterStyle.filter.startsWith('drop-shadow('), 'App quota hover glows without unclipping the rounded meter');
   hover.pause(); hover.currentTime = 40;
   record.updatedAt = '2026-11-16T10:00:01Z';
   renderLimits(); await settle();
