@@ -204,7 +204,7 @@ async function fetchAntigravityLimits(options = {}, deps = {}) {
 
   const localPromise = scope || !localEnabled
     ? Promise.resolve(null)
-    : probeFn(deps).then(
+    : probeFn({ ...deps, probeTimeoutMs: 20000 }).then(
         (snapshot) => mapAntigravitySnapshot(snapshot, { nowMs, source: 'rpc' }),
         () => null
       );
