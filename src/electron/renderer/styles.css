@@ -4736,6 +4736,8 @@ html.is-windows .settings-panel select option {
   stroke-width: 2;
   stroke-linecap: round;
   stroke-linejoin: round;
+  /* The SVG stretches with preserveAspectRatio="none"; keep the stroke 2px in screen space. */
+  vector-effect: non-scaling-stroke;
 }
 .home-trend-head {
   display: flex;
