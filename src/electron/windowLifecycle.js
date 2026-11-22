@@ -31,6 +31,7 @@ function handoffWindow(oldWindow, nextWindow, options = {}) {
     nextWindow?.removeListener('show', finish);
     destroyOld();
     if (shouldFocus && nextWindow && !nextWindow.isDestroyed()) nextWindow.focus();
+    options.afterHandoff?.(nextWindow);
   };
 
   if (!nextWindow || nextWindow.isDestroyed()) {

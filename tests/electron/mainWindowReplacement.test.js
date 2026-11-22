@@ -37,6 +37,7 @@ function fixture(state = {}) {
     mainWindowReplacementTask: Promise.resolve(),
     captureRetainedWindowState: async () => {}, restoreRetainedWindowState: async () => {},
     windowsBackdropFallback: () => false,
+    refreshRetainedWindowsBackdrop: () => true,
     stopFloatingBubbleAutoCollapseTimer() {}, displayForBounds: () => null,
     applyNativeMaterial() {}, persistWindowBounds() {}, WINDOW_LIMITS: {},
     restoreFloatingBubbleWindow(win, bounds) { win.bounds = bounds; },
@@ -60,6 +61,10 @@ function fixture(state = {}) {
 
 test('visible host replacement retains the page and focus, including maximized restore', async () => {
   const { context, old, creations } = fixture({ focused: true });
+  const events = [];
+  const origDestroy = old.destroy.bind(old);
+  old.destroy = () => { events.push('destroyOld'); origDestroy(); };
+  context.refreshRetainedWindowsBackdrop = win => { events.push(['refresh', win === context.mainWindow]); return true; };
   context.settings.windowMaximized = true;
   await context.replaceMainWindow(old.bounds, { focus: true });
   assert.equal(creations[0].options.previousWindow, old);
@@ -67,6 +72,7 @@ test('visible host replacement retains the page and focus, including maximized r
   assert.equal(context.mainWindow.maximized, true);
   assert.equal(context.mainWindow.focused, true);
   assert.equal(old.destroyed, true);
+  assert.deepEqual(events, ['destroyOld', ['refresh', true]]);
 });
 
 test('an in-place expansion cancels a collapse awaiting viewport capture', async () => {
@@ -141,4 +147,66 @@ test('rapid requests keep only the latest host and wait for the preceding viewpo
   await Promise.all([third, fourth]);
   assert.equal(creations.length, 3);
   assert.equal(creations[2].bounds.width, 600);
+});
+
+test('windows backdrop recovery refreshes visible windows on display hot-plug, metrics changes, and wake events', () => {
+  const refreshed = [];
+  const makeWindow = (label, state = {}) => {
+    const win = new Window(state);
+    win.webContents = { invalidates: 0, invalidate() { this.invalidates++; } };
+    win.label = label;
+    return win;
+  };
+  const main = makeWindow('main', { visible: true, minimized: false });
+  const dashboard = makeWindow('dashboard', { visible: true, minimized: false });
+  const hidden = makeWindow('hidden', { visible: false, minimized: false });
+  const minimized = makeWindow('minimized', { visible: true, minimized: true });
+  const powerMonitor = new EventEmitter();
+  const screen = new EventEmitter();
+  const notchController = { locked: null, setLocked(value) { this.locked = value; } };
+  const context = {
+    process: { platform: 'win32' },
+    mainWindow: main,
+    dashboardWindow: dashboard,
+    powerMonitor,
+    screen,
+    notchController,
+    refreshWindowsBackdrop(target) {
+      refreshed.push(target.label);
+      return true;
+    }
+  };
+  vm.createContext(context);
+  vm.runInContext(functionSource('refreshRetainedWindowsBackdrop', 'function createWindow('), context);
+
+  assert.equal(context.refreshRetainedWindowsBackdrop(hidden), false);
+  assert.equal(context.refreshRetainedWindowsBackdrop(minimized), false);
+  assert.equal(hidden.webContents.invalidates, 0);
+  assert.equal(minimized.webContents.invalidates, 0);
+
+  context.attachWindowsBackdropRecovery();
+  powerMonitor.emit('lock-screen');
+  assert.equal(notchController.locked, true);
+  assert.deepEqual(refreshed, []);
+
+  for (const event of ['unlock-screen', 'resume']) {
+    powerMonitor.emit(event);
+  }
+  assert.equal(notchController.locked, false);
+  for (const event of ['display-added', 'display-removed', 'display-metrics-changed']) {
+    screen.emit(event);
+  }
+
+  assert.deepEqual(refreshed, [
+    'main', 'dashboard',
+    'main', 'dashboard',
+    'main', 'dashboard',
+    'main', 'dashboard',
+    'main', 'dashboard'
+  ]);
+  assert.equal(main.webContents.invalidates, 5);
+  assert.equal(dashboard.webContents.invalidates, 5);
+
+  context.process.platform = 'darwin';
+  assert.equal(context.refreshRetainedWindowsBackdrop(main), false);
 });
