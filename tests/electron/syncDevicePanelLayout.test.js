@@ -52,7 +52,7 @@ test('sync settings draw one map from the target to its devices, with preference
   const start = html.indexOf('id="syncSettingsDetails"');
   const end = html.indexOf('<section class="total-panel">', start);
   const section = html.slice(start, end);
-  const order = ['hubModeOptions', 'syncMap', 'syncLocalIntro', 'syncPanelConnection', 'hubUrlInput', 'hubHostFields', 'icloudFields',
+  const order = ['syncMap', 'hubModeOptions', 'syncLocalIntro', 'syncPanelConnection', 'hubUrlInput', 'hubHostFields', 'icloudFields',
     'saveSettingsButton', 'syncDevicePanel', 'syncThisDeviceCard', 'deviceIconLocalRow', 'syncUploadIntervalRow', 'syncContentDetails'];
   const positions = order.map(id => section.indexOf(`id="${id}"`));
   assert.ok(positions.every(position => position >= 0));
@@ -299,7 +299,7 @@ test('empty device list refreshes when the runtime starts syncing', () => {
   const list = new Element();
   const context = vm.createContext({
     document: { createElement: () => new Element() },
-    els: { syncDeviceList: list, syncPanelCount: {}, syncPanelOpenDevices: {} },
+    els: { syncDeviceList: list, syncPanelCount: {} },
     state: { mode: 'local', settings: { hubMode: 'client' } },
     syncDevicePanelApi: panelApi,
     currentLocale: () => 'en',
@@ -324,7 +324,7 @@ test('sync timestamp changes reuse the device row and pass the latest data to it
   const updates = [];
   const context = vm.createContext({
     document: { createElement: () => new Element() },
-    els: { syncDeviceList: list, syncPanelCount: {}, syncPanelOpenDevices: {} },
+    els: { syncDeviceList: list, syncPanelCount: {} },
     state: { mode: 'sync', settings: { hubMode: 'client' } },
     syncDevicePanelApi: panelApi,
     currentLocale: () => 'en',

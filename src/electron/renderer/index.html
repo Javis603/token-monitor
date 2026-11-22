@@ -1429,19 +1429,19 @@
             <span class="settings-section-meta"><span id="syncSettingsSummary" class="settings-section-summary"></span><span class="settings-section-disclosure" aria-hidden="true"></span></span>
           </button>
           <div id="syncSettingsDetails" class="settings-section-details hidden">
-            <div class="settings-item sync-method-row">
-              <span id="syncModeLabel" class="settings-item-text settings-item-title" data-i18n="settings.sync.mode">Sync method</span>
-              <span class="sync-mode-select">
-                <select id="hubModeOptions" aria-labelledby="syncModeLabel">
-                  <option value="local" data-i18n="settings.sync.localOnly">Local only</option>
-                  <option value="client" data-i18n="settings.sync.connectHub">Connect to a hub</option>
-                  <option value="host" data-i18n="settings.sync.hostHub">Host hub on this device</option>
-                  <option value="icloud" data-i18n="settings.sync.icloud">iCloud Drive</option>
-                </select>
-                <span class="settings-section-disclosure" aria-hidden="true"></span>
-              </span>
-            </div>
             <section id="syncMap" class="settings-page-card sync-map" aria-labelledby="syncModeLabel">
+              <div class="sync-map-head">
+                <span id="syncModeLabel" class="sync-map-label" data-i18n="settings.sync.mode">Sync method</span>
+                <span class="sync-mode-select">
+                  <select id="hubModeOptions" aria-labelledby="syncModeLabel">
+                    <option value="local" data-i18n="settings.sync.localOnly">Local only</option>
+                    <option value="client" data-i18n="settings.sync.connectHub">Connect to a hub</option>
+                    <option value="host" data-i18n="settings.sync.hostHub">Host hub on this device</option>
+                    <option value="icloud" data-i18n="settings.sync.icloud">iCloud Drive</option>
+                  </select>
+                  <span class="settings-section-disclosure" aria-hidden="true"></span>
+                </span>
+              </div>
               <div id="syncLocalIntro" class="sync-node sync-node-placeholder" data-sync-modes="local">
                 <span class="sync-node-icon" data-sync-icon="client" aria-hidden="true"></span>
                 <span class="sync-node-text">
@@ -1543,7 +1543,6 @@
                   <span id="syncPanelCount" class="sync-panel-count"></span>
                 </div>
                 <div id="syncDeviceList" class="sync-device-list"></div>
-                <button id="syncPanelOpenDevices" type="button" class="sync-panel-link"><span data-i18n="settings.sync.panel.viewUsage">View usage by device</span><span class="sync-panel-link-arrow" aria-hidden="true"></span></button>
               </div>
             </section>
             <div id="syncThisDeviceCard" class="settings-subgroup settings-page-card sync-this-device">

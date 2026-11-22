@@ -532,7 +532,6 @@ Object.assign(els, {
   syncPanelBuild: document.getElementById('syncPanelBuild'),
   syncPanelCount: document.getElementById('syncPanelCount'),
   syncDeviceList: document.getElementById('syncDeviceList'),
-  syncPanelOpenDevices: document.getElementById('syncPanelOpenDevices'),
   hubAddressList: document.getElementById('hubAddressList'),
   syncUploadIntervalInput: document.getElementById('syncUploadIntervalInput'),
   collectionCadenceInput: document.getElementById('collectionCadenceInput'),
@@ -9873,7 +9872,6 @@ function stopSyncPanelAgeTimer() {
 function renderSyncPanelDevices(rows) {
   const counts = syncDevicePanelApi.deviceCounts(rows);
   els.syncPanelCount.textContent = counts.total > 0 ? t('settings.sync.panel.onlineCount', counts) : '';
-  els.syncPanelOpenDevices.hidden = counts.total === 0 || !availableBreakdownIds().includes('device');
   const list = els.syncDeviceList;
   const scope = JSON.stringify([
     state.settings?.hubMode, state.mode, state.settings?.deviceId,
@@ -15021,8 +15019,6 @@ els.hubProfileRemove?.addEventListener('click', async () => {
   cancelClientConnectionEdit();
   await changeHubProfile({ type: 'delete', id: state.settings?.activeHubProfileId });
 });
-
-els.syncPanelOpenDevices?.addEventListener('click', () => openViewFromTray('device'));
 
 els.hubModeOptions.addEventListener('change', async (event) => {
   const target = event.target;
