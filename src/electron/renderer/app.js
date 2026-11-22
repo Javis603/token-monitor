@@ -2507,20 +2507,10 @@ function animateHomeHistoryVisuals(activityScroll, activityCanvas, trendChart) {
     });
   });
 
-  const line = trendChart?.querySelector('.area-line-stroke');
-  const fill = trendChart?.querySelector('.area-line-fill');
-  const length = line?.getTotalLength?.() || 0;
-  if (length > 0) {
-    line.animate([
-      { strokeDasharray: `${length} ${length}`, strokeDashoffset: length },
-      { strokeDasharray: `${length} ${length}`, strokeDashoffset: 0 }
-    ], {
-      duration: HOME_HISTORY_MOTION_MS,
-      easing: 'cubic-bezier(0.22, 1, 0.36, 1)',
-      fill: 'backwards'
-    });
-  }
-  fill?.animate([
+  // Wipe the line and its fill in together. A dash-offset draw-in would need the
+  // on-screen path length: the stroke is non-scaling, so dashes are laid out in
+  // screen space while getTotalLength() reports stretched viewBox units.
+  trendChart?.querySelector('.area-line')?.animate([
     { clipPath: 'inset(0 100% 0 0)' },
     { clipPath: 'inset(0 0 0 0)' }
   ], {
