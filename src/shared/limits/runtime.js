@@ -2,7 +2,7 @@
 
 const { orderAccountRows, defaultIdentityKey, configuredMultiAccountProviders, normalizeAccountSlots, accountSlotKey, defaultAccountValues, accountValuesFingerprint } = require('./accountSlots');
 const { alibabaVariantIdentityPart, alibabaRetiredVariantScopes } = require('../providers/alibaba/runtimeIdentity');
-const { LIMIT_PROVIDER_REGISTRY } = require('./registry');
+const { LIMIT_PROVIDER_REGISTRY, limitProviderEntry } = require('./registry');
 
 const crypto = require('node:crypto');
 const { hashKey } = require('../hashKey');
@@ -692,10 +692,15 @@ function createLimitsRuntime(initialOptions = {}, deps = {}) {
     // It is consumed here and never enters the normalized or synced wire shape.
     const removals = inputRows.filter((row) => row?.removed === true);
     const cacheInvalidations = new Map();
+    // This optional hook runs synchronously after a healthy row commits under
+    // its own identity, with its original probe input kept out of the snapshot.
+    const commitAcceptedReading = limitProviderEntry(lane.provider)?.limits.commitAcceptedReading;
+    const rawRowsByReading = commitAcceptedReading && new WeakMap();
     const normalizedRows = inputRows
       .filter((row) => row?.removed !== true)
       .map((input) => {
         const row = normalizeLimitProvider({ ...input, provider: lane.provider });
+        if (row) rawRowsByReading?.set(row, input);
         // An explicit provider result can invalidate known-bad windows without
         // disabling transient retention for its other windows or other accounts.
         // Require an account key; a generic failure cannot invalidate a lane.
@@ -807,7 +812,12 @@ function createLimitsRuntime(initialOptions = {}, deps = {}) {
       if (row.status === 'ok' && committedRow.status !== 'ok') addFailureDetail(dispatch, { kind: 'stale-windows' });
       // Marks the row as measurable by this runtime, so a persisted seed for a
       // provider that has not answered yet can never become a burn baseline.
-      if (committedRow.status === 'ok') markLimitsProbeSuccess(burnState, committedRow);
+      if (committedRow.status === 'ok') {
+        markLimitsProbeSuccess(burnState, committedRow);
+        if (commitAcceptedReading && rowIdentityKey(committedRow) === identityKey) {
+          commitAcceptedReading(rawRowsByReading.get(row), committedRow, providerRuntimeState);
+        }
+      }
     }
 
     // Retire anonymous state only after its healthy replacement actually commits;

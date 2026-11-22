@@ -4,6 +4,9 @@ const assert = require('node:assert/strict');
 const test = require('node:test');
 
 const { fetchAntigravityLimits } = require('../../src/shared/limits/collector');
+const { createLimitsRuntime } = require('../../src/shared/limits/runtime');
+const { _quotaSummaryWindows } = require('../../src/shared/providers/antigravity/probe');
+const { daily: quotaSummary } = require('../fixtures/antigravityQuotaSummaryArgon.json');
 
 test('fetchAntigravityLimits returns notConfigured when probe says LS not running', async () => {
   const result = await fetchAntigravityLimits({}, {
@@ -83,41 +86,273 @@ test('fetchAntigravityLimits does not invent session windows for Starter account
   ]);
 });
 
-test('fetchAntigravityLimits preserves legacy 3-pool fallback as weekly windows', async () => {
-  const result = await fetchAntigravityLimits({}, {
-    antigravityProbe: async () => ({
-      accountPlan: 'Pro',
-      accountEmail: 'a@b.com',
-      pools: [
-        { name: 'Gemini Pro',   remainingFraction: 0.5, resetTime: '2026-06-03T02:00:00Z' },
-        { name: 'Gemini Flash', remainingFraction: 0.9, resetTime: '2026-06-03T01:00:00Z' },
-        { name: 'Claude',       remainingFraction: 0.7, resetTime: '2026-06-03T04:00:00Z' }
-      ]
-    })
+test('Antigravity keeps quota failures scoped across endpoint fallbacks and the probe deadline', async (t) => {
+  let appStatus = 200;
+  let cliStatus = null;
+  let cliDiscoveryHangs = false;
+  let nowMs = Date.now();
+  const probeTimeoutMs = 1000;
+  const deps = {
+    probeTimeoutMs,
+    detectProcessInfos: async () => [
+      { pid: 1, kind: 'app', csrfToken: 'app-fixture', desktopRpcPort: 54733 },
+      ...(cliStatus === null ? [] : [{
+        pid: 2, kind: 'cli', csrfToken: 'cli-fixture', hubPort: cliDiscoveryHangs ? null : 54734
+      }])
+    ],
+    listeningPorts: async (pid) => {
+      if (pid === 1) return [54733];
+      if (cliDiscoveryHangs) {
+        t.mock.timers.tick(probeTimeoutMs);
+        return new Promise(() => {});
+      }
+      return [54735];
+    },
+    callLs: async ({ method, port, scheme }) => {
+      if (scheme === 'https') throw new Error('HTTP-only listener');
+      if (method === 'GetUnleashData') return {};
+      const status = port === 54733 ? appStatus : port === 54734 ? cliStatus : 503;
+      if (method === 'RetrieveUserQuotaSummary') {
+        if (status !== 200) throw Object.assign(new Error(`RPC ${status}`), {
+          status: status === 401 ? 'unauthorized' : 'unavailable', httpStatus: status
+        });
+        return { groups: [{ displayName: 'Gemini Models', buckets: [
+          { window: 'session', remainingFraction: 0.7 },
+          { window: 'weekly', remainingFraction: 0.9 }
+        ] }] };
+      }
+      return { userStatus: { email: port === 54733 ? 'app@example.com' : 'cli@example.com' } };
+    }
+  };
+  const runtime = createLimitsRuntime({ limitProviders: ['antigravity'] }, {
+    ...deps,
+    now: () => nowMs,
+    autoStart: false,
+    autoRetry: false
   });
-  assert.equal(result.provider, 'antigravity');
-  assert.equal(result.status, 'ok');
-  assert.equal(result.source, 'rpc');
-  assert.equal(result.accountLabel, 'Pro');
-  assert.deepEqual(result.windows.map((w) => w.label), ['Gemini Pro', 'Gemini Flash', 'Claude']);
-  for (const window of result.windows) {
-    assert.equal(window.kind, 'weekly');
-    assert.equal(window.windowMinutes, null);
+  async function refresh(reason = 'manual') {
+    nowMs += 60_000;
+    await runtime.refresh({ provider: 'antigravity' }, reason);
+    return runtime.getSnapshot().providers;
   }
-  assert.equal(Math.round(result.windows[0].usedPercent), 50);
-  assert.equal(Math.round(result.windows[1].usedPercent), 10);
-  assert.equal(Math.round(result.windows[2].usedPercent), 30);
+  try {
+    const [first] = await refresh('startup');
+    assert.equal(first.status, 'ok');
+    assert.deepEqual(first.windows.map(window => window.windowMinutes), [300, 10_080]);
+    const assertRetainedDesktop = (rows) => {
+      const app = rows.find(row => row.accountKey === first.accountKey);
+      assert.equal(app?.status, 'unavailable');
+      assert.equal(app.updatedAt, first.updatedAt);
+      assert.deepEqual(app.windows, first.windows);
+    };
+
+    appStatus = 503;
+    assertRetainedDesktop(await refresh());
+
+    cliStatus = 200;
+    const cliReading = (await refresh()).find(row => row.sourceDetail === 'cli');
+    assert.equal(cliReading?.status, 'ok');
+    cliStatus = 401;
+    const rows = await refresh();
+    assertRetainedDesktop(rows);
+    const cli = rows.find(row => row.accountKey === cliReading.accountKey);
+    assert.equal(cli?.status, 'unauthorized');
+    assert.deepEqual(cli.windows, []);
+
+    appStatus = 401;
+    cliDiscoveryHangs = true;
+    t.mock.timers.enable({ apis: ['setTimeout', 'Date'] });
+    const desktopAfterTimeout = (await refresh()).find(row => row.accountKey === first.accountKey);
+    assert.equal(desktopAfterTimeout?.status, 'unauthorized');
+    assert.deepEqual(desktopAfterTimeout.windows, []);
+  } finally {
+    runtime.stop();
+  }
 });
 
-test('fetchAntigravityLimits maps unauthorized errors', async () => {
-  const result = await fetchAntigravityLimits({}, {
-    antigravityProbe: async () => {
-      const err = new Error('401');
-      err.status = 'unauthorized';
-      throw err;
+test('Antigravity clears quota only for the account observed on the rejected RPC process', async () => {
+  const processFor = (pid) => ({ pid, kind: 'app', csrfToken: `fixture-${pid}`, desktopRpcPort: 54732 + pid });
+  let processes = [processFor(1)];
+  let statusByPort = new Map();
+  let nowMs = Date.now();
+  const runtime = createLimitsRuntime({ limitProviders: ['antigravity'] }, {
+    autoStart: false, autoRetry: false, now: () => nowMs,
+    detectProcessInfos: async () => processes,
+    listeningPorts: async processId => [54732 + processId],
+    callLs: async ({ method, port }) => {
+      if (method === 'GetUnleashData') return {};
+      if (method === 'GetUserStatus') return { userStatus: { email: `app-${port}@example.com` } };
+      const status = statusByPort.get(port) ?? 200;
+      if (status !== 200) {
+        throw Object.assign(new Error(`RPC ${status}`), {
+          status: status === 401 ? 'unauthorized' : 'unavailable',
+          httpStatus: status
+        });
+      }
+      return { groups: quotaSummary.groups };
     }
   });
-  assert.equal(result.status, 'unauthorized');
+  async function refresh() {
+    nowMs += 60_000;
+    await runtime.refresh({ provider: 'antigravity' }, 'manual');
+    return runtime.getSnapshot().providers;
+  }
+  try {
+    const [first] = await refresh();
+    assert.equal(first.status, 'ok');
+
+    // A process without a known binding rejects authentication: keep the reading.
+    processes = [processFor(2)];
+    statusByPort = new Map([[54734, 401]]);
+    const [retained] = await refresh();
+    assert.equal(retained.status, 'unavailable');
+    assert.deepEqual(retained.windows, first.windows);
+
+    statusByPort = new Map();
+    const second = (await refresh()).find(row => row.status === 'ok');
+    assert.notEqual(second.accountKey, first.accountKey);
+
+    // Both processes answer: each rejection stays on the account it replaces.
+    processes = [processFor(1), processFor(2)];
+    statusByPort = new Map([[54733, 401], [54734, 503]]);
+    const rows = await refresh();
+    const rejected = rows.find(row => row.accountKey === first.accountKey);
+    assert.equal(rejected?.status, 'unauthorized');
+    assert.deepEqual(rejected.windows, []);
+    const unavailable = rows.find(row => row.accountKey === second.accountKey);
+    assert.equal(unavailable?.status, 'unavailable');
+    assert.deepEqual(unavailable.windows, second.windows);
+
+  } finally {
+    runtime.stop();
+  }
+});
+
+test('Antigravity commits RPC source bindings only for accepted readings', { timeout: 5000 }, async (t) => {
+  let nowMs = Date.now();
+  let sourceKey = 'A';
+  let failures;
+  const accountEmail = 'same@example.com';
+  const accounts = [{ id: 'managed', accountEmail, credentials: { accessToken: 'fixture', projectId: 'fixture-project' } }];
+  const oauthQuota = { groups: quotaSummary.groups.filter(group => group.displayName === 'Gemini 4 Argon') };
+  const oauthStarted = Promise.withResolvers();
+  const runtime = createLimitsRuntime({ limitProviders: ['antigravity'] }, {
+    autoStart: false, autoRetry: false, now: () => nowMs,
+    resolveConfigSnapshot: () => ({ antigravityManagedAccounts: failures ? [] : accounts }),
+    fetch: async (url, { signal }) => {
+      signal.throwIfAborted();
+      if (url.endsWith(':loadCodeAssist')) return { ok: true, json: async () => ({}) };
+      if (!url.endsWith(':retrieveUserQuotaSummary')) throw new Error(`Unexpected URL ${url}`);
+      if (sourceKey === 'B') {
+        oauthStarted.resolve();
+        await new Promise((_, reject) => signal.addEventListener('abort', () => reject(signal.reason), { once: true }));
+      }
+      return { ok: true, json: async () => oauthQuota };
+    },
+    antigravityProbe: async () => {
+      if (failures) {
+        const sourceFailures = new Map(failures.map(([key, status]) => [key, { source: 'app', error: { status } }]));
+        throw Object.assign(new Error('RPC sources failed'), { sourceFailures });
+      }
+      return {
+        accountEmail, sourceDetail: 'app', sourceKey,
+        windows: [{ name: 'Gemini 5-hour', kind: 'session', remainingFraction: 0.72 }]
+      };
+    }
+  });
+  t.after(() => runtime.stop());
+  const refresh = () => runtime.refresh({ provider: 'antigravity' }, 'credential-edit');
+  const reading = () => runtime.getSnapshot().providers[0];
+
+  await refresh();
+  const first = reading();
+  assert.equal(first.windows.length, 2);
+
+  sourceKey = 'B';
+  nowMs += 60_000;
+  const superseded = refresh();
+  await oauthStarted.promise;
+
+  failures = [['A', 'unavailable'], ['B', 'unauthorized']];
+  const next = refresh();
+  assert.equal((await superseded).superseded, true);
+  await next;
+  assert.equal(reading().status, 'unavailable');
+  assert.equal(reading().updatedAt, first.updatedAt);
+  assert.deepEqual(reading().windows, first.windows);
+
+  failures = [['A', 'unauthorized'], ['B', 'unavailable']];
+  await refresh();
+  assert.equal(reading().status, 'unauthorized');
+  assert.deepEqual(reading().windows, []);
+});
+
+test('Antigravity keeps the previous account read when a process switches accounts', async () => {
+  let suffix = '';
+  let rpcStatus = 200;
+  let nowMs = Date.now();
+  const runtime = createLimitsRuntime({ limitProviders: ['antigravity'] }, {
+    autoStart: false, autoRetry: false, now: () => nowMs,
+    detectProcessInfos: async () => [{ pid: 2, kind: 'app', csrfToken: 'fixture', desktopRpcPort: 54734 }],
+    listeningPorts: async () => [54734],
+    callLs: async ({ method, port }) => {
+      if (method === 'GetUnleashData') return {};
+      if (method === 'GetUserStatus') return { userStatus: { email: `app-${port}${suffix}@example.com` } };
+      if (rpcStatus !== 200) throw Object.assign(new Error('RPC 401'), { status: 'unauthorized', httpStatus: 401 });
+      return { groups: quotaSummary.groups };
+    }
+  });
+  async function refresh() {
+    nowMs += 60_000;
+    await runtime.refresh({ provider: 'antigravity' }, 'manual');
+    return runtime.getSnapshot().providers;
+  }
+  try {
+    const [first] = await refresh();
+    assert.equal(first.status, 'ok');
+
+    // The same process signs into another account.
+    suffix = '-b';
+    const second = (await refresh()).find(row => row.status === 'ok');
+    assert.notEqual(second.accountKey, first.accountKey);
+
+    // A rejection belongs to the account the process serves now, not the previous one.
+    rpcStatus = 401;
+    const rows = await refresh();
+    const previous = rows.find(row => row.accountKey === first.accountKey);
+    assert.equal(previous?.status, 'unavailable');
+    assert.deepEqual(previous.windows, first.windows);
+    const switched = rows.find(row => row.accountKey === second.accountKey);
+    assert.equal(switched?.status, 'unauthorized');
+    assert.deepEqual(switched.windows, []);
+  } finally {
+    runtime.stop();
+  }
+});
+
+test('Antigravity keeps new service-named quota groups and their periods together through normalization', async () => {
+  const buckets = [
+    { window: 'weekly', remainingFraction: 0.6 },
+    { window: 'session', remainingFraction: 0.4 },
+    { window: 'daily', remainingFraction: 0.8 }
+  ];
+  const result = await fetchAntigravityLimits({}, {
+    detectProcessInfo: async () => ({ pid: 1, csrfToken: 'test-token' }),
+    listeningPorts: async () => [54733],
+    callLs: async ({ method }) => method === 'RetrieveUserQuotaSummary' ? {
+      groups: [
+        { displayName: 'Gemini 5 Ultra', buckets },
+        ...quotaSummary.groups
+      ]
+    } : {}
+  });
+  assert.equal(result.status, 'ok');
+  assert.deepEqual(result.windows.map(window => window.label), [
+    'Gemini 5-hour', 'Gemini weekly',
+    'Gemini 4 Argon weekly',
+    'Claude/GPT 5-hour', 'Claude/GPT weekly',
+    'Gemini 5 Ultra 5-hour', 'Gemini 5 Ultra weekly'
+  ]);
 });
 
 test('fetchAntigravityLimits refreshes all enabled OAuth accounts and keeps per-account errors', async () => {
@@ -359,72 +594,6 @@ test('fetchAntigravityLimits keeps the OAuth plan when quota data is unavailable
   assert.deepEqual(result[0].windows, []);
 });
 
-test('fetchAntigravityLimits preserves grouped OAuth quota over legacy 3-pool RPC fallback', async () => {
-  const result = await fetchAntigravityLimits({
-    antigravityManagedAccounts: [{
-      id: 'same-account',
-      accountEmail: 'Same@Example.com',
-      enabled: true,
-      credentials: {
-        accessToken: 'token-same',
-        refreshToken: 'refresh-same',
-        expiresAt: Date.now() + 3600_000,
-        clientId: 'client',
-        clientSecret: 'secret',
-        projectId: 'project-same'
-      }
-    }]
-  }, {
-    antigravityProbe: async () => ({
-      accountPlan: 'Google AI Pro',
-      accountEmail: 'same@example.com',
-      sourceDetail: 'app',
-      pools: [
-        { name: 'Gemini Pro', remainingFraction: 1, resetTime: '2026-06-03T02:00:00Z' },
-        { name: 'Gemini Flash', remainingFraction: 1, resetTime: '2026-06-03T02:00:00Z' },
-        { name: 'Claude', remainingFraction: 1, resetTime: '2026-06-03T02:00:00Z' }
-      ]
-    }),
-    fetch: async (url) => {
-      if (url.endsWith(':loadCodeAssist')) {
-        return { ok: true, status: 200, json: async () => ({ currentTier: { id: 'standard-tier' } }) };
-      }
-      if (url.endsWith(':retrieveUserQuotaSummary')) {
-        return {
-          ok: true,
-          status: 200,
-          json: async () => ({
-            groups: [
-              {
-                displayName: 'Gemini Models',
-                buckets: [
-                  { displayName: '5-Hour Limit', window: 'session', remainingFraction: 0.65 },
-                  { displayName: 'Weekly Limit', window: 'weekly', remainingFraction: 0.92 }
-                ]
-              },
-              {
-                displayName: 'Claude/GPT Models',
-                buckets: [
-                  { displayName: '5-Hour Limit', window: 'session', remainingFraction: 0.80 },
-                  { displayName: 'Weekly Limit', window: 'weekly', remainingFraction: 0.85 }
-                ]
-              }
-            ]
-          })
-        };
-      }
-      throw new Error(`Unexpected URL ${url}`);
-    }
-  });
-
-  assert.equal(result.length, 1);
-  assert.equal(result[0].accountEmail, 'same@example.com');
-  assert.equal(result[0].source, 'oauth');
-  assert.equal(result[0].windows.length, 4);
-  assert.equal(result[0].windows.some((w) => w.windowMinutes === 300), true);
-  assert.equal(result[0].windows[0].remainingPercent, 65);
-});
-
 test('fetchAntigravityLimits does not replace healthy OAuth quota when local RPC returns empty windows', async () => {
   const result = await fetchAntigravityLimits({
     antigravityManagedAccounts: [{
@@ -441,8 +610,7 @@ test('fetchAntigravityLimits does not replace healthy OAuth quota when local RPC
       }
     }]
   }, {
-    // Probe returns a valid snapshot but with no windows — mapAntigravitySnapshot
-    // will set status: 'unavailable', which causes localIsHealthy to be false.
+    // An empty local snapshot must leave the usable OAuth quota in place.
     antigravityProbe: async () => ({
       accountPlan: 'Google AI Pro',
       accountEmail: 'same@example.com',
@@ -585,62 +753,6 @@ test('fetchAntigravityLimits unshifts local RPC when account does not match mana
   assert.equal(result[1].source, 'oauth');
 });
 
-test('fetchAntigravityLimits replaces OAuth quota when both local RPC and OAuth only have legacy pools', async () => {
-  const result = await fetchAntigravityLimits({
-    antigravityManagedAccounts: [{
-      id: 'same-account',
-      accountEmail: 'Same@Example.com',
-      enabled: true,
-      credentials: {
-        accessToken: 'token-same',
-        refreshToken: 'refresh-same',
-        expiresAt: Date.now() + 3600_000,
-        clientId: 'client',
-        clientSecret: 'secret',
-        projectId: 'project-same'
-      }
-    }]
-  }, {
-    antigravityProbe: async () => ({
-      accountPlan: 'Google AI Pro',
-      accountEmail: 'same@example.com',
-      sourceDetail: 'app',
-      pools: [
-        { name: 'Gemini Pro', remainingFraction: 0.8, resetTime: '2026-06-03T02:00:00Z' }
-      ]
-    }),
-    fetch: async (url) => {
-      if (url.endsWith(':loadCodeAssist')) {
-        return { ok: true, status: 200, json: async () => ({ currentTier: { id: 'standard-tier' } }) };
-      }
-      if (url.endsWith(':retrieveUserQuotaSummary')) {
-        return { ok: false, status: 404, json: async () => ({ error: 'Not Found' }) };
-      }
-      if (url.endsWith(':fetchAvailableModels')) {
-        return {
-          ok: true,
-          status: 200,
-          json: async () => ({
-            models: {
-              'gemini-2.5-pro': {
-                displayName: 'Gemini Pro',
-                quotaInfo: { remainingFraction: 0.4, resetTime: '2026-06-03T02:00:00Z' }
-              }
-            }
-          })
-        };
-      }
-      throw new Error(`Unexpected URL ${url}`);
-    }
-  });
-
-  assert.equal(result.length, 1);
-  assert.equal(result[0].accountEmail, 'same@example.com');
-  // When OAuth also only has legacy pools, the live local RPC replaces OAuth
-  assert.equal(result[0].source, 'rpc');
-  assert.equal(result[0].windows[0].remainingPercent, 80);
-});
-
 test('fetchAntigravityLimits returns unauthorized when probe throws unauthorized status', async () => {
   const result = await fetchAntigravityLimits({}, {
     antigravityProbe: async () => {
@@ -654,7 +766,12 @@ test('fetchAntigravityLimits returns unauthorized when probe throws unauthorized
   assert.equal(result.windows.length, 0);
 });
 
-test('fetchAntigravityLimits preserves Gemini 4 Argon from OAuth when local RPC reports only Gemini and Claude/GPT groups', async () => {
+test('fetchAntigravityLimits keeps OAuth-only groups when service names share a long prefix', async () => {
+  const group = (suffix, remainingFraction) => ({
+    displayName: `Claude 5 Experimental Models ${suffix}`,
+    buckets: [{ window: 'session', remainingFraction }]
+  });
+  const localGroup = group('Alpha', 0.28);
   const result = await fetchAntigravityLimits({
     antigravityManagedAccounts: [{
       id: 'same-account',
@@ -678,7 +795,8 @@ test('fetchAntigravityLimits preserves Gemini 4 Argon from OAuth when local RPC 
         { name: 'Gemini 5-hour', kind: 'session', remainingFraction: 0.90 },
         { name: 'Gemini weekly', kind: 'weekly', remainingFraction: 0.95 },
         { name: 'Claude/GPT 5-hour', kind: 'session', remainingFraction: null, showMeter: false },
-        { name: 'Claude/GPT weekly', kind: 'weekly', remainingFraction: 0 }
+        { name: 'Claude/GPT weekly', kind: 'weekly', remainingFraction: 0 },
+        ..._quotaSummaryWindows({ groups: [localGroup] })
       ]
     }),
     fetch: async (url) => {
@@ -716,7 +834,9 @@ test('fetchAntigravityLimits preserves Gemini 4 Argon from OAuth when local RPC 
                     resetTime: '2026-10-23T00:33:37Z'
                   }
                 ]
-              }
+              },
+              group('Alpha', 0.10),
+              group('Beta', 0.74)
             ]
           })
         };
@@ -727,12 +847,15 @@ test('fetchAntigravityLimits preserves Gemini 4 Argon from OAuth when local RPC 
 
   assert.equal(result.length, 1);
   assert.equal(result[0].source, 'rpc');
-  assert.deepEqual(result[0].windows.map((window) => [window.label, window.kind, window.remainingPercent, window.showMeter]), [
+  assert.deepEqual(result[0].windows.slice(0, 5).map((window) => [window.label, window.kind, window.remainingPercent, window.showMeter]), [
     ['Gemini 5-hour', 'session', 90, true],
     ['Gemini weekly', 'weekly', 95, true],
     ['Gemini 4 Argon weekly', 'weekly', 74, true],
     ['Claude/GPT 5-hour', 'session', null, false],
     ['Claude/GPT weekly', 'weekly', 0, true]
   ]);
+  const extra = result[0].windows.slice(5);
+  assert.deepEqual(extra.map(window => window.remainingPercent), [28, 74]);
+  assert.ok(extra.every(({ label }) => label.endsWith(' 5-hour') && label.length <= 32));
+  assert.notEqual(extra[0].label, extra[1].label);
 });
-

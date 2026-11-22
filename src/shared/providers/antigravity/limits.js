@@ -6,6 +6,7 @@ const { mergedOwnerAccounts } = require('../../limits/ownerAccountSlots');
 
 const antigravityOAuth = require('./oauth');
 const antigravityProbe = require('./probe');
+const { quotaGroupFromLabel } = require('./corePolicy');
 const {
   normalizeLimitProvider
 } = require('../../limits/core');
@@ -19,23 +20,19 @@ const {
 
 function groupedWindowGroupKey(window) {
   if (typeof window?.windowMinutes !== 'number') return '';
-  const match = String(window?.label || '').trim().match(/^(.+?)\s+(?:5-hour|weekly)$/i);
-  return match ? match[1].trim().toLowerCase() : '';
+  return quotaGroupFromLabel(window.label).toLowerCase();
 }
 
 function mergeMissingOAuthGroups(local, existing) {
-  const localWindows = Array.isArray(local?.windows) ? local.windows : [];
-  const localGroups = new Set(localWindows.map(groupedWindowGroupKey).filter(Boolean));
+  const localGroups = new Set(local.windows.map(groupedWindowGroupKey).filter(Boolean));
   if (localGroups.size === 0) return local;
-  const missingWindows = (existing?.windows || []).filter((window) => {
+  const missingWindows = existing.windows.filter((window) => {
     const groupKey = groupedWindowGroupKey(window);
     return groupKey && !localGroups.has(groupKey);
   });
   if (missingWindows.length === 0) return local;
-  return normalizeLimitProvider({
-    ...local,
-    windows: [...localWindows, ...missingWindows]
-  });
+  const merged = normalizeLimitProvider({ ...local, windows: [...local.windows, ...missingWindows] });
+  return { ...merged, rpcSourceKey: local.rpcSourceKey };
 }
 
 function antigravityPlanLabelFromParts(...parts) {
@@ -50,6 +47,7 @@ function mapAntigravitySnapshot(snapshot, { nowMs, source = 'rpc', account = nul
   const accountEmail = String(snapshot?.accountEmail || account?.accountEmail || '').trim().toLowerCase();
   const accountLabel = snapshot?.accountPlan ? antigravityPlanLabelFromParts(snapshot.accountPlan) : '';
   const accountKeySeed = accountEmail || snapshot?.accountPlan || account?.id || 'default';
+  const legacyPools = source === 'oauth' ? snapshot?.pools || [] : [];
   const windows = Array.isArray(snapshot?.windows)
     ? snapshot.windows.map((window) => ({
         kind: window.kind,
@@ -62,7 +60,7 @@ function mapAntigravitySnapshot(snapshot, { nowMs, source = 'rpc', account = nul
         windowMinutes: window.kind === 'session' ? 300 : window.kind === 'weekly' ? 10_080 : null,
         showMeter: window.showMeter !== false
       }))
-    : (snapshot?.pools || []).map((pool) => ({
+    : legacyPools.map((pool) => ({
         kind: 'weekly',
         label: pool.name,
         usedPercent: Number.isFinite(pool.remainingFraction)
@@ -72,7 +70,7 @@ function mapAntigravitySnapshot(snapshot, { nowMs, source = 'rpc', account = nul
         windowMinutes: null,
         showMeter: Number.isFinite(pool.remainingFraction)
       }));
-  return normalizeLimitProvider({
+  const row = normalizeLimitProvider({
     provider: 'antigravity',
     accountKey: accountEmail ? antigravityOAuth.accountKey(accountEmail) : hashKey('antigravity', accountKeySeed),
     accountLabel,
@@ -86,6 +84,7 @@ function mapAntigravitySnapshot(snapshot, { nowMs, source = 'rpc', account = nul
     updatedAt,
     windows
   });
+  return source === 'rpc' ? { ...row, rpcSourceKey: snapshot?.sourceKey ?? null } : row;
 }
 
 function antigravityAccountError(account, error, nowMs) {
@@ -106,6 +105,44 @@ function antigravityAccountError(account, error, nowMs) {
   });
 }
 
+const RPC_SOURCE_BINDINGS_STATE_KEY = 'antigravity.rpc-source-bindings';
+const RPC_SOURCE_BINDINGS_MAX_ENTRIES = 16;
+
+// A process kind can expose several sources across app restarts. Remember which
+// source produced each account's reading so an authentication rejection clears
+// only that reading, capped like the existing runtime identity caches.
+function commitAcceptedReading(input, row, providerRuntimeState) {
+  const { source, sourceDetail, accountKey } = row;
+  if (source !== 'rpc' || !sourceDetail || !accountKey || !Object.hasOwn(input, 'rpcSourceKey')) return;
+  const sourceKey = input.rpcSourceKey;
+  let bindings = providerRuntimeState.get(RPC_SOURCE_BINDINGS_STATE_KEY);
+  if (!(bindings instanceof Map)) {
+    if (!sourceKey) return;
+    bindings = new Map();
+    providerRuntimeState.set(RPC_SOURCE_BINDINGS_STATE_KEY, bindings);
+  }
+  const key = `${sourceDetail}:${accountKey}`;
+  bindings.delete(key);
+  // An alternate endpoint of the same process proves no process credential. Its
+  // reading must not stay bound to one, or a later rejection replaces it.
+  if (!sourceKey) {
+    if (bindings.size === 0) providerRuntimeState.delete(RPC_SOURCE_BINDINGS_STATE_KEY);
+    return;
+  }
+  // A source serves one account at a time; a same-process account switch must
+  // not leave the previous account bound to it.
+  for (const [boundKey, boundSource] of bindings) {
+    if (boundSource === sourceKey) bindings.delete(boundKey);
+  }
+  bindings.set(key, sourceKey);
+  while (bindings.size > RPC_SOURCE_BINDINGS_MAX_ENTRIES) bindings.delete(bindings.keys().next().value);
+}
+
+function rpcSourceKeyForAccount(sourceDetail, accountKey, deps = {}) {
+  if (!(deps.providerRuntimeState instanceof Map)) return '';
+  return deps.providerRuntimeState.get(RPC_SOURCE_BINDINGS_STATE_KEY)?.get(`${sourceDetail}:${accountKey}`) || '';
+}
+
 async function fetchAntigravityLimits(options = {}, deps = {}) {
   if (options.antigravityAccountSlots?.length) options = { ...options, antigravityManagedAccounts: mergedOwnerAccounts(options, 'antigravity', options.antigravityManagedAccounts || []).map(account => ({ ...account, credentials: account.credentials })) };
   const nowMs = (deps.now || Date.now)();
@@ -124,15 +161,30 @@ async function fetchAntigravityLimits(options = {}, deps = {}) {
     try {
       return mapAntigravitySnapshot(await probeFn(deps), { nowMs, source: 'rpc' });
     } catch (error) {
-      return normalizeLimitProvider({
+      const base = {
         provider: 'antigravity',
-        accountKey: '',
-        accountLabel: '',
         source: 'rpc',
-        status: providerStatusFromError(error),
         updatedAt: nowIso(nowMs),
         windows: []
-      });
+      };
+      const sourceFailures = error?.sourceFailures;
+      let status = providerStatusFromError(sourceFailures ? error.cause : error);
+      if (sourceFailures) {
+        for (const { source, error: cause } of sourceFailures.values()) deps.noteLimitFailure?.(cause, { source });
+        const previous = (options.previousLimits?.providers || []).filter(row => row.provider === 'antigravity');
+        const rows = previous.filter(row => row.source === 'rpc' && row.accountKey)
+          .map(({ accountKey, accountLabel, accountEmail, sourceDetail }) => {
+            const sourceKey = rpcSourceKeyForAccount(sourceDetail, accountKey, deps);
+            const failure = sourceKey ? sourceFailures.get(sourceKey) : null;
+            return normalizeLimitProvider({
+              ...base, accountKey, accountLabel, accountEmail, sourceDetail,
+              status: providerStatusFromError(failure?.error)
+            });
+          });
+        if (rows.length) return rows.length === 1 ? rows[0] : rows;
+        if (previous.some(row => row.windows.length)) status = 'unavailable';
+      } else deps.noteLimitFailure?.(error, { source: 'rpc' });
+      return normalizeLimitProvider({ ...base, status });
     }
   }
 
@@ -161,25 +213,16 @@ async function fetchAntigravityLimits(options = {}, deps = {}) {
   const providers = [...remote];
   if (local?.accountKey) {
     const duplicateIndex = providers.findIndex((provider) => provider.accountKey === local.accountKey);
-    if (duplicateIndex >= 0) {
-      const existing = providers[duplicateIndex];
-      const existingHasGrouped = (existing.windows || []).some((w) => typeof w.windowMinutes === 'number');
-      const localHasGrouped = (local.windows || []).some((w) => typeof w.windowMinutes === 'number');
-      const localIsHealthy = local.status === 'ok';
-      if (localIsHealthy && (localHasGrouped || !existingHasGrouped)) {
-        providers.splice(
-          duplicateIndex,
-          1,
-          localHasGrouped && existingHasGrouped ? mergeMissingOAuthGroups(local, existing) : local
-        );
-      }
-    } else {
+    if (duplicateIndex < 0) {
       providers.unshift(local);
+    } else if (local.status === 'ok') {
+      providers[duplicateIndex] = mergeMissingOAuthGroups(local, providers[duplicateIndex]);
     }
   }
   return providers;
 }
 
 module.exports = {
+  commitAcceptedReading,
   fetchAntigravityLimits
 };
