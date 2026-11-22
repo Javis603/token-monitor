@@ -888,11 +888,13 @@ function shouldAnchorSettingsScroll(section, expanding) {
   return SETTINGS_SECTION_IDS.slice(0, sectionIndex).some(id => state.settingsSections[id]);
 }
 
-function anchorSettingsScroll(anchorEl, mutate) {
+// targetOffset pins the header at that distance from the panel top instead of
+// where it currently sits.
+function anchorSettingsScroll(anchorEl, mutate, targetOffset) {
   cancelSettingsScrollAnchor();
   const panel = els.settingsPanel;
   if (!panel || !anchorEl) { mutate(); return; }
-  const offset = anchorEl.getBoundingClientRect().top - panel.getBoundingClientRect().top;
+  const offset = targetOffset ?? anchorEl.getBoundingClientRect().top - panel.getBoundingClientRect().top;
   mutate();
   const reducedMotion = prefersReducedMotion();
   const deadline = performance.now() + SETTINGS_SCROLL_ANCHOR_MS;
@@ -6466,12 +6468,12 @@ function openSettingsPanel(section) {
   // the count unrefreshed; main's cache decides whether this goes to GitHub.
   if (state.settingsSections?.general) void refreshAboutStars();
   if (section === 'notch') {
-    setSettingsSectionExpanded('window', true);
-    displaySettings?.open('notch');
-    // Tile clicks keep the scroll position; this outside entry point brings the
-    // Window section (tiles and the notch page) to the top of the panel.
-    const header = document.querySelector('[data-settings-section="window"]');
-    if (header) els.settingsPanel.scrollTop += header.getBoundingClientRect().top - els.settingsPanel.getBoundingClientRect().top;
+    // Tile clicks keep the scroll position; this outside entry point holds the
+    // Window header at the panel top, including while a section above collapses.
+    anchorSettingsScroll(document.querySelector('[data-settings-section="window"]'), () => {
+      setSettingsSectionExpanded('window', true);
+      displaySettings?.open('notch');
+    }, 0);
   }
   els.shell.style.transform = 'translateZ(0)';
   requestAnimationFrame(() => { els.shell.style.transform = ''; });

@@ -110,6 +110,8 @@ test('Notch Settings command reaches the renderer through the registered preload
     hideHomeTrendTooltip() {}, syncPluginLimitsDemand() {}, state: {}, syncSettingsForm: () => events.push('sync'), ensureServiceStatusTicker() {},
     setSettingsSectionExpanded: (...args) => events.push(args),
     setSettingsAccordionExpanded: (...args) => events.push(args.at(-1)),
+    document: { querySelector: () => null },
+    anchorSettingsScroll: (_anchor, mutate) => mutate(),
     requestAnimationFrame: callback => callback()
   };
   const renderer = read('renderer/app.js');
