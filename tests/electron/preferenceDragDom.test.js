@@ -136,7 +136,7 @@ test('tool preference controls place compact actions beside the note without dup
   assert.match(group, /<div class="settings-note-row">/);
   assert.match(group, /<p class="settings-note" data-i18n="settings\.tools\.note">[\s\S]*?<div class="tool-header-actions">/);
   assert.match(group, /<div class="tool-header-actions">/);
-  assert.match(group, /class="settings-reset-button"/);
+  assert.match(group, /class="tool-header-action"/);
   assert.doesNotMatch(group, /settings-tools-header/);
   assert.doesNotMatch(group, /settings\.tools\.title/);
   assert.doesNotMatch(group, /<div class="settings-actions tool-settings-actions">/);

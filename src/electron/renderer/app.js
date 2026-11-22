@@ -9000,10 +9000,14 @@ function renderAppearanceColorRows(container, keys, { rowClass, nameClass, reset
       resetButton.type = 'button';
       resetButton.className = 'settings-reset-button';
       resetButton.addEventListener('click', () => queueAppearanceColorChange(() => reset(key)));
-      row.append(name, swatch, resetButton);
+      const heading = document.createElement('span');
+      heading.className = 'settings-reset-heading';
+      heading.append(name, resetButton);
+      row.append(heading, swatch);
       container.appendChild(row);
     }
-    const [name, swatch, resetButton] = row.children;
+    const [heading, swatch] = row.children;
+    const [name, resetButton] = heading.children;
     const label = nameFor(key);
     name.textContent = label;
     swatch.setAttribute('aria-label', label);
@@ -11405,7 +11409,8 @@ function renderHomeLimitProviderList() {
   headerActions.className = 'tool-header-actions';
   const reset = document.createElement('button');
   reset.type = 'button';
-  reset.className = 'settings-reset-button';
+  reset.className = 'tool-header-action';
+  reset.textContent = '↺';
   reset.setAttribute('aria-label', t('settings.views.resetOrder'));
   reset.disabled = !hasCustomOrder;
   reset.addEventListener('click', () => void resetHomeLimitProviderOrder());
@@ -11510,7 +11515,8 @@ function renderHomeSettingsList() {
   caption.textContent = t('settings.home.modules');
   const reset = document.createElement('button');
   reset.type = 'button';
-  reset.className = 'settings-reset-button';
+  reset.className = 'tool-header-action';
+  reset.textContent = '↺';
   reset.setAttribute('aria-label', t('settings.views.resetOrder'));
   reset.disabled = !hasCustomOrder;
   reset.addEventListener('click', () => void resetHomeModuleOrder());
@@ -11862,7 +11868,8 @@ function renderServiceProviderList() {
   headerActions.className = 'tool-header-actions';
   const reset = document.createElement('button');
   reset.type = 'button';
-  reset.className = 'settings-reset-button';
+  reset.className = 'tool-header-action';
+  reset.textContent = '↺';
   reset.setAttribute('aria-label', t('settings.views.resetOrder'));
   reset.disabled = !hasCustomOrder;
   reset.addEventListener('click', () => void resetServiceProviderOrder());
@@ -13994,7 +14001,8 @@ function limitProviderUsageItemsList(providerId, items, reusableInputs = null) {
   if (items.some((item) => item.hidden)) {
     const restore = document.createElement('button');
     restore.type = 'button';
-    restore.className = 'settings-reset-button';
+    restore.className = 'reset-appearance-button reset-inline';
+    restore.textContent = '↺';
     restore.setAttribute('aria-label', t('settings.limits.usageItemsRestore'));
     restore.addEventListener('click', () => commitLimitProviderHiddenItems(
       limitUsageItemsApi.restoreUsageItemDefaults(state.settings?.limitProviderHiddenItems, providerId)
