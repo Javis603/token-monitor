@@ -651,6 +651,30 @@ test('parent cancellation during optional grouped identity lookup rejects the pr
   await assert.rejects(pending, /grouped lookup cancelled/);
 });
 
+test('probe keeps quota when optional identity lookup reaches the internal deadline', async (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout', 'Date'] });
+  const probeTimeoutMs = 100;
+  const result = await probe.probe({
+    probeTimeoutMs,
+    detectProcessInfo: async () => ({ pid: 1, csrfToken: 'csrf', desktopRpcPort: 54733 }),
+    listeningPorts: async () => [54733],
+    callLs: async ({ method }) => {
+      if (method === 'RetrieveUserQuotaSummary') {
+        const buckets = [{ window: 'weekly', remainingFraction: 0.6 }];
+        return { groups: [{ displayName: 'Gemini Models', buckets }] };
+      }
+      if (method === 'GetUserStatus') {
+        t.mock.timers.tick(probeTimeoutMs);
+        return new Promise(() => {});
+      }
+      return {};
+    }
+  });
+
+  assert.equal(result.accountEmail, null);
+  assert.equal(result.windows[0].remainingFraction, 0.6);
+});
+
 test('probe tries the next endpoint when a grouped response is unusable', async () => {
   const calls = [];
   const result = await probe.probe({

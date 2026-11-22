@@ -87,7 +87,7 @@ An account-scoped manual refresh fetches only the requested OAuth account. With 
 
 The probe discovers the running process and connects to its loopback RPC service. For Antigravity desktop builds that advertise a host bridge token on stdin, it reads the RPC port and credential from the matching PID’s `~/.gemini/antigravity/daemon/hub_*.json` descriptor and verifies that the process owns the listener and the connected socket before sending the credential. Older builds provide the RPC credential on the process command line.
 
-Local quota comes from the grouped quota summary. If a source cannot provide a usable summary, the probe tries the next local source. When all sources fail, the limits runtime applies its last-good policy. An authentication failure from a fallback process kind cannot clear a cached reading from another kind. User status supplies account identity and plan information after a successful quota lookup.
+Local quota comes from the grouped quota summary. If a source cannot provide a usable summary, the probe tries the next local source until its deadline. When all sources fail, the limits runtime applies its last-good policy. An authentication rejection can clear a cached reading if the current runtime has already associated that process and credential with the reading. Ambiguous failures keep the previous reading. User status supplies account identity and plan information after a successful quota lookup.
 
 Identity lookup may fail while quota lookup succeeds. Such a row is valid but anonymous; it must remain device-scoped during hub aggregation. Do not give anonymous RPC rows a cross-device-stable fallback key, because two unrelated Google accounts could otherwise collapse into one row. An anonymous local row also cannot be safely matched to a managed OAuth account, so both rows may be visible until local identity becomes available.
 
@@ -122,7 +122,7 @@ Grouped quota responses map into the normalized limits windows used by every pro
 
 Standalone OAuth can still produce legacy model pools when grouped quota is unavailable. These rows and rows synced from older devices keep the fallback layout. A legacy pool without a finite remaining fraction keeps its reset information in the normalized record, and the renderer hides the row across the Limits page, Edge Dock, Home compact windows, and usage checklist. A real zero stays visible as exhausted. In the grouped layout, disabled buckets remain visible without a meter.
 
-The Limits page and Edge Dock show Gemini, Claude/GPT, and Gemini 4 Argon in their existing order, followed by new groups in service order. New groups use the service's display name and show whichever five-hour or weekly buckets the summary supplies. Group names follow the existing label format and are shortened when needed to fit the period suffix within the Hub label limit. Other periods are skipped. A weekly-only Argon allowance spans the full row.
+The Limits page and Edge Dock show Gemini, Claude/GPT, and Gemini 4 Argon in their existing order, followed by new groups in service order. New groups use the service's display name and show whichever five-hour or weekly buckets the summary supplies. Names that need shortening or sanitization use a stable suffix so RPC and OAuth agree on the group within the Hub label limit. Other periods are skipped. A weekly-only Argon allowance spans the full row.
 
 ### Identity and aggregation
 

@@ -107,6 +107,8 @@ function antigravityAccountError(account, error, nowMs) {
   });
 }
 
+const rpcIdentityKey = (sourceDetail) => `antigravity-rpc:${sourceDetail}`;
+
 async function fetchAntigravityLimits(options = {}, deps = {}) {
   if (options.antigravityAccountSlots?.length) options = { ...options, antigravityManagedAccounts: mergedOwnerAccounts(options, 'antigravity', options.antigravityManagedAccounts || []).map(account => ({ ...account, credentials: account.credentials })) };
   const nowMs = (deps.now || Date.now)();
@@ -123,7 +125,15 @@ async function fetchAntigravityLimits(options = {}, deps = {}) {
 
   if (accounts.length === 0 && !scope) {
     try {
-      return mapAntigravitySnapshot(await probeFn(deps), { nowMs, source: 'rpc' });
+      const snapshot = await probeFn(deps);
+      const row = mapAntigravitySnapshot(snapshot, { nowMs, source: 'rpc' });
+      if (row.status === 'ok' && row.sourceDetail && !deps.signal?.aborted) {
+        // Store only the latest observed account binding for each process kind.
+        const key = rpcIdentityKey(row.sourceDetail);
+        if (snapshot.sourceKey) deps.providerRuntimeState?.set(key, { sourceKey: snapshot.sourceKey, accountKey: row.accountKey });
+        else deps.providerRuntimeState?.delete(key);
+      }
+      return row;
     } catch (error) {
       const base = {
         provider: 'antigravity',
@@ -132,19 +142,25 @@ async function fetchAntigravityLimits(options = {}, deps = {}) {
         windows: []
       };
       const sourceFailures = error?.sourceFailures;
+      let status = providerStatusFromError(sourceFailures ? error.cause : error);
       if (sourceFailures) {
-        for (const [source, cause] of sourceFailures) deps.noteLimitFailure?.(cause, { source });
-        // Attribute a terminal failure only to a cached row from its source.
-        // A missing or unknown source produces the ordinary unavailable status.
-        const rows = (options.previousLimits?.providers || [])
-          .filter((row) => row.provider === 'antigravity' && row.source === 'rpc' && row.accountKey)
-          .map(({ accountKey, accountLabel, accountEmail, sourceDetail }) => normalizeLimitProvider({
-            ...base, accountKey, accountLabel, accountEmail, sourceDetail,
-            status: providerStatusFromError(sourceFailures.get(sourceDetail))
-          }));
+        for (const { source, error: cause } of sourceFailures.values()) deps.noteLimitFailure?.(cause, { source });
+        const previous = (options.previousLimits?.providers || []).filter(row => row.provider === 'antigravity');
+        const rows = previous.filter(row => row.source === 'rpc' && row.accountKey)
+          .map(({ accountKey, accountLabel, accountEmail, sourceDetail }) => {
+            const identity = deps.providerRuntimeState?.get(rpcIdentityKey(sourceDetail));
+            const failure = identity?.accountKey === accountKey
+              ? sourceFailures.get(identity.sourceKey)
+              : null;
+            return normalizeLimitProvider({
+              ...base, accountKey, accountLabel, accountEmail, sourceDetail,
+              status: providerStatusFromError(failure?.error)
+            });
+          });
         if (rows.length) return rows.length === 1 ? rows[0] : rows;
+        if (previous.some(row => row.windows.length)) status = 'unavailable';
       } else deps.noteLimitFailure?.(error, { source: 'rpc' });
-      return normalizeLimitProvider({ ...base, status: providerStatusFromError(sourceFailures ? error.cause : error) });
+      return normalizeLimitProvider({ ...base, status });
     }
   }
 

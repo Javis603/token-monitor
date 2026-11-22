@@ -12,6 +12,7 @@ const path = require('node:path');
 const https = require('node:https');
 const http = require('node:http');
 const { appVersion } = require('../../appVersion');
+const { hashKey } = require('../../hashKey');
 const { limitStage } = require('../../limits/failureDetail');
 const { errorWithStatus } = require('../../limits/providerHelpers');
 const { quotaGroupRank } = require('./corePolicy');
@@ -546,18 +547,19 @@ function quotaRemainingFraction(bucket) {
 }
 
 function quotaGroupName(displayName) {
-  const name = typeof displayName === 'string' ? displayName.trim() : '';
+  const name = typeof displayName === 'string' ? displayName.trim().replace(/\s+/g, ' ') : '';
   const lower = name.toLowerCase();
   if (/^gemini(?:\s+models)?$/.test(lower)) return 'Gemini';
   if (/^claude\s*(?:and|&|\/)\s*gpt(?:\s+models)?$/.test(lower)) return 'Claude/GPT';
   if (lower === 'gemini 4 argon') return 'Gemini 4 Argon';
-  // Hubs clear labels longer than 32 characters. Reserve the suffix
-  // before shortening so both windows still have a valid shared group name.
+  if (!name) return 'Quota';
+  // RPC and OAuth can report different subsets. Derive the same shortened
+  // name from the full name, with room for the period within the Hub limit.
   const maxNameLength = 32 - ' 5-hour'.length;
-  const clean = name.replace(/[^a-z0-9\s+._/-]/gi, '').replace(/\s+/g, ' ').trim();
-  return clean.length > maxNameLength
-    ? `${clean.slice(0, maxNameLength - 3).trimEnd()}...`
-    : clean || 'Quota';
+  const clean = name.replace(/[^a-z0-9 +._/-]/gi, '').replace(/ +/g, ' ').trim();
+  if (clean === name && clean.length <= maxNameLength) return clean;
+  const suffix = `-${hashKey('antigravity-quota-group', lower).slice(-8)}`;
+  return `${(clean || 'Quota').slice(0, maxNameLength - suffix.length).trimEnd()}${suffix}`;
 }
 
 function quotaBucketKind(bucket) {
@@ -761,12 +763,19 @@ async function resolveWorkingEndpoint(candidates, call, deadlineMs, signal) {
   return { candidates, lastError };
 }
 
+function preferQuotaFailure(previous, next) {
+  return previous?.status === 'unauthorized' ? previous : next || previous;
+}
+
 async function groupedQuotaFromCandidates(candidates, call, {
+  previousError,
+  csrfToken,
+  sourceKey,
   summaryDeadlineMs,
   probeDeadlineMs,
   signal
 }) {
-  let lastError = errorWithStatus('unavailable', 'no endpoint candidates');
+  let lastError = previousError || errorWithStatus('unavailable', 'no endpoint candidates');
   for (const candidate of candidates) {
     try {
       const summary = await callBeforeDeadline(call, {
@@ -791,18 +800,21 @@ async function groupedQuotaFromCandidates(candidates, call, {
             || preferredPlanInfoName(identity?.userStatus?.planStatus?.planInfo)
             || null;
           accountEmail = identity?.userStatus?.email?.trim?.() || null;
-        } catch (_) {
-          throwIfAborted(signal);
-        }
-        throwIfAborted(signal);
-        return { snapshot: { accountPlan, accountEmail, windows }, lastError };
+        } catch (_) { /* An account lookup can fail after a usable quota response. */ }
+        return {
+          snapshot: { accountPlan, accountEmail, windows, sourceKey: candidate.csrfToken === csrfToken ? sourceKey : null },
+          lastError
+        };
       }
-      lastError = errorWithStatus('unavailable', 'empty quota summary');
+      lastError = preferQuotaFailure(lastError, errorWithStatus('unavailable', 'empty quota summary'));
     } catch (err) {
-      throwIfAborted(signal);
-      lastError = err;
-      if (remainingMs(summaryDeadlineMs) <= 0) break;
+      // An alternate extension credential cannot invalidate the process login.
+      const failure = err?.status === 'unauthorized' && candidate.csrfToken !== csrfToken
+        ? Object.assign(errorWithStatus('unavailable', 'alternate RPC credential rejected'), { cause: err })
+        : err;
+      lastError = preferQuotaFailure(lastError, failure);
     }
+    if (signal.aborted || remainingMs(summaryDeadlineMs) <= 0) break;
   }
   return { snapshot: null, lastError };
 }
@@ -853,6 +865,7 @@ async function probe(deps = {}) {
     // - discovery keeps the full provider deadline when no explicit hub competes.
     for (const kind of PROCESS_KIND_ORDER) {
       const sourceInfos = infos.filter((info) => info.kind === kind);
+      const sourceKeys = sourceInfos.map(({ pid, csrfToken }) => hashKey('antigravity-rpc', kind, pid, csrfToken));
       const halfDeadlineMs = () => (
         Date.now() + Math.max(1, Math.floor(remainingMs(probeDeadlineMs) / 2))
       );
@@ -931,59 +944,57 @@ async function probe(deps = {}) {
             }
             // A failed lightweight preflight lowers the hub's priority but does
             // not remove it: older servers can still implement the quota RPCs.
-            return resolveDiscoveredCandidates(explicitHub);
+            return await resolveDiscoveredCandidates(explicitHub);
           }
 
-          return resolveDiscoveredCandidates();
+          return await resolveDiscoveredCandidates();
         } catch (error) {
           return { candidates: [], error };
         }
       });
 
-      const groupedTasks = candidateStates.map(async (state) => {
+      const groupedTasks = candidateStates.map(async (state, index) => {
         const entry = await state;
         if (entry.candidates.length === 0) {
           return { snapshot: null, lastError: entry.error };
         }
 
-        let grouped = await groupedQuotaFromCandidates(entry.candidates, call, {
-          summaryDeadlineMs: halfDeadlineMs(),
+        const groupOptions = {
           probeDeadlineMs,
-          signal
+          signal,
+          csrfToken: sourceInfos[index].csrfToken,
+          sourceKey: sourceKeys[index]
+        };
+        const grouped = await groupedQuotaFromCandidates(entry.candidates, call, {
+          ...groupOptions,
+          summaryDeadlineMs: halfDeadlineMs(),
+          previousError: entry.error
         });
-        let groupedError = grouped.lastError || entry.error;
+        if (grouped.snapshot || signal.aborted || !entry.fallbackCandidates) return grouped;
 
-        if (!grouped.snapshot && entry.fallbackCandidates) {
-          let fallback;
-          try {
-            fallback = await entry.fallbackCandidates();
-          } catch (error) {
-            fallback = { candidates: [], error };
-          }
-          groupedError = fallback.error || groupedError;
-          if (fallback.candidates.length > 0) {
-            grouped = await groupedQuotaFromCandidates(fallback.candidates, call, {
-              summaryDeadlineMs: halfDeadlineMs(),
-              probeDeadlineMs,
-              signal
-            });
-            groupedError = grouped.lastError || groupedError;
-          }
+        const fallback = await entry.fallbackCandidates().catch(error => ({ candidates: [], error }));
+        const previousError = preferQuotaFailure(grouped.lastError, fallback.error);
+        if (fallback.candidates.length === 0 || signal.aborted) {
+          return { snapshot: null, lastError: previousError };
         }
-
-        return { snapshot: grouped.snapshot, lastError: groupedError };
+        return groupedQuotaFromCandidates(fallback.candidates, call, {
+          ...groupOptions,
+          summaryDeadlineMs: halfDeadlineMs(),
+          previousError
+        });
       });
       // Kind ordering is semantic; PID ordering within one kind is only stable
       // enumeration. A valid grouped snapshot can therefore finish the kind
       // immediately. Try the next source kind once every grouped task fails.
       const groupedOutcome = await firstSnapshotOrAll(groupedTasks);
-      throwIfAborted(signal);
+      throwIfAborted(deps.signal);
       if (groupedOutcome.snapshot) return { ...groupedOutcome.snapshot, sourceDetail: kind };
-      for (const { lastError: error } of groupedOutcome.results) {
+      for (const [index, { lastError: error }] of groupedOutcome.results.entries()) {
         if (!error) continue;
         lastError = error;
-        sourceFailures.set(kind, error);
+        sourceFailures.set(sourceKeys[index], { source: kind, error });
       }
+      if (signal.aborted) break;
     }
     if (sourceFailures.size) {
       throw Object.assign(errorWithStatus(lastError.status, lastError.message), { cause: lastError, sourceFailures });
