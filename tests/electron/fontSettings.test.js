@@ -215,7 +215,7 @@ test('font settings wiring keeps renderer defaults concrete and technical monosp
   const fontInputRowCss = styles.match(/\.settings-font-input-row \{([\s\S]*?)\}/)?.[1] || '';
   assert.match(fontControlsCss, /border-top: 1px solid var\(--line\)/);
   assert.doesNotMatch(fontControlsCss, /border-bottom/);
-  assert.match(fontInputRowCss, /grid-template-columns: minmax\(0, 1fr\) 18px/);
+  assert.match(fontInputRowCss, /grid-template-columns: minmax\(0, 1fr\) 20px/);
   assert.match(fontInputRowCss, /gap: 8px/);
   assert.match(styles, /settings-font-preview/);
   assert.match(dashboardStyles, /font-family: var\(--ui-font,/);

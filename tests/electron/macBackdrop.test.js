@@ -15,14 +15,14 @@ const i18n = fs.readFileSync(path.join(rendererDir, 'i18n.js'), 'utf8');
 const { normalizeMacBackdropMode, appearanceState, isLiquidGlassBackdrop, liquidGlassStyle, normalizeLiquidGlassTint, liquidGlassTint } = require('../../src/electron/macBackdropMode');
 const { normalizeNativeMaterialState } = require('../../src/electron/renderer/glassRendering');
 
-test('Tint Reset buttons have localized accessible names without changing their visible glyph or styling', () => {
+test('Tint Reset buttons use the shared icon and have localized accessible names', () => {
   const { applyTranslations, translate } = require('../../src/electron/renderer/i18n');
   const buttons = ['macGlassTintReset', 'macClearGlassTintReset'].map((id) => {
     const [, attributes, glyph] = html.match(new RegExp(`<button id="${id}"([^]*?)>([^]*?)</button>`));
-    assert.match(attributes, /class="reset-appearance-button reset-inline"/);
+    assert.match(attributes, /class="settings-reset-button"/);
     assert.match(attributes, /aria-label="Reset tint"/);
     assert.match(attributes, /data-i18n-aria-label="settings.appearance.resetTint"/);
-    assert.equal(glyph, '↺');
+    assert.equal(glyph, '');
     return { textContent: glyph, attributes: {}, dataset: {
       i18nAriaLabel: 'settings.appearance.resetTint'
     }, setAttribute(name, value) { this.attributes[name] = value; } };
@@ -33,7 +33,7 @@ test('Tint Reset buttons have localized accessible names without changing their 
     for (const button of buttons) {
       assert.equal(button.attributes['aria-label'], translate(locale, 'settings.appearance.resetTint'));
       assert.equal(button.attributes.title, undefined);
-      assert.equal(button.textContent, '↺');
+      assert.equal(button.textContent, '');
     }
   }
 });

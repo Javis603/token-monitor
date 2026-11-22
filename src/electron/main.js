@@ -628,6 +628,7 @@ function defaultSettings() {
     showLiveDot: true,
     showToolIcons: true,
     titleIconOnly: true,
+    settingsInTitlebar: false,
     showCompactTotalTokens: false,
     showLiveTokenRate: false,
     liveTokenRateScope: 'all',
@@ -806,6 +807,33 @@ function defaultSettings() {
       lastKnownLatest: null,
       dismissedVersion: null
     }
+  };
+}
+
+function resettableSettingsDefaults() {
+  const defaults = defaultSettings();
+  const keys = [
+    'language', 'startAtLogin', 'automaticAppUpdates', 'discordRpcEnabled',
+    'periodMonthMode', 'currency', 'heatmapMetric', 'homeActiveDaysWindow', 'showExactHomeTrendTokens',
+    'homeModuleCounts', 'homeLimitDisplayMode', 'showHomeLimitBars', 'showHomeLimitProviderNames', 'homeLimitAccountCount',
+    'historyIntervalMs', 'sessionContextMetric', 'limitsHistoryOpenMode', 'modelRankingMetric', 'serviceStatusRefreshMs',
+    'windowBehavior', 'keepAboveTaskbar', 'floatingBubbleEnabled', 'floatingBubbleTrigger', 'floatingBubbleContent',
+    'showTrayIcon', 'trayMode', 'hideAppIcon', 'trayContent', 'showTrayProviderBadge',
+    'edgeDockEnabled', 'edgeDockMode', 'edgeDockSide', 'edgeDockSize', 'edgeDockCustomScale',
+    'edgeDockBubbleSize', 'edgeDockBubbleCustomScale', 'edgeDockMacBackdrop', 'edgeDockWindowsBackdrop',
+    'edgeDockRunningIndicatorEnabled', 'edgeDockWarnColors', 'edgeDockHaptic',
+    'notchEnabled', 'notchHoverAction', 'notchShape', 'notchSize', 'notchCustomScale',
+    'notchStyle', 'notchProgressiveBlur', 'notchSummaryEnabled', 'notchSummaryMode',
+    'notchHideSummaryInFullScreen', 'notchRunningIndicatorEnabled', 'notchWarnColors', 'notchHaptic', 'notchSwipeGestures',
+    'systemGlass', 'windowsBackdrop', 'macBackdrop', 'textSize', 'reduceMotion', 'tokenNumberAnimation',
+    'showCompactTotalTokens', 'compactTokenUnits', 'showLiveTokenRate', 'liveTokenRateScope',
+    'settingsInTitlebar', 'showLiveDot', 'showToolIcons', 'titleIconOnly',
+    'collectionMode', 'wslScanEnabled', 'exportAutoEnabled', 'exportIntervalMs',
+    'showLimitSource', 'showLimitUsed', 'workbuddyQuotaTotalEnabled', 'syncUploadIntervalMs'
+  ];
+  return {
+    ...Object.fromEntries(keys.map(key => [key, defaults[key]])),
+    limitsRefresh: defaults.limitsRefreshMode === 'adaptive' ? 'adaptive' : String(defaults.limitsRefreshMs)
   };
 }
 
@@ -8656,6 +8684,7 @@ app.whenReady().then(() => {
     return repositoryStars.get();
   });
   ipcMain.handle('app:getInfo', () => ({
+    resettableSettingsDefaults: resettableSettingsDefaults(),
     notchCapabilities: notchController?.getCapabilities() || null,
     version: app.getVersion(),
     platform: process.platform,
