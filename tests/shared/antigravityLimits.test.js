@@ -171,17 +171,24 @@ test('Antigravity keeps quota failures scoped across endpoint fallbacks and the 
 });
 
 test('Antigravity clears quota only for the account observed on the rejected RPC process', async () => {
-  let pid = 1;
-  let unauthorized = false;
+  const processFor = (pid) => ({ pid, kind: 'app', csrfToken: `fixture-${pid}`, desktopRpcPort: 54732 + pid });
+  let processes = [processFor(1)];
+  let statusByPort = new Map();
   let nowMs = Date.now();
   const runtime = createLimitsRuntime({ limitProviders: ['antigravity'] }, {
     autoStart: false, autoRetry: false, now: () => nowMs,
-    detectProcessInfos: async () => [{ pid, kind: 'app', csrfToken: `fixture-${pid}`, desktopRpcPort: 54732 + pid }],
+    detectProcessInfos: async () => processes,
     listeningPorts: async processId => [54732 + processId],
     callLs: async ({ method, port }) => {
       if (method === 'GetUnleashData') return {};
       if (method === 'GetUserStatus') return { userStatus: { email: `app-${port}@example.com` } };
-      if (unauthorized) throw Object.assign(new Error('RPC 401'), { status: 'unauthorized', httpStatus: 401 });
+      const status = statusByPort.get(port) ?? 200;
+      if (status !== 200) {
+        throw Object.assign(new Error(`RPC ${status}`), {
+          status: status === 401 ? 'unauthorized' : 'unavailable',
+          httpStatus: status
+        });
+      }
       return { groups: quotaSummary.groups };
     }
   });
@@ -193,25 +200,72 @@ test('Antigravity clears quota only for the account observed on the rejected RPC
   try {
     const [first] = await refresh();
     assert.equal(first.status, 'ok');
-    pid = 2;
-    unauthorized = true;
+
+    // A process without a known binding rejects authentication: keep the reading.
+    processes = [processFor(2)];
+    statusByPort = new Map([[54734, 401]]);
     const [retained] = await refresh();
     assert.equal(retained.status, 'unavailable');
     assert.deepEqual(retained.windows, first.windows);
 
-    unauthorized = false;
+    statusByPort = new Map();
     const second = (await refresh()).find(row => row.status === 'ok');
     assert.notEqual(second.accountKey, first.accountKey);
-    unauthorized = true;
+
+    // Both processes answer: each rejection stays on the account it replaces.
+    processes = [processFor(1), processFor(2)];
+    statusByPort = new Map([[54733, 401], [54734, 503]]);
     const rows = await refresh();
-    for (const [reading, status, windows] of [
-      [first, 'unavailable', first.windows],
-      [second, 'unauthorized', []]
-    ]) {
-      const row = rows.find(row => row.accountKey === reading.accountKey);
-      assert.equal(row.status, status);
-      assert.deepEqual(row.windows, windows);
+    const rejected = rows.find(row => row.accountKey === first.accountKey);
+    assert.equal(rejected?.status, 'unauthorized');
+    assert.deepEqual(rejected.windows, []);
+    const unavailable = rows.find(row => row.accountKey === second.accountKey);
+    assert.equal(unavailable?.status, 'unavailable');
+    assert.deepEqual(unavailable.windows, second.windows);
+
+  } finally {
+    runtime.stop();
+  }
+});
+
+test('Antigravity keeps the previous account read when a process switches accounts', async () => {
+  let suffix = '';
+  let rpcStatus = 200;
+  let nowMs = Date.now();
+  const runtime = createLimitsRuntime({ limitProviders: ['antigravity'] }, {
+    autoStart: false, autoRetry: false, now: () => nowMs,
+    detectProcessInfos: async () => [{ pid: 2, kind: 'app', csrfToken: 'fixture', desktopRpcPort: 54734 }],
+    listeningPorts: async () => [54734],
+    callLs: async ({ method, port }) => {
+      if (method === 'GetUnleashData') return {};
+      if (method === 'GetUserStatus') return { userStatus: { email: `app-${port}${suffix}@example.com` } };
+      if (rpcStatus !== 200) throw Object.assign(new Error('RPC 401'), { status: 'unauthorized', httpStatus: 401 });
+      return { groups: quotaSummary.groups };
     }
+  });
+  async function refresh() {
+    nowMs += 60_000;
+    await runtime.refresh({ provider: 'antigravity' }, 'manual');
+    return runtime.getSnapshot().providers;
+  }
+  try {
+    const [first] = await refresh();
+    assert.equal(first.status, 'ok');
+
+    // The same process signs into another account.
+    suffix = '-b';
+    const second = (await refresh()).find(row => row.status === 'ok');
+    assert.notEqual(second.accountKey, first.accountKey);
+
+    // A rejection belongs to the account the process serves now, not the previous one.
+    rpcStatus = 401;
+    const rows = await refresh();
+    const previous = rows.find(row => row.accountKey === first.accountKey);
+    assert.equal(previous?.status, 'unavailable');
+    assert.deepEqual(previous.windows, first.windows);
+    const switched = rows.find(row => row.accountKey === second.accountKey);
+    assert.equal(switched?.status, 'unauthorized');
+    assert.deepEqual(switched.windows, []);
   } finally {
     runtime.stop();
   }
@@ -746,4 +800,3 @@ test('fetchAntigravityLimits keeps OAuth-only groups when service names share a 
   assert.ok(extra.every(({ label }) => label.endsWith(' 5-hour') && label.length <= 32));
   assert.notEqual(extra[0].label, extra[1].label);
 });
-

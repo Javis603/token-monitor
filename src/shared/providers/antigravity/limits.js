@@ -107,7 +107,41 @@ function antigravityAccountError(account, error, nowMs) {
   });
 }
 
-const rpcIdentityKey = (sourceDetail) => `antigravity-rpc:${sourceDetail}`;
+const RPC_SOURCE_BINDINGS_STATE_KEY = 'antigravity.rpc-source-bindings';
+const RPC_SOURCE_BINDINGS_MAX_ENTRIES = 16;
+
+// A process kind can expose several sources across app restarts. Remember which
+// source produced each account's reading so an authentication rejection clears
+// only that reading, capped like the existing runtime identity caches.
+function bindRpcSourceAccount(sourceDetail, sourceKey, accountKey, deps = {}) {
+  if (!accountKey || !(deps.providerRuntimeState instanceof Map)) return;
+  let bindings = deps.providerRuntimeState.get(RPC_SOURCE_BINDINGS_STATE_KEY);
+  if (!(bindings instanceof Map)) {
+    if (!sourceKey) return;
+    bindings = new Map();
+    deps.providerRuntimeState.set(RPC_SOURCE_BINDINGS_STATE_KEY, bindings);
+  }
+  const key = `${sourceDetail}:${accountKey}`;
+  bindings.delete(key);
+  // An alternate endpoint of the same process proves no process credential. Its
+  // reading must not stay bound to one, or a later rejection replaces it.
+  if (!sourceKey) {
+    if (bindings.size === 0) deps.providerRuntimeState.delete(RPC_SOURCE_BINDINGS_STATE_KEY);
+    return;
+  }
+  // A source serves one account at a time; a same-process account switch must
+  // not leave the previous account bound to it.
+  for (const [boundKey, boundSource] of bindings) {
+    if (boundSource === sourceKey) bindings.delete(boundKey);
+  }
+  bindings.set(key, sourceKey);
+  while (bindings.size > RPC_SOURCE_BINDINGS_MAX_ENTRIES) bindings.delete(bindings.keys().next().value);
+}
+
+function rpcSourceKeyForAccount(sourceDetail, accountKey, deps = {}) {
+  if (!(deps.providerRuntimeState instanceof Map)) return '';
+  return deps.providerRuntimeState.get(RPC_SOURCE_BINDINGS_STATE_KEY)?.get(`${sourceDetail}:${accountKey}`) || '';
+}
 
 async function fetchAntigravityLimits(options = {}, deps = {}) {
   if (options.antigravityAccountSlots?.length) options = { ...options, antigravityManagedAccounts: mergedOwnerAccounts(options, 'antigravity', options.antigravityManagedAccounts || []).map(account => ({ ...account, credentials: account.credentials })) };
@@ -128,10 +162,7 @@ async function fetchAntigravityLimits(options = {}, deps = {}) {
       const snapshot = await probeFn(deps);
       const row = mapAntigravitySnapshot(snapshot, { nowMs, source: 'rpc' });
       if (row.status === 'ok' && row.sourceDetail && !deps.signal?.aborted) {
-        // Store only the latest observed account binding for each process kind.
-        const key = rpcIdentityKey(row.sourceDetail);
-        if (snapshot.sourceKey) deps.providerRuntimeState?.set(key, { sourceKey: snapshot.sourceKey, accountKey: row.accountKey });
-        else deps.providerRuntimeState?.delete(key);
+        bindRpcSourceAccount(row.sourceDetail, snapshot.sourceKey, row.accountKey, deps);
       }
       return row;
     } catch (error) {
@@ -148,10 +179,8 @@ async function fetchAntigravityLimits(options = {}, deps = {}) {
         const previous = (options.previousLimits?.providers || []).filter(row => row.provider === 'antigravity');
         const rows = previous.filter(row => row.source === 'rpc' && row.accountKey)
           .map(({ accountKey, accountLabel, accountEmail, sourceDetail }) => {
-            const identity = deps.providerRuntimeState?.get(rpcIdentityKey(sourceDetail));
-            const failure = identity?.accountKey === accountKey
-              ? sourceFailures.get(identity.sourceKey)
-              : null;
+            const sourceKey = rpcSourceKeyForAccount(sourceDetail, accountKey, deps);
+            const failure = sourceKey ? sourceFailures.get(sourceKey) : null;
             return normalizeLimitProvider({
               ...base, accountKey, accountLabel, accountEmail, sourceDetail,
               status: providerStatusFromError(failure?.error)
@@ -167,7 +196,13 @@ async function fetchAntigravityLimits(options = {}, deps = {}) {
   const localPromise = scope?.sourceDetail === 'oauth'
     ? Promise.resolve(null)
     : probeFn(deps).then(
-        (snapshot) => mapAntigravitySnapshot(snapshot, { nowMs, source: 'rpc' }),
+        (snapshot) => {
+          const row = mapAntigravitySnapshot(snapshot, { nowMs, source: 'rpc' });
+          if (row.status === 'ok' && row.sourceDetail) {
+            bindRpcSourceAccount(row.sourceDetail, snapshot.sourceKey, row.accountKey, deps);
+          }
+          return row;
+        },
         () => null
       );
   const remotePromise = Promise.all(accounts.map(async (account) => {
