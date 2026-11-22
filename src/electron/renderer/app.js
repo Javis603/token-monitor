@@ -8517,6 +8517,7 @@ async function refreshStats(options = {}) {
     allTimeSessions.invalidate();
     state.stats = sessionStatsForDisplay(allTimeSessions.attach(nextStats));
     observeDisplayLiveTokenRates(nextStats);
+    if (typeof signalHibernateRevealIfReady === 'function') signalHibernateRevealIfReady();
     if (options.forceHistory === true) {
       // A manual history rescan is an explicit retry boundary. Let Home request the
       // corresponding full payload even when its revision is unchanged, and restore
@@ -14589,6 +14590,14 @@ if (pluginBridge) {
   pluginBridge.onChanged(() => void refreshPluginCatalog());
 }
 
+let hibernateRevealPending = false;
+
+function signalHibernateRevealIfReady() {
+  if (!hibernateRevealPending || !initialSettingsApplied || !state.stats) return;
+  hibernateRevealPending = false;
+  window.tokenMonitor.signalAppearanceReady?.();
+}
+
 async function init() {
   // Subscribe before querying: a native appearance/accessibility change can
   // arrive while the initial state round trip is in flight.
@@ -14645,11 +14654,22 @@ async function init() {
   // Tray startup also needs its saved appearance prepared before native show.
   applyVisibleSettingsAppearance();
   initialSettingsApplied = true;
-  if (state.windowVisible) {
+  // A tray action can arrive at did-finish-load, before this asynchronous init
+  // finishes. Replay it now, before the window can announce appearance, so the
+  // first painted frame is the requested view or settings section.
+  flushPendingTrayOpen();
+  const hibernateReveal = new URLSearchParams(window.location.search).get('hibernateReveal') === '1';
+  if (hibernateReveal) {
+    // Do not reveal the recreated popover on the static zero defaults. Wait for
+    // the first real stats snapshot; the main process still falls back after
+    // its short wake timeout if stats do not arrive.
+    hibernateRevealPending = true;
+    signalHibernateRevealIfReady();
+  } else if (state.windowVisible) {
     const signalAppearanceReady = () => window.tokenMonitor.signalAppearanceReady?.();
     // A retained WebContentsView can be document.hidden until its native host
     // shows. Prepare it now, without waiting on animation frames that pause while
-    // hidden. windowVisible still excludes intentionally hidden tray startup.
+    // hidden.
     if (document.hidden) signalAppearanceReady();
     else requestAnimationFrame(() => requestAnimationFrame(signalAppearanceReady));
   }
@@ -15997,8 +16017,39 @@ reducedMotionMedia?.addEventListener?.('change', () => {
   applyReduceMotionPreference('system');
 });
 
-window.tokenMonitor.onOpenSettings?.(openSettingsPanel);
-window.tokenMonitor.onOpenView?.(openViewFromTray);
+// The main process sends tray navigation as soon as did-finish-load fires,
+// which can be earlier than the asynchronous settings load above. Dispatching
+// then would open the panel or switch views against the default state; keep the
+// last request until init has applied the saved settings instead.
+let pendingTrayOpen = null;
+
+function dispatchTrayOpen(request) {
+  // An explicit tray view outranks the saved startup preference. Consume the
+  // one-time preference so the later syncSettingsForm() cannot replace it; a
+  // plugin page as the last view leaves the query seed absent, so this is not
+  // already covered by initialViewState.
+  if (request.kind === 'view') initialBreakdownPreferenceApplied = true;
+  if (request.kind === 'view') openViewFromTray(request.value);
+  else openSettingsPanel(request.value);
+}
+
+function handleTrayOpenRequest(kind, value) {
+  if (!initialSettingsApplied || !state.settings) {
+    pendingTrayOpen = { kind, value };
+    return;
+  }
+  dispatchTrayOpen({ kind, value });
+}
+
+function flushPendingTrayOpen() {
+  if (!pendingTrayOpen) return;
+  const request = pendingTrayOpen;
+  pendingTrayOpen = null;
+  dispatchTrayOpen(request);
+}
+
+window.tokenMonitor.onOpenSettings?.((section) => handleTrayOpenRequest('settings', section));
+window.tokenMonitor.onOpenView?.((viewId) => handleTrayOpenRequest('view', viewId));
 
 window.tokenMonitor.onFloatingBubbleState?.((payload) => {
   applyFloatingBubbleState(payload);
@@ -16162,6 +16213,7 @@ window.tokenMonitor.onStatsPush?.((payload) => {
     state.stats = sessionStatsForDisplay(allTimeSessions.attach(incomingStats));
     observeLiveTokenRate(state.stats);
     observeDisplayLiveTokenRates(state.stats);
+    if (typeof signalHibernateRevealIfReady === 'function') signalHibernateRevealIfReady();
     applyCodexActiveAccountFromStats();
     // Progressive mid-tick pushes never carry a fresh history scan (see
     // AGENTS.md collector notes), so only the final push can retire the
