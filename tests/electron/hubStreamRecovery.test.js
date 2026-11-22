@@ -66,7 +66,7 @@ function streamFixture(t, { pendingHeaders = false, ignoreAbort = false } = {}) 
     sendPush() {},
     setLatestHubStatsCache: stats => { cached = stats; },
     requestSyncDisplayStats: () => snapshots.push(cached),
-    fetch(_url, { signal }) {
+    fetchFromHub(_url, { signal }) {
       const connection = { signal };
       connections.push(connection);
       if (pendingHeaders) return new Promise((_resolve, reject) => signal.addEventListener('abort', () => reject(signal.reason), { once: true }));
@@ -235,7 +235,7 @@ test('the periodic fallback reuses fresh stream data and downloads only when it 
     effectiveHubConfig: () => ({ url: 'https://hub.invalid', secret: 's' }),
     currentHubStatsCache: () => cached, hubModeRequestIsCurrent: () => true, setLatestHubStatsCache() {},
     composeLocalSyncSummary: stats => stats, injectLocalDeviceStatus: stats => stats,
-    async fetch() { downloads++; return { ok: true, json: async () => ({ devices: [], marker: 'rest' }) }; }
+    async fetchFromHub() { downloads++; return { ok: true, json: async () => ({ devices: [], marker: 'rest' }) }; }
   });
   vm.runInContext(fetchSource, context);
   const fallback = { streamCache: true };

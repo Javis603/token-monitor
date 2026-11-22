@@ -5,6 +5,7 @@ const test = require('node:test');
 
 const {
   AppProxyAgent,
+  createDesktopHubFetch,
   createSessionProxyApplier,
   networkProxySource,
   noProxyError,
@@ -15,6 +16,23 @@ const {
   sessionProxyConfig
 } = require('../../src/electron/networkProxy');
 const { resolveProxyConfig } = require('../../src/shared/outboundFetch');
+
+test('desktop Hub requests keep local addresses direct and use the current route for remote requests', async () => {
+  const calls = [];
+  let route = 'system';
+  const fetchFromHub = createDesktopHubFetch(
+    async (url, init) => calls.push([route, url, init]),
+    async (url, init) => calls.push(['direct', url, init])
+  );
+  const init = { headers: { authorization: 'Bearer fixture' }, signal: new AbortController().signal };
+  const local = 'http://127.0.0.1:17321/api/stats';
+  const remote = 'https://hub.example/api/stats/stream';
+  await fetchFromHub(local, init);
+  await fetchFromHub(remote, init);
+  route = 'app';
+  await fetchFromHub(remote, init);
+  assert.deepEqual(calls, [['direct', local, init], ['system', remote, init], ['app', remote, init]]);
+});
 
 test('proxy URLs normalize to scheme://host[:port]', () => {
   assert.equal(normalizeProxyUrl('http://127.0.0.1:7897'), 'http://127.0.0.1:7897');

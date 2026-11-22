@@ -55,6 +55,7 @@ const { isLimitWindowHidden: historyWindowHidden } = require('../shared/limits/u
 const { maskEmailAddress: historyMaskEmail } = require('./renderer/accountIdentity');
 const { vendorColors: historyVendorColors } = require('../shared/vendorPresentation');
 const {
+  createDesktopHubFetch,
   createSessionProxyApplier,
   createProxyReadyFetch,
   networkProxySource,
@@ -114,6 +115,7 @@ const sessionProxy = createSessionProxyApplier({
   getConfig: () => sessionProxyConfig(settings || {}),
   log: (message) => console.log(message)
 });
+const fetchFromHub = createDesktopHubFetch(electronLimitsFetch());
 
 // Lazy because `session.defaultSession` only exists once the app is ready, and
 // process-wide because the transport caches one proxy agent per proxy URL.
@@ -3123,7 +3125,7 @@ async function deleteDeviceFromHub(deviceId) {
   const { url: hubUrl, secret } = effectiveHubConfig();
   if (!hubUrl) return;
   const base = hubUrl.replace(/\/$/, '');
-  const response = await fetch(`${base}/api/devices/${encodeURIComponent(deviceId)}`, {
+  const response = await fetchFromHub(`${base}/api/devices/${encodeURIComponent(deviceId)}`, {
     method: 'DELETE',
     headers: secret ? { authorization: `Bearer ${secret}` } : {}
   });
@@ -3189,7 +3191,7 @@ async function postToHub(summary) {
     || syncOptions.identity !== getSyncContentRuntime().status().identity
     || !sameDestination(uploadContext, syncContentContext())
     || summary.deviceId !== syncContentContext().deviceId) throw new Error('hub_changed');
-  const fetchForUpload = (target, options) => fetch(target, { ...options, redirect: 'error',
+  const fetchForUpload = (target, options) => fetchFromHub(target, { ...options, redirect: 'error',
     signal: AbortSignal.any([syncOptions.signal, AbortSignal.timeout(15_000)]) });
   const { response } = await postSyncPayload(fetchForUpload, url, {
     syncSessionTitles: syncOptions.syncSessionTitles,
@@ -3242,7 +3244,7 @@ async function requestSyncContent(context, pathname, method, body) {
         body: error.current || null };
     }
   }
-  const response = await fetch(`${context.url.replace(/\/$/, '')}${pathname}`, {
+  const response = await fetchFromHub(`${context.url.replace(/\/$/, '')}${pathname}`, {
     method, redirect: 'error',
     headers: { 'content-type': 'application/json', ...(context.secret ? { authorization: `Bearer ${context.secret}` } : {}) },
     ...(body !== undefined ? { body: JSON.stringify(body) } : {}),
@@ -3497,7 +3499,7 @@ async function fetchSharedSubscriptions() {
   // lane open for the rest of the session, and every later read and save for that
   // hub behind it. fetch() has no deadline of its own, so it gets the same 15s
   // the other hub requests use.
-  const response = await fetch(endpoint.url, { headers: endpoint.headers, signal: AbortSignal.timeout(15_000) });
+  const response = await fetchFromHub(endpoint.url, { headers: endpoint.headers, signal: AbortSignal.timeout(15_000) });
   if (!response.ok) throw new Error(`Hub ${response.status}: ${(await response.text()).slice(0, 200)}`);
   return response.json();
 }
@@ -3552,7 +3554,7 @@ async function writeSharedSubscriptionsNow(list, hub, baseUpdatedAt) {
   }
   const endpoint = subscriptionsEndpoint();
   if (!endpoint) throw new Error('hub not configured');
-  const response = await fetch(endpoint.url, {
+  const response = await fetchFromHub(endpoint.url, {
     method: 'PUT',
     headers: { 'content-type': 'application/json', ...endpoint.headers },
     body: JSON.stringify({ subscriptions: list, baseUpdatedAt }),
@@ -4380,6 +4382,7 @@ function historyResolverOptions() {
   return {
     aggregateHistory,
     embeddedHub,
+    fetchImpl: fetchFromHub,
     historyEnabled: settings?.historyEnabled !== false,
     hubMode: settings?.hubMode,
     hubUrl,
@@ -5024,7 +5027,7 @@ async function startStatsStream(options = {}) {
   controller.signal.addEventListener('abort', () => clearTimeout(activityTimer), { once: true });
   try {
     armActivityTimeout(15_000);
-    const response = await fetch(url, {
+    const response = await fetchFromHub(url, {
       headers: {
         accept: 'text/event-stream',
         [HUB_STREAM_HEADER]: HUB_STREAM_VERSION,
@@ -6733,7 +6736,7 @@ async function fetchStats(options = {}) {
     }
   }
   const url = `${hubUrl.replace(/\/$/, '')}/api/stats`;
-  const response = await fetch(url, { headers: secret ? { authorization: `Bearer ${secret}` } : {} });
+  const response = await fetchFromHub(url, { headers: secret ? { authorization: `Bearer ${secret}` } : {} });
   if (!response.ok) throw new Error(`Hub ${response.status}: ${(await response.text()).slice(0, 200)}`);
   const stats = await response.json();
   if (!hubModeRequestIsCurrent(requestGeneration, 'client', requestHubIdentity)) {
@@ -8333,6 +8336,9 @@ app.whenReady().then(() => {
           console.log(`[limits-runtime] settings refresh failed: ${error.message}`);
         });
       }
+    }
+    if (proxySettingChanged && !runtimeChange.modeStructural && settings.hubMode === 'client') {
+      void startStatsStream();
     }
     if (settings.showTrayIcon !== previousShowTrayIcon) {
       if (settings.showTrayIcon) ensureTray();

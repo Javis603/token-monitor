@@ -76,6 +76,10 @@ function isImplicitBypassOrigin(origin, platform) {
   }
 }
 
+function createDesktopHubFetch(proxyFetch, directFetch = globalThis.fetch) {
+  return (url, init) => isImplicitBypassOrigin(url) ? directFetch(url, init) : proxyFetch(url, init);
+}
+
 /**
  * undici dispatcher for the app proxy: local hosts go to a direct Agent, the
  * rest to an EnvHttpProxyAgent built from explicit values only. Every proxy
@@ -404,6 +408,7 @@ function createProxyReadyFetch(fetchImpl, ensureReady) {
 
 module.exports = {
   AppProxyAgent,
+  createDesktopHubFetch,
   createProxyReadyFetch,
   createSessionProxyApplier,
   effectiveAppProxy,
