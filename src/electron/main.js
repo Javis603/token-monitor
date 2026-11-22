@@ -3057,7 +3057,7 @@ function getHubInfo() {
 async function getHubBuildStatus() {
   if (settings?.hubMode !== 'client') return { status: 'notConfigured', runtime: '', hubUrl: '' };
   const hubUrl = String(settings.hubUrl || '').trim();
-  return probeHubBuild(hubUrl);
+  return probeHubBuild(hubUrl, { fetchImpl: fetchFromHub });
 }
 
 async function startEmbeddedHub() {
