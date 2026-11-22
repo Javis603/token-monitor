@@ -819,7 +819,7 @@ function resettableSettingsDefaults() {
     'historyIntervalMs', 'sessionContextMetric', 'limitsHistoryOpenMode', 'modelRankingMetric', 'serviceStatusRefreshMs',
     'windowBehavior', 'keepAboveTaskbar', 'floatingBubbleEnabled', 'floatingBubbleTrigger', 'floatingBubbleContent',
     'showTrayIcon', 'trayMode', 'hideAppIcon', 'trayContent', 'showTrayProviderBadge',
-    'edgeDockEnabled', 'edgeDockMode', 'edgeDockSide', 'edgeDockSize', 'edgeDockCustomScale',
+    'edgeDockEnabled', 'edgeDockMode', 'edgeDockTriggerRange', 'edgeDockSide', 'edgeDockSize', 'edgeDockCustomScale',
     'edgeDockBubbleSize', 'edgeDockBubbleCustomScale', 'edgeDockMacBackdrop', 'edgeDockWindowsBackdrop',
     'edgeDockRunningIndicatorEnabled', 'edgeDockWarnColors', 'edgeDockHaptic',
     'notchEnabled', 'notchHoverAction', 'notchShape', 'notchSize', 'notchCustomScale',
