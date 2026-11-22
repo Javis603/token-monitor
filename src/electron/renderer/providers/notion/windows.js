@@ -17,6 +17,7 @@
         window.kind === 'session' ? 0.95 : 0.68, null, providerWindowText(provider, window).detail
       ));
     if (quotaNodes.length === 1) quotaNodes[0].classList.add('limit-window-wide');
+    windows.classList.add('limit-windows-notion');
     windows.append(...quotaNodes);
   }
 
