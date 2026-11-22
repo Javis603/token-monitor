@@ -268,7 +268,7 @@ Token Monitor 對 Token 用量、帳戶額度與 session 明細分別支援：
 | <img src=".github/assets/tools-icon/trae.png" width="28" alt="Trae CN" /> | Trae CN | Trae CN access token（透過 trae.cn 查詢 Trae CN／SOLO credits） | — | ✅ | — |
 | <img src=".github/assets/tools-icon/alibaba.png" width="28" alt="Alibaba Cloud" /> | Alibaba Cloud | 阿里雲控制台 cookie（百鍊／Model Studio Token Plan 額度，團隊版與個人版） | — | ✅ | — |
 | <img src=".github/assets/tools-icon/stepfun.png" width="28" alt="StepFun" /> | StepFun | StepFun Oasis-Token（Coding Plan／Token Plan 額度） | — | ✅ | — |
-| <img src=".github/assets/tools-icon/notion.png" width="28" alt="Notion AI" /> | Notion AI | Notion AI 滾動／每月額度，限 Business/Enterprise；手動 token_v2 Cookie + 明確的工作區 ID | — | ✅ | — |
+| <img src=".github/assets/tools-icon/notion.png" width="28" alt="Notion AI" /> | Notion AI | Business/Enterprise 的標準與自選積分，或舊制滾動／每月額度；手動 token_v2 Cookie + 明確的工作區 ID | — | ✅ | — |
 | <img src=".github/assets/tools-icon/manus.png" width="28" alt="Manus" /> | Manus | 每日／每月額度與點數餘額；桌面工作階段（macOS／Windows）或手動網頁工作階段（所有 OS） | — | ✅ | — |
 | <img src=".github/assets/tools-icon/hark.png" width="28" alt="Hark" /> | Hark | Hark Pro 的每日與每月 token 池；macOS 桌面工作階段或貼上的工作階段 cookie | — | ✅ | — |
 | <img src=".github/assets/tools-icon/opendesign.png" width="28" alt="OpenDesign" /> | OpenDesign | 目前工作區的 5 小時／每週訂閱額度；手動 Cookie | — | ✅ | — |
@@ -288,7 +288,7 @@ Token Monitor 對 Token 用量、帳戶額度與 session 明細分別支援：
 - LM Studio 追蹤目前僅涵蓋伺服器日誌中記錄的 OpenAI 相容 `/v1/chat/completions` 與 `/v1/responses` 請求。透過 LM Studio 內建 Chat 介面發起的對話，以及原生 `/api/v1/chat` 請求均不包含在內。
 - Unsloth Studio 從 `studio.db` 追蹤 Studio 對話與本機 API 的推論用量。本機推論的 API 費用為零；可識別的按量計費供應商使用 Tokscale 的價格估算。不包含訓練 Token。詳見 [Unsloth 資料來源說明](docs/providers/unsloth.md)。
 - Devin 從本機 `sessions.db` 追蹤 Devin CLI 會話，並從 `acp-events` ACP 日誌追蹤 Devin Desktop 代理會話；同一 session 兩邊都有資料時以 CLI 資料庫為準。Desktop 的涵蓋範圍取決於連接的 ACP 代理：只有會在本機寫入 `usage_update` 事件的代理才會計入，而 Devin Desktop 預設的 `devin-cloud` 代理在伺服器端計量，因此預設的 Desktop 設定不會回報 Desktop token。session 標題與專案歸屬取自 CLI 資料庫。詳見 [Devin 資料來源說明](docs/providers/devin.md)。
-- Notion AI 使用內部 API，需手動貼上 `token_v2` Cookie 與明確的 Business/Enterprise 工作區 ID。目前僅以測試資料驗證，尚無真實回應樣本，實際登入驗證待批准。不會自動取得 Cookie，也不保證公開 API 相容性。詳見 [Notion 資料來源說明](docs/providers/notion.md)。
+- Notion AI 使用內部 API，需手動貼上 `token_v2` Cookie 與明確的 Business/Enterprise 工作區 ID。Token Monitor 使用包含已去識別化標準與自選積分回應的測試樣本驗證。詳見 [Notion 資料來源說明](docs/providers/notion.md)。
 - Manus 支援 macOS／Windows 桌面工作階段自動讀取，所有 OS（含 Linux）也可手動輸入網頁工作階段。每日／每月額度與點數餘額使用相同的未公開內部介面，不保證相容性。詳見 [Manus 資料來源說明](docs/providers/manus.md)。
 - Hark 在 macOS 上讀取已登入的桌面工作階段，任何系統都可以貼上工作階段 cookie。顯示帳戶級的每日與每月 token 池。詳見 [Hark 資料來源說明](docs/providers/hark.md)。
 - MiniMax Code 讀取 CLI 寫入的本機工作階段記錄，位於 `~/.minimax` 或 `MINIMAX_DATA_DIR` / `MAVIS_DATA_DIR`（亦包括 `~/.mavis` 與 `~/.minimax-<profile>` / `~/.mavis-<profile>`），並加上以 `tokscale headless mcode` 擷取的執行；兩邊都有的同一輪只計一次。
