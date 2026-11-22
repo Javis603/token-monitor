@@ -1,4 +1,4 @@
-/* global state, els, renderLimits, renderTrends, renderSessionDetail, renderRows, updateRow, sessionRowsForPeriod, renderSessionGroupDetail, sessionRowsApi, rendererDom, document, PointerEvent, requestAnimationFrame */
+/* global state, els, renderLimits, renderTrends, renderSessionDetail, renderRows, updateRow, sessionRowsForPeriod, renderSessionGroupDetail, sessionRowsApi, rendererDom, document, getComputedStyle, PointerEvent, requestAnimationFrame */
 'use strict';
 (async () => {
   const assert = (ok, message) => { if (!ok) throw new Error(message); };
