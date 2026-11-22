@@ -5264,7 +5264,7 @@ html.is-windows .settings-panel select option {
 /* Where an even pace through the window would leave the meter now: a notch
    cut through the groove and fill, so it reads on any glass behind it. Pace
    is on demand: a standing mark on every row read as clutter. */
-.home-limit-account:hover .home-limit-track.has-pace .home-limit-meter {
+.home-limit-account:is(:hover, :focus-within) .home-limit-track.has-pace .home-limit-meter {
   mask-image: linear-gradient(90deg, #000 calc(var(--home-limit-pace) - 1px), transparent 0,
     transparent calc(var(--home-limit-pace) + 1px), #000 0);
 }
@@ -5338,7 +5338,7 @@ html.is-windows .settings-panel select option {
   opacity: 0;
   transition: opacity 150ms ease;
 }
-.home-limit-account:hover .home-limit-pace { opacity: 1; }
+.home-limit-account:is(:hover, :focus-within) .home-limit-pace { opacity: 1; }
 .home-limit-window > .home-list-value,
 .home-limit-window-value {
   grid-column: 5;
