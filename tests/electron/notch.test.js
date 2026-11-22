@@ -3167,6 +3167,28 @@ test('scroll gestures step between the hidden summary, the summary and the open 
   assert.equal(last(f.top).expanded, true);
 });
 
+test('a screen-lock stop preserves a dismissed summary, an ordinary stop resets it', (t) => {
+  const f = scrollFixture(t);
+  f.scroll(30);
+  f.scroll(-30);
+  f.scroll(-30);
+  assert.equal(last(notchWindow(f)).summary, null);
+
+  f.controller.stop({ preserveSummary: true });
+  f.controller.sync();
+  const locked = notchWindow(f);
+  f.ipcMain.emit('topNotch:ready', { sender: locked.webContents });
+  f.controller.setData(buildNotchData(stats(), [], { trayContent: 'tokens' }));
+  assert.equal(last(locked).summary, null, 'the dismissed summary stays hidden after unlock');
+
+  f.controller.stop();
+  f.controller.sync();
+  const restored = notchWindow(f);
+  f.ipcMain.emit('topNotch:ready', { sender: restored.webContents });
+  f.controller.setData(buildNotchData(stats(), [], { trayContent: 'tokens' }));
+  assert.ok(last(restored).summary, 'an ordinary stop still resets the choice');
+});
+
 test('opening the panel any way clears a dismissed summary', (t) => {
   const f = scrollFixture(t);
   f.scroll(-30);

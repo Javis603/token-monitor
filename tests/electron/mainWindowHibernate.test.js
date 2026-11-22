@@ -55,8 +55,8 @@ function fixture(platform = 'linux') {
   const controller = kind => ({
     owns: win => win.kind === kind,
     setAppearance() {},
-    stop() {
-      surfaceEvents.push(`${kind}:stop`);
+    stop(options = {}) {
+      surfaceEvents.push(`${kind}:stop${options.preserveSummary ? ':preserveSummary' : ''}`);
       for (const win of windows) if (this.owns(win)) win.destroy();
     },
     sync() {
@@ -174,7 +174,7 @@ test('screen lock destroys the tray UI and unlock rebuilds the dock and notch wh
   assert.equal(original.isDestroyed(), true);
   assert.equal(context.mainWindow, null);
   assert.equal(run.windows.size, 0);
-  assert.deepEqual(run.surfaceEvents, ['notch:locked:true', 'dock:stop', 'notch:stop']);
+  assert.deepEqual(run.surfaceEvents, ['notch:locked:true', 'dock:stop', 'notch:stop:preserveSummary']);
 
   powerMonitor.emit('unlock-screen');
   assert.equal(run.suspended(), false);

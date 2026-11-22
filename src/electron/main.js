@@ -7673,7 +7673,7 @@ function suspendScreenUi() {
     || process.platform !== 'darwin' || hasDependentAppWindow()) return;
   screenUiSuspended = true;
   edgeDockController?.stop();
-  notchController?.stop();
+  notchController?.stop({ preserveSummary: true });
   hidePopover();
   hibernateMainWindow();
   // A parked history card has no owner and can be rebuilt on the next open.
