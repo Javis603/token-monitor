@@ -128,8 +128,9 @@ test('dailyWindow keeps every calendar day, so zero-usage days stay in the range
     '2026-06-01', '2026-06-02', '2026-06-03', '2026-06-04', '2026-06-05', '2026-06-06', '2026-06-07'
   ]);
   assert.deepEqual(window.map((day) => day.tokens), [10, 0, 0, 30, 0, 0, 0]);
+  assert.deepEqual(window.map((day) => day.hasRecord), [true, false, false, true, false, false, false]);
   assert.equal(window[0].perClient.claude.tokens, 10, 'recorded rows keep their attribution');
-  assert.equal(window[1].perClient, undefined, 'a filled day is an explicit zero, not an empty row');
+  assert.equal(window[1].perClient, undefined, 'a gap has no recorded attribution');
 });
 
 test('dailyWindow spans the whole recorded run through today, never just the rows', () => {
@@ -146,15 +147,31 @@ test('dailyWindow spans the whole recorded run through today, never just the row
   assert.deepEqual(dailyWindow([], { days: 7, todayKey: '2026-06-07' }), []);
 });
 
-test('candleChart keeps quiet days out of OHLC without collapsing the calendar', () => {
+test('dailyWindow ignores impossible calendar dates and retains a recorded zero', () => {
+  const rows = [
+    { date: '2026-02-29', tokens: 100 },
+    { date: '2026-03-01', tokens: 0, messages: 1 },
+    { date: '2026-13-01', tokens: 100 }
+  ];
+  const window = dailyWindow(rows, { days: 2, todayKey: '2026-03-02' });
+  assert.deepEqual(window, [
+    { date: '2026-03-01', tokens: 0, messages: 1, hasRecord: true },
+    { date: '2026-03-02', tokens: 0, cost: 0, hasRecord: false }
+  ]);
+  const model = dailyBarsChart(window);
+  assert.deepEqual(model.bars.map((bar) => [bar.total, bar.hasRecord]), [[0, true], [0, false]]);
+  assert.deepEqual(dailyWindow([rows[0]], { todayKey: '2026-03-02' }), []);
+});
+
+test('candleChart preserves calendar slots and calculates OHLC from recorded days', () => {
   const week = [
-    { date: '2026-06-01', tokens: 0 },
+    { date: '2026-06-01', tokens: 0, hasRecord: false },
     { date: '2026-06-02', tokens: 10 },
-    { date: '2026-06-03', tokens: 0 },
+    { date: '2026-06-03', tokens: 0, hasRecord: false },
     { date: '2026-06-04', tokens: 30 },
-    { date: '2026-06-05', tokens: 0 },
-    { date: '2026-06-06', tokens: 0 },
-    { date: '2026-06-07', tokens: 0 }
+    { date: '2026-06-05', tokens: 0, hasRecord: false },
+    { date: '2026-06-06', tokens: 0, hasRecord: false },
+    { date: '2026-06-07', tokens: 0, hasRecord: false }
   ];
   const options = { width: 100, height: 100, padTop: 0, padRight: 0, padBottom: 0, padLeft: 0, bucketDays: 7 };
   const model = candleChart(week, options);
@@ -163,20 +180,27 @@ test('candleChart keeps quiet days out of OHLC without collapsing the calendar',
   assert.deepEqual(
     [model.candles[0].open, model.candles[0].high, model.candles[0].low, model.candles[0].close],
     [10, 30, 10, 30],
-    'zero days must not drag the bucket low to the baseline'
+    'missing days leave the bucket low unchanged'
   );
   assert.equal(model.candles[0].key, '2026-06-01');
   assert.equal(model.candles[0].endKey, '2026-06-07');
-  assert.equal(model.candles[0].flat, false);
+  assert.equal(model.candles[0].hasRecord, true);
 
-  // A bucket with no usage at all keeps its calendar slot but draws no mark.
-  const quiet = candleChart(week.map((day) => ({ ...day, tokens: 0 })), options);
+  const weekWithZero = week.map((day) => day.date === '2026-06-03' ? { ...day, hasRecord: true } : day);
+  assert.equal(candleChart(weekWithZero, options).candles[0].low, 0, 'a recorded zero counts towards OHLC');
+
+  const gaps = week.map((day) => ({ ...day, tokens: 0, hasRecord: false }));
+  const quiet = candleChart(gaps, options);
   assert.equal(quiet.candles.length, 1);
   assert.deepEqual([quiet.candles[0].open, quiet.candles[0].high, quiet.candles[0].low, quiet.candles[0].close], [0, 0, 0, 0]);
-  assert.equal(quiet.candles[0].flat, true);
+  assert.equal(quiet.candles[0].hasRecord, false);
   const quietSvg = candleChartSvg(quiet, { axisLabel: () => '' });
   assert.doesNotMatch(quietSvg, /candle-body/);
   assert.match(quietSvg, /class="bar-hover"/);
+
+  const zero = candleChart([{ ...gaps[0], hasRecord: true }, ...gaps.slice(1)], options);
+  assert.equal(zero.candles[0].hasRecord, true);
+  assert.match(candleChartSvg(zero), /candle-body/);
 });
 
 test('barsChartSvg renders one rect per segment with colorFor fill and a per-bar description', () => {

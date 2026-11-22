@@ -356,9 +356,7 @@ function renderLegend(model) {
 function renderTrends() {
   const previousKind = state.chartKind;
   const previousGeometry = captureGeometry(els.chart, '.bar-stack[data-motion-key]');
-  // The selected range is calendar days, not recorded rows: history omits
-  // zero-usage days, so slicing it would quietly shorten the range and drop the
-  // quiet days from the chart entirely.
+  // Give each calendar day a slot even when history has no record for it.
   const daily = charts.dailyWindow(state.history?.daily || [], {
     days: state.range === 'all' ? 0 : Number(state.range)
   });
@@ -610,14 +608,16 @@ function positionTooltip(ev) {
 }
 
 function showBarTooltip(bar, ev) {
+  if (bar.hasRecord === false) {
+    els.tooltip.innerHTML = `<div class="tt-head">${shortDate(bar.label)} · ${t('dashboard.noRecord')}</div>`;
+    positionTooltip(ev);
+    return;
+  }
   const segs = (bar.segments || []).filter((s) => s.value > 0).sort((a, b) => b.value - a.value);
   const rows = segs.map((s) =>
     `<div class="tt-row"><span class="tt-dot" data-c="${colorFor(s.key)}"></span><span class="tt-name">${s.key}</span><span class="tt-val">${formatCompact(s.value)}</span></div>`
   ).join('');
-  // History only stores days that saw usage, so a filled day with no segments is
-  // a day without a record — not a measured zero.
-  const total = rows ? ` · ${formatCompact(bar.total)}` : ` · ${t('dashboard.noRecord')}`;
-  els.tooltip.innerHTML = `<div class="tt-head">${shortDate(bar.label)}${total}</div>${rows}`;
+  els.tooltip.innerHTML = `<div class="tt-head">${shortDate(bar.label)} · ${formatCompact(bar.total)}</div>${rows}`;
   applySwatchColors(els.tooltip);
   positionTooltip(ev);
 }
@@ -625,8 +625,7 @@ function showBarTooltip(bar, ev) {
 function showCandleTooltip(c, ev) {
   // Each candle spans a bucket of days: O = first day, C = last day, H/L = busiest/quietest.
   const head = c.endKey && c.endKey !== c.key ? `${longDate(c.key)} – ${longDate(c.endKey)}` : longDate(c.key);
-  // A bucket whose every day is a filled zero row has no recorded usage at all.
-  if (c.flat) {
+  if (c.hasRecord === false) {
     els.tooltip.innerHTML = `<div class="tt-head">${head}</div><div class="tt-row"><span class="tt-name">${t('dashboard.noRecord')}</span></div>`;
     positionTooltip(ev);
     return;
