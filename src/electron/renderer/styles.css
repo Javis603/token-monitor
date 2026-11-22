@@ -8308,6 +8308,9 @@ html.native-liquid-glass .view-switcher-menu-item { border-radius: 9px; }
 .main-view-link:is(:hover, :focus-visible)::after { background: currentColor; }
 :is(.main-view-link, .main-view-back):focus-visible { outline: 1px solid rgba(var(--accent-rgb), 0.72); outline-offset: 1px; }
 .main-view-subpage { display: grid; grid-template-columns: minmax(0, 1fr); min-width: 0; }
+.main-view-back { display: inline-flex; align-items: center; gap: 8px; min-height: 28px; padding: 4px 8px; margin: 0 0 12px; border: 1px solid transparent; border-radius: 6px; background: transparent; color: var(--text); font: inherit; font-size: .6875rem; cursor: pointer; }
+.main-view-back::before { content: ''; width: 12px; height: 12px; flex: 0 0 12px; background: currentColor; -webkit-mask: url("icons/actions/chevron-down.svg") center / contain no-repeat; mask: url("icons/actions/chevron-down.svg") center / contain no-repeat; transform: rotate(90deg); }
+.main-view-back:hover { background: rgba(var(--overlay-rgb), .09); }
 .main-view-inspector .main-view-back { justify-self: start; margin: -4px 0 6px -6px; }
 .main-view-subpage-title { margin: 0 0 4px; color: var(--text); font-size: 0.75rem; font-weight: 600; }
 .settings-panel .main-view-subpage > .settings-nested-list { margin: 0; padding: 0; border-left: 0; }
@@ -10142,69 +10145,150 @@ html.native-liquid-glass .view-switcher-menu-item { border-radius: 9px; }
 .plugin-credential-form { display: grid; gap: 8px; }
 .plugin-credential-summary { align-items: center; }
 .plugin-credential-summary > .settings-note, .plugin-credential-error { margin: 0; }
-/* Display settings keep mounted controls; navigation has no height animation. */
-.settings-section-details-inner > .display-settings { min-width: 0; margin-top: 0; }
+/* Window display surfaces: top 5-tile switcher + card-grouped controls. */
+.settings-section-details-inner > .display-settings {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 0;
+  margin-top: 6px;
+  margin-bottom: 10px;
+}
 .display-settings .settings-window-group { margin-top: 0; padding-top: 0; border-top: 0; }
-.display-settings-list { margin-top: 8px; border-top: 1px solid var(--line); }
-.display-settings-row { display: flex; align-items: center; gap: 12px; border-bottom: 1px solid rgba(var(--line-rgb), .12); }
-.display-settings-open { display: flex; flex: 1; align-items: center; gap: 12px; min-width: 0; padding: 16px 0; border: 0; background: none; text-align: left; color: inherit; }
-.display-settings-row:first-child .display-settings-open { padding-top: 10px; }
-.display-settings-labels { display: grid; gap: 5px; min-width: 0; }
-.display-settings-labels .settings-item-desc { margin: 0; }
-.display-settings-thumb { flex: 0 0 66px; height: 43px; position: relative; border: 1px solid rgba(var(--line-rgb), .3); border-radius: 5px; background: rgba(var(--line-rgb), .05); overflow: hidden; }
-.display-settings-thumb::before { content: ''; position: absolute; inset: 0 0 auto; height: 4px; background: rgba(var(--line-rgb), .12); }
-.display-settings-thumb i { position: absolute; background: var(--text); opacity: .65; }
-.display-settings-thumb-main i { inset: 12px 14px 8px; border-radius: 3px; }
-.display-settings-thumb-edge i { width: 7px; height: 27px; top: 9px; right: 0; border-radius: 4px 0 0 4px; }
-.display-settings-thumb-notch i { width: 30px; height: 8px; top: 0; left: 18px; border-radius: 0 0 5px 5px; }
-.display-settings-thumb-bubble i { width: 25px; height: 10px; left: 50%; top: 50%; transform: translate(-50%, -50%); border-radius: 8px; }
-.display-settings-thumb-tray i { width: 19px; height: 3px; top: 1px; right: 5px; }
-.display-settings[data-edge-side=left] .display-settings-thumb-edge i { right: auto; left: 0; border-radius: 0 4px 4px 0; }
+.display-settings-dock {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(0, 1fr));
+  gap: 5px;
+}
+.display-settings-tile {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 5px;
+  min-width: 0;
+  padding: 7px 3px 6px;
+  border: 1px solid rgba(var(--line-rgb), .18);
+  border-radius: 10px;
+  background: rgba(var(--panel-rgb), .2);
+  color: var(--muted);
+  font: inherit;
+  font-size: 0.625rem;
+  line-height: 1.2;
+  cursor: pointer;
+  transition: background 140ms ease, border-color 140ms ease, color 140ms ease;
+}
+.display-settings-tile:hover {
+  background: rgba(var(--overlay-rgb), .06);
+  color: var(--text);
+}
+.display-settings-tile[aria-selected="true"] {
+  border-color: rgba(var(--accent-rgb), .55);
+  background: rgba(var(--accent-rgb), .12);
+  color: var(--text);
+  font-weight: 500;
+}
+.display-settings-tile-dot {
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: rgba(var(--line-rgb), .32);
+  transition: background 140ms ease, box-shadow 140ms ease;
+}
+.display-settings-tile.is-enabled .display-settings-tile-dot {
+  background: var(--success);
+  box-shadow: 0 0 6px rgba(var(--success-rgb), .55);
+}
+.display-settings-tile-label {
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.display-settings-thumb {
+  flex: 0 0 auto;
+  width: 34px;
+  height: 22px;
+  position: relative;
+  border: 1px solid rgba(var(--line-rgb), .34);
+  border-radius: 4px;
+  background: rgba(var(--line-rgb), .06);
+  overflow: hidden;
+}
+.display-settings-thumb::before {
+  content: '';
+  position: absolute;
+  inset: 0 0 auto;
+  height: 3px;
+  background: rgba(var(--line-rgb), .16);
+}
+.display-settings-thumb i {
+  position: absolute;
+  background: var(--text);
+  opacity: .68;
+}
+.display-settings-tile[aria-selected="true"] .display-settings-thumb {
+  border-color: rgba(var(--accent-rgb), .55);
+  background: rgba(var(--accent-rgb), .08);
+}
+.display-settings-tile[aria-selected="true"] .display-settings-thumb i {
+  background: var(--accent);
+  opacity: 1;
+}
+.display-settings-thumb-main i { inset: 6px 7px 4px; border-radius: 2px; }
+.display-settings-thumb-edge i { width: 4px; height: 14px; top: 5px; right: 0; border-radius: 2px 0 0 2px; }
+.display-settings-thumb-notch i { width: 15px; height: 5px; top: 0; left: 9px; border-radius: 0 0 3px 3px; }
+.display-settings-thumb-bubble i { width: 13px; height: 5px; left: 50%; top: 50%; transform: translate(-50%, -50%); border-radius: 4px; }
+.display-settings-thumb-tray i { width: 11px; height: 2px; top: 0.5px; right: 2.5px; border-radius: 1px; }
+.display-settings[data-edge-side=left] .display-settings-thumb-edge i { right: auto; left: 0; border-radius: 0 2px 2px 0; }
 .display-settings[data-platform=win32] .display-settings-thumb::before { top: auto; bottom: 0; }
-.display-settings[data-platform=win32] .display-settings-thumb-tray i { top: auto; bottom: 1px; }
+.display-settings[data-platform=win32] .display-settings-thumb-tray i { top: auto; bottom: 0.5px; }
 .display-settings[data-platform=linux] .display-settings-thumb::before { display: none; }
-.display-settings[data-platform=linux] .display-settings-thumb-tray i { width: 10px; height: 10px; top: 50%; right: auto; left: 50%; transform: translate(-50%, -50%); border-radius: 2px; }
-/* Match the plugin settings' back action and category-tab typography. */
-.display-settings-back { display: inline-flex; align-items: center; gap: 8px; min-height: 28px; padding: 4px 8px; margin: 0 0 12px; border: 1px solid transparent; border-radius: 6px; background: transparent; color: var(--text); font: inherit; font-size: .6875rem; cursor: pointer; }
-.display-settings-back::before { content: ''; width: 12px; height: 12px; flex: 0 0 12px; background: currentColor; -webkit-mask: url("icons/actions/chevron-down.svg") center / contain no-repeat; mask: url("icons/actions/chevron-down.svg") center / contain no-repeat; transform: rotate(90deg); }
-.display-settings-back:hover { background: rgba(var(--overlay-rgb), .09); }
-.display-settings-quick, .display-settings-states { display: flex; gap: 3px; padding: 3px; border-radius: 8px; background: rgba(var(--line-rgb), .06); }
-.display-settings-quick { margin-bottom: 16px; }
-.display-settings-quick button, .display-settings-states button { flex: 1; min-width: 0; padding: 7px 3px; border: 0; border-radius: 5px; font-size: 11px; background: none; color: var(--muted); }
-.display-settings-quick [aria-selected=true], .display-settings-states [aria-pressed=true] { color: var(--text); background: rgba(var(--line-rgb), .13); }
-.display-settings-title .settings-item-title { font-size: 15px; }
-.display-settings-categories { display: flex; gap: 14px; margin-top: 18px; border-bottom: 1px solid var(--line); }
-.display-settings-categories button { min-height: 30px; padding: 5px 0 10px; background: none; border: 0; border-bottom: 2px solid transparent; border-radius: 0; color: var(--muted); font: inherit; font-size: .6875rem; }
-.display-settings-categories [aria-selected=true] { border-bottom-color: var(--text); color: var(--text); }
-.display-settings-fields > * { margin-top: 4px; }
-/* A collapsed description between two rows must not break their shared separator. */
-.display-settings-fields > .settings-item + .presence-feature-body.hidden + .settings-item { margin-top: 0; border-top: 1px solid rgba(var(--line-rgb), .06); }
-.display-settings-preview { position: relative; height: 166px; margin: 12px 0 8px; overflow: hidden; border: 1px solid rgba(var(--line-rgb), .2); border-radius: 9px; background: rgba(var(--line-rgb), .06); contain: layout paint; }
-.display-settings-preview iframe { border: 0; position: absolute; left: 50%; top: 8px; transform-origin: top left; pointer-events: none; }
-.display-settings-preview-note { font-size: 10px; margin-top: 8px; }
-.display-settings-preview[data-surface=floatingBubble] { height: 64px; }
-.display-settings-preview[data-surface=tray] { height: 48px; }
-.display-settings-preview[data-surface=edgeDock] { height: 248px; }
-.display-settings-bitmap { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); display: flex; align-items: center; justify-content: center; width: max-content; min-width: 40px; max-width: calc(100% - 32px); padding: 6px 10px; border: 1px solid rgba(var(--line-rgb), .24); border-radius: 20px; white-space: nowrap; }
-.display-settings-bitmap img { height: 24px; width: auto; max-width: 100%; min-width: 0; object-fit: contain; }
-/* The edge-attached strip holds the full 24px content plus 8px on either side;
-   its background must not cut through a multi-row tray bitmap. */
-.display-settings-preview[data-surface=tray] .display-settings-bitmap { top: 0; left: 0; right: 0; width: auto; height: 40px; max-width: none; padding: 8px 12px; justify-content: flex-end; transform: none; border-radius: 0; border: 0; font-size: 12px; }
-.display-settings-preview[data-surface=tray]::before { content: ''; position: absolute; height: 40px; inset: 0 0 auto; background: rgba(var(--line-rgb), .1); }
-.display-settings[data-platform=win32] .display-settings-preview[data-surface=tray]::before { top: auto; bottom: 0; }
-.display-settings[data-platform=win32] .display-settings-preview[data-surface=tray] .display-settings-bitmap { top: auto; bottom: 0; }
-.display-settings[data-platform=linux] .display-settings-preview[data-surface=tray]::before { display: none; }
-.display-settings[data-platform=linux] .display-settings-preview[data-surface=tray] .display-settings-bitmap { top: 50%; transform: translateY(-50%); justify-content: center; }
+.display-settings[data-platform=linux] .display-settings-thumb-tray i { width: 6px; height: 6px; top: 50%; right: auto; left: 50%; transform: translate(-50%, -50%); border-radius: 1.5px; }
 
-.display-settings-open { font-size: .6875rem; cursor: pointer; }
-.display-settings-switch { flex: 0 0 34px; }
-.display-settings-open::after { content: ''; width: 12px; height: 12px; flex: 0 0 12px; background: var(--muted); -webkit-mask: url("icons/actions/chevron-down.svg") center / contain no-repeat; mask: url("icons/actions/chevron-down.svg") center / contain no-repeat; transform: rotate(-90deg); margin-left: auto; }
+/* clip, unlike the accordion's hidden, is not a scroll container, so the edge
+   dock composer's sticky detail pane sticks to the settings panel instead. */
+#windowSettingsDetails, #windowSettingsDetails .accordion-animation-inner { overflow: clip; }
+.display-settings-pages { display: grid; min-width: 0; }
+.display-settings-page { display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+.display-settings-page .settings-page-card {
+  margin-top: 0;
+  padding: 8px 10px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: rgba(var(--panel-rgb), .22);
+}
+.display-settings-hero {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+  background: rgba(var(--panel-rgb), .32);
+}
+.display-settings-hero-text { display: grid; gap: 2px; min-width: 0; flex: 1 1 auto; }
+.display-settings-hero-title-row { display: flex; align-items: center; gap: 4px; min-width: 0; }
+.display-settings-hero-title { color: var(--text); font-size: 0.78125rem; font-weight: 600; line-height: 1.3; }
+.display-settings-hero-sub { margin: 0; color: var(--muted); font-size: 0.625rem; line-height: 1.45; }
+.display-settings-hero-switch { flex: 0 0 auto; margin-top: 2px; }
+.display-settings-cards {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 0;
+  transition: opacity 160ms ease;
+}
+.display-settings-cards.is-disabled-surface { opacity: .55; }
+/* Rows sit flush with hairline dividers like the other settings cards, even
+   when a wrapper, composer or hidden row separates them in the DOM. The
+   subblock only groups rows that hide with their parent switch. */
+.display-settings-card > :not(.settings-group-header) + *,
+.display-settings-subblock > * { margin-top: 0; }
+.display-settings-card > :not(.settings-group-header) + .settings-item,
+.display-settings-subblock > .settings-item { border-top: 1px solid rgba(var(--line-rgb), .06); }
 .display-settings button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
-
-.display-settings-preview[data-surface=notch] { height: 100px; }
-
-.display-settings-page-flat > .display-settings-fields:not([hidden]) { margin-top: 8px; padding-top: 4px; border-top: 1px solid var(--line); }
-.display-settings-page-flat > .display-settings-fields > :first-child { margin-top: 0; }
 
 .plugin-about { display: flex; flex-direction: column; gap: 12px; min-width: 0; }
 .plugin-about h3, .plugin-about .settings-note { margin: 0; }

@@ -828,7 +828,7 @@ let displaySettings = null;
 function applySettingsSectionDom(id, open) {
   if (id === 'sync' && !open) { syncModeSelect?.close(); syncContentForm?.closeHelp(); }
   if (id === 'appearance' && !open) appearanceColorPicker.close();
-  if (id === 'window' && !open) stopWindowShortcutRecording();
+  if (id === 'window' && !open) { stopWindowShortcutRecording(); displaySettings?.close?.(); }
   const toggle = document.querySelector(`[data-settings-section="${id}"]`);
   const details = document.getElementById(`${id}SettingsDetails`);
   const group = toggle?.closest('.settings-collapsible-group');
@@ -888,11 +888,13 @@ function shouldAnchorSettingsScroll(section, expanding) {
   return SETTINGS_SECTION_IDS.slice(0, sectionIndex).some(id => state.settingsSections[id]);
 }
 
-function anchorSettingsScroll(anchorEl, mutate) {
+// targetOffset pins the header at that distance from the panel top instead of
+// where it currently sits.
+function anchorSettingsScroll(anchorEl, mutate, targetOffset) {
   cancelSettingsScrollAnchor();
   const panel = els.settingsPanel;
   if (!panel || !anchorEl) { mutate(); return; }
-  const offset = anchorEl.getBoundingClientRect().top - panel.getBoundingClientRect().top;
+  const offset = targetOffset ?? anchorEl.getBoundingClientRect().top - panel.getBoundingClientRect().top;
   mutate();
   const reducedMotion = prefersReducedMotion();
   const deadline = performance.now() + SETTINGS_SCROLL_ANCHOR_MS;
@@ -6466,8 +6468,12 @@ function openSettingsPanel(section) {
   // the count unrefreshed; main's cache decides whether this goes to GitHub.
   if (state.settingsSections?.general) void refreshAboutStars();
   if (section === 'notch') {
-    setSettingsSectionExpanded('window', true);
-    displaySettings?.open('notch');
+    // Tile clicks keep the scroll position; this outside entry point holds the
+    // Window header at the panel top, including while a section above collapses.
+    anchorSettingsScroll(document.querySelector('[data-settings-section="window"]'), () => {
+      setSettingsSectionExpanded('window', true);
+      displaySettings?.open('notch');
+    }, 0);
   }
   els.shell.style.transform = 'translateZ(0)';
   requestAnimationFrame(() => { els.shell.style.transform = ''; });
@@ -6481,6 +6487,7 @@ function openViewFromTray(viewId) {
   syncModeSelect?.close();
   syncContentForm?.closeHelp();
   appearanceColorPicker.close();
+  displaySettings?.close();
   els.settingsPanel?.classList.add('hidden');
   els.shell.classList.remove('settings-open');
   state.untrackedWithDataProbed = null;
@@ -11225,7 +11232,7 @@ function renderHomeLimitProviderList() {
   page.className = 'main-view-subpage';
   const back = document.createElement('button');
   back.type = 'button';
-  back.className = 'display-settings-back main-view-back';
+  back.className = 'main-view-back';
   back.textContent = t('views.home');
   back.addEventListener('click', () => setHomeLimitProvidersOpen(false));
   const title = document.createElement('strong');
@@ -14854,6 +14861,7 @@ els.settingsButton.addEventListener('click', (event) => {
     syncModeSelect?.close();
     syncContentForm?.closeHelp();
     appearanceColorPicker.close();
+    displaySettings?.close();
     resetSettingsListSearch();
     stopWindowShortcutRecording();
     state.untrackedWithDataProbed = null;
@@ -17305,7 +17313,6 @@ function refreshTrayComposers() {
     createTrayComposer
   );
   Object.values(trayComposers).forEach((composer) => composer?.refresh());
-  displaySettings?.refreshLivePreview();
   syncCustomTrayClockTimer();
 }
 
@@ -18226,14 +18233,11 @@ setupSettingsAccordion(
   document.getElementById('syncContentDetails'), expanded => syncContentForm.setExpanded(expanded)
 );
 setupSettingsSections();
-const displaySettingsPreview = window.TokenMonitorDisplaySettingsPreview.create({
-  window, document, bridge: window.tokenMonitor, settings: () => state.settings,
-  bitmap: trayComposerPreview, stats: () => state.stats, t
-});
 displaySettings = window.TokenMonitorDisplaySettings.create({
   document, root: document.getElementById('windowSettingsDetails').querySelector('.settings-section-details-inner'),
-  scrollPanel: els.settingsPanel, t, platform: () => state.appInfo?.platform, settings: () => state.settings,
-  preview: displaySettingsPreview.show, cancelScroll: cancelSettingsScrollAnchorOnInteraction,
+  t, platform: () => state.appInfo?.platform, settings: () => state.settings,
+  helpPopover: window.TokenMonitorHelpPopover,
+  cancelScroll: cancelSettingsScrollAnchorOnInteraction,
   stopWindowShortcutRecording
 });
 let legacyAccountOwners;

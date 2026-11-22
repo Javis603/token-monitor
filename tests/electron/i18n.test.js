@@ -315,8 +315,8 @@ test('OS-specific copy follows the platform instead of naming every OS at once',
   assert.equal(translate('en', 'settings.display.showTrayIcon', {}, 'linux'), 'Show tray icon');
   assert.equal(translate('en', 'settings.display.hideAppIcon', {}, 'darwin'), 'Hide Dock icon');
   assert.equal(translate('en', 'settings.display.hideAppIcon', {}, 'win32'), 'Hide taskbar icon');
-  assert.equal(translate('zh-TW', 'settings.displayModes.trayNote', {}, 'darwin'), '在選單列查看');
-  assert.equal(translate('zh-TW', 'settings.displayModes.trayNote', {}, 'win32'), '在系統匣查看');
+  assert.equal(translate('zh-TW', 'settings.displayModes.trayTitle', {}, 'darwin'), '選單列');
+  assert.equal(translate('zh-TW', 'settings.displayModes.trayTitle', {}, 'win32'), '系統匣');
   assert.match(translate('en', 'settings.sync.hostNote', {}, 'darwin'), /macOS may prompt/);
   assert.match(translate('en', 'settings.sync.hostNote', {}, 'win32'), /Windows may prompt/);
   assert.doesNotMatch(translate('en', 'settings.sync.hostNote', {}, 'linux'), /prompt/);
