@@ -8499,8 +8499,9 @@ function renderHome() {
   for (const child of [...els.homePanel.children]) {
     if (!ordered.includes(child)) child.remove();
   }
-  // Attached now, so meters and readings can measure and animate.
-  homeLimitMotion.animate(els.homePanel, limitMotion);
+  // Attached now, so meters and readings can measure and animate. Page entry
+  // grows the meters from zero like the other breakdowns' bars.
+  homeLimitMotion.animate(els.homePanel, limitMotion, { entry: state.animateBarsFromZero });
   if (moduleIds.includes('session')) scheduleHomeSessionRepaint(sessionRows);
   updateHomeActivity();
 }

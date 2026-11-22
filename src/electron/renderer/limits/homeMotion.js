@@ -17,6 +17,8 @@
   const GHOST_MS = 700;
   const GHOST_EASING = 'cubic-bezier(0.5, 0, 0.2, 1)';
   const FLARE_MS = 900;
+  const ENTRY_MS = 420;
+  const ENTRY_STAGGER_MS = 24;
 
   function finite(value) {
     if (value === null || value === undefined || value === '') return null;
@@ -143,14 +145,16 @@
       }, numbers.duration);
     }
 
-    function animate(scope, snapshot) {
-      if (!snapshot?.size || prefersReducedMotion()) return;
+    function animate(scope, snapshot, { entry = false } = {}) {
+      if ((!snapshot?.size && !entry) || prefersReducedMotion()) return;
       const now = scope.ownerDocument.timeline?.currentTime ?? performance.now();
+      let entryIndex = 0;
       for (const item of scope.querySelectorAll('.home-limit-window[data-limit-motion-key]')) {
-        const previous = snapshot.get(item.dataset.limitMotionKey);
-        if (!previous) continue;
+        const key = item.dataset.limitMotionKey;
+        const previous = snapshot?.get(key);
+        if (!previous && !entry) continue;
         const value = item.querySelector('[data-limit-motion-value]');
-        if (value) playReading(value, previous);
+        if (value && previous) playReading(value, previous);
         const track = item.querySelector('.home-limit-track');
         if (!track) continue;
         const current = {
@@ -158,6 +162,22 @@
           resetsAt: item.dataset.limitResetAt,
           fill: track.dataset.limitFill
         };
+        if (entry) {
+          // Page entry grows every meter from zero like the other breakdowns'
+          // bars; change motion still owns updates while Home stays visible.
+          const fillPercent = finite(current.fill);
+          if (fillPercent === null) continue;
+          for (const animation of track.getAnimations({ subtree: true })) animation.cancel();
+          meterMotions.delete(track);
+          track.animate([{ '--home-limit-fill': '0%' }, { '--home-limit-fill': `${fillPercent}%` }], {
+            duration: ENTRY_MS,
+            delay: entryIndex * ENTRY_STAGGER_MS,
+            easing: FILL_EASING,
+            fill: 'backwards'
+          });
+          entryIndex += 1;
+          continue;
+        }
         const active = previous.motion;
         // A retained track keeps its running animations; a replaced one
         // replays the same motion from its original start.
@@ -185,5 +205,5 @@
     return { capture, animate, settle };
   }
 
-  return { createHomeLimitMotion, planMeterMotion, FILL_MS, GHOST_DELAY_MS, GHOST_MS, FLARE_MS };
+  return { createHomeLimitMotion, planMeterMotion, FILL_MS, GHOST_DELAY_MS, GHOST_MS, FLARE_MS, ENTRY_MS, ENTRY_STAGGER_MS };
 });
