@@ -115,7 +115,9 @@ test('Notch Settings command reaches the renderer through the registered preload
   const renderer = read('renderer/app.js');
   const registration = renderer.split('\n').find(line => line.startsWith('window.tokenMonitor.onOpenSettings?.('));
   assert.ok(registration, 'renderer must register its settings-open handler');
-  vm.runInNewContext(`${functionSource(renderer, 'resetMainViewSettings', 'openViewFromTray')}\n${registration}`, context);
+  const trayOpen = renderer.slice(renderer.indexOf('let pendingTrayOpen = null;'), renderer.indexOf('window.tokenMonitor.onFloatingBubbleState'));
+  context.state = { settings: {} };
+  vm.runInNewContext(`${functionSource(renderer, 'resetMainViewSettings', 'openViewFromTray')}\nlet initialSettingsApplied = true;\n${trayOpen}`, context);
   assert.equal(ipcRenderer.listenerCount('settings:open'), 1);
 
   const sent = [];

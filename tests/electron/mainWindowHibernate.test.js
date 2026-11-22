@@ -56,6 +56,8 @@ function fixture(platform = 'linux') {
     edgeDockController: { owns: win => win.kind === 'dock' },
     notchController: { owns: win => win.kind === 'notch' },
     limitsHistoryController: { isIdleWindow: win => win.kind === 'parked-history', hide() {} },
+    ensureTray: () => true, updateTrayDisplay() {},
+    suspendWindowMaximized() {}, setWindowMaximizable() {},
     ipcMain: new EventEmitter(),
     DEFAULT_WINDOW: { width: 340, height: 650 }, WINDOW_LIMITS: {},
     floatingBubbleState: { collapsed: false }, mainWindowChrome: {}, rendererViewState: { breakdown: 'limits' },
@@ -86,6 +88,7 @@ function fixture(platform = 'linux') {
     section('const MAIN_WINDOW_HIBERNATE_MS', 'function stopPersistBoundsTimer('),
     section('function showPopover(', 'function currentWindowToggleShortcutStatus('),
     section('function handleWindowToggleShortcut(', 'function trayMenuLocale('),
+    section('function enterTrayMode(', 'function exitTrayMode()'),
     section('function loadWindowFile(', 'function handleZoomShortcut('),
     section("app.on('activate'", 'startPluginRuntime();'),
     section("app.on('window-all-closed'", '// Every window shares')
@@ -188,6 +191,19 @@ test('a temporary dependent window re-arms hibernation and releases it when clos
   run.fire(RETRY_MS);
   assert.equal(run.original.isDestroyed(), true);
   assert.equal(run.context.mainWindow, null);
+});
+
+test('switching an already-hidden window to tray mode arms hibernation', () => {
+  const run = fixture();
+  run.context.cancelMainWindowHibernate();
+  run.context.settings.trayMode = false;
+  // Electron emits no hide event for a window that is already hidden.
+  run.original.silentVisibility = true;
+  run.original.visible = false;
+  run.context.settings.trayMode = true;
+  run.context.enterTrayMode();
+  assert.equal(run.original.isVisible(), false);
+  assert.equal(run.timer(HIBERNATE_MS)?.unrefed, true);
 });
 
 test('activate wakes a hibernated window before the remaining-window filter', () => {

@@ -124,6 +124,40 @@ test('early appearance does not consume a plugin-dependent initial Limits prefer
   assert.equal(context.state.breakdown, 'limits');
 });
 
+test('tray navigation waits for initial settings and replays only the last request', () => {
+  const calls = [];
+  let onOpenSettings;
+  let onOpenView;
+  const context = vm.createContext({
+    state: { settings: null },
+    initialSettingsApplied: false,
+    openSettingsPanel: section => calls.push(['settings', section]),
+    openViewFromTray: viewId => calls.push(['view', viewId]),
+    window: {
+      tokenMonitor: {
+        onOpenSettings: (callback) => { onOpenSettings = callback; },
+        onOpenView: (callback) => { onOpenView = callback; }
+      }
+    }
+  });
+  const helper = app.slice(app.indexOf('let pendingTrayOpen = null;'), app.indexOf('window.tokenMonitor.onFloatingBubbleState'));
+  vm.runInContext(helper, context);
+  assert.match(helper, /handleTrayOpenRequest\('settings', section\)/);
+  assert.match(helper, /handleTrayOpenRequest\('view', viewId\)/);
+  onOpenView('limits');
+  onOpenSettings('notch');
+  onOpenView('trends');
+  assert.deepEqual(calls, []);
+  context.state.settings = { themeColors: {} };
+  context.initialSettingsApplied = true;
+  vm.runInContext('flushPendingTrayOpen()', context);
+  assert.deepEqual(calls, [['view', 'trends']]);
+  onOpenSettings('notch');
+  assert.deepEqual(calls.at(-1), ['settings', 'notch'], 'a loaded renderer dispatches at once');
+  const init = app.slice(app.indexOf('async function init()'));
+  assert.ok(init.indexOf('flushPendingTrayOpen();') > init.indexOf('initialSettingsApplied = true;'));
+});
+
 function initialAppearance({ nativeHidden, windowVisible, search = '', stats = {} }) {
   let applied = 0;
   let signaled = 0;
@@ -139,8 +173,9 @@ function initialAppearance({ nativeHidden, windowVisible, search = '', stats = {
   });
   const init = app.slice(app.indexOf('async function init()'));
   const helper = app.slice(app.indexOf('let hibernateRevealPending'), app.indexOf('async function init()'));
+  const trayOpen = app.slice(app.indexOf('let pendingTrayOpen = null;'), app.indexOf('window.tokenMonitor.onFloatingBubbleState'));
   const early = init.slice(init.indexOf('// Local appearance'), init.indexOf('try { await pluginApi?.list();'));
-  vm.runInContext(`let initialSettingsApplied = false;\n${helper}\n${early}`, context);
+  vm.runInContext(`let initialSettingsApplied = false;\n${trayOpen}\n${helper}\n${early}`, context);
   return { applied: () => applied, signaled: () => signaled, frames, context };
 }
 

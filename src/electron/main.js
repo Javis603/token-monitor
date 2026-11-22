@@ -6332,7 +6332,12 @@ function enterTrayMode() {
     setWindowMaximizable(mainWindow, false);
     applyMacSpaceBehavior(true);
     if (mainWindow.isVisible()) hidePopover();
-    else pluginWindowActions.hide(mainWindow);
+    else {
+      pluginWindowActions.hide(mainWindow);
+      // Hiding an already-hidden window emits no native hide event, so the
+      // quiet-period timer the show/hide cycle would arm never starts here.
+      scheduleMainWindowHibernate(mainWindow);
+    }
   }
 }
 

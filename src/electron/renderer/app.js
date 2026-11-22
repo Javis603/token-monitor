@@ -14647,6 +14647,10 @@ async function init() {
   // Tray startup also needs its saved appearance prepared before native show.
   applyVisibleSettingsAppearance();
   initialSettingsApplied = true;
+  // A tray action can arrive at did-finish-load, before this asynchronous init
+  // finishes. Replay it now, before the window can announce appearance, so the
+  // first painted frame is the requested view or settings section.
+  flushPendingTrayOpen();
   const hibernateReveal = new URLSearchParams(window.location.search).get('hibernateReveal') === '1';
   if (hibernateReveal) {
     // Do not reveal the recreated popover on the static zero defaults. Wait for
@@ -16005,8 +16009,34 @@ reducedMotionMedia?.addEventListener?.('change', () => {
   applyReduceMotionPreference('system');
 });
 
-window.tokenMonitor.onOpenSettings?.(openSettingsPanel);
-window.tokenMonitor.onOpenView?.(openViewFromTray);
+// The main process sends tray navigation as soon as did-finish-load fires,
+// which can be earlier than the asynchronous settings load above. Dispatching
+// then would open the panel or switch views against the default state; keep the
+// last request until init has applied the saved settings instead.
+let pendingTrayOpen = null;
+
+function dispatchTrayOpen(request) {
+  if (request.kind === 'view') openViewFromTray(request.value);
+  else openSettingsPanel(request.value);
+}
+
+function handleTrayOpenRequest(kind, value) {
+  if (!initialSettingsApplied || !state.settings) {
+    pendingTrayOpen = { kind, value };
+    return;
+  }
+  dispatchTrayOpen({ kind, value });
+}
+
+function flushPendingTrayOpen() {
+  if (!pendingTrayOpen) return;
+  const request = pendingTrayOpen;
+  pendingTrayOpen = null;
+  dispatchTrayOpen(request);
+}
+
+window.tokenMonitor.onOpenSettings?.((section) => handleTrayOpenRequest('settings', section));
+window.tokenMonitor.onOpenView?.((viewId) => handleTrayOpenRequest('view', viewId));
 
 window.tokenMonitor.onFloatingBubbleState?.((payload) => {
   applyFloatingBubbleState(payload);
