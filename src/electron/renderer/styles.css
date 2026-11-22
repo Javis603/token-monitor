@@ -4232,6 +4232,7 @@ html.is-windows .settings-panel select option {
   color: var(--text);
 }
 .session-search-toggle.is-active { color: var(--accent); }
+.session-sort-toggle:focus-visible,
 .session-search-toggle:focus-visible {
   outline: 2px solid rgba(var(--accent-rgb), 0.32);
   outline-offset: 1px;
