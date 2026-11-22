@@ -3,26 +3,30 @@
 ## What's changed
 
 <!-- app-update-notes:en:start -->
+### Added
+- **Notion AI credits.** Show reported Standard and Select credit pools, allowances, and resets in Limits and the sidebar. (#1612)
+- **MiniMax Code usage.** Add relocated data directories containing `v2/sessions` as custom scan paths. Usage found in both locations is counted once. (#1618)
+
 ### Improved
-- **Collection settings.** Untracked tools show “Has data” when this computer already has recorded usage, or “Detected” when local data is found on disk. (#1604)
-- **AI Tool Limits settings.** Disabled providers show device icons and a tooltip listing devices with live quota readings. (#1604)
-- **Main Screen settings.** Move the view visibility switch into the header with a status note when hidden or locked, and display Home “Activity” options as full-width dropdown rows. (#1595)
-- **Devin quota cards.** Show the signed-in email when it matches the configured organization, falling back to the organization name when unavailable. (#1602)
-- **App memory.** Lower background footprint while unfocused and send smaller incremental updates to visible windows. (#1498, #1592)
+- **Multi-device Sync.** See the sync target, connection status, and devices in one map. Supported Node Hubs are identified as built-in or standalone. (#1624, #1606)
+- **Window settings.** Switch directly between display surfaces and adjust their options on a single page. (#1611)
+- **Background memory.** Reduce memory use after full scans and while the tray window is hidden. On macOS, tray mode can also release idle display surfaces while the screen is locked, with collection continuing. (#1607, #1608, #1617)
+- **Codex archive watching.** Reduce file watcher usage for compressed archives while retaining their usage in scans. (#1626)
+- **Quota history.** Rows that open the history card use the same hover highlight as the sidebar. (#1619)
 
 ### Fixed
-- **Windows Chinese fonts.** Use regional sans-serif fonts instead of NSimSun in the “App default” preset across app windows. (#1598)
-- **Qoder quotas.** Keep different accounts separate when multiple devices sync to the same Hub, instead of collapsing them into one row. (#1574)
-- **Z.ai Team quotas.** Keep different team projects separate across synced devices while still merging readings for the same project after an API key rotates. (#1575)
-- **Live usage collection.** Avoid rescanning every tracked tool when a file update includes an idle tool with no usage today. (#1591)
+- **Antigravity.** Restore desktop usage sync and grouped quotas, keep the last successful quota reading through temporary refresh failures, and correct cost estimates for known Orchestrator models. (#1597, #1613)
+- **Usage trends.** Keep missing dates visible and distinguish them from recorded zero usage. Empty candlestick intervals remain hoverable. (#1534)
+- **Home trend line.** Keep the stroke width consistent in wide windows. (#1621)
+- **Windows main window.** Fix a blank window that could appear after minimizing and restoring it. (#1589)
 <!-- app-update-notes:en:end -->
 ## Download
 
-- **macOS Apple Silicon** — [Token-Monitor-0.95.1-arm64.dmg](https://github.com/Javis603/token-monitor/releases/download/v0.95.1/Token-Monitor-0.95.1-arm64.dmg)
-- **macOS Intel** — [Token-Monitor-0.95.1-x64.dmg](https://github.com/Javis603/token-monitor/releases/download/v0.95.1/Token-Monitor-0.95.1-x64.dmg)
-- **Windows Installer** — [Token-Monitor-Setup-0.95.1.exe](https://github.com/Javis603/token-monitor/releases/download/v0.95.1/Token-Monitor-Setup-0.95.1.exe) (recommended)
-- **Windows Portable** — [Token-Monitor-0.95.1.exe](https://github.com/Javis603/token-monitor/releases/download/v0.95.1/Token-Monitor-0.95.1.exe) (no install required)
-- **Linux x64** — [Token-Monitor-0.95.1.AppImage](https://github.com/Javis603/token-monitor/releases/download/v0.95.1/Token-Monitor-0.95.1.AppImage)
+- **macOS Apple Silicon** — [Token-Monitor-0.96.0-arm64.dmg](https://github.com/Javis603/token-monitor/releases/download/v0.96.0/Token-Monitor-0.96.0-arm64.dmg)
+- **macOS Intel** — [Token-Monitor-0.96.0-x64.dmg](https://github.com/Javis603/token-monitor/releases/download/v0.96.0/Token-Monitor-0.96.0-x64.dmg)
+- **Windows Installer** — [Token-Monitor-Setup-0.96.0.exe](https://github.com/Javis603/token-monitor/releases/download/v0.96.0/Token-Monitor-Setup-0.96.0.exe) (recommended)
+- **Windows Portable** — [Token-Monitor-0.96.0.exe](https://github.com/Javis603/token-monitor/releases/download/v0.96.0/Token-Monitor-0.96.0.exe) (no install required)
+- **Linux x64** — [Token-Monitor-0.96.0.AppImage](https://github.com/Javis603/token-monitor/releases/download/v0.96.0/Token-Monitor-0.96.0.AppImage)
 
 <details>
 <summary><strong>First launch and other notes</strong></summary>
@@ -57,27 +61,31 @@ Tokscale is bundled with this app and updated through Token Monitor releases. Se
 ## 更新内容
 
 <!-- app-update-notes:zh:start -->
+### 新增
+- **Notion AI 点数：** 在额度页面和侧边栏显示账号提供的 Standard 与 Select 点数、总额度和重置时间。 （#1612）
+- **MiniMax Code 用量：** 可将迁移后包含 `v2/sessions` 的数据目录加入自定义扫描路径。两处共有的记录只计一次。 （#1618）
+
 ### 改进
-- **采集设置：** 未追踪的工具在本机已有用量记录时显示“有数据”，检测到本地数据文件时显示“已检测”。 （#1604）
-- **AI 工具额度设置：** 已停用的服务商显示设备图标和提示，列出已有实时额度读数的设备。 （#1604）
-- **主界面设置：** 将视图显示开关移至顶部标题栏，隐藏或无法切换时给出原因说明；主页“活动”选项改用全宽下拉行。 （#1595）
-- **Devin 额度卡片：** 当登录成员与所配组织一致时显示登录邮箱，不可用时回退显示组织名。 （#1602）
-- **内存与更新：** 窗口未聚焦时降低后台内存占用，并向可见窗口发送更轻量的增量更新。 （#1498, #1592）
+- **多设备同步：** 在一张图中查看同步目标、连接状态和设备。支持识别内置和独立运行的 Node Hub。 （#1624, #1606）
+- **窗口设置：** 可直接切换各显示界面，在同一页调整选项。 （#1611）
+- **后台内存：** 降低完整扫描后及托盘窗口隐藏时的内存占用。macOS 托盘模式在锁屏时还可释放闲置界面，用量采集继续运行。 （#1607, #1608, #1617）
+- **Codex 归档监听：** 减少压缩归档占用的文件监听资源，扫描仍会计入归档用量。 （#1626）
+- **额度历史：** 可打开历史卡片的额度行，悬停高亮与侧边栏一致。 （#1619）
 
 ### 修复
-- **Windows 中文字体：** “App 默认”预设下各窗口改用区域无衬线字体，不再回退为新宋体（NSimSun）。 （#1598）
-- **Qoder 额度：** 修复多设备同步到同一 Hub 时，不同账号可能合并为同一行的问题。 （#1574）
-- **Z.ai 团队额度：** 修复多设备同步时不同团队项目合并显示的问题，并在轮换 API 密钥后仍能合并同一项目的读数。 （#1575）
-- **实时用量采集：** 监听更新包含今日暂无用量的空闲工具时，不再触发全部已追踪工具的重新扫描。 （#1591）
+- **Antigravity：** 恢复桌面版用量同步和分组额度显示，刷新暂时失败时保留上次成功读数，并修正已知 Orchestrator 模型的费用估算。 （#1597, #1613）
+- **用量趋势：** 保留缺少记录的日期，与已记录的零用量区分开来。空白 K 线区间也可悬停查看。 （#1534）
+- **主页趋势线：** 修复宽窗口下线条粗细不均的问题。 （#1621）
+- **Windows 主窗口：** 修复最小化后恢复时可能出现空白的问题。 （#1589）
 <!-- app-update-notes:zh:end -->
 
 ## 下载
 
-- **macOS Apple Silicon** — [Token-Monitor-0.95.1-arm64.dmg](https://github.com/Javis603/token-monitor/releases/download/v0.95.1/Token-Monitor-0.95.1-arm64.dmg)
-- **macOS Intel** — [Token-Monitor-0.95.1-x64.dmg](https://github.com/Javis603/token-monitor/releases/download/v0.95.1/Token-Monitor-0.95.1-x64.dmg)
-- **Windows 安装版** — [Token-Monitor-Setup-0.95.1.exe](https://github.com/Javis603/token-monitor/releases/download/v0.95.1/Token-Monitor-Setup-0.95.1.exe)（推荐）
-- **Windows 便携版** — [Token-Monitor-0.95.1.exe](https://github.com/Javis603/token-monitor/releases/download/v0.95.1/Token-Monitor-0.95.1.exe)（免安装）
-- **Linux x64** — [Token-Monitor-0.95.1.AppImage](https://github.com/Javis603/token-monitor/releases/download/v0.95.1/Token-Monitor-0.95.1.AppImage)
+- **macOS Apple Silicon** — [Token-Monitor-0.96.0-arm64.dmg](https://github.com/Javis603/token-monitor/releases/download/v0.96.0/Token-Monitor-0.96.0-arm64.dmg)
+- **macOS Intel** — [Token-Monitor-0.96.0-x64.dmg](https://github.com/Javis603/token-monitor/releases/download/v0.96.0/Token-Monitor-0.96.0-x64.dmg)
+- **Windows 安装版** — [Token-Monitor-Setup-0.96.0.exe](https://github.com/Javis603/token-monitor/releases/download/v0.96.0/Token-Monitor-Setup-0.96.0.exe)（推荐）
+- **Windows 便携版** — [Token-Monitor-0.96.0.exe](https://github.com/Javis603/token-monitor/releases/download/v0.96.0/Token-Monitor-0.96.0.exe)（免安装）
+- **Linux x64** — [Token-Monitor-0.96.0.AppImage](https://github.com/Javis603/token-monitor/releases/download/v0.96.0/Token-Monitor-0.96.0.AppImage)
 
 <details>
 <summary><strong>首次启动与其他说明</strong></summary>
@@ -108,7 +116,7 @@ Tokscale 已随应用内置，并通过 Token Monitor 发布版本更新。你�
 ---
 
 <details>
-<summary><strong>Full Changelog:</strong> <a href="https://github.com/Javis603/token-monitor/compare/v0.95.0...v0.95.1">v0.95.0...v0.95.1</a></summary>
+<summary><strong>Full Changelog:</strong> <a href="https://github.com/Javis603/token-monitor/compare/v0.95.1...v0.96.0">v0.95.1...v0.96.0</a></summary>
 
 <!-- github-generated-release-notes -->
 
@@ -125,27 +133,31 @@ Tokscale 已随应用内置，并通过 Token Monitor 发布版本更新。你�
 ## 更新內容
 
 <!-- app-update-notes:zh-TW:start -->
+### 新增
+- **Notion AI 點數：** 在額度頁面與側邊欄顯示帳號提供的 Standard 和 Select 點數、總額度及重設時間。 （#1612）
+- **MiniMax Code 用量：** 可將搬移後含有 `v2/sessions` 的資料目錄加入自訂掃描路徑。兩處重複的紀錄只算一次。 （#1618）
+
 ### 改進
-- **採集設定：** 未追蹤的工具在本機已有用量記錄時顯示「有資料」，偵測到本機資料時顯示「已偵測」。 （#1604）
-- **AI 工具額度設定：** 已停用的服務商顯示裝置圖示與提示，列出已有即時額度讀數的裝置。 （#1604）
-- **主畫面設定：** 將檢視顯示開關移至頂部標題列，隱藏或無法切換時顯示原因說明；主頁「活動」選項改用全寬下拉列。 （#1595）
-- **Devin 額度卡片：** 登入成員與所設組織一致時顯示登入信箱，無法取得時改顯示組織名稱。 （#1602）
-- **記憶體與更新：** 視窗未聚焦時降低背景記憶體用量，並向可見視窗傳送更輕量的增量更新。 （#1498, #1592）
+- **多裝置同步：** 在同一張圖查看同步目標、連線狀態與裝置，並辨識支援的內建或獨立 Node Hub。 （#1624, #1606）
+- **視窗設定：** 可直接切換各顯示介面，在同一頁調整選項。 （#1611）
+- **背景記憶體：** 降低完整掃描後及系統匣視窗隱藏時的記憶體用量。macOS 選單列模式在鎖定畫面時也可釋放閒置介面，用量採集會繼續。 （#1607, #1608, #1617）
+- **Codex 封存監聽：** 減少壓縮封存佔用的檔案監聽資源，掃描仍會計入封存用量。 （#1626）
+- **額度歷史：** 可開啟歷史卡片的額度列，游標停駐效果與側邊欄一致。 （#1619）
 
 ### 修復
-- **Windows 中文字體：** 「App 預設」下各視窗改用區域無襯線字體，不再退回新宋體（NSimSun）。 （#1598）
-- **Qoder 額度：** 修復多裝置同步到同一 Hub 時，不同帳號可能合併為同一列的問題。 （#1574）
-- **Z.ai 團隊額度：** 修復多裝置同步時不同團隊專案合併顯示的問題，並在輪換 API 金鑰後仍能合併同一專案的讀數。 （#1575）
-- **即時用量採集：** 監聽更新包含今日尚無用量的閒置工具時，不再觸發所有已追蹤工具的重新掃描。 （#1591）
+- **Antigravity：** 恢復桌面版用量同步與分組額度顯示，重新整理暫時失敗時保留上次成功讀數，並修正已知 Orchestrator 模型的費用估算。 （#1597, #1613）
+- **用量趨勢：** 保留缺少紀錄的日期，並與已記錄的零用量區分。空白 K 線區間也可停駐查看。 （#1534）
+- **主頁趨勢線：** 修復寬視窗下線條粗細不均的問題。 （#1621）
+- **Windows 主視窗：** 修復最小化後還原時可能出現空白的問題。 （#1589）
 <!-- app-update-notes:zh-TW:end -->
 
 ## 下載
 
-- **macOS Apple Silicon** — [Token-Monitor-0.95.1-arm64.dmg](https://github.com/Javis603/token-monitor/releases/download/v0.95.1/Token-Monitor-0.95.1-arm64.dmg)
-- **macOS Intel** — [Token-Monitor-0.95.1-x64.dmg](https://github.com/Javis603/token-monitor/releases/download/v0.95.1/Token-Monitor-0.95.1-x64.dmg)
-- **Windows 安裝版** — [Token-Monitor-Setup-0.95.1.exe](https://github.com/Javis603/token-monitor/releases/download/v0.95.1/Token-Monitor-Setup-0.95.1.exe)（推薦）
-- **Windows 便攜版** — [Token-Monitor-0.95.1.exe](https://github.com/Javis603/token-monitor/releases/download/v0.95.1/Token-Monitor-0.95.1.exe)（免安裝）
-- **Linux x64** — [Token-Monitor-0.95.1.AppImage](https://github.com/Javis603/token-monitor/releases/download/v0.95.1/Token-Monitor-0.95.1.AppImage)
+- **macOS Apple Silicon** — [Token-Monitor-0.96.0-arm64.dmg](https://github.com/Javis603/token-monitor/releases/download/v0.96.0/Token-Monitor-0.96.0-arm64.dmg)
+- **macOS Intel** — [Token-Monitor-0.96.0-x64.dmg](https://github.com/Javis603/token-monitor/releases/download/v0.96.0/Token-Monitor-0.96.0-x64.dmg)
+- **Windows 安裝版** — [Token-Monitor-Setup-0.96.0.exe](https://github.com/Javis603/token-monitor/releases/download/v0.96.0/Token-Monitor-Setup-0.96.0.exe)（推薦）
+- **Windows 便攜版** — [Token-Monitor-0.96.0.exe](https://github.com/Javis603/token-monitor/releases/download/v0.96.0/Token-Monitor-0.96.0.exe)（免安裝）
+- **Linux x64** — [Token-Monitor-0.96.0.AppImage](https://github.com/Javis603/token-monitor/releases/download/v0.96.0/Token-Monitor-0.96.0.AppImage)
 
 </details>
 
@@ -157,27 +169,31 @@ Tokscale 已随应用内置，并通过 Token Monitor 发布版本更新。你�
 ## 업데이트 내용
 
 <!-- app-update-notes:ko:start -->
+### 추가
+- **Notion AI 크레딧.** 한도 화면과 사이드바에 계정에서 제공하는 Standard 및 Select 크레딧, 총 한도, 초기화 시간을 표시합니다. (#1612)
+- **MiniMax Code 사용량.** 옮긴 데이터 폴더에 `v2/sessions`가 있으면 사용자 지정 스캔 경로로 추가할 수 있습니다. 양쪽에 있는 기록은 한 번만 집계합니다. (#1618)
+
 ### 개선
-- **수집 설정.** 추적하지 않는 도구에 이 컴퓨터의 사용 기록이 있으면 ‘데이터 있음’, 로컬 데이터가 있으면 ‘감지됨’ 태그를 표시합니다. (#1604)
-- **AI 도구 한도 설정.** 비활성화된 제공업체에 실시간 할당량 데이터가 있는 기기 아이콘과 기기 목록 툴팁을 표시합니다. (#1604)
-- **메인 화면 설정.** 보기 표시 스위치를 헤더로 옮기고 숨김·잠금 상태일 때 안내 문구를 표시합니다. 홈 ‘활동’ 옵션도 가로 전체 너비의 드롭다운 행으로 정리했습니다. (#1595)
-- **Devin 할당량 카드.** 로그인된 멤버십이 설정된 조직과 일치하면 로그인 이메일을 표시하고, 확인할 수 없으면 조직 이름을 표시합니다. (#1602)
-- **메모리 및 갱신.** 창에 포커스가 없을 때 백그라운드 메모리 사용량을 줄이고, 표시된 창에는 변경된 부분만 가볍게 전달합니다. (#1498, #1592)
+- **다중 기기 동기화.** 동기화 대상, 연결 상태, 기기를 한눈에 볼 수 있습니다. 지원되는 Node Hub는 내장형 또는 독립 실행형으로 표시합니다. (#1624, #1606)
+- **창 설정.** 표시 영역을 바로 전환하고 한 페이지에서 옵션을 조정할 수 있습니다. (#1611)
+- **백그라운드 메모리.** 전체 스캔 후와 트레이 창을 숨겼을 때 메모리 사용량을 줄였습니다. macOS 메뉴 막대 모드에서는 화면을 잠그면 유휴 UI의 메모리도 줄이며 사용량 수집은 계속됩니다. (#1607, #1608, #1617)
+- **Codex 아카이브 감시.** 압축 아카이브에 쓰는 파일 감시 리소스를 줄였습니다. 아카이브 사용량은 스캔에 계속 포함됩니다. (#1626)
+- **한도 기록.** 기록 카드를 여는 행에 마우스를 올리면 사이드바와 같은 강조 효과가 나타납니다. (#1619)
 
 ### 수정
-- **Windows 중국어 글꼴.** ‘앱 기본값’ 글꼴 프리셋에서 앱 창 전반의 간체·번체 중국어에 NSimSun 대신 지역 산세리프 글꼴을 사용합니다. (#1598)
-- **Qoder 할당량.** 여러 기기가 같은 Hub에 동기화될 때 서로 다른 계정이 한 행으로 합쳐지지 않고 따로 표시됩니다. (#1574)
-- **Z.ai 팀 할당량.** 여러 기기에서 동기화된 서로 다른 팀 프로젝트를 구분해 표시하며, API 키를 교체해도 같은 프로젝트의 데이터는 하나로 유지합니다. (#1575)
-- **실시간 사용량 수집.** 파일 변경 알림에 오늘 사용량이 없는 유휴 도구가 포함되더라도 추적 중인 모든 도구를 다시 스캔하지 않습니다. (#1591)
+- **Antigravity.** 데스크톱 사용량 동기화와 그룹별 한도를 복구했습니다. 일시적인 새로고침 오류가 발생하면 마지막으로 읽은 한도를 유지하며, 알려진 Orchestrator 모델의 예상 비용도 바로잡았습니다. (#1597, #1613)
+- **사용량 추세.** 기록이 없는 날짜를 남겨 두고 사용량이 0으로 기록된 날짜와 구분합니다. 빈 캔들 구간에도 마우스를 올려 확인할 수 있습니다. (#1534)
+- **홈 추세선.** 창이 넓을 때 선 두께가 고르지 않던 문제를 수정했습니다. (#1621)
+- **Windows 메인 창.** 최소화한 창을 복원하면 화면이 비어 보일 수 있던 문제를 수정했습니다. (#1589)
 <!-- app-update-notes:ko:end -->
 
 ## 다운로드
 
-- **macOS Apple Silicon** — [Token-Monitor-0.95.1-arm64.dmg](https://github.com/Javis603/token-monitor/releases/download/v0.95.1/Token-Monitor-0.95.1-arm64.dmg)
-- **macOS Intel** — [Token-Monitor-0.95.1-x64.dmg](https://github.com/Javis603/token-monitor/releases/download/v0.95.1/Token-Monitor-0.95.1-x64.dmg)
-- **Windows 설치 버전** — [Token-Monitor-Setup-0.95.1.exe](https://github.com/Javis603/token-monitor/releases/download/v0.95.1/Token-Monitor-Setup-0.95.1.exe) (권장)
-- **Windows 포터블 버전** — [Token-Monitor-0.95.1.exe](https://github.com/Javis603/token-monitor/releases/download/v0.95.1/Token-Monitor-0.95.1.exe) (설치 필요 없음)
-- **Linux x64** — [Token-Monitor-0.95.1.AppImage](https://github.com/Javis603/token-monitor/releases/download/v0.95.1/Token-Monitor-0.95.1.AppImage)
+- **macOS Apple Silicon** — [Token-Monitor-0.96.0-arm64.dmg](https://github.com/Javis603/token-monitor/releases/download/v0.96.0/Token-Monitor-0.96.0-arm64.dmg)
+- **macOS Intel** — [Token-Monitor-0.96.0-x64.dmg](https://github.com/Javis603/token-monitor/releases/download/v0.96.0/Token-Monitor-0.96.0-x64.dmg)
+- **Windows 설치 버전** — [Token-Monitor-Setup-0.96.0.exe](https://github.com/Javis603/token-monitor/releases/download/v0.96.0/Token-Monitor-Setup-0.96.0.exe) (권장)
+- **Windows 포터블 버전** — [Token-Monitor-0.96.0.exe](https://github.com/Javis603/token-monitor/releases/download/v0.96.0/Token-Monitor-0.96.0.exe) (설치 필요 없음)
+- **Linux x64** — [Token-Monitor-0.96.0.AppImage](https://github.com/Javis603/token-monitor/releases/download/v0.96.0/Token-Monitor-0.96.0.AppImage)
 
 </details>
 
@@ -189,27 +205,31 @@ Tokscale 已随应用内置，并通过 Token Monitor 发布版本更新。你�
 ## 更新内容
 
 <!-- app-update-notes:ja:start -->
+### 追加
+- **Notion AI クレジット。** アカウントから取得できる Standard と Select のクレジット、上限、リセット時刻を制限画面とサイドバーに表示します。 （#1612）
+- **MiniMax Code の使用量。** 移動先のデータフォルダーに `v2/sessions` があれば、カスタムスキャンパスに追加できます。両方の場所にある記録は一度だけ集計します。 （#1618）
+
 ### 改善
-- **収集設定。** 未追跡のツールにこの端末の使用履歴がある場合は「データあり」、ローカルデータが見つかった場合は「検出済み」を表示します。 （#1604）
-- **AIツール制限の設定。** 無効になっているプロバイダーに、最新の残量データがある端末のアイコンと一覧ツールチップを表示します。 （#1604）
-- **メイン画面の設定。** ビューの表示スイッチをヘッダーへ移し、非表示や変更不可のときに理由を表示します。ホームの「アクティビティ」設定も幅いっぱいのドロップダウン行に統一しました。 （#1595）
-- **Devin の残量カード。** ログイン中のメンバーシップが設定済みの組織と一致する場合はメールアドレスを表示し、取得できない場合は組織名を表示します。 （#1602）
-- **メモリと更新。** ウィンドウが非アクティブな間のバックグラウンドメモリ使用量を抑え、表示中のウィンドウには差分のみを軽く反映します。 （#1498, #1592）
+- **マルチデバイス同期。** 同期先、接続状態、端末を一つの図で確認できます。対応する Node Hub は内蔵型とスタンドアロン型を区別して表示します。 （#1624, #1606）
+- **ウィンドウ設定。** 表示先を直接切り替え、同じページで設定を調整できます。 （#1611）
+- **バックグラウンドのメモリ。** 全体スキャン後やトレイのウィンドウを隠しているときのメモリ使用量を削減しました。macOS のメニューバーモードでは、画面ロック中に使われていない表示領域を解放し、使用量の収集は続けます。 （#1607, #1608, #1617）
+- **Codex アーカイブの監視。** 圧縮アーカイブに使うファイル監視リソースを削減しました。スキャンでは引き続きアーカイブの使用量も集計します。 （#1626）
+- **上限の履歴。** 履歴カードを開く行にポインターを重ねると、サイドバーと同じ強調表示になります。 （#1619）
 
 ### 修正
-- **Windows の中国語フォント。** 「アプリのデフォルト」フォント設定で、各ウィンドウの中国語表示に NSimSun ではなく地域別のサンセリフ体を使います。 （#1598）
-- **Qoder の残量。** 複数の端末を同じ Hub に同期したとき、別々のアカウントが 1 行にまとまらず個別に表示されるようにしました。 （#1574）
-- **Z.ai チームの残量。** 同期された端末間で別々のチームプロジェクトを分けて表示しつつ、API キーを更新しても同じプロジェクトのデータは統合されます。 （#1575）
-- **リアルタイムの使用量収集。** 監視更新に当日の使用量がない待機中のツールが含まれていても、追跡中のすべてのツールを再スキャンしないようにしました。 （#1591）
+- **Antigravity。** デスクトップ版の使用量同期とグループ別の制限表示を復旧しました。一時的な更新エラー時は最後に取得した値を保持し、既知の Orchestrator モデルの推定費用も修正しました。 （#1597, #1613）
+- **使用量の推移。** 記録がない日も残し、使用量がゼロと記録された日と区別します。空のローソク足区間もポインターを重ねて確認できます。 （#1534）
+- **ホームの推移グラフ。** ウィンドウが広いと線の太さが不均一になる問題を修正しました。 （#1621）
+- **Windows のメインウィンドウ。** 最小化から戻したときに画面が空白になることがある問題を修正しました。 （#1589）
 <!-- app-update-notes:ja:end -->
 
 ## ダウンロード
 
-- **macOS Apple Silicon** — [Token-Monitor-0.95.1-arm64.dmg](https://github.com/Javis603/token-monitor/releases/download/v0.95.1/Token-Monitor-0.95.1-arm64.dmg)
-- **macOS Intel** — [Token-Monitor-0.95.1-x64.dmg](https://github.com/Javis603/token-monitor/releases/download/v0.95.1/Token-Monitor-0.95.1-x64.dmg)
-- **Windows インストーラー** — [Token-Monitor-Setup-0.95.1.exe](https://github.com/Javis603/token-monitor/releases/download/v0.95.1/Token-Monitor-Setup-0.95.1.exe)（推奨）
-- **Windows ポータブル版** — [Token-Monitor-0.95.1.exe](https://github.com/Javis603/token-monitor/releases/download/v0.95.1/Token-Monitor-0.95.1.exe)（インストール不要）
-- **Linux x64** — [Token-Monitor-0.95.1.AppImage](https://github.com/Javis603/token-monitor/releases/download/v0.95.1/Token-Monitor-0.95.1.AppImage)
+- **macOS Apple Silicon** — [Token-Monitor-0.96.0-arm64.dmg](https://github.com/Javis603/token-monitor/releases/download/v0.96.0/Token-Monitor-0.96.0-arm64.dmg)
+- **macOS Intel** — [Token-Monitor-0.96.0-x64.dmg](https://github.com/Javis603/token-monitor/releases/download/v0.96.0/Token-Monitor-0.96.0-x64.dmg)
+- **Windows インストーラー** — [Token-Monitor-Setup-0.96.0.exe](https://github.com/Javis603/token-monitor/releases/download/v0.96.0/Token-Monitor-Setup-0.96.0.exe)（推奨）
+- **Windows ポータブル版** — [Token-Monitor-0.96.0.exe](https://github.com/Javis603/token-monitor/releases/download/v0.96.0/Token-Monitor-0.96.0.exe)（インストール不要）
+- **Linux x64** — [Token-Monitor-0.96.0.AppImage](https://github.com/Javis603/token-monitor/releases/download/v0.96.0/Token-Monitor-0.96.0.AppImage)
 
 </details>
 
