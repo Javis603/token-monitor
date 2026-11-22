@@ -228,6 +228,65 @@ test('Antigravity clears quota only for the account observed on the rejected RPC
   }
 });
 
+test('Antigravity commits RPC source bindings only for accepted readings', { timeout: 5000 }, async (t) => {
+  let nowMs = Date.now();
+  let sourceKey = 'A';
+  let failures;
+  const accountEmail = 'same@example.com';
+  const accounts = [{ id: 'managed', accountEmail, credentials: { accessToken: 'fixture', projectId: 'fixture-project' } }];
+  const oauthQuota = { groups: quotaSummary.groups.filter(group => group.displayName === 'Gemini 4 Argon') };
+  const oauthStarted = Promise.withResolvers();
+  const runtime = createLimitsRuntime({ limitProviders: ['antigravity'] }, {
+    autoStart: false, autoRetry: false, now: () => nowMs,
+    resolveConfigSnapshot: () => ({ antigravityManagedAccounts: failures ? [] : accounts }),
+    fetch: async (url, { signal }) => {
+      signal.throwIfAborted();
+      if (url.endsWith(':loadCodeAssist')) return { ok: true, json: async () => ({}) };
+      if (!url.endsWith(':retrieveUserQuotaSummary')) throw new Error(`Unexpected URL ${url}`);
+      if (sourceKey === 'B') {
+        oauthStarted.resolve();
+        await new Promise((_, reject) => signal.addEventListener('abort', () => reject(signal.reason), { once: true }));
+      }
+      return { ok: true, json: async () => oauthQuota };
+    },
+    antigravityProbe: async () => {
+      if (failures) {
+        const sourceFailures = new Map(failures.map(([key, status]) => [key, { source: 'app', error: { status } }]));
+        throw Object.assign(new Error('RPC sources failed'), { sourceFailures });
+      }
+      return {
+        accountEmail, sourceDetail: 'app', sourceKey,
+        windows: [{ name: 'Gemini 5-hour', kind: 'session', remainingFraction: 0.72 }]
+      };
+    }
+  });
+  t.after(() => runtime.stop());
+  const refresh = () => runtime.refresh({ provider: 'antigravity' }, 'credential-edit');
+  const reading = () => runtime.getSnapshot().providers[0];
+
+  await refresh();
+  const first = reading();
+  assert.equal(first.windows.length, 2);
+
+  sourceKey = 'B';
+  nowMs += 60_000;
+  const superseded = refresh();
+  await oauthStarted.promise;
+
+  failures = [['A', 'unavailable'], ['B', 'unauthorized']];
+  const next = refresh();
+  assert.equal((await superseded).superseded, true);
+  await next;
+  assert.equal(reading().status, 'unavailable');
+  assert.equal(reading().updatedAt, first.updatedAt);
+  assert.deepEqual(reading().windows, first.windows);
+
+  failures = [['A', 'unauthorized'], ['B', 'unavailable']];
+  await refresh();
+  assert.equal(reading().status, 'unauthorized');
+  assert.deepEqual(reading().windows, []);
+});
+
 test('Antigravity keeps the previous account read when a process switches accounts', async () => {
   let suffix = '';
   let rpcStatus = 200;

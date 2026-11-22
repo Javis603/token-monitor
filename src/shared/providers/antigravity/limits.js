@@ -24,18 +24,15 @@ function groupedWindowGroupKey(window) {
 }
 
 function mergeMissingOAuthGroups(local, existing) {
-  const localWindows = Array.isArray(local?.windows) ? local.windows : [];
-  const localGroups = new Set(localWindows.map(groupedWindowGroupKey).filter(Boolean));
+  const localGroups = new Set(local.windows.map(groupedWindowGroupKey).filter(Boolean));
   if (localGroups.size === 0) return local;
-  const missingWindows = (existing?.windows || []).filter((window) => {
+  const missingWindows = existing.windows.filter((window) => {
     const groupKey = groupedWindowGroupKey(window);
     return groupKey && !localGroups.has(groupKey);
   });
   if (missingWindows.length === 0) return local;
-  return normalizeLimitProvider({
-    ...local,
-    windows: [...localWindows, ...missingWindows]
-  });
+  const merged = normalizeLimitProvider({ ...local, windows: [...local.windows, ...missingWindows] });
+  return { ...merged, rpcSourceKey: local.rpcSourceKey };
 }
 
 function antigravityPlanLabelFromParts(...parts) {
@@ -73,7 +70,7 @@ function mapAntigravitySnapshot(snapshot, { nowMs, source = 'rpc', account = nul
         windowMinutes: null,
         showMeter: Number.isFinite(pool.remainingFraction)
       }));
-  return normalizeLimitProvider({
+  const row = normalizeLimitProvider({
     provider: 'antigravity',
     accountKey: accountEmail ? antigravityOAuth.accountKey(accountEmail) : hashKey('antigravity', accountKeySeed),
     accountLabel,
@@ -87,6 +84,7 @@ function mapAntigravitySnapshot(snapshot, { nowMs, source = 'rpc', account = nul
     updatedAt,
     windows
   });
+  return source === 'rpc' ? { ...row, rpcSourceKey: snapshot?.sourceKey ?? null } : row;
 }
 
 function antigravityAccountError(account, error, nowMs) {
@@ -113,20 +111,22 @@ const RPC_SOURCE_BINDINGS_MAX_ENTRIES = 16;
 // A process kind can expose several sources across app restarts. Remember which
 // source produced each account's reading so an authentication rejection clears
 // only that reading, capped like the existing runtime identity caches.
-function bindRpcSourceAccount(sourceDetail, sourceKey, accountKey, deps = {}) {
-  if (!accountKey || !(deps.providerRuntimeState instanceof Map)) return;
-  let bindings = deps.providerRuntimeState.get(RPC_SOURCE_BINDINGS_STATE_KEY);
+function commitAcceptedReading(input, row, providerRuntimeState) {
+  const { source, sourceDetail, accountKey } = row;
+  if (source !== 'rpc' || !sourceDetail || !accountKey || !Object.hasOwn(input, 'rpcSourceKey')) return;
+  const sourceKey = input.rpcSourceKey;
+  let bindings = providerRuntimeState.get(RPC_SOURCE_BINDINGS_STATE_KEY);
   if (!(bindings instanceof Map)) {
     if (!sourceKey) return;
     bindings = new Map();
-    deps.providerRuntimeState.set(RPC_SOURCE_BINDINGS_STATE_KEY, bindings);
+    providerRuntimeState.set(RPC_SOURCE_BINDINGS_STATE_KEY, bindings);
   }
   const key = `${sourceDetail}:${accountKey}`;
   bindings.delete(key);
   // An alternate endpoint of the same process proves no process credential. Its
   // reading must not stay bound to one, or a later rejection replaces it.
   if (!sourceKey) {
-    if (bindings.size === 0) deps.providerRuntimeState.delete(RPC_SOURCE_BINDINGS_STATE_KEY);
+    if (bindings.size === 0) providerRuntimeState.delete(RPC_SOURCE_BINDINGS_STATE_KEY);
     return;
   }
   // A source serves one account at a time; a same-process account switch must
@@ -159,12 +159,7 @@ async function fetchAntigravityLimits(options = {}, deps = {}) {
 
   if (accounts.length === 0 && !scope) {
     try {
-      const snapshot = await probeFn(deps);
-      const row = mapAntigravitySnapshot(snapshot, { nowMs, source: 'rpc' });
-      if (row.status === 'ok' && row.sourceDetail && !deps.signal?.aborted) {
-        bindRpcSourceAccount(row.sourceDetail, snapshot.sourceKey, row.accountKey, deps);
-      }
-      return row;
+      return mapAntigravitySnapshot(await probeFn(deps), { nowMs, source: 'rpc' });
     } catch (error) {
       const base = {
         provider: 'antigravity',
@@ -196,13 +191,7 @@ async function fetchAntigravityLimits(options = {}, deps = {}) {
   const localPromise = scope?.sourceDetail === 'oauth'
     ? Promise.resolve(null)
     : probeFn(deps).then(
-        (snapshot) => {
-          const row = mapAntigravitySnapshot(snapshot, { nowMs, source: 'rpc' });
-          if (row.status === 'ok' && row.sourceDetail) {
-            bindRpcSourceAccount(row.sourceDetail, snapshot.sourceKey, row.accountKey, deps);
-          }
-          return row;
-        },
+        (snapshot) => mapAntigravitySnapshot(snapshot, { nowMs, source: 'rpc' }),
         () => null
       );
   const remotePromise = Promise.all(accounts.map(async (account) => {
@@ -234,5 +223,6 @@ async function fetchAntigravityLimits(options = {}, deps = {}) {
 }
 
 module.exports = {
+  commitAcceptedReading,
   fetchAntigravityLimits
 };
