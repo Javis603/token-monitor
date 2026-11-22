@@ -6286,16 +6286,6 @@ html.is-windows .limit-live-badge {
   opacity: 0.7;
   white-space: nowrap;
 }
-.limit-windows-notion {
-  align-items: start;
-}
-.limit-windows-notion .limit-reset-split {
-  flex-wrap: wrap;
-  gap: 2px 8px;
-}
-.limit-windows-notion .limit-detail {
-  margin-inline-start: auto;
-}
 .limit-window-note {
   gap: 3px;
 }
