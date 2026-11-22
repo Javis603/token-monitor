@@ -1429,9 +1429,9 @@
             <span class="settings-section-meta"><span id="syncSettingsSummary" class="settings-section-summary"></span><span class="settings-section-disclosure" aria-hidden="true"></span></span>
           </button>
           <div id="syncSettingsDetails" class="settings-section-details hidden">
-            <div class="sync-connection-fields">
-              <div class="settings-field sync-mode-field">
-                <span id="syncModeLabel" data-i18n="settings.sync.mode">Sync method</span>
+            <section id="syncMap" class="settings-page-card sync-map" aria-labelledby="syncModeLabel">
+              <div class="sync-map-head">
+                <span id="syncModeLabel" class="sync-map-label" data-i18n="settings.sync.mode">Sync method</span>
                 <span class="sync-mode-select">
                   <select id="hubModeOptions" aria-labelledby="syncModeLabel">
                     <option value="local" data-i18n="settings.sync.localOnly">Local only</option>
@@ -1442,39 +1442,48 @@
                   <span class="settings-section-disclosure" aria-hidden="true"></span>
                 </span>
               </div>
-              <div id="hubClientFields" class="hub-mode-fields hidden">
-                <div id="syncPanelConnection" class="sync-panel-connection" hidden>
-                  <div class="sync-panel-state">
+              <div id="syncLocalIntro" class="sync-node sync-node-placeholder" data-sync-modes="local">
+                <span class="sync-node-icon" data-sync-icon="client" aria-hidden="true"></span>
+                <span class="sync-node-text">
+                  <strong class="sync-node-title" data-i18n="settings.sync.noHub">No Hub yet</strong>
+                  <span class="sync-node-sub" data-i18n="settings.sync.localIntro">Connect to or host a Hub to combine usage from your other devices.</span>
+                </span>
+              </div>
+              <div id="hubClientFields" class="hub-mode-fields sync-map-hub hidden">
+                <div id="syncPanelConnection" class="sync-panel-connection sync-node" hidden>
+                  <span class="sync-node-icon">
+                    <span id="syncPanelSignal" class="sync-panel-signal" aria-hidden="true">
+                      <svg class="sync-panel-signal-linked" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+                        <circle cx="12" cy="12" r="9" />
+                        <path d="m8 12 3 3 5-6" />
+                      </svg>
+                      <svg class="sync-panel-signal-unlinked" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+                        <circle cx="12" cy="12" r="9" />
+                        <path d="m6 6 12 12" />
+                      </svg>
+                      <svg class="sync-panel-signal-pending" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round">
+                        <circle cx="12" cy="12" r="9" opacity="0.2" />
+                        <path d="M12 3a9 9 0 0 1 9 9" />
+                      </svg>
+                    </span>
+                  </span>
+                  <div class="sync-panel-state sync-node-text">
                     <div class="sync-connection-heading">
-                      <span class="sync-connection-status">
-                        <span id="syncPanelSignal" class="sync-panel-signal" aria-hidden="true">
-                          <svg class="sync-panel-signal-linked" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
-                            <circle cx="12" cy="12" r="9" />
-                            <path d="m8 12 3 3 5-6" />
-                          </svg>
-                          <svg class="sync-panel-signal-unlinked" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
-                            <circle cx="12" cy="12" r="9" />
-                            <path d="m6 6 12 12" />
-                          </svg>
-                          <svg class="sync-panel-signal-pending" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round">
-                            <circle cx="12" cy="12" r="9" opacity="0.2" />
-                            <path d="M12 3a9 9 0 0 1 9 9" />
-                          </svg>
-                        </span>
-                        <strong id="syncPanelState" role="status" aria-live="polite"></strong>
-                      </span>
-                      <button id="syncConnectionEdit" type="button" class="sync-connection-edit" data-i18n="settings.sync.editConnection">Change connection</button>
+                      <div id="syncConnectionIdentity" class="sync-connection-identity sync-node-title">
+                        <span id="hubProfilePicker" class="hub-profile-picker" hidden><select id="hubProfileSelect" aria-label="Hub" data-i18n-aria-label="settings.sync.hubPicker"></select></span>
+                        <span id="syncConnectionEndpoint"></span>
+                      </div>
                     </div>
-                    <div id="syncConnectionIdentity" class="sync-connection-identity">
-                      <span id="hubProfilePicker" class="hub-profile-picker" hidden><select id="hubProfileSelect" aria-label="Hub" data-i18n-aria-label="settings.sync.hubPicker"></select></span>
-                      <span id="syncConnectionEndpoint"></span>
-                      <span id="syncPanelBuild" class="sync-panel-build" hidden></span>
+                    <div class="sync-node-meta">
+                      <strong id="syncPanelState" class="sync-node-state" role="status" aria-live="polite"></strong>
+                      <span id="syncPanelUpload" class="sync-node-sub"></span>
                     </div>
-                    <span id="syncPanelUpload"></span>
-                    <span id="syncPanelDetail" role="status" aria-live="polite" hidden></span>
+                    <span id="syncPanelBuild" class="sync-panel-build sync-node-sub" hidden></span>
+                    <span id="syncPanelDetail" class="sync-node-sub" role="status" aria-live="polite" hidden></span>
                   </div>
+                  <button id="syncConnectionEdit" type="button" class="sync-connection-edit" data-i18n="settings.sync.editConnection" data-i18n-aria-label="settings.sync.editConnection" aria-label="Change connection">Change connection</button>
                 </div>
-                <div id="syncConnectionEditor" class="sync-connection-editor">
+                <div id="syncConnectionEditor" class="sync-connection-editor sync-map-form">
                   <label><span data-i18n="settings.sync.hubName">Hub name</span><input id="hubProfileNameInput" type="text" maxlength="120" spellcheck="false" placeholder="Home / Worker" data-i18n-placeholder="settings.sync.hubNamePlaceholder" /></label>
                   <label><span data-i18n="settings.sync.hubUrl">Hub URL</span><input id="hubUrlInput" type="text" spellcheck="false" placeholder="http://hub-host:17321" /></label>
                   <div class="settings-field hub-secret-field">
@@ -1485,37 +1494,59 @@
                     </div>
                   </div>
                 </div>
-                <div id="hubBuildStatus" class="hub-status hub-build-status" role="status" hidden></div>
+                <div id="hubBuildStatus" class="hub-status hub-build-status sync-map-notice" role="status" hidden></div>
               </div>
-              <div id="hubHostFields" class="hub-mode-fields hidden">
-                <label><span data-i18n="settings.sync.port">Port</span><input id="hubPortInput" type="number" min="1" max="65535" spellcheck="false" /></label>
-                <label><span data-i18n="settings.sync.sharedSecret">Shared Secret</span>
-                  <div class="hub-secret-row">
-                    <input id="hubSecretInput" type="text" spellcheck="false" readonly />
-                    <button id="hubSecretCopyButton" type="button" class="icon-button" aria-label="Copy secret" data-i18n-aria-label="settings.sync.copySecret">⧉</button>
-                    <button id="hubSecretRegenButton" type="button" class="icon-button" aria-label="Regenerate" data-i18n-aria-label="settings.sync.regenerateSecret">↺</button>
+              <div id="hubHostFields" class="hub-mode-fields sync-map-hub hidden">
+                <div class="sync-node">
+                  <span class="sync-node-icon" data-sync-icon="host" aria-hidden="true"></span>
+                  <span class="sync-node-text">
+                    <span id="hubStatusRow" class="hub-status"></span>
+                    <span class="sync-node-sub" data-i18n="settings.sync.hostWarningShort">Quitting Token Monitor stops the Hub for every connected device.</span>
+                  </span>
+                </div>
+                <div class="sync-share sync-map-form">
+                  <div id="hubAddressList" class="hub-address-list"></div>
+                  <div class="settings-field sync-share-secret">
+                    <label for="hubSecretInput" data-i18n="settings.sync.sharedSecret">Shared Secret</label>
+                    <div class="hub-secret-row">
+                      <input id="hubSecretInput" type="text" spellcheck="false" readonly />
+                      <button id="hubSecretCopyButton" type="button" class="icon-button" aria-label="Copy secret" data-i18n-aria-label="settings.sync.copySecret">⧉</button>
+                      <button id="hubSecretRegenButton" type="button" class="icon-button" aria-label="Regenerate" data-i18n-aria-label="settings.sync.regenerateSecret">↺</button>
+                    </div>
                   </div>
-                </label>
-                <div id="hubStatusRow" class="hub-status"></div>
-                <div id="hubAddressList" class="hub-address-list"></div>
-                <p class="settings-note" data-i18n="settings.sync.hostNote">Other devices connect using one of the URLs above with the shared secret. For cross-network use, run Tailscale or ZeroTier on both sides - the virtual IP works the same.</p>
-                <p class="settings-note hub-warning" data-i18n="settings.sync.hostWarning">The hub runs while Token Monitor is running. Quitting (not just closing the window) stops the hub for all connected devices.</p>
-              </div>
-              <div id="icloudFields" class="hub-mode-fields hidden">
-                <div id="icloudStatus" class="hub-status" role="status" aria-live="polite"></div>
-                <div id="icloudRootStatus" class="icloud-root-status"></div>
-                <p class="settings-note" data-i18n="settings.sync.icloudNote">Sync usage, limits, history, devices and subscriptions across Macs signed into the same Apple ID. No Token Monitor server is used; updates may take a moment to appear.</p>
-              </div>
-              <div id="syncDeviceSettings" class="sync-device-settings">
-                <label><span data-i18n="settings.sync.deviceId">Device ID</span><input id="deviceIdInput" type="text" spellcheck="false" placeholder="auto (hostname)" data-i18n-placeholder="settings.sync.deviceIdPlaceholder" /></label>
-                <div class="settings-actions">
-                  <button id="saveSettingsButton" type="button" data-i18n="settings.common.save">Save</button>
-                  <button id="syncConnectionCancel" type="button" data-i18n="settings.common.cancel" hidden>Cancel</button>
-                  <button id="hubProfileRemove" type="button" class="hub-profile-remove" data-i18n="settings.sync.removeHub" hidden>Remove Hub</button>
+                  <label class="sync-port-field"><span data-i18n="settings.sync.port">Port</span><input id="hubPortInput" type="number" min="1" max="65535" spellcheck="false" /></label>
+                  <p class="settings-note" data-i18n="settings.sync.hostNote">Other devices connect using one of the URLs above with the shared secret. For cross-network use, run Tailscale or ZeroTier on both sides - the virtual IP works the same.</p>
                 </div>
               </div>
-              <div id="syncConnectionSaveError" class="hub-status error" role="alert" hidden></div>
-              <div id="deviceIconLocalRow" class="settings-item"><span id="deviceIconLocalLabel" class="settings-item-text settings-field" data-i18n="devices.icon.thisDevice">This device’s icon</span><span class="device-icon-local-control"><select id="deviceIconInput" aria-labelledby="deviceIconLocalLabel"></select></span></div>
+              <div id="icloudFields" class="hub-mode-fields sync-map-hub hidden">
+                <div class="sync-node">
+                  <span class="sync-node-icon" data-sync-icon="icloud" aria-hidden="true"></span>
+                  <span class="sync-node-text">
+                    <span id="icloudStatus" class="hub-status" role="status" aria-live="polite"></span>
+                    <span id="icloudRootStatus" class="icloud-root-status sync-node-sub"></span>
+                    <span class="sync-node-sub" data-i18n="settings.sync.icloudNote">Sync usage, limits, history, devices and subscriptions across Macs signed into the same Apple ID. No Token Monitor server is used; updates may take a moment to appear.</span>
+                  </span>
+                </div>
+              </div>
+              <div id="syncDeviceSettings" class="sync-device-settings sync-map-form">
+                <label><span data-i18n="settings.sync.deviceId">Device ID</span><input id="deviceIdInput" type="text" spellcheck="false" placeholder="auto (hostname)" data-i18n-placeholder="settings.sync.deviceIdPlaceholder" /></label>
+                <div class="settings-actions">
+                  <button id="hubProfileRemove" type="button" class="hub-profile-remove" data-i18n="settings.sync.removeHub" hidden>Remove Hub</button>
+                  <button id="syncConnectionCancel" type="button" data-i18n="settings.common.cancel" hidden>Cancel</button>
+                  <button id="saveSettingsButton" type="button" data-i18n="settings.common.save">Save</button>
+                </div>
+              </div>
+              <div id="syncConnectionSaveError" class="hub-status error sync-map-notice" role="alert" hidden></div>
+              <div id="syncDevicePanel" class="sync-panel" hidden>
+                <div class="sync-panel-heading">
+                  <span data-i18n="settings.sync.panel.devices">Devices</span>
+                  <span id="syncPanelCount" class="sync-panel-count"></span>
+                </div>
+                <div id="syncDeviceList" class="sync-device-list"></div>
+              </div>
+            </section>
+            <div id="syncThisDeviceCard" class="settings-subgroup settings-page-card sync-this-device">
+              <div id="deviceIconLocalRow" class="settings-item"><span id="deviceIconLocalLabel" class="settings-item-text settings-item-title" data-i18n="devices.icon.thisDevice">This device’s icon</span><span class="device-icon-local-control"><select id="deviceIconInput" aria-labelledby="deviceIconLocalLabel"></select></span></div>
               <label id="syncUploadIntervalRow" class="sync-upload-interval-row settings-item" hidden><span class="settings-item-text"><span class="settings-item-title" data-i18n="settings.sync.uploadInterval">Sync upload frequency</span></span>
                 <select id="syncUploadIntervalInput">
                   <option value="0" data-i18n="settings.sync.uploadInterval.live">Live</option>
@@ -1524,44 +1555,36 @@
                   <option value="1800000" data-i18n="settings.sync.uploadInterval.30m">Every 30 minutes</option>
                 </select>
               </label>
-            </div>
-            <div id="syncContentGroup" class="settings-group cursor-account-group theme-color-accordion">
-              <button id="syncContentToggle" class="settings-group-header cursor-settings-toggle" type="button" aria-expanded="false" aria-controls="syncContentDetails">
-                <span data-i18n="settings.sync.content.title">Additional sync</span>
-                <span class="cursor-settings-summary"><span class="cursor-disclosure-icon" aria-hidden="true"></span></span>
-              </button>
-              <div id="syncContentDetails" class="cursor-settings-details hidden" inert>
-                <div class="sync-content-body">
-                  <p class="settings-note" data-i18n="settings.sync.content.basis">Usage, cost, tool limits and subscriptions sync automatically.</p>
-                  <p id="syncContentLocalNote" class="settings-note" data-i18n="settings.sync.content.localNote">Optional content sync is available when connected to or hosting a hub.</p>
-                  <div id="syncContentNotice" class="sync-content-notice" hidden>
-                    <p id="syncContentStatus" class="settings-note" role="status" aria-live="polite" hidden></p>
-                    <button id="syncContentRetry" class="sync-content-retry" type="button" data-i18n="settings.sync.content.retry" hidden>Check again</button>
-                  </div>
-                  <div id="syncContentOptions" class="sync-content-options" hidden>
-                    <label id="syncContentHostRow" class="settings-item checkbox-label sync-content-option" hidden><span class="settings-item-text"><span class="settings-item-title" data-i18n="settings.sync.content.hostPermission">Allow devices to sync session titles</span><span class="settings-item-desc" data-i18n="settings.sync.content.hostNote">Controls what this hub accepts. Each device chooses separately whether to send titles.</span></span><input id="syncContentHostPermission" type="checkbox" /></label>
-                    <div class="settings-item checkbox-label sync-content-option">
-                      <div class="settings-item-text">
-                        <span class="settings-help-heading"><label for="syncContentsessionTitles" class="settings-item-title" data-i18n="settings.sync.content.sessionTitles">Session titles</label><button id="syncContentTitleHelp" class="settings-help-trigger" type="button" aria-describedby="syncContentTitleHelpPopover" aria-expanded="false" aria-controls="syncContentTitleHelpPopover" data-i18n-aria-label="settings.sync.content.helpLabel" aria-label="How to enable title sync"><span aria-hidden="true">i</span></button></span>
-                        <span id="syncContentTitleNote" class="settings-item-desc" data-i18n="settings.sync.content.titleNote">Let other devices display session titles.</span>
-                        <span id="syncContentTitleUnavailable" class="settings-item-desc sync-title-unavailable" hidden><span data-i18n="settings.sync.content.titleUnavailable">Title sync is not enabled on the server.</span></span>
-                      </div>
-                      <input id="syncContentsessionTitles" type="checkbox" aria-describedby="syncContentStatus syncContentTitleUnavailable syncContentCleanup" disabled />
+              <div id="syncContentGroup" class="settings-group cursor-account-group theme-color-accordion">
+                <button id="syncContentToggle" class="settings-group-header cursor-settings-toggle" type="button" aria-expanded="false" aria-controls="syncContentDetails">
+                  <span data-i18n="settings.sync.content.title">Additional sync</span>
+                  <span class="cursor-settings-summary"><span id="syncContentSummary" class="cursor-status-pill" hidden></span><span class="cursor-disclosure-icon" aria-hidden="true"></span></span>
+                </button>
+                <div id="syncContentDetails" class="cursor-settings-details hidden" inert>
+                  <div class="sync-content-body">
+                    <p class="settings-note" data-i18n="settings.sync.content.basis">Usage, cost, tool limits and subscriptions sync automatically.</p>
+                    <p id="syncContentLocalNote" class="settings-note" data-i18n="settings.sync.content.localNote">Optional content sync is available when connected to or hosting a hub.</p>
+                    <div id="syncContentNotice" class="sync-content-notice" hidden>
+                      <p id="syncContentStatus" class="settings-note" role="status" aria-live="polite" hidden></p>
+                      <button id="syncContentRetry" class="sync-content-retry" type="button" data-i18n="settings.sync.content.retry" hidden>Check again</button>
                     </div>
-                    <label class="settings-item checkbox-label sync-content-option"><span class="settings-item-text"><span class="settings-item-title" data-i18n="settings.sync.content.modelAliases">Model aliases and grouping</span><span class="settings-item-desc" data-i18n="settings.sync.content.aliasesNote">Use the same model names and groups on your devices.</span></span><input id="syncContentmodelAliases" type="checkbox" aria-describedby="syncContentStatus" disabled /></label>
-                    <label class="settings-item checkbox-label sync-content-option"><span class="settings-item-text"><span class="settings-item-title" data-i18n="settings.sync.content.customPricing">Custom pricing</span><span class="settings-item-desc" data-i18n="settings.sync.content.pricingNote">Use the same custom rates on your devices.</span></span><input id="syncContentcustomPricing" type="checkbox" aria-describedby="syncContentStatus" disabled /></label>
+                    <div id="syncContentOptions" class="sync-content-options" hidden>
+                      <label id="syncContentHostRow" class="settings-item checkbox-label sync-content-option" hidden><span class="settings-item-text"><span class="settings-item-title" data-i18n="settings.sync.content.hostPermission">Allow devices to sync session titles</span><span class="settings-item-desc" data-i18n="settings.sync.content.hostNote">Controls what this hub accepts. Each device chooses separately whether to send titles.</span></span><input id="syncContentHostPermission" type="checkbox" /></label>
+                      <div class="settings-item checkbox-label sync-content-option">
+                        <div class="settings-item-text">
+                          <span class="settings-help-heading"><label for="syncContentsessionTitles" class="settings-item-title" data-i18n="settings.sync.content.sessionTitles">Session titles</label><button id="syncContentTitleHelp" class="settings-help-trigger" type="button" aria-describedby="syncContentTitleHelpPopover" aria-expanded="false" aria-controls="syncContentTitleHelpPopover" data-i18n-aria-label="settings.sync.content.helpLabel" aria-label="How to enable title sync"><span aria-hidden="true">i</span></button></span>
+                          <span id="syncContentTitleNote" class="settings-item-desc" data-i18n="settings.sync.content.titleNote">Let other devices display session titles.</span>
+                          <span id="syncContentTitleUnavailable" class="settings-item-desc sync-title-unavailable" hidden><span data-i18n="settings.sync.content.titleUnavailable">Title sync is not enabled on the server.</span></span>
+                        </div>
+                        <input id="syncContentsessionTitles" type="checkbox" aria-describedby="syncContentStatus syncContentTitleUnavailable syncContentCleanup" disabled />
+                      </div>
+                      <label class="settings-item checkbox-label sync-content-option"><span class="settings-item-text"><span class="settings-item-title" data-i18n="settings.sync.content.modelAliases">Model aliases and grouping</span><span class="settings-item-desc" data-i18n="settings.sync.content.aliasesNote">Use the same model names and groups on your devices.</span></span><input id="syncContentmodelAliases" type="checkbox" aria-describedby="syncContentStatus" disabled /></label>
+                      <label class="settings-item checkbox-label sync-content-option"><span class="settings-item-text"><span class="settings-item-title" data-i18n="settings.sync.content.customPricing">Custom pricing</span><span class="settings-item-desc" data-i18n="settings.sync.content.pricingNote">Use the same custom rates on your devices.</span></span><input id="syncContentcustomPricing" type="checkbox" aria-describedby="syncContentStatus" disabled /></label>
+                    </div>
+                    <div id="syncContentCleanup" class="sync-content-cleanup" hidden><p class="settings-note hub-warning" data-i18n="settings.sync.content.cleanup_pending">Title sync is off, but previously shared titles still need to be removed from the server. Retry when connected.</p><div class="settings-actions"><button id="syncContentCleanupRetry" type="button" data-i18n="settings.sync.content.cleanupRetry">Retry title removal</button></div></div>
                   </div>
-                  <div id="syncContentCleanup" class="sync-content-cleanup" hidden><p class="settings-note hub-warning" data-i18n="settings.sync.content.cleanup_pending">Title sync is off, but previously shared titles still need to be removed from the server. Retry when connected.</p><div class="settings-actions"><button id="syncContentCleanupRetry" type="button" data-i18n="settings.sync.content.cleanupRetry">Retry title removal</button></div></div>
                 </div>
               </div>
-            </div>
-            <div id="syncDevicePanel" class="sync-panel" hidden>
-              <div class="sync-panel-heading">
-                <span data-i18n="settings.sync.panel.devices">Devices</span>
-                <span id="syncPanelCount" class="sync-panel-count"></span>
-              </div>
-              <div id="syncDeviceList" class="sync-device-list"></div>
-              <button id="syncPanelOpenDevices" type="button" class="sync-panel-link"><span data-i18n="settings.sync.panel.viewUsage">View usage by device</span><span class="sync-panel-link-arrow" aria-hidden="true"></span></button>
             </div>
           </div>
         </div>

@@ -523,6 +523,7 @@ Object.assign(els, {
   secretPasteButton: document.getElementById('secretPasteButton'),
   hubStatusRow: document.getElementById('hubStatusRow'),
   syncDevicePanel: document.getElementById('syncDevicePanel'),
+  syncMap: document.getElementById('syncMap'),
   syncPanelConnection: document.getElementById('syncPanelConnection'),
   syncPanelSignal: document.getElementById('syncPanelSignal'),
   syncPanelState: document.getElementById('syncPanelState'),
@@ -531,7 +532,6 @@ Object.assign(els, {
   syncPanelBuild: document.getElementById('syncPanelBuild'),
   syncPanelCount: document.getElementById('syncPanelCount'),
   syncDeviceList: document.getElementById('syncDeviceList'),
-  syncPanelOpenDevices: document.getElementById('syncPanelOpenDevices'),
   hubAddressList: document.getElementById('hubAddressList'),
   syncUploadIntervalInput: document.getElementById('syncUploadIntervalInput'),
   collectionCadenceInput: document.getElementById('collectionCadenceInput'),
@@ -684,6 +684,7 @@ const syncModeSelect = window.TokenMonitorSelectControl?.enhance(els.hubModeOpti
   getOptionMeta: option => ({ description: t(SYNC_MODE_DESCRIPTIONS[option.value]), icon: syncModeIcons[option.value] })
 });
 window.addEventListener('unload', () => syncModeSelect?.destroy(), { once: true });
+for (const slot of document.querySelectorAll('[data-sync-icon]')) slot.replaceChildren(syncModeIcons[slot.dataset.syncIcon](document));
 window.addEventListener('unload', () => {
   for (const select of document.querySelectorAll('.device-icon-select, #deviceIconInput')) deviceIconsApi.destroyDeviceIconSelect(select);
 }, { once: true });
@@ -9685,6 +9686,12 @@ function syncHubModeUi() {
     els.icloudFields.classList.toggle('hidden', mode !== 'icloud');
     els.icloudFields.inert = mode !== 'icloud';
   }
+  // Blocks outside the per-mode field groups name the modes they belong to.
+  for (const node of els.syncMap.querySelectorAll('[data-sync-modes]')) {
+    const shown = node.dataset.syncModes.split(' ').includes(mode);
+    node.hidden = !shown;
+    node.inert = !shown;
+  }
   if (mode === 'host') {
     els.hubSecretInput.value = state.settings.hubHostSecret || '';
     renderHubStatus();
@@ -9865,7 +9872,6 @@ function stopSyncPanelAgeTimer() {
 function renderSyncPanelDevices(rows) {
   const counts = syncDevicePanelApi.deviceCounts(rows);
   els.syncPanelCount.textContent = counts.total > 0 ? t('settings.sync.panel.onlineCount', counts) : '';
-  els.syncPanelOpenDevices.hidden = counts.total === 0 || !availableBreakdownIds().includes('device');
   const list = els.syncDeviceList;
   const scope = JSON.stringify([
     state.settings?.hubMode, state.mode, state.settings?.deviceId,
@@ -10058,6 +10064,26 @@ function renderHubBuildStatus() {
   els.hubBuildStatus.hidden = false;
 }
 
+let hubAddressesExpanded = false;
+function hubAddressRow(addr, port) {
+  const url = `http://${addr.address}:${port}`;
+  const row = document.createElement('div');
+  row.className = 'hub-address-row';
+  const code = document.createElement('code');
+  code.textContent = url;
+  const ifaceLabel = document.createElement('span');
+  ifaceLabel.className = 'hub-address-iface';
+  ifaceLabel.textContent = addr.interface;
+  const copy = document.createElement('button');
+  copy.type = 'button';
+  copy.className = 'icon-button';
+  copy.setAttribute('aria-label', t('settings.sync.copyUrl', { url }));
+  copy.textContent = '⧉';
+  copy.addEventListener('click', () => copyToClipboard(url, copy));
+  row.append(code, ifaceLabel, copy);
+  return row;
+}
+
 function renderHubAddresses(addresses, port) {
   els.hubAddressList.replaceChildren();
   if (addresses.length === 0) {
@@ -10067,28 +10093,34 @@ function renderHubAddresses(addresses, port) {
     els.hubAddressList.appendChild(empty);
     return;
   }
+  // Lead with the network card other devices most likely share, not a VPN or
+  // virtual adapter; the rest stay one click away.
+  const physical = addr => /^(en|eth|wl|wi-?fi|ethernet)/i.test(String(addr.interface || ''));
+  const ordered = [...addresses.filter(physical), ...addresses.filter(addr => !physical(addr))];
   const header = document.createElement('div');
   header.className = 'hub-address-header';
   header.textContent = t('settings.sync.connectWith');
-  els.hubAddressList.appendChild(header);
-  for (const addr of addresses) {
-    const url = `http://${addr.address}:${port}`;
-    const row = document.createElement('div');
-    row.className = 'hub-address-row';
-    const code = document.createElement('code');
-    code.textContent = url;
-    const ifaceLabel = document.createElement('span');
-    ifaceLabel.className = 'hub-address-iface';
-    ifaceLabel.textContent = addr.interface;
-    const copy = document.createElement('button');
-    copy.type = 'button';
-    copy.className = 'icon-button';
-    copy.setAttribute('aria-label', t('settings.sync.copyUrl', { url }));
-    copy.textContent = '⧉';
-    copy.addEventListener('click', () => copyToClipboard(url, copy));
-    row.append(code, ifaceLabel, copy);
-    els.hubAddressList.appendChild(row);
-  }
+  els.hubAddressList.append(header, hubAddressRow(ordered[0], port));
+  const rest = ordered.slice(1);
+  if (rest.length === 0) return;
+  const extra = document.createElement('div');
+  extra.className = 'hub-address-extra';
+  extra.id = 'hubAddressExtra';
+  extra.hidden = !hubAddressesExpanded;
+  extra.append(...rest.map(addr => hubAddressRow(addr, port)));
+  const more = document.createElement('button');
+  more.type = 'button';
+  more.className = 'hub-address-more';
+  more.setAttribute('aria-expanded', String(hubAddressesExpanded));
+  more.setAttribute('aria-controls', extra.id);
+  more.textContent = hubAddressesExpanded ? t('settings.sync.fewerAddresses') : t('settings.sync.moreAddresses', { count: rest.length });
+  more.addEventListener('click', () => {
+    hubAddressesExpanded = !hubAddressesExpanded;
+    renderHubAddresses(addresses, port);
+    els.hubAddressList.querySelector('.hub-address-more')?.focus({ preventScroll: true });
+  });
+  // The toggle precedes the rows it reveals, so Tab reaches them next.
+  els.hubAddressList.append(more, extra);
 }
 
 async function copyToClipboard(text, button) {
@@ -14987,8 +15019,6 @@ els.hubProfileRemove?.addEventListener('click', async () => {
   cancelClientConnectionEdit();
   await changeHubProfile({ type: 'delete', id: state.settings?.activeHubProfileId });
 });
-
-els.syncPanelOpenDevices?.addEventListener('click', () => openViewFromTray('device'));
 
 els.hubModeOptions.addEventListener('change', async (event) => {
   const target = event.target;
