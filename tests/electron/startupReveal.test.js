@@ -131,6 +131,7 @@ test('tray navigation waits for initial settings and replays only the last reque
   const context = vm.createContext({
     state: { settings: null },
     initialSettingsApplied: false,
+    initialBreakdownPreferenceApplied: false,
     openSettingsPanel: section => calls.push(['settings', section]),
     openViewFromTray: viewId => calls.push(['view', viewId]),
     window: {
@@ -152,8 +153,15 @@ test('tray navigation waits for initial settings and replays only the last reque
   context.initialSettingsApplied = true;
   vm.runInContext('flushPendingTrayOpen()', context);
   assert.deepEqual(calls, [['view', 'trends']]);
+  assert.equal(context.initialBreakdownPreferenceApplied, true, 'the tray view consumes the saved preference');
   onOpenSettings('notch');
   assert.deepEqual(calls.at(-1), ['settings', 'notch'], 'a loaded renderer dispatches at once');
+  context.initialSettingsApplied = false;
+  context.initialBreakdownPreferenceApplied = false;
+  onOpenSettings('notch');
+  context.initialSettingsApplied = true;
+  vm.runInContext('flushPendingTrayOpen()', context);
+  assert.equal(context.initialBreakdownPreferenceApplied, false, 'settings alone leaves the saved preference to apply');
   const init = app.slice(app.indexOf('async function init()'));
   assert.ok(init.indexOf('flushPendingTrayOpen();') > init.indexOf('initialSettingsApplied = true;'));
 });

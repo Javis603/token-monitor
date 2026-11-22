@@ -16016,6 +16016,11 @@ reducedMotionMedia?.addEventListener?.('change', () => {
 let pendingTrayOpen = null;
 
 function dispatchTrayOpen(request) {
+  // An explicit tray view outranks the saved startup preference. Consume the
+  // one-time preference so the later syncSettingsForm() cannot replace it; a
+  // plugin page as the last view leaves the query seed absent, so this is not
+  // already covered by initialViewState.
+  if (request.kind === 'view') initialBreakdownPreferenceApplied = true;
   if (request.kind === 'view') openViewFromTray(request.value);
   else openSettingsPanel(request.value);
 }
