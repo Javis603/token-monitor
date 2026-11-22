@@ -558,6 +558,10 @@ test('MiniMax Code watches every runtime store and the headless captures', () =>
     const custom = path.join(homeDir, 'custom-data');
     const overridden = clientSourceRoots('mcode', { homeDir, env: { ...env, MAVIS_DATA_DIR: custom } }).mcode;
     assert.deepEqual(overridden.slice(0, 1), [{ id: 'mcode-sessions', dir: path.join(custom, 'v2', 'sessions') }]);
+
+    const relocated = path.join(homeDir, 'relocated-minimax');
+    const withCustom = clientSourceRoots('mcode', { ...options, customScanPaths: { mcode: [relocated] } }).mcode;
+    assert.deepEqual(withCustom.slice(-1), [{ id: 'custom-scan-path', dir: relocated, custom: true }]);
   } finally {
     fs.rmSync(homeDir, { recursive: true, force: true });
     fs.rmSync(elsewhere, { recursive: true, force: true });
