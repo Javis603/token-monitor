@@ -46,6 +46,7 @@ function fixture(platform = 'linux') {
     show() { this.visible = true; if (!this.silentVisibility) this.emit('show'); }
     hide() { this.visible = false; if (!this.silentVisibility) this.emit('hide'); }
     isMinimized() { return false; }
+    setBackgroundColor(color) { this.backgroundColors = [...(this.backgroundColors || []), color]; }
     destroy() {
       windows.delete(this);
       this.emit('closed');
@@ -185,6 +186,24 @@ test('screen lock destroys the tray UI and unlock rebuilds the dock and notch wh
   context.updateTrayDisplay();
   assert.ok(context.mainWindow, 'live artwork can resume on the next ordinary tray update');
   assert.equal(context.mainWindow.isVisible(), false);
+});
+
+test('a macOS main window rebuilt after screen lock restores its transparent canvas before reveal', () => {
+  const run = fixture('darwin');
+  const { context, powerMonitor } = run;
+  for (const kind of ['dock', 'notch']) run.addWindow(kind);
+  powerMonitor.emit('lock-screen');
+  powerMonitor.emit('unlock-screen');
+  context.handleTrayToggle(null, { x: 35 }, false, false, true);
+  const next = context.mainWindow;
+  assert.equal(next.backgroundColors, undefined);
+  next.webContents.emit('did-finish-load');
+  assert.deepEqual(next.backgroundColors, ['#00000000']);
+  assert.equal(next.visible, false);
+  context.ipcMain.emit('window:appearanceReady', { sender: next.webContents });
+  assert.equal(next.visible, true);
+  next.webContents.emit('did-finish-load');
+  assert.deepEqual(next.backgroundColors, ['#00000000', '#00000000'], 'a reload restores it again');
 });
 
 test('a dependent window preserves the UI and keeps the existing Notch lock behavior', () => {

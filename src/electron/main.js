@@ -7442,6 +7442,10 @@ function createWindow(boundsOverride, options = {}) {
     win.on(event, () => { if (win === mainWindow) cancelMainWindowHibernate(); });
   }
   if (!options.previousWindow) win.webContents.on('did-finish-load', () => {
+    // A window rebuilt after hibernation can share a renderer with the dock or
+    // notch, which leaves an opaque canvas over the native material (as with
+    // the Dashboard). Restore transparency on every completed load.
+    if (process.platform === 'darwin') win.setBackgroundColor('#00000000');
     if (win === mainWindow) lastRendererStatsFingerprint = null;
     sendFloatingBubbleState();
     // Only report a window that is already on screen. A window still awaiting its
