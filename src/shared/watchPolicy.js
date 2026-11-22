@@ -998,11 +998,12 @@ function watcherOptions(usePolling, ignored) {
 // it on the first read before their source cache is warm. A read-only SQLite
 // connection can write its wal-index; it is not evidence of new token usage.
 // Adding a client to this list asserts a measurement rather than a hunch.
+// MiniMax Code rewrites runtime-state.sqlite-shm on every read-only metadata scan of a watched data directory (measured on darwin with the pinned 4.23 scanner, first and repeat scans).
 // Cherry Studio, CatPaw and Goose also rewrite their wal-index on repeated read-only WAL scans.
 // Cursor's read-only desktop credential/title queries change state.vscdb-shm too.
 const SELF_WATCHED_SQLITE_SIDECAR_CLIENTS = Object.freeze([
   'antigravity', 'catpaw', 'cherrystudio', 'copilot', 'cursor', 'devin', 'goose',
-  'hermes', 'kilo', 'kiro', 'mimo', 'opencode', 'openclaw', 'unsloth', 'zcode', 'zed'
+  'hermes', 'kilo', 'kiro', 'mimo', 'mcode', 'opencode', 'openclaw', 'unsloth', 'zcode', 'zed'
 ]);
 
 function isSelfWatchSqliteSidecarEvent(filePath, rootsByClient = {}) {
