@@ -42,6 +42,10 @@
       models: 'Models',
       limits: 'Limits',
       currentSession: 'Current session',
+      fullSession: 'full session',
+      estimated: 'est.',
+      estimatedLong: 'estimated',
+      estimatedHint: '≈ from context and Qoder credits',
       stale: 'stale',
       reset: 'resets',
       now: 'now',
@@ -76,6 +80,10 @@
       models: '模型',
       limits: '额度',
       currentSession: '当前会话',
+      fullSession: '全会话',
+      estimated: '估',
+      estimatedLong: '估算',
+      estimatedHint: '≈ 按上下文与 Qoder credits 估算',
       stale: '快照',
       reset: '重置',
       now: '刚刚',
@@ -398,6 +406,8 @@
     refs.contextBar.append(refs.contextFill);
     refs.context.wrap.insertBefore(refs.contextBar, refs.context.value);
     refs.cache = chip('cache');
+    refs.cacheNote = element('span', 'session-status-chip-note');
+    refs.cache.wrap.append(refs.cacheNote);
     refs.quota = chip('quota');
     refs.calls = chip('calls');
     metrics.append(refs.context.wrap, refs.cache.wrap, refs.quota.wrap, refs.calls.wrap);
@@ -506,6 +516,7 @@
       return;
     }
     const c = copy();
+    const estimated = row.estimated === true || row.estimatedTokens === true || row.estimatedCost === true;
     status.classList.remove('hidden');
     status.classList.toggle('is-live', isLive(row));
 
@@ -534,14 +545,22 @@
 
     const cached = cachePercent(row);
     if (cached != null) {
+      refs.cache.wrap.dataset.estimated = estimated ? 'true' : '';
+      refs.cache.wrap.dataset.tone = cached >= 85 ? 'good' : cached < 50 ? 'low' : '';
+      const cacheNote = estimated ? c.estimated : '';
+      refs.cacheNote.textContent = cacheNote;
+      refs.cacheNote.hidden = !cacheNote;
       setChip(
         refs.cache,
         c.cache,
         `${cached}%`,
-        `${compact(positive(row.cacheReadTokens))} ${c.cachedShort} / ${compact(positive(row.cacheReadTokens) + positive(row.inputTokens))}`
+        `${compact(positive(row.cacheReadTokens))} ${c.cachedShort} / ${compact(positive(row.cacheReadTokens) + positive(row.inputTokens))}${cacheNote ? ` · ${cacheNote}` : ''}`
       );
     } else {
       refs.cache.wrap.hidden = true;
+      refs.cache.wrap.dataset.estimated = '';
+      refs.cache.wrap.dataset.tone = '';
+      refs.cacheNote.textContent = '';
     }
 
     const messages = positive(row.messageCount);
@@ -572,7 +591,7 @@
       clientLabel(row.client),
       topModel(row),
       context ? `${c.ctx} ${context.usedPercent}%` : '',
-      cached != null ? `${c.cache} ${cached}%` : '',
+      cached != null ? `${c.cache} ${cached}%${estimated ? ` ${c.estimatedLong}` : ''}` : '',
       messages > 0 ? `${exactFormatter().format(messages)} ${c.calls}` : ''
     ].filter(Boolean).join(', '));
     markSessionEntering(row);
@@ -597,6 +616,9 @@
     if (!card || !state.row) return;
     const row = state.row;
     const c = copy();
+    const estimated = row.estimated === true || row.estimatedTokens === true || row.estimatedCost === true;
+    const estimatedCost = row.estimatedCost === true
+      || (estimated && row.estimatedTokens !== true);
     card.replaceChildren();
 
     const head = element('div', 'session-insight-head');
@@ -604,11 +626,20 @@
     headText.append(
       element('div', 'session-insight-title', row.title || c.currentSession),
       element('div', 'session-insight-sub', [
+        c.fullSession,
         clientLabel(row.client),
         topModel(row),
         row.projectLabel
       ].filter(Boolean).join(' · '))
     );
+    if (estimated) {
+      const badges = element('div', 'session-insight-badges');
+      badges.append(
+        element('span', 'session-insight-estimated', `≈ ${c.estimatedLong}`),
+        element('span', 'session-insight-estimated-hint', c.estimatedHint)
+      );
+      headText.append(badges);
+    }
     const close = element('button', 'session-insight-close', '×');
     close.type = 'button';
     close.setAttribute('aria-label', c.close);
@@ -629,10 +660,14 @@
       ? Math.round(positive(row.timedOutputTokens) / (positive(row.timedDurationMs) / 1000))
       : 0;
     addStat(grid, c.avgSpeed, tps > 0 ? `${tps} tok/s` : '');
-    addStat(grid, c.cost, money(row.costUsd || 0));
     const cost = positive(row.costUsd);
+    addStat(grid, c.cost, cost > 0 && estimatedCost
+      ? `≈ ${money(cost)}`
+      : money(cost));
     const tokens = positive(row.totalTokens);
-    addStat(grid, c.perMillion, cost > 0 && tokens > 0 ? money(cost / tokens * 1000000) : '');
+    addStat(grid, c.perMillion, cost > 0 && tokens > 0
+      ? `${estimatedCost ? '≈ ' : ''}${money(cost / tokens * 1000000)}`
+      : '');
     if (context) {
       addStat(
         grid,
@@ -662,7 +697,9 @@
           element('span', 'session-insight-row-name', modelLabel(name)),
           element('span', 'session-insight-row-meta', hit != null ? `${hit}% ${c.cachedShort}` : ''),
           element('span', 'session-insight-row-value', compact(tokensValue)),
-          element('span', 'session-insight-row-cost', money(costs[name] || 0))
+          element('span', 'session-insight-row-cost', (
+            estimatedCost && positive(costs[name]) > 0 ? '≈ ' : ''
+          ) + money(costs[name] || 0))
         );
         list.append(item);
       }
