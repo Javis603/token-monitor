@@ -105,27 +105,19 @@
 }
 
 .limit-row[data-limit-history]:focus-visible { outline: 1px solid var(--accent); outline-offset: 4px; border-radius: 4px; }
-.limit-row[data-limit-history] .limit-meter-fill::after {
-  content: "";
-  position: absolute;
-  inset: 0;
-  border-radius: inherit;
-  background: linear-gradient(to bottom, rgba(255, 255, 255, .18), transparent 55%);
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, .24);
-  opacity: 0;
-  pointer-events: none;
-  transition: opacity 140ms ease;
+/* Hover is carried by the mark itself rather than a selection box: a rail ring or
+   a history-capable limit meter glows in its own colour. One cue for both
+   surfaces (the edge dock loads this sheet too). The meter glows rather than its
+   fill: a filter applies after the meter's own rounded clip, which the scaled
+   fill's corners need. */
+.edge-dock-cell.is-focused .edge-dock-ring-fill,
+.limit-row[data-limit-history]:is(:hover, :focus-visible, .is-history-active) .limit-meter {
+  filter: drop-shadow(0 0 3px var(--mark-glow-color));
 }
-.limit-row[data-limit-history]:is(:hover, :focus-visible, .is-history-active) .limit-meter-fill {
-  filter: saturate(1.12) brightness(1.06);
-}
-.limit-row[data-limit-history]:is(:hover, :focus-visible, .is-history-active) .limit-meter-fill::after {
-  opacity: 1;
-}
-:root[data-reduce-motion="on"] .limit-row[data-limit-history] .limit-meter-fill,
-:root[data-reduce-motion="on"] .limit-row[data-limit-history] .limit-meter-fill::after { transition: none; }
+.limit-row[data-limit-history] .limit-meter { transition: filter 180ms ease; }
+:root[data-reduce-motion="on"] .limit-row[data-limit-history] .limit-meter { transition: none; }
 @media (prefers-reduced-motion: reduce) {
-  :root:not([data-reduce-motion="off"]) .limit-row[data-limit-history] .limit-meter-fill::after { transition: none; }
+  :root:not([data-reduce-motion="off"]) .limit-row[data-limit-history] .limit-meter { transition: none; }
 }
 * { box-sizing: border-box; }
 html, body {
@@ -6250,7 +6242,7 @@ html.is-windows .limit-live-badge {
   border-radius: 3px;
   transform: scaleX(var(--bar-scale, 0));
   transform-origin: left center;
-  transition: transform 420ms cubic-bezier(0.22, 1, 0.36, 1), filter 140ms ease;
+  transition: transform 420ms cubic-bezier(0.22, 1, 0.36, 1);
 }
 .limit-meter-completion {
   position: absolute;

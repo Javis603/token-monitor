@@ -727,7 +727,7 @@ function ringNode(remainingPercent, color, mark) {
   // Chromium interpolates color-mix() filter colours near black. Supply legacy
   // RGBA so the hover shadow keeps the ring's colour throughout the transition.
   const glowColor = color === 'var(--text)' ? getComputedStyle(document.documentElement).getPropertyValue('--text') : color;
-  ring.style.setProperty('--ring-glow-color', colorWithAlpha(glowColor, 0.55));
+  ring.style.setProperty('--mark-glow-color', colorWithAlpha(glowColor, 0.55));
   const svg = document.createElementNS(SVG_NS, 'svg');
   svg.setAttribute('viewBox', '0 0 42 42');
   svg.setAttribute('aria-hidden', 'true');
