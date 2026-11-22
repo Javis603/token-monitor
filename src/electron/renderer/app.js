@@ -391,6 +391,7 @@ state.sessionPage = 0;
 state.sessionPagerSignature = '';
 state.sessionSearchOpen = false;
 state.sessionSearchQuery = '';
+state.sessionSort = 'recent';
 state.sessionRowsCache = null;
 let directBreakdownOverride = null;
 state.homeActivitySettingsExpanded = false;
@@ -414,6 +415,7 @@ const els = {
   subscriptionList: document.getElementById('subscriptionList'), subscriptionAddForm: document.getElementById('subscriptionAddForm'), subscriptionAddToggle: document.getElementById('subscriptionAddToggle'), subscriptionAddDetails: document.getElementById('subscriptionAddDetails'), subscriptionProviderInput: document.getElementById('subscriptionProviderInput'), subscriptionAccountInput: document.getElementById('subscriptionAccountInput'), subscriptionPlanNameInput: document.getElementById('subscriptionPlanNameInput'), subscriptionAmountInput: document.getElementById('subscriptionAmountInput'), subscriptionCurrencyInput: document.getElementById('subscriptionCurrencyInput'), subscriptionIntervalCountInput: document.getElementById('subscriptionIntervalCountInput'), subscriptionIntervalInput: document.getElementById('subscriptionIntervalInput'), subscriptionStartDateInput: document.getElementById('subscriptionStartDateInput'), subscriptionAutoRenewInput: document.getElementById('subscriptionAutoRenewInput'), subscriptionNextRenewalInput: document.getElementById('subscriptionNextRenewalInput'), subscriptionNote: document.getElementById('subscriptionNote'), subscriptionOrphanNotice: document.getElementById('subscriptionOrphanNotice'), subscriptionOrphanText: document.getElementById('subscriptionOrphanText'), subscriptionOrphanAdopt: document.getElementById('subscriptionOrphanAdopt'), subscriptionOrphanDiscard: document.getElementById('subscriptionOrphanDiscard'), subscriptionSyncError: document.getElementById('subscriptionSyncError'), subscriptionNextRenewalLabel: document.getElementById('subscriptionNextRenewalLabel'), subscriptionNextRenewalNote: document.getElementById('subscriptionNextRenewalNote'), subscriptionSubmit: document.getElementById('subscriptionSubmit'), subscriptionCancelEdit: document.getElementById('subscriptionCancelEdit'), subscriptionTotalRow: document.getElementById('subscriptionTotalRow'), subscriptionErrorMessage: document.getElementById('subscriptionErrorMessage'), subscriptionPlanFields: document.getElementById('subscriptionPlanFields'), subscriptionTopUpFields: document.getElementById('subscriptionTopUpFields'), subscriptionTopUpList: document.getElementById('subscriptionTopUpList'), subscriptionTopUpDateInput: document.getElementById('subscriptionTopUpDateInput'), subscriptionTopUpAmountInput: document.getElementById('subscriptionTopUpAmountInput'), subscriptionTopUpAddButton: document.getElementById('subscriptionTopUpAddButton'), subscriptionAmountRow: document.getElementById('subscriptionAmountRow'), subscriptionTopUpHeadingRow: document.getElementById('subscriptionTopUpHeadingRow'), subscriptionKindInputs: [...document.querySelectorAll('input[name="subscriptionKind"]')]
 };
 Object.assign(els, {
+  sessionSortToggle: document.getElementById('sessionSortToggle'),
   sessionSearchToggle: document.getElementById('sessionSearchToggle'),
   sessionSearchHost: document.getElementById('sessionSearchHost'),
   sessionSearchInput: document.getElementById('sessionSearchInput'),
@@ -3284,6 +3286,9 @@ function setSessionSearchStatus(query, count) {
 function syncSessionSearchChrome() {
   const visible = state.breakdown === 'session' && !state.openSession;
   const open = visible && state.sessionSearchOpen;
+  els.sessionSortToggle.classList.toggle('hidden', !visible);
+  const sortLabel = t(state.sessionSort === 'tokens' ? 'sortMostTokens' : 'sortNewest');
+  if (els.sessionSortToggle.textContent !== sortLabel) els.sessionSortToggle.textContent = sortLabel;
   els.sessionSearchToggle?.classList.toggle('hidden', !visible);
   els.sessionSearchToggle?.classList.toggle('is-active', open);
   els.sessionSearchToggle?.setAttribute('aria-expanded', String(open));
@@ -3704,7 +3709,7 @@ function sessionRowsForPeriod(period) {
   const options = sessionPresentationOptions();
   if (state.breakdown === 'session') options.rowLabelCache = sessionRowLabelCache;
   const rows = rawSessionRowsForPeriod(period, options);
-  if (rows.length > 0) return sessionRowsApi.groupSessionRows(rows, options);
+  if (rows.length > 0) return sessionRowsApi.groupSessionRows(rows, { ...options, sortBy: state.sessionSort });
   if (Number(period?.totalTokens || 0) === 0) return [];
   return modelRowsForPeriod(period);
 }
@@ -5806,6 +5811,7 @@ function sessionDetailBack() {
 function renderSessionDetail({ detail, loading, error, preserveScroll = false } = {}) {
   els.sessionToolFilter.classList.add('hidden');
   els.sessionSearchHost?.classList.add('hidden');
+  els.sessionSortToggle?.classList.add('hidden');
   els.sessionSearchToggle?.classList.add('hidden');
   els.breakdown.classList.add('hidden');
   els.sessionDetail.classList.remove('hidden');
@@ -6035,6 +6041,7 @@ function sessionGroupRunNode(row, max, parent) {
 function renderSessionGroupDetail(request) {
   els.sessionToolFilter.classList.add('hidden');
   els.sessionSearchHost?.classList.add('hidden');
+  els.sessionSortToggle?.classList.add('hidden');
   els.sessionSearchToggle?.classList.add('hidden');
   els.breakdown.classList.add('hidden');
   els.sessionDetail.classList.remove('hidden');
@@ -8258,6 +8265,7 @@ function renderAppContent({ fromSearch = false } = {}) {
   const { fixedUnavailable, detailUnavailable } = periodContentAvailability();
   if (fixedUnavailable || detailUnavailable) {
     els.sessionToolFilter.classList.add('hidden');
+    els.sessionSortToggle.classList.add('hidden');
     els.sessionSearchToggle.classList.add('hidden');
     els.sessionSearchHost.classList.add('hidden');
     cancelNumberAnimation();
@@ -15373,6 +15381,12 @@ for (const input of els.reduceMotionInputs || []) {
   });
 }
 els.liveDotInput.addEventListener('change', saveAppearanceFromControls);
+els.sessionSortToggle.addEventListener('click', () => {
+  state.sessionSort = state.sessionSort === 'tokens' ? 'recent' : 'tokens';
+  state.sessionPage = 0;
+  els.breakdown.scrollTop = 0;
+  render();
+});
 els.sessionSearchToggle?.addEventListener('click', () => {
   const open = !state.sessionSearchOpen;
   setSessionSearchOpen(open, { focus: open });

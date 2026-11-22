@@ -20,6 +20,16 @@ const {
   sessionRowsForPeriod
 } = require('../../src/electron/renderer/sessionRows');
 
+test('session groups can rank by tokens with recent activity breaking ties', () => {
+  const rows = [
+    { key: 'small', name: 'Small', value: 100, sortTime: 30 },
+    { key: 'older', name: 'Older', value: 500, sortTime: 10 },
+    { key: 'newer', name: 'Newer', value: 500, sortTime: 20 }
+  ];
+  assert.deepEqual(groupSessionRows(rows).map(row => row.key), ['small', 'newer', 'older']);
+  assert.deepEqual(groupSessionRows(rows, { sortBy: 'tokens' }).map(row => row.key), ['newer', 'older', 'small']);
+});
+
 test('reuses unchanged row labels across snapshots while the activity state and labels stay current', () => {
   const rowLabelCache = {};
   const lastUsedAt = '2026-10-10T00:00:00Z';

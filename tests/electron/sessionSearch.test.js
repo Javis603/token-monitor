@@ -64,6 +64,7 @@ test('the search affordance is scoped to the session list and closing it clears 
     };
   };
   const els = {
+    sessionSortToggle: node(),
     sessionSearchToggle: node(),
     sessionSearchHost: node(),
     sessionSearchInput: node(),
@@ -77,6 +78,8 @@ test('the search affordance is scoped to the session list and closing it clears 
     `let sessionSearchComposing = false;\n${app.slice(start, end)}\nreturn { syncSessionSearchChrome, setSessionSearchOpen };`)(state, els, (key) => key);
 
   api.syncSessionSearchChrome();
+  assert.equal(els.sessionSortToggle.classes.has('hidden'), false);
+  assert.equal(els.sessionSortToggle.textContent, 'sortNewest');
   assert.equal(els.sessionSearchToggle.classes.has('hidden'), false);
   assert.equal(els.sessionSearchHost.classes.has('hidden'), false);
   assert.equal(els.sessionSearchHost.classes.has('is-open'), false);
@@ -85,7 +88,9 @@ test('the search affordance is scoped to the session list and closing it clears 
 
   state.sessionSearchOpen = true;
   state.sessionSearchQuery = 'review';
+  state.sessionSort = 'tokens';
   api.syncSessionSearchChrome();
+  assert.equal(els.sessionSortToggle.textContent, 'sortMostTokens');
   assert.equal(els.sessionSearchHost.classes.has('hidden'), false);
   assert.equal(els.sessionSearchHost.classes.has('is-open'), true);
   assert.equal(els.sessionSearchHost.inert, false);
@@ -96,6 +101,7 @@ test('the search affordance is scoped to the session list and closing it clears 
 
   state.openSession = { kind: 'session' };
   api.syncSessionSearchChrome();
+  assert.equal(els.sessionSortToggle.classes.has('hidden'), true);
   assert.equal(els.sessionSearchToggle.classes.has('hidden'), true);
   assert.equal(els.sessionSearchHost.classes.has('hidden'), true);
   assert.equal(els.sessionSearchHost.classes.has('is-open'), false);
@@ -136,7 +142,8 @@ test('background renders preserve IME composition until the completed query is c
   let renders = 0;
   const sync = Function('state', 'els', 't', 'render',
     `${app.slice(start, end)}\n${app.slice(handlersStart, handlersEnd)}\nreturn syncSessionSearchChrome;`)(
-    state, { sessionSearchInput: input, breakdown: { scrollTop: 0 } }, key => key, () => { renders++; }
+    state, { sessionSearchInput: input, sessionSortToggle: { classList: { toggle() {} } }, breakdown: { scrollTop: 0 } },
+    key => key, () => { renders++; }
   );
 
   handlers.compositionstart();
