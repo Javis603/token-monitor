@@ -8976,7 +8976,7 @@ function renderThemePresetChips() {
   }
 }
 
-function renderAppearanceColorRows(container, keys, { rowClass, nameClass, resetLabel, nameFor, colorFor, preview, save, reset }) {
+function renderAppearanceColorRows(container, keys, { rowClass, nameClass, resetLabel, nameFor, colorFor, hasOverride, preview, save, reset }) {
   if (!container) return;
   const existing = new Map([...container.children].map(row => [row.dataset.colorKey, row]));
   for (const key of keys) {
@@ -8998,25 +8998,31 @@ function renderAppearanceColorRows(container, keys, { rowClass, nameClass, reset
       }, event.detail === 0));
       const resetButton = document.createElement('button');
       resetButton.type = 'button';
-      resetButton.className = 'reset-appearance-button reset-inline';
-      resetButton.textContent = '↺';
+      resetButton.className = 'settings-reset-button';
       resetButton.addEventListener('click', () => queueAppearanceColorChange(() => reset(key)));
-      row.append(name, swatch, resetButton);
+      const heading = document.createElement('span');
+      heading.className = 'settings-reset-heading';
+      heading.append(name, resetButton);
+      row.append(heading, swatch);
       container.appendChild(row);
     }
-    const [name, swatch, resetButton] = row.children;
+    const [heading, swatch] = row.children;
+    const [name, resetButton] = heading.children;
     const label = nameFor(key);
     name.textContent = label;
     swatch.setAttribute('aria-label', label);
     resetButton.setAttribute('aria-label', t(resetLabel));
+    syncSettingResetVisibility(resetButton, swatch, !hasOverride(key));
     appearanceColorPicker.setSwatch(swatch, colorFor(key));
   }
 }
 
 function renderThemeColorGrid() {
+  const overrides = currentThemeOverrides();
   renderAppearanceColorRows(els.themeColorGrid, ['bg', 'text', 'muted', 'accent', 'chart'], {
     rowClass: 'color-picker-row', nameClass: 'color-picker-name', resetLabel: 'settings.appearance.resetColor',
     nameFor: key => t(`settings.appearance.color.${key}`), colorFor: resolvedThemeColor,
+    hasOverride: key => Object.hasOwn(overrides, key),
     preview: previewThemeColor, save: saveThemeColor, reset: resetThemeColor
   });
 }
@@ -9027,6 +9033,7 @@ function renderVendorColorList() {
     rowClass: 'vendor-color-row', nameClass: 'vendor-color-name', resetLabel: 'settings.appearance.resetBrand',
     nameFor: id => id === 'default' ? t('settings.appearance.vendorDefault') : themePresetsApi.vendorLabel(id),
     colorFor: id => overrides[id] || BRAND_VENDOR_COLORS[id],
+    hasOverride: id => Object.hasOwn(overrides, id),
     preview: previewVendorColor, save: saveVendorColor, reset: resetVendorColor
   });
 }
@@ -9645,6 +9652,10 @@ function syncFontSettingsControls() {
     if (controls.preset) controls.preset.value = preset;
     if (controls.input) controls.input.value = preset === 'custom' ? value : '';
     syncFontCustomRow(role);
+    const isInterface = role === 'interface';
+    const reset = isInterface ? els.resetInterfaceFontButton : els.resetDisplayFontButton;
+    const control = controls.preset?.parentElement.querySelector('.select-control-trigger') || controls.preset;
+    syncSettingResetVisibility(reset, control, value === (isInterface ? '' : fontSettingsApi.DEFAULT_DISPLAY_FONT));
   }
 }
 
@@ -9655,11 +9666,19 @@ function syncSliderRow(input) {
 }
 
 function syncSliderRows() {
-  syncSliderRow(els.glassInput);
-  for (const [key] of nativeGlassTintSettings) syncSliderRow(els[`${key}Input`]);
-  syncSliderRow(els.blurInput);
-  syncSliderRow(els.backgroundImageOpacityInput);
-  syncSliderRow(els.zoomInput);
+  const sliders = [
+    [els.glassInput, els.resetGlassButton, defaultAppearance.glassOpacity],
+    [els.blurInput, els.resetDepthButton, defaultAppearance.glassBlur],
+    [els.backgroundImageOpacityInput, els.resetBackgroundImageOpacityButton, defaultAppearance.backgroundImageOpacity],
+    [els.zoomInput, els.resetZoomButton, Math.round(defaultAppearance.zoomFactor * 100)],
+    ...nativeGlassTintSettings.map(([key, mode]) => [
+      els[`${key}Input`], els[`${key}Reset`], macBackdropApi.normalizeLiquidGlassTint(undefined, mode)
+    ])
+  ];
+  for (const [input, reset, defaultValue] of sliders) {
+    syncSliderRow(input);
+    if (input) syncSettingResetVisibility(reset, input, Number(input.value) === defaultValue);
+  }
 }
 
 function applyAppearanceFromControls() {
@@ -10550,6 +10569,86 @@ function syncHideAppIconControl(showTrayIcon, trayMode) {
   els.hideAppIconOptions?.classList.toggle('hidden', !els.hideAppIconInput.checked);
 }
 
+const settingResetRows = [];
+
+function settingResetControl(row) {
+  return row.querySelector('.select-control-trigger')
+    || row.querySelector('select, input:not([type="radio"]), input[type="radio"]:checked');
+}
+
+function syncSettingResetVisibility(button, control, hide) {
+  if (!button) return;
+  if (hide && document.activeElement === button) control?.focus({ preventScroll: true });
+  button.hidden = hide;
+}
+
+function createSettingReset(row, heading, title, defaultValue, read, save) {
+  const button = document.createElement('button');
+  button.type = 'button';
+  button.className = 'settings-reset-button';
+  button.hidden = true;
+  heading.append(button);
+  let saving = false;
+  const sync = () => {
+    const control = settingResetControl(row);
+    const hidden = !saving && (control?.disabled || (read() ?? defaultValue) === defaultValue);
+    syncSettingResetVisibility(button, control, hidden);
+    const setting = title.dataset.i18n ? t(title.dataset.i18n) : title.textContent;
+    button.setAttribute('aria-label', t('settings.common.resetSetting', { setting }));
+  };
+  button.addEventListener('click', async () => {
+    if (button.hidden || saving || settingResetControl(row)?.disabled) return;
+    saving = true;
+    button.setAttribute('aria-disabled', 'true');
+    try {
+      await save(defaultValue);
+    } catch (_) {
+      window.alert(t('settings.common.resetSettingFailed'));
+    } finally {
+      saving = false;
+      button.removeAttribute('aria-disabled');
+      sync();
+    }
+  });
+  return sync;
+}
+
+function setupSettingResets() {
+  const defaults = state.appInfo?.resettableSettingsDefaults || {};
+  for (const heading of els.settingsPanel.querySelectorAll('[data-reset-setting]')) {
+    const key = heading.dataset.resetSetting;
+    if (defaults[key] === undefined) continue;
+    const row = heading.closest('.settings-item, .display-settings-hero');
+    const title = heading.querySelector('.settings-item-title');
+    let read = () => state.settings[key];
+    let save = value => saveSettings({ [key]: value });
+    if (key === 'edgeDockSide') {
+      read = () => Number.isFinite(state.settings.edgeDockFloatingX) ? 'floating' : state.settings.edgeDockSide;
+    }
+    if (key === 'periodMonthMode') save = saveDefaultUsageRange;
+    if (key === 'liveTokenRateScope') save = saveLiveTokenRateScope;
+    if (key === 'limitsRefresh') {
+      read = () => els.limitsRefreshInput.value;
+      save = saveLimitsRefresh;
+    }
+    settingResetRows.push(createSettingReset(row, heading, title, defaults[key], read, save));
+  }
+}
+
+function syncSettingResets() {
+  for (const sync of settingResetRows) sync();
+}
+
+function addRenderedSettingReset(row, heading, title, key, itemId) {
+  const defaults = state.appInfo?.resettableSettingsDefaults;
+  const defaultValue = itemId === undefined ? defaults?.[key] : defaults?.[key]?.[itemId];
+  if (defaultValue === undefined) return;
+  heading.dataset.inspectorReset = itemId === undefined ? key : `${key}:${itemId}`;
+  const read = () => itemId === undefined ? state.settings[key] : state.settings[key]?.[itemId];
+  const save = value => saveSettings({ [key]: itemId === undefined ? value : { [itemId]: value } });
+  createSettingReset(row, heading, title, defaultValue, read, save)();
+}
+
 function syncSettingsForm() {
   if (isRendererWindowHidden()) {
     applyInitialBreakdownPreference();
@@ -10716,6 +10815,7 @@ function syncSettingsForm() {
   modelAliasForm?.syncSettings();
   renderCursorStatus();
   displaySettings?.sync();
+  syncSettingResets();
 }
 
 function applyVisibleSettingsAppearance() {
@@ -11098,6 +11198,9 @@ function renderViewPreferences() {
 function renderMainViewInspector(view, { off, lastVisible, unavailable }) {
   const inspector = els.mainViewInspector;
   if (!inspector) return;
+  const focusedReset = document.activeElement?.matches('.settings-reset-button')
+    ? document.activeElement.parentElement.dataset.inspectorReset
+    : undefined;
   inspector.classList.toggle('is-subpage', view.id === 'home' && Boolean(state.homeLimitProvidersOpen));
   if (view.id === 'home' && state.homeLimitProvidersOpen) {
     inspector.removeAttribute('aria-labelledby');
@@ -11140,6 +11243,13 @@ function renderMainViewInspector(view, { off, lastVisible, unavailable }) {
   inspector.replaceChildren(header);
   const settings = MAIN_VIEW_SETTINGS[view.id];
   if (settings) inspector.append(settings());
+  if (focusedReset && document.activeElement === document.body) {
+    const heading = inspector.querySelector(`[data-inspector-reset="${CSS.escape(focusedReset)}"]`);
+    const row = heading?.closest('.settings-item, .home-limit-status-setting') || heading?.parentElement;
+    const target = heading?.querySelector('.settings-reset-button:not([hidden])')
+      || (row && settingResetControl(row));
+    target?.focus({ preventScroll: true });
+  }
 }
 
 function homeLimitProviders() {
@@ -11161,7 +11271,7 @@ function setHomeLimitProvidersOpen(open) {
 function renderHomeLimitSettings() {
   const wrap = document.createElement('div');
   wrap.className = 'settings-nested-list home-limit-settings';
-  const displayRow = document.createElement('label');
+  const displayRow = document.createElement('div');
   displayRow.className = 'settings-item home-limit-display-setting';
   const displayText = document.createElement('span');
   displayText.className = 'settings-item-text';
@@ -11178,28 +11288,43 @@ function renderHomeLimitSettings() {
   }
   displayInput.value = homeModulePreferencesApi.normalizeHomeLimitDisplayMode(state.settings?.homeLimitDisplayMode);
   displayInput.addEventListener('change', () => void saveSettings({ homeLimitDisplayMode: displayInput.value }));
+  displayInput.setAttribute('aria-label', displayTitle.textContent);
   displayRow.append(displayText, displayInput);
-  const statusLabel = document.createElement('label');
+  addRenderedSettingReset(displayRow, displayText, displayTitle, 'homeLimitDisplayMode');
+  const statusLabel = document.createElement('div');
   statusLabel.className = 'checkbox-label home-limit-status-setting';
   const statusInput = document.createElement('input');
   statusInput.type = 'checkbox';
   statusInput.checked = state.settings?.showHomeLimitBars === true;
-  const statusText = document.createElement('span');
+  statusInput.id = 'homeLimitBarsInput';
+  const statusText = document.createElement('label');
+  statusText.htmlFor = statusInput.id;
   statusText.textContent = t('settings.home.showLimitBars');
   statusInput.addEventListener('change', () => void saveSettings({ showHomeLimitBars: statusInput.checked }));
-  statusLabel.append(statusInput, statusText);
-  const providerNamesLabel = document.createElement('label');
+  statusText.className = 'settings-item-title';
+  const statusCopy = document.createElement('span');
+  statusCopy.className = 'settings-item-text';
+  statusCopy.append(statusText);
+  statusLabel.append(statusInput, statusCopy);
+  addRenderedSettingReset(statusLabel, statusCopy, statusText, 'showHomeLimitBars');
+  const providerNamesLabel = document.createElement('div');
   providerNamesLabel.className = 'checkbox-label home-limit-status-setting';
   const providerNamesInput = document.createElement('input');
   providerNamesInput.type = 'checkbox';
   const providerNamesRequired = state.settings?.showToolIcons === false;
   providerNamesInput.checked = providerNamesRequired || state.settings?.showHomeLimitProviderNames === true;
   providerNamesInput.disabled = providerNamesRequired;
-  const providerNamesText = document.createElement('span');
+  providerNamesInput.id = 'homeLimitProviderNamesInput';
+  const providerNamesText = document.createElement('label');
+  providerNamesText.htmlFor = providerNamesInput.id;
   providerNamesText.textContent = t('settings.home.showLimitProviderNames');
   const providerNamesCopy = document.createElement('span');
   providerNamesCopy.className = 'home-limit-provider-names-copy';
-  providerNamesCopy.append(providerNamesText);
+  providerNamesText.className = 'settings-item-title';
+  const providerNamesHeading = document.createElement('span');
+  providerNamesHeading.className = 'settings-item-text';
+  providerNamesHeading.append(providerNamesText);
+  providerNamesCopy.append(providerNamesHeading);
   if (providerNamesRequired) {
     const requiredReason = t('settings.home.providerNamesRequiredWithoutIcons');
     const requiredReasonText = document.createElement('span');
@@ -11215,7 +11340,8 @@ function renderHomeLimitSettings() {
     renderHomeIfVisible();
   });
   providerNamesLabel.append(providerNamesInput, providerNamesCopy);
-  const countLabel = document.createElement('label');
+  addRenderedSettingReset(providerNamesLabel, providerNamesHeading, providerNamesText, 'showHomeLimitProviderNames');
+  const countLabel = document.createElement('div');
   countLabel.className = 'settings-item home-limit-account-count-setting';
   const countText = document.createElement('span');
   countText.className = 'settings-item-text';
@@ -11234,7 +11360,9 @@ function renderHomeLimitSettings() {
     await saveSettings({ homeLimitAccountCount: Number(countInput.value) });
     renderHomeIfVisible();
   });
+  countInput.setAttribute('aria-label', countTitle.textContent);
   countLabel.append(countText, countInput);
+  addRenderedSettingReset(countLabel, countText, countTitle, 'homeLimitAccountCount');
   const providers = homeLimitProviders();
   const hidden = hiddenHomeLimitProviderSet();
   const link = document.createElement('button');
@@ -11322,7 +11450,7 @@ function renderHomeLimitProviderList() {
 function renderHomeModuleCountSettings(id) {
   const wrap = document.createElement('div');
   wrap.className = 'settings-nested-list';
-  const label = document.createElement('label');
+  const label = document.createElement('div');
   label.className = 'settings-item home-module-count-setting';
   const text = document.createElement('span');
   text.className = 'settings-item-text';
@@ -11348,7 +11476,9 @@ function renderHomeModuleCountSettings(id) {
     }
     renderHomeIfVisible();
   });
+  input.setAttribute('aria-label', title.textContent);
   label.append(text, input);
+  addRenderedSettingReset(label, text, title, 'homeModuleCounts', id);
   wrap.append(label);
   if (id === 'session') {
     const note = document.createElement('p');
@@ -11457,8 +11587,8 @@ function renderHomeSettingsList() {
 function renderHomeActivitySettings() {
   const wrap = document.createElement('div');
   wrap.className = 'settings-nested-list';
-  const row = (titleKey, options, value, onChange) => {
-    const label = document.createElement('label');
+  const row = (key, titleKey, options, value, onChange) => {
+    const label = document.createElement('div');
     label.className = 'settings-item';
     const text = document.createElement('span');
     text.className = 'settings-item-text';
@@ -11475,18 +11605,20 @@ function renderHomeActivitySettings() {
     }
     select.value = value;
     select.addEventListener('change', () => void onChange(select.value).then(renderHomeIfVisible));
+    select.setAttribute('aria-label', title.textContent);
     label.append(text, select);
+    addRenderedSettingReset(label, text, title, key);
     wrap.append(label);
   };
-  row('settings.home.heatmapColor',
+  row('heatmapMetric', 'settings.home.heatmapColor',
     [['tokens', 'dashboard.heatmap.tokens'], ['cost', 'dashboard.heatmap.cost']],
     state.settings?.heatmapMetric || 'cost',
     (metric) => saveSettings({ heatmapMetric: metric }));
-  row('settings.home.activeDaysWindow',
+  row('homeActiveDaysWindow', 'settings.home.activeDaysWindow',
     ['all', 'year'].map((mode) => [mode, `settings.home.activeDaysWindow.${mode}`]),
     state.settings?.homeActiveDaysWindow || 'all',
     (mode) => saveSettings({ homeActiveDaysWindow: mode }));
-  row('settings.home.trendTokens',
+  row('showExactHomeTrendTokens', 'settings.home.trendTokens',
     ['compact', 'exact'].map((mode) => [mode, `settings.home.trendTokens.${mode}`]),
     state.settings?.showExactHomeTrendTokens === true ? 'exact' : 'compact',
     (mode) => saveSettings({ showExactHomeTrendTokens: mode === 'exact' }));
@@ -11496,7 +11628,7 @@ function renderHomeActivitySettings() {
 function renderLimitsViewSettingsList() {
   const wrap = document.createElement('div');
   wrap.className = 'settings-nested-list';
-  const row = document.createElement('label');
+  const row = document.createElement('div');
   row.className = 'settings-item';
   const text = document.createElement('span');
   text.className = 'settings-item-text';
@@ -11517,7 +11649,9 @@ function renderLimitsViewSettingsList() {
     await saveSettings({ limitsHistoryOpenMode: input.value });
     renderLimits();
   });
+  input.setAttribute('aria-label', title.textContent);
   row.append(text, input);
+  addRenderedSettingReset(row, text, title, 'limitsHistoryOpenMode');
   wrap.appendChild(row);
   return wrap;
 }
@@ -11529,7 +11663,7 @@ function renderModelViewSettingsList() {
   row.className = 'settings-item';
   const label = document.createElement('span');
   label.id = 'modelRankingMetricLabel';
-  label.className = 'settings-item-text settings-item-title';
+  label.className = 'settings-item-title';
   label.textContent = t('settings.modelRanking.label');
   const options = document.createElement('div');
   options.className = 'inline-options';
@@ -11554,7 +11688,11 @@ function renderModelViewSettingsList() {
     option.append(input, text);
     options.append(option);
   }
-  row.append(label, options);
+  const heading = document.createElement('span');
+  heading.className = 'settings-item-text';
+  heading.append(label);
+  row.append(heading, options);
+  addRenderedSettingReset(row, heading, label, 'modelRankingMetric');
   wrap.append(row);
   return wrap;
 }
@@ -11574,10 +11712,11 @@ function renderTrendSettingsList() {
   wrap.append(label);
 
   const HISTORY_INTERVAL_OPTIONS = [300000, 600000, 900000, 1800000, 3600000];
-  const intervalRow = document.createElement('label');
+  const intervalRow = document.createElement('div');
   intervalRow.className = 'status-provider-interval';
   intervalRow.classList.toggle('hidden', !input.checked);
   const intervalLabel = document.createElement('span');
+  intervalLabel.className = 'settings-item-text';
   intervalLabel.textContent = t('settings.views.trendInterval');
   const select = document.createElement('select');
   select.id = 'trendIntervalSelect';
@@ -11590,7 +11729,9 @@ function renderTrendSettingsList() {
     select.appendChild(option);
   }
   select.addEventListener('change', () => void saveSettings({ historyIntervalMs: Number(select.value) }));
+  select.setAttribute('aria-label', intervalLabel.textContent);
   intervalRow.append(intervalLabel, select);
+  addRenderedSettingReset(intervalRow, intervalLabel, intervalLabel, 'historyIntervalMs');
   wrap.append(intervalRow);
 
   input.addEventListener('change', async () => {
@@ -11706,6 +11847,7 @@ function renderSessionSettingsList() {
     options.append(option);
   }
   row.append(label, options);
+  addRenderedSettingReset(row, label, title, 'sessionContextMetric');
   wrap.append(row);
   return wrap;
 }
@@ -11735,9 +11877,10 @@ function renderServiceProviderList() {
   header.append(note, headerActions);
   wrap.append(header);
   const SERVICE_STATUS_REFRESH_OPTIONS = [0, 60000, 120000, 300000, 900000, 1800000];
-  const intervalRow = document.createElement('label');
+  const intervalRow = document.createElement('div');
   intervalRow.className = 'status-provider-interval';
   const intervalLabel = document.createElement('span');
+  intervalLabel.className = 'settings-item-text';
   intervalLabel.textContent = t('serviceStatus.refreshEvery');
   const select = document.createElement('select');
   select.id = 'serviceStatusRefreshSelect';
@@ -11750,7 +11893,9 @@ function renderServiceProviderList() {
     select.appendChild(option);
   }
   select.addEventListener('change', () => void saveSettings({ serviceStatusRefreshMs: Number(select.value) }));
+  select.setAttribute('aria-label', intervalLabel.textContent);
   intervalRow.append(intervalLabel, select);
+  addRenderedSettingReset(intervalRow, intervalLabel, intervalLabel, 'serviceStatusRefreshMs');
   wrap.append(intervalRow);
   for (const { id, label } of providers) {
     const isHidden = hidden.has(id);
@@ -12698,7 +12843,10 @@ function restoreSettingsListFocus(focusedId) {
   const target = document.getElementById(focusedId);
   const group = target?.closest('.settings-list-group');
   const toggle = group?.inert ? document.getElementById(`${group.id}Toggle`) : null;
-  (toggle || target)?.focus({ preventScroll: true });
+  const control = target?.hidden && target.matches('.settings-reset-button')
+    ? settingResetControl(target.closest('.settings-item'))
+    : target;
+  (toggle || control)?.focus({ preventScroll: true });
   // The toggle can sit below the fold of a long list. Reveal it after the
   // repaint's scroll preservation, by id since a later repaint may replace it,
   // and as an interaction so a pending restore does not scroll it away again.
@@ -13764,7 +13912,8 @@ function limitProviderSettingsList(providerId, settings, reusableInputs = null) 
     // not part of the title cell, so the switch stays on the title's line and
     // the note wraps full-width underneath instead of squeezing it onto its own
     // row.
-    const item = document.createElement('label');
+    const canReset = setting.key === 'workbuddyQuotaTotalEnabled';
+    const item = document.createElement(canReset ? 'div' : 'label');
     item.className = 'checkbox-label settings-item';
     const copy = document.createElement('span');
     copy.className = 'settings-item-text';
@@ -13797,6 +13946,14 @@ function limitProviderSettingsList(providerId, settings, reusableInputs = null) 
     desc.className = 'settings-note settings-item-desc';
     desc.textContent = t(setting.descKey);
     item.append(copy, input, desc);
+    if (canReset) {
+      desc.id = 'workbuddyQuotaTotalNote';
+      input.setAttribute('aria-describedby', desc.id);
+      input.setAttribute('aria-label', title.textContent);
+      addRenderedSettingReset(item, copy, title, setting.key);
+      const reset = copy.querySelector('.settings-reset-button');
+      if (reset) reset.id = 'resetWorkbuddyQuotaTotalButton';
+    }
     list.append(item);
   }
   return list;
@@ -14665,6 +14822,7 @@ async function init() {
   });
   window.tokenMonitor.onSystemUiThemePush?.((payload) => applySystemUiTheme(payload?.dark === true));
   try { state.appInfo = await window.tokenMonitor.getAppInfo?.(); } catch (_) {}
+  setupSettingResets();
   if (!notchCapabilitiesSeeded) state.notchCapabilities = state.appInfo?.notchCapabilities || null;
   syncNotchCapabilities();
   // Seeding assigns directly: the rest of init delivers both icon sets anyway,
@@ -14712,6 +14870,7 @@ async function init() {
     renderAppUpdatePill();
     renderSettingsAppUpdateRow();
     renderAutomaticAppUpdateControl();
+    syncSettingResets();
     if (els.appUpdatePopover.matches(':popover-open')) renderAppUpdatePopover(payload);
   });
   if (state.appInfo?.loginItemSupported) {
@@ -14820,14 +14979,16 @@ els.monthPeriodMenu?.addEventListener('keydown', (event) => {
   });
 });
 
-els.periodMonthModeInput?.addEventListener('change', async () => {
-  const selection = fixedPeriodRangesApi.normalizeMonthMode(els.periodMonthModeInput.value);
+async function saveDefaultUsageRange(value) {
+  const selection = fixedPeriodRangesApi.normalizeMonthMode(value);
   state.settings.periodMonthMode = selection;
   if (fixedPeriodRangesApi.slotForSelection(state.period) === 'month') setPeriod(selection);
   syncPeriodTabs();
   render();
   await saveSettings({ periodMonthMode: selection });
-});
+}
+
+els.periodMonthModeInput?.addEventListener('change', () => saveDefaultUsageRange(els.periodMonthModeInput.value));
 
 document.addEventListener('click', (event) => {
   if (!state.periodMenuOpen) return;
@@ -15117,14 +15278,16 @@ els.secretPasteButton?.addEventListener('click', async () => {
     }
   } catch (_) {}
 });
-els.limitsRefreshInput.addEventListener('change', async () => {
+async function saveLimitsRefresh(value) {
   // Adaptive carries its own baseline, so the stored interval is left alone and
   // comes back unchanged when a fixed option is selected again.
-  const value = els.limitsRefreshInput.value;
   await saveSettings(value === 'adaptive'
     ? { limitsRefreshMode: 'adaptive' }
     : { limitsRefreshMode: 'fixed', limitsRefreshMs: Number(value) });
   await refreshStats({ force: true });
+}
+els.limitsRefreshInput.addEventListener('change', async () => {
+  await saveLimitsRefresh(els.limitsRefreshInput.value);
 });
 els.showLimitSourceInput.addEventListener('change', async () => {
   await saveSettings({ showLimitSource: els.showLimitSourceInput.checked });
@@ -15458,13 +15621,15 @@ els.showLiveTokenRateInput.addEventListener('change', async () => {
   if (state.settings.showLiveTokenRate) observeLiveTokenRate(state.stats);
   renderLiveTokenRate();
 });
-els.liveTokenRateScopeInput?.addEventListener('change', async () => {
-  state.settings.liveTokenRateScope = els.liveTokenRateScopeInput.value === 'device' ? 'device' : 'all';
+async function saveLiveTokenRateScope(scope) {
+  await saveSettings({ liveTokenRateScope: scope });
   resetLiveTokenRateTracking();
   observeLiveTokenRate(state.stats);
   renderLiveTokenRate();
-  await saveAppearanceFromControls();
-});
+}
+els.liveTokenRateScopeInput?.addEventListener('change', () => saveLiveTokenRateScope(
+  els.liveTokenRateScopeInput.value === 'device' ? 'device' : 'all'
+));
 els.compactTokenUnitsInput?.addEventListener('change', async () => {
   await saveAppearanceFromControls();
 });
@@ -15524,7 +15689,11 @@ function syncNotchHoverControls() {
 
 function syncNotchHoverDelayValue() {
   const value = els.notchHoverDelayRow?.querySelector('.slider-value');
-  if (value && els.notchHoverDelayInput) value.textContent = `${(Number(els.notchHoverDelayInput.value) / 1000).toFixed(1)} s`;
+  const input = els.notchHoverDelayInput;
+  if (!input) return;
+  const delay = Number(input.value);
+  if (value) value.textContent = `${(delay / 1000).toFixed(1)} s`;
+  syncSettingResetVisibility(els.resetNotchHoverDelayButton, input, delay === NOTCH_HOVER_DELAY_DEFAULT_MS);
 }
 
 function syncNotchStyleInput(preview) {

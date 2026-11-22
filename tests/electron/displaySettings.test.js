@@ -67,6 +67,7 @@ class FakeElement {
     if (selector.startsWith('#')) return this.id === selector.slice(1);
     if (selector.startsWith('.')) return this.classList.contains(selector.slice(1));
     if (selector === '[data-i18n]') return Boolean(this.dataset.i18n);
+    if (selector === '[data-reset-setting]') return Boolean(this.dataset.resetSetting);
     return false;
   }
   closest(selector) {
@@ -136,7 +137,9 @@ function createWindowSettingsFixture({ platform = 'darwin', prefs = {} } = {}) {
   // Edge Dock
   const edgeDockLabel = reg('label', '', 'checkbox-label settings-item');
   const edgeDockInput = reg('input', 'edgeDockInput');
-  edgeDockLabel.append(edgeDockInput);
+  const edgeDockResetHeading = reg('span');
+  edgeDockResetHeading.dataset.resetSetting = 'edgeDockEnabled';
+  edgeDockLabel.append(edgeDockResetHeading, edgeDockInput);
   const edgeDockOptions = reg('div', 'edgeDockOptions');
   edgeDockOptions.append(
     itemWith(reg('span', 'edgeDockModeLabel')),
@@ -304,6 +307,8 @@ test('surface header shows plain intro and dims cards while off, then switches t
   const edgeCards = edgePage.querySelector('.display-settings-cards');
   const edgeHelp = edgePage.querySelector('#display-help-trigger-edgeDock');
   const edgeTab = f.root.querySelector('#display-tab-edgeDock');
+  assert.equal(edgePage.querySelector('.display-settings-hero-title-row').dataset.resetSetting, 'edgeDockEnabled');
+  assert.equal(edgePage.querySelector('.display-settings-hero-title').classList.contains('settings-item-title'), true);
 
   assert.equal(edgeSub.textContent, translate('en', 'settings.display.edgeDockNote', {}, 'darwin'));
   assert.equal(edgeCards.classList.contains('is-disabled-surface'), true);

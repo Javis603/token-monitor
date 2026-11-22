@@ -21,6 +21,7 @@ Sources:
   - actions/trash.svg: trash
   - actions/download.svg: download
   - actions/rotate-cw.svg: rotate-cw
+  - actions/undo-2.svg: undo-2
   - actions/external-link.svg: external-link
   - actions/chevron-down.svg: chevron-down
   - actions/ellipsis.svg: ellipsis

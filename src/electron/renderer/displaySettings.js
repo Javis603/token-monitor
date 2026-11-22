@@ -254,10 +254,16 @@
       const heroSub = make('p', 'display-settings-hero-sub');
       heroText.append(heroTitleRow, heroSub);
 
-      const originalLabel = input.closest('label');
+      const originalRow = input.closest('.settings-item') || input.closest('label');
+      const resetHeading = originalRow?.querySelector('[data-reset-setting]');
+      if (resetHeading) {
+        heroTitleRow.dataset.resetSetting = resetHeading.dataset.resetSetting;
+        heroTitle.classList.add('settings-item-title');
+        delete resetHeading.dataset.resetSetting;
+      }
       const switchLabel = make('label', 'checkbox-label display-settings-hero-switch');
       switchLabel.append(input);
-      if (originalLabel) originalLabel.hidden = true;
+      if (originalRow) originalRow.hidden = true;
 
       hero.append(heroText, switchLabel);
 

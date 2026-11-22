@@ -820,6 +820,41 @@ body.is-windows.floating-bubble-collapsed-right .floating-bubble-tab {
   gap: 2px;
 }
 .settings-item-title { color: var(--text); }
+.settings-item-text:is([data-reset-setting], [data-inspector-reset]) {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+.settings-panel :is([data-reset-setting], [data-inspector-reset]) > label.settings-item-title { color: var(--text); }
+.settings-item-heading[data-reset-setting] > .settings-reset-button { order: 1; }
+#exportAutoStatus { order: 2; }
+.settings-panel .settings-reset-button {
+  display: grid;
+  place-items: center;
+  flex: 0 0 auto;
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--muted);
+  pointer-events: auto;
+  cursor: pointer;
+}
+.settings-reset-button::before {
+  content: "";
+  width: 10px;
+  height: 10px;
+  background: currentColor;
+  mask: url("icons/actions/undo-2.svg") center / contain no-repeat;
+}
+.settings-panel .settings-reset-button:not(:disabled, [aria-disabled="true"]):is(:hover, :focus-visible) {
+  color: var(--text);
+}
+.settings-reset-button:focus-visible { outline: 1px solid var(--accent); }
+.settings-reset-button:is(:disabled, [aria-disabled="true"]) { opacity: 0.38; cursor: default; }
+[data-single-setting-reset]:disabled { visibility: hidden; }
 .model-alias-example { overflow-wrap: anywhere; }
 
 .settings-item-desc,
@@ -3180,7 +3215,8 @@ button.tool-preference-main:focus-visible {
 }
 @media (forced-colors: active) {
   .tool-visibility-button::before,
-  .tool-pin-button::before {
+  .tool-pin-button::before,
+  .settings-reset-button::before {
     background: ButtonText;
   }
 }
@@ -3681,8 +3717,8 @@ p.settings-list-group-label { padding: 2px 0 0; }
   cursor: pointer;
 }
 .reset-appearance-button:hover { border-color: var(--line-strong); color: var(--text); }
-.slider-label { display: flex; align-items: center; justify-content: space-between; }
 .reset-inline { width: 18px; height: 18px; font-size: 10px; line-height: 1; }
+.slider-label { display: flex; align-items: center; justify-content: space-between; }
 /* Slider rows: title (+ reset) left, track with value fill right, numeric readout at the edge */
 .settings-slider-item .slider-label { justify-content: flex-start; gap: 6px; }
 .settings-panel .settings-slider-item input[type="range"] { flex: 0 0 42%; width: 42%; }
@@ -3713,19 +3749,14 @@ p.settings-list-group-label { padding: 2px 0 0; }
 }
 .settings-font-input-row {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 18px;
+  grid-template-columns: minmax(0, 1fr);
   align-items: center;
-  gap: 8px;
   min-width: 0;
 }
 .settings-panel .settings-font-input-row select,
 .settings-panel .settings-font-input-row input {
   width: 100%;
   min-width: 0;
-}
-.settings-font-input-row .reset-appearance-button {
-  width: 18px;
-  height: 18px;
 }
 .settings-font-custom-row {
   display: grid;
@@ -3792,7 +3823,7 @@ p.settings-list-group-label { padding: 2px 0 0; }
 .color-picker-grid { display: grid; }
 .color-picker-row, .vendor-color-row {
   display: grid;
-  grid-template-columns: 1fr auto auto;
+  grid-template-columns: minmax(0, 1fr) auto;
   align-items: center;
   gap: 8px;
   color: var(--muted);
@@ -3832,6 +3863,12 @@ p.settings-list-group-label { padding: 2px 0 0; }
   padding-top: 5px;
 }
 .settings-appearance-vendors > .theme-color-accordion { border-top: 0; padding-top: 0; }
+.settings-reset-heading {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  min-width: 0;
+}
 .color-picker-name, .vendor-color-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .settings-panel button.color-picker-swatch {
   width: 32px;
@@ -8236,7 +8273,6 @@ html.native-liquid-glass .view-switcher-menu-item { border-radius: 9px; }
   line-height: 1.3;
   opacity: 0.8;
 }
-.main-view-nav-footer .tool-header-action { width: 22px; height: 22px; font-size: 14px; }
 .main-view-tab {
   display: flex;
   flex: 1 1 auto;
@@ -8346,7 +8382,6 @@ html.native-liquid-glass .view-switcher-menu-item { border-radius: 9px; }
 }
 .settings-panel .main-view-inspector .home-settings-header { margin: 6px 0 0; min-height: 22px; }
 .main-view-caption { color: var(--muted); font-size: 0.5625rem; }
-.settings-panel .main-view-inspector .home-settings-header .tool-header-action { width: 22px; height: 22px; font-size: 14px; }
 .settings-panel .main-view-inspector .home-module-preference-row {
   grid-template-columns: minmax(0, 1fr) auto;
   min-height: 36px;
@@ -10653,3 +10688,7 @@ button.slot-device-toggle { width: 100%; min-height: 0; padding: 0; border: 0; b
 .slot-device-fix { grid-column: 1 / -1; justify-self: start; }
 .slot-devices-expanded > .slot-status { visibility: hidden; }
 .slot-devices-expanded > .slot-copy > .slot-fix { display: none; }
+
+.main-view-nav-footer .tool-header-action { width: 22px; height: 22px; font-size: 14px; }
+
+.settings-panel .main-view-inspector .home-settings-header .tool-header-action { width: 22px; height: 22px; font-size: 14px; }

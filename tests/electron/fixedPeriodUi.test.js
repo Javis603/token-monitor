@@ -86,11 +86,11 @@ test('the Settings default uses the standard title-control-description row', () 
   const css = read('styles.css');
   const i18n = read('i18n.js');
   const setting = html.slice(
-    html.indexOf('<label class="settings-item period-default-setting">'),
-    html.indexOf('</label>', html.indexOf('<label class="settings-item period-default-setting">'))
+    html.indexOf('<div class="settings-item period-default-setting">'),
+    html.indexOf('</div>', html.indexOf('<div class="settings-item period-default-setting">'))
   );
-  assert.ok(setting.indexOf('settings-item-title') < setting.indexOf('periodMonthModeInput'));
-  assert.ok(setting.indexOf('periodMonthModeInput') < setting.indexOf('settings-item-desc'));
+  assert.ok(setting.indexOf('settings-item-title') < setting.indexOf('id="periodMonthModeInput"'));
+  assert.ok(setting.indexOf('id="periodMonthModeInput"') < setting.indexOf('settings-item-desc'));
   assert.doesNotMatch(css, /\.period-default-setting\s*\{[^}]*align-items:/s);
   assert.match(setting, /data-i18n="periodRange\.settingsTitle">Default usage range</);
   assert.match(setting, /data-i18n="periodRange\.settingsNote">Choose the default usage range shown on Home\./);

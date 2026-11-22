@@ -199,6 +199,7 @@ test('font controls and zoom share a visible Appearance group', () => {
 
 test('font settings wiring keeps renderer defaults concrete and technical monospace roles intact', () => {
   const app = readProjectFile('src', 'electron', 'renderer', 'app.js');
+  const html = readProjectFile('src', 'electron', 'renderer', 'index.html');
   const dashboard = readProjectFile('src', 'electron', 'renderer', 'dashboard.js');
   const styles = readProjectFile('src', 'electron', 'renderer', 'styles.css');
   const dashboardStyles = readProjectFile('src', 'electron', 'renderer', 'dashboard.css');
@@ -215,8 +216,9 @@ test('font settings wiring keeps renderer defaults concrete and technical monosp
   const fontInputRowCss = styles.match(/\.settings-font-input-row \{([\s\S]*?)\}/)?.[1] || '';
   assert.match(fontControlsCss, /border-top: 1px solid var\(--line\)/);
   assert.doesNotMatch(fontControlsCss, /border-bottom/);
-  assert.match(fontInputRowCss, /grid-template-columns: minmax\(0, 1fr\) 18px/);
-  assert.match(fontInputRowCss, /gap: 8px/);
+  assert.match(fontInputRowCss, /grid-template-columns: minmax\(0, 1fr\);/);
+  assert.match(html, /<span class="settings-reset-heading"><label[^>]*for="interfaceFontPreset"[^>]*>[^<]*<\/label><button id="resetInterfaceFontButton"/);
+  assert.match(html, /<span class="settings-reset-heading"><label[^>]*for="displayFontPreset"[^>]*>[^<]*<\/label><button id="resetDisplayFontButton"/);
   assert.match(styles, /settings-font-preview/);
   assert.match(dashboardStyles, /font-family: var\(--ui-font,/);
   assert.match(dashboardStyles, /font-family: var\(--display-font, inherit\)/);
