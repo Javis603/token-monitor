@@ -277,6 +277,54 @@ test('dashboard.js fetches history over IPC and renders both tabs', () => {
   assert.match(js, /onDashboardHistoryChanged\?\.\(handleDashboardHistoryChanged\)/);
 });
 
+test('Dashboard Trends renders the selected calendar range and labels unrecorded days', () => {
+  // History omits zero-usage days, so slicing it to the last N rows shortened
+  // the range and removed those days from the chart. The Trends tab must build
+  // the calendar window instead, keep the slots hoverable, and say "no record"
+  // rather than claiming a measured zero.
+  const js = read('src', 'electron', 'renderer', 'dashboard.js');
+  const trends = /function renderTrends\(\) \{([\s\S]*?)\n\}\n\nfunction renderBreakdown/.exec(js);
+  assert.ok(trends, 'renderTrends exists');
+  assert.match(trends[1], /charts\.dailyWindow\(state\.history\?\.daily \|\| \[\],\s*\{\s*days: state\.range === 'all' \? 0 : Number\(state\.range\)\s*\}\)/);
+  assert.doesNotMatch(js, /charts\.clampDaily/);
+  assert.match(js, /t\('dashboard\.noRecord'\)/);
+});
+
+test('Dashboard tooltips distinguish unrecorded days and buckets from recorded zeros', () => {
+  const tooltip = { innerHTML: '' };
+  const context = {
+    els: { tooltip },
+    t: (key) => (key === 'dashboard.noRecord' ? 'No usage recorded' : key),
+    shortDate: () => '10/24',
+    longDate: () => '10/24',
+    formatCompact: (value) => String(value),
+    colorFor: () => '#fff',
+    applySwatchColors: () => {},
+    positionTooltip: () => {}
+  };
+  const showBarTooltip = dashboardFunction('showBarTooltip', '\nfunction showCandleTooltip', context);
+
+  showBarTooltip({ label: '2026-10-24', total: 0, segments: [], hasRecord: false }, {});
+  assert.match(tooltip.innerHTML, /No usage recorded/);
+  assert.doesNotMatch(tooltip.innerHTML, /· 0/);
+
+  showBarTooltip({ label: '2026-10-24', total: 0, segments: [], hasRecord: true }, {});
+  assert.doesNotMatch(tooltip.innerHTML, /No usage recorded/);
+  assert.match(tooltip.innerHTML, /· 0/);
+
+  showBarTooltip({ label: '2026-10-24', total: 4300, segments: [{ key: 'claude', value: 4300 }] }, {});
+  assert.match(tooltip.innerHTML, /claude/);
+  assert.match(tooltip.innerHTML, /4300/);
+
+  const showCandleTooltip = dashboardFunction('showCandleTooltip', '\nfunction showHeatTooltip', context);
+  const zero = { key: '2026-10-24', open: 0, high: 0, low: 0, close: 0 };
+  showCandleTooltip({ ...zero, hasRecord: false }, {});
+  assert.match(tooltip.innerHTML, /No usage recorded/);
+  showCandleTooltip({ ...zero, hasRecord: true }, {});
+  assert.doesNotMatch(tooltip.innerHTML, /No usage recorded/);
+  assert.match(tooltip.innerHTML, />L<.*>0</);
+});
+
 test('dashboard reuses the shared scheduler to defer hidden render work', () => {
   const html = read('src', 'electron', 'renderer', 'dashboard.html');
   const js = read('src', 'electron', 'renderer', 'dashboard.js');

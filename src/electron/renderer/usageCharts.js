@@ -168,16 +168,16 @@
         cum += height;
         segments.push({ key: k, value, x, width: barWidth, y: o.padTop + innerH - cum, height });
       }
-      return { label: e[o.labelKey], index: i, x, width: barWidth, total: totals[i], segments };
+      return { label: e[o.labelKey], index: i, x, width: barWidth, total: totals[i], segments, hasRecord: e.hasRecord !== false };
     });
 
     return { width: o.width, height: o.height, plot: { x: o.padLeft, y: o.padTop, w: innerW, h: innerH }, maxTotal, keys, bars };
   }
 
   // Candlesticks from a daily-total series. Each candle aggregates `bucketDays`
-  // consecutive calendar days into one OHLC bar — open = first day, close = last day,
-  // high/low = busiest/quietest day in the bucket — so the high/low can protrude past
-  // the body as a real wick (needs ≥3 days in the bucket to show). Buckets are anchored
+  // consecutive calendar days into one OHLC bar. Open, close, high, and low use the
+  // first, last, busiest, and quietest recorded day. High and low can protrude past
+  // the body as a real wick. Buckets are anchored
   // to the most recent day and grouped backwards, so the latest data always lands on a
   // full bucket and gaps in sparse data still fall into the right calendar bucket.
   function candleChart(daily, options) {
@@ -186,7 +186,7 @@
       options || {}
     );
     const days = (Array.isArray(daily) ? daily : [])
-      .map((d) => ({ date: String(d.date).slice(0, 10), value: n(d[o.metric]) }))
+      .map((d) => ({ date: String(d.date).slice(0, 10), value: n(d[o.metric]), hasRecord: d.hasRecord !== false }))
       .sort((a, b) => a.date.localeCompare(b.date));
     const bucketDays = Math.max(1, Math.round(o.bucketDays));
 
@@ -202,16 +202,22 @@
       }
       base = [...groups.keys()].sort((a, b) => b - a).map((idx) => {
         const ds = groups.get(idx); // days inherit the global sort, so earliest..latest
-        const values = ds.map((d) => d.value);
+        // Missing days keep their calendar slots. Only observed values, including
+        // a recorded zero, contribute to OHLC.
+        const recorded = ds.filter((d) => d.hasRecord);
+        const values = recorded.length ? recorded.map((d) => d.value) : [0];
+        const open = values[0];
+        const close = values[values.length - 1];
         return {
           key: ds[0].date,
           endKey: ds[ds.length - 1].date,
           days: ds.length,
-          open: ds[0].value,
-          close: ds[ds.length - 1].value,
+          hasRecord: recorded.length > 0,
+          open,
+          close,
           high: Math.max(...values),
           low: Math.min(...values),
-          up: ds[ds.length - 1].value >= ds[0].value
+          up: close >= open
         };
       });
     }
@@ -231,6 +237,7 @@
       return {
         key: c.key, endKey: c.endKey, days: c.days,
         open: c.open, high: c.high, low: c.low, close: c.close, up: c.up,
+        hasRecord: c.hasRecord,
         x, width: bodyW, wickX: x + bodyW / 2,
         yHigh: yOf(c.high), yLow: yOf(c.low),
         bodyY, bodyHeight: Math.max(1, yOf(bottom) - bodyY)
@@ -489,6 +496,39 @@
     return Number.isFinite(num) && num > 0 ? arr.slice(-num) : arr;
   }
 
+  function isCalendarDayKey(key) {
+    const time = Date.parse(`${key}T00:00:00Z`);
+    return Number.isFinite(time) && new Date(time).toISOString().slice(0, 10) === key;
+  }
+
+  // History can omit days with no records. Fill the selected calendar range
+  // through today, marking the gaps so charts can distinguish them from zero.
+  function dailyWindow(daily, options) {
+    const o = Object.assign({ days: 0, todayKey: localDayKey() }, options || {});
+    const rows = (Array.isArray(daily) ? daily : [])
+      .map((row) => ({ row, key: String(row?.date || '').slice(0, 10) }))
+      .filter(({ key }) => isCalendarDayKey(key))
+      .sort((a, b) => a.key.localeCompare(b.key));
+    if (!rows.length) return [];
+    const today = isCalendarDayKey(o.todayKey) ? o.todayKey : localDayKey();
+    // A device in a timezone ahead of ours can record a "today" later than ours;
+    // anchor on the later date so those rows are not cut off.
+    const end = rows[rows.length - 1].key > today ? rows[rows.length - 1].key : today;
+    const count = Math.max(0, Math.floor(n(o.days)));
+    const start = count > 0 ? addDaysUTC(end, -(count - 1)) : rows[0].key;
+    const byDate = new Map(rows.map(({ row, key }) => [key, row]));
+    const points = [];
+    for (let key = start; key <= end; key = addDaysUTC(key, 1)) {
+      const existing = byDate.get(key);
+      if (existing) {
+        points.push({ ...existing, date: key, hasRecord: true });
+      } else {
+        points.push({ date: key, tokens: 0, cost: 0, hasRecord: false });
+      }
+    }
+    return points;
+  }
+
   function svgRound(v) {
     return Math.round(v * 100) / 100;
   }
@@ -557,7 +597,9 @@
     const o = Object.assign({ colorFor: () => '#6ab4f0', titleOf: () => '', axisLabel: () => '', yTicks: 0, formatTick: (v) => String(v), radius: 3 }, options || {});
     const p = model.plot;
     const grid = yAxisSvg(p, model.maxTotal, o.yTicks, o.formatTick);
-    const parts = (model.bars || []).map((bar) => {
+    const bars = model.bars || [];
+    const slot = p.w / Math.max(1, bars.length);
+    const parts = bars.map((bar, index) => {
       const segs = bar.segments || [];
       const top = segs.length - 1;
       const drawn = segs.map((s, i) => {
@@ -569,7 +611,10 @@
       }).join('');
       const tip = o.titleOf(bar);
       const title = tip ? `<desc>${escapeXml(tip)}</desc>` : '';
-      const hover = `<rect data-i="${bar.index}" x="${svgRound(bar.x)}" y="${svgRound(p.y)}" width="${svgRound(bar.width)}" height="${svgRound(p.h)}" class="bar-hover">${title}</rect>`;
+      // Make narrow days hoverable across the entire slot, including the visual gap.
+      const start = svgRound(p.x + index * slot);
+      const end = svgRound(p.x + (index + 1) * slot);
+      const hover = `<rect data-i="${bar.index}" x="${start}" y="${svgRound(p.y)}" width="${svgRound(end - start)}" height="${svgRound(p.h)}" class="bar-hover">${title}</rect>`;
       const label = axisText(o.axisLabel(bar, bar.index, model.bars), bar.x + bar.width / 2, model.height - 4);
       const stack = `<g class="bar-stack" data-motion-key="${encodeURIComponent(String(bar.label))}">${drawn}</g>`;
       return stack + hover + label;
@@ -586,9 +631,11 @@
       const cls = c.up ? 'candle-up' : 'candle-down';
       const bodyHeight = Math.max(1, c.bodyHeight);
       const bodyMid = c.bodyY + bodyHeight / 2;
-      const wick = `<line class="candle-wick candle-wick-high ${cls}" x1="${svgRound(c.wickX)}" y1="${svgRound(bodyMid)}" x2="${svgRound(c.wickX)}" y2="${svgRound(c.yHigh)}"></line>`
+      // A bucket with no recorded usage keeps its slot on the axis and its hover
+      // target, but draws no mark: a zero-height candle would read as real data.
+      const wick = c.hasRecord === false ? '' : `<line class="candle-wick candle-wick-high ${cls}" x1="${svgRound(c.wickX)}" y1="${svgRound(bodyMid)}" x2="${svgRound(c.wickX)}" y2="${svgRound(c.yHigh)}"></line>`
         + `<line class="candle-wick candle-wick-low ${cls}" x1="${svgRound(c.wickX)}" y1="${svgRound(bodyMid)}" x2="${svgRound(c.wickX)}" y2="${svgRound(c.yLow)}"></line>`;
-      const body = `<rect class="candle-body ${cls}" x="${svgRound(c.x)}" y="${svgRound(c.bodyY)}" width="${svgRound(c.width)}" height="${svgRound(bodyHeight)}" rx="1"></rect>`;
+      const body = c.hasRecord === false ? '' : `<rect class="candle-body ${cls}" x="${svgRound(c.x)}" y="${svgRound(c.bodyY)}" width="${svgRound(c.width)}" height="${svgRound(bodyHeight)}" rx="1"></rect>`;
       const tip = o.titleOf(c);
       const title = tip ? `<desc>${escapeXml(tip)}</desc>` : '';
       const hover = `<rect data-i="${i}" x="${svgRound(c.x)}" y="${svgRound(p.y)}" width="${svgRound(c.width)}" height="${svgRound(p.h)}" class="bar-hover">${title}</rect>`;
@@ -695,7 +742,7 @@
     localDayKey, weekStartKey, dailyBarsChart, candleChart, computeHeatmapIntensities, contribHeatmap, rollingYearHeatmap, statsCards, sparklinePreview,
     areaLineChart, areaLineSvg,
     selectPreviewSeries, patchTodayBar, sparklineSvg,
-    applyVendorColors, modelColors, clientColors, fallbackModelColors, modelVendorFor, modelColor, clampDaily,
+    applyVendorColors, modelColors, clientColors, fallbackModelColors, modelVendorFor, modelColor, clampDaily, dailyWindow,
     barsChartSvg, candleChartSvg, heatmapSvg, statsCardsHtml, statCardColumnWidths
   };
 });
