@@ -175,9 +175,9 @@
   }
 
   // Candlesticks from a daily-total series. Each candle aggregates `bucketDays`
-  // consecutive calendar days into one OHLC bar — open = first day, close = last day,
-  // high/low = busiest/quietest day in the bucket — so the high/low can protrude past
-  // the body as a real wick (needs ≥3 days in the bucket to show). Buckets are anchored
+  // consecutive calendar days into one OHLC bar. Open, close, high, and low use the
+  // first, last, busiest, and quietest recorded day. High and low can protrude past
+  // the body as a real wick. Buckets are anchored
   // to the most recent day and grouped backwards, so the latest data always lands on a
   // full bucket and gaps in sparse data still fall into the right calendar bucket.
   function candleChart(daily, options) {
@@ -597,7 +597,9 @@
     const o = Object.assign({ colorFor: () => '#6ab4f0', titleOf: () => '', axisLabel: () => '', yTicks: 0, formatTick: (v) => String(v), radius: 3 }, options || {});
     const p = model.plot;
     const grid = yAxisSvg(p, model.maxTotal, o.yTicks, o.formatTick);
-    const parts = (model.bars || []).map((bar) => {
+    const bars = model.bars || [];
+    const slot = p.w / Math.max(1, bars.length);
+    const parts = bars.map((bar, index) => {
       const segs = bar.segments || [];
       const top = segs.length - 1;
       const drawn = segs.map((s, i) => {
@@ -609,7 +611,10 @@
       }).join('');
       const tip = o.titleOf(bar);
       const title = tip ? `<desc>${escapeXml(tip)}</desc>` : '';
-      const hover = `<rect data-i="${bar.index}" x="${svgRound(bar.x)}" y="${svgRound(p.y)}" width="${svgRound(bar.width)}" height="${svgRound(p.h)}" class="bar-hover">${title}</rect>`;
+      // Make narrow days hoverable across the entire slot, including the visual gap.
+      const start = svgRound(p.x + index * slot);
+      const end = svgRound(p.x + (index + 1) * slot);
+      const hover = `<rect data-i="${bar.index}" x="${start}" y="${svgRound(p.y)}" width="${svgRound(end - start)}" height="${svgRound(p.h)}" class="bar-hover">${title}</rect>`;
       const label = axisText(o.axisLabel(bar, bar.index, model.bars), bar.x + bar.width / 2, model.height - 4);
       const stack = `<g class="bar-stack" data-motion-key="${encodeURIComponent(String(bar.label))}">${drawn}</g>`;
       return stack + hover + label;

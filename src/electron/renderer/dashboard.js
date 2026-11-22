@@ -623,7 +623,7 @@ function showBarTooltip(bar, ev) {
 }
 
 function showCandleTooltip(c, ev) {
-  // Each candle spans a bucket of days: O = first day, C = last day, H/L = busiest/quietest.
+  // The date range covers the whole bucket. OHLC uses its recorded days.
   const head = c.endKey && c.endKey !== c.key ? `${longDate(c.key)} – ${longDate(c.endKey)}` : longDate(c.key);
   if (c.hasRecord === false) {
     els.tooltip.innerHTML = `<div class="tt-head">${head}</div><div class="tt-row"><span class="tt-name">${t('dashboard.noRecord')}</span></div>`;

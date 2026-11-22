@@ -203,6 +203,18 @@ test('candleChart preserves calendar slots and calculates OHLC from recorded day
   assert.match(candleChartSvg(zero), /candle-body/);
 });
 
+test('barsChartSvg makes all 365 days hoverable at the narrow dashboard width', () => {
+  const series = Array.from({ length: 365 }, (_, i) => ({ date: `day-${i}` }));
+  const model = dailyBarsChart(series, { width: 532, padLeft: 52, padRight: 14, gap: 0.3 });
+  const svg = barsChartSvg(model);
+  const slots = [...svg.matchAll(/<rect data-i="\d+" x="([^"]+)" y="[^"]+" width="([^"]+)"[^>]+class="bar-hover"/g)];
+  assert.equal(slots.length, 365);
+  for (const [, x, width] of slots) {
+    const left = Number(x);
+    assert.ok(Math.ceil(left) < left + Number(width), `slot at ${left} needs a whole-pixel hover target`);
+  }
+});
+
 test('barsChartSvg renders one rect per segment with colorFor fill and a per-bar description', () => {
   const model = dailyBarsChart(
     [{ date: '2026-06-01', perClient: { claude: { tokens: 10 }, codex: { tokens: 5 } } }],
