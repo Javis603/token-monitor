@@ -6468,6 +6468,10 @@ function openSettingsPanel(section) {
   if (section === 'notch') {
     setSettingsSectionExpanded('window', true);
     displaySettings?.open('notch');
+    // Tile clicks keep the scroll position; this outside entry point brings the
+    // Window section (tiles and the notch page) to the top of the panel.
+    const header = document.querySelector('[data-settings-section="window"]');
+    if (header) els.settingsPanel.scrollTop += header.getBoundingClientRect().top - els.settingsPanel.getBoundingClientRect().top;
   }
   els.shell.style.transform = 'translateZ(0)';
   requestAnimationFrame(() => { els.shell.style.transform = ''; });
@@ -6481,9 +6485,7 @@ function openViewFromTray(viewId) {
   syncModeSelect?.close();
   syncContentForm?.closeHelp();
   appearanceColorPicker.close();
-  // Every later open, including Home's Customize shortcuts, starts on the main
-  // window tile; openSettingsPanel('notch') still deep-links past it.
-  displaySettings?.reset();
+  displaySettings?.close();
   els.settingsPanel?.classList.add('hidden');
   els.shell.classList.remove('settings-open');
   state.untrackedWithDataProbed = null;
@@ -14857,7 +14859,7 @@ els.settingsButton.addEventListener('click', (event) => {
     syncModeSelect?.close();
     syncContentForm?.closeHelp();
     appearanceColorPicker.close();
-    displaySettings?.reset();
+    displaySettings?.close();
     resetSettingsListSearch();
     stopWindowShortcutRecording();
     state.untrackedWithDataProbed = null;

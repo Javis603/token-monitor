@@ -364,10 +364,6 @@
       }
     }
 
-    function reset() {
-      open('main');
-    }
-
     function sync() {
       container.dataset.platform = platform() || 'unknown';
       container.dataset.edgeSide = settings()?.edgeDockSide === 'left' ? 'left' : 'right';
@@ -402,7 +398,6 @@
 
     return {
       open,
-      reset,
       close: closeHelp,
       sync,
       get active() { return active; }

@@ -274,7 +274,7 @@ test('display switcher defaults to main, adapts tiles per OS, and stops shortcut
   assert.equal(f.root.querySelector('#display-page-main').hidden, true);
   assert.equal(f.root.querySelector('#display-page-edgeDock').hidden, false);
 
-  f.controller.reset();
+  f.controller.open('main');
   assert.equal(f.controller.active, 'main');
   assert.equal(f.root.querySelector('#display-page-main').hidden, false);
 
