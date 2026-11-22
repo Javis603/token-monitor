@@ -7035,7 +7035,8 @@ function renderViewSwitcher({ focusMenu = false, focusDisclosure = false } = {})
 function homeModuleShell(kind, title, viewId, meta = '') {
   const module = document.createElement('section');
   module.className = `home-module home-module-${kind}`;
-  module.setAttribute('aria-label', title);
+  // The meta (the Limits mode) is part of what the module's numbers mean.
+  module.setAttribute('aria-label', meta ? `${title}: ${meta}` : title);
   // Plugin modules have no detail view to jump to.
   if (viewId) {
     module.tabIndex = 0;
@@ -7094,7 +7095,11 @@ function homeLimitRows() {
   const compact = homeModulePreferencesApi.resolveHomeLimitDisplayMode(state.settings?.homeLimitDisplayMode) !== 'rows';
   return homeOverviewApi.homeLimitAccountsForProviders({
     providers: limitWindowsView.collapseWorkbuddyAccounts(desktopLimitRecords()).map((provider) => {
-      const shown = (provider.windows || []).filter((window) => !isWindowHidden(provider.provider, window));
+      // An install still carrying the retired `showCodexAdditionalLimits: false`
+      // (its migration could not save) keeps the extra pools off Home too.
+      const legacyHidden = (window) => provider.provider === 'codex' && window?.additional === true
+        && state.settings?.showCodexAdditionalLimits === false;
+      const shown = (provider.windows || []).filter((window) => !isWindowHidden(provider.provider, window) && !legacyHidden(window));
       return {
         ...provider,
         // The reset count follows the card's "Resets" usage item.
@@ -7455,7 +7460,12 @@ function renderClassicHomeLimits(module, body, rows, showBars) {
       const remainingPercent = optionalFiniteNumber(window.remainingPercent);
       if (highlightLow && remainingPercent != null) {
         const clamped = Math.max(0, Math.min(100, remainingPercent));
-        if (clamped < 20) {
+        if (!homeVendorColorsEnabled()) {
+          // Same monochrome thresholds as the default rows: red only when
+          // exhausted, amber when nearly out.
+          if (clamped === 0) value.classList.add('home-limit-value-critical');
+          else if (clamped < 20) value.classList.add('home-limit-value-low');
+        } else if (clamped < 20) {
           value.classList.add('home-limit-value-critical');
         } else if (clamped < 50) {
           value.classList.add('home-limit-value-low');
@@ -7560,8 +7570,10 @@ function homeShareColors(rows) {
 // With tool icons off, a row's mark is a swatch of its segment's colour so the
 // list reads against the bar; with icons on, the shared icon path wins.
 function applyHomeShareMark(mark, iconKind, color) {
-  applyHomeListMark(mark, iconKind, color);
-  if (iconKind?.kind !== 'icon') mark.classList.add('home-share-swatch');
+  const swatch = iconKind?.kind !== 'icon';
+  // A swatch matches its segment, which swaps near-black vendor colours for ink.
+  applyHomeListMark(mark, iconKind, swatch ? homeShareVendorColor(color) : color);
+  if (swatch) mark.classList.add('home-share-swatch');
 }
 
 function renderHomeModelModule(period) {
@@ -11665,7 +11677,9 @@ function renderHomeLimitSettings() {
     option.textContent = t(`settings.home.limitDisplayMode.${mode}`);
     displayInput.append(option);
   }
-  displayInput.value = homeModulePreferencesApi.normalizeHomeLimitDisplayMode(state.settings?.homeLimitDisplayMode);
+  const storedDisplayMode = homeModulePreferencesApi.normalizeHomeLimitDisplayMode(state.settings?.homeLimitDisplayMode);
+  // `rows` is not offered while it is the recommendation, so Default stands for it.
+  displayInput.value = storedDisplayMode === 'rows' ? 'default' : storedDisplayMode;
   displayInput.addEventListener('change', () => void saveSettings({ homeLimitDisplayMode: displayInput.value }));
   displayInput.setAttribute('aria-label', displayTitle.textContent);
   displayRow.append(displayText, displayInput);
@@ -11872,7 +11886,8 @@ function renderHomeModuleCountSettings(id) {
 
 function homeModuleSummary(id) {
   if (id === 'limits') {
-    return t(`settings.home.limitDisplayMode.${homeModulePreferencesApi.normalizeHomeLimitDisplayMode(state.settings?.homeLimitDisplayMode)}`);
+    const mode = homeModulePreferencesApi.normalizeHomeLimitDisplayMode(state.settings?.homeLimitDisplayMode);
+    return t(`settings.home.limitDisplayMode.${mode === 'rows' ? 'default' : mode}`);
   }
   if (id === 'trends') return t((state.settings?.heatmapMetric || 'cost') === 'tokens' ? 'dashboard.heatmap.tokens' : 'dashboard.heatmap.cost');
   if (HOME_MODULE_SUBGROUPS[id]) return t('settings.home.itemCountValue', { n: homeModulePreferencesApi.homeModuleCount(state.settings, id) });

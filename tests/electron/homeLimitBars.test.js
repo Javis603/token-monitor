@@ -59,6 +59,16 @@ test('Home resolves real plan labels without treating MiMo products as plans', (
   ])[0].plan, 'Pro');
 });
 
+test('Home keeps Codex additional pools hidden while the legacy switch is still off', () => {
+  const codex = { provider: 'codex', status: 'ok', accountLabel: 'Work', windows: [
+    { kind: 'weekly', remainingPercent: 40 },
+    { kind: 'weekly', label: 'GPT-5-Codex-Mini', additional: true, remainingPercent: 70 }
+  ] };
+  const labels = (settings) => resolveHomeRows([codex], settings)[0].windows.map((window) => Boolean(window.additional));
+  assert.deepEqual(labels({}), [false, true]);
+  assert.deepEqual(labels({ showCodexAdditionalLimits: false }), [false]);
+});
+
 test('Home uses account-row plan policies for grouped titles and adapter identities', () => {
   const window = { kind: 'weekly', remainingPercent: 40 };
   const rows = resolveHomeRows([
@@ -527,7 +537,7 @@ test('Home display mode persists separately from low-limit highlighting and is t
   assert.match(main, /homeLimitDisplayMode: normalizeHomeLimitDisplayMode\(patch\.homeLimitDisplayMode \?\? settings\.homeLimitDisplayMode\)/);
   assert.match(app, /saveSettings\(\{ homeLimitDisplayMode: displayInput\.value \}\)/);
   // The select stores `default` itself, so picking it keeps following the recommendation.
-  assert.match(app, /displayInput\.value = homeModulePreferencesApi\.normalizeHomeLimitDisplayMode\(/);
+  assert.match(app, /const storedDisplayMode = homeModulePreferencesApi\.normalizeHomeLimitDisplayMode\(state\.settings\?\.homeLimitDisplayMode\);\s*\/\/[^\n]*\n\s*displayInput\.value = storedDisplayMode === 'rows' \? 'default' : storedDisplayMode;/);
   assert.match(app, /for \(const mode of \['default', 'text', 'bars'\]\)/);
   for (const mode of ['rows', 'text', 'bars', 'default']) assert.equal(preferences.normalizeHomeLimitDisplayMode(mode), mode);
   assert.equal(preferences.normalizeHomeLimitDisplayMode('invalid'), 'default');

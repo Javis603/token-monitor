@@ -4800,8 +4800,9 @@ html.is-windows .settings-panel select option {
 .home-share-scope:hover [data-share-index] > .home-share-swatch {
   background: var(--home-vendor-color) !important;
 }
-.home-module-device:hover .home-device-tile {
-  --home-device-color: var(--home-vendor-color);
+.home-module-device:hover .home-device-tile::before {
+  /* The tile sets its own colour inline, so hover paints the edge directly. */
+  background: var(--home-vendor-color);
 }
 /* Continuous hover targets, so a pointer moving through a list never drops
    into a gap where nothing is hovered (which flashed every row back on): rows
@@ -4915,7 +4916,8 @@ html.is-windows .settings-panel select option {
 }
 .home-device-grid[data-count="1"] { --home-device-columns: 1; }
 .home-device-grid[data-count="1"] .home-device-tile {
-  grid-template-columns: auto auto minmax(0, 1fr);
+  /* The name gives way first, so a long one never pushes the amount out. */
+  grid-template-columns: minmax(0, 1fr) auto auto;
   align-items: center;
   gap: 8px;
 }
@@ -4931,6 +4933,7 @@ html.is-windows .settings-panel select option {
   font-size: 0.6875rem;
 }
 .home-device-grid[data-count="1"] .home-device-tile-sub:empty { display: none; }
+.home-device-grid[data-count="1"] .home-device-tile-head { min-width: 0; }
 .home-device-grid[data-count="2"],
 .home-device-grid[data-count="4"] { --home-device-columns: 2; }
 @container (min-width: 400px) {

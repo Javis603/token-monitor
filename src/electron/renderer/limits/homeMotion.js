@@ -62,7 +62,7 @@
     // A refresh mid-animation must not restart it: a retained track keeps
     // running, a rebuilt one replays from the original start.
     const meterMotions = new WeakMap();
-    const rollSettles = new Set();
+    const readingSettles = new Set();
 
     function capture(scope) {
       const snapshot = new Map();
@@ -129,19 +129,23 @@
       if (numberMode() === 'count') {
         const from = finite(previous.percent);
         if (from !== null && Math.round(from) !== Math.round(to)) {
-          numbers.beginCount(value, from, to, formatPercent, { toText });
+          settleLater(numbers.beginCount(value, from, to, formatPercent, { toText }));
         }
         return;
       }
       // A roll still in flight carries its glyphs over even when the reading
       // has not changed again.
       if (previous.text === toText && !previous.roll) return;
-      const settle = numbers.beginRoll(value, previous.text, toText, to > (finite(previous.percent) ?? to),
-        null, previous.roll);
-      rollSettles.add(settle);
+      settleLater(numbers.beginRoll(value, previous.text, toText, to > (finite(previous.percent) ?? to),
+        null, previous.roll));
+    }
+
+    // Count runs on animation frames and Roll on WAAPI; settle() finishes both.
+    function settleLater(settle) {
+      readingSettles.add(settle);
       setTimeout(() => {
         settle();
-        rollSettles.delete(settle);
+        readingSettles.delete(settle);
       }, numbers.duration);
     }
 
@@ -198,8 +202,8 @@
     }
 
     function settle() {
-      for (const finish of rollSettles) finish();
-      rollSettles.clear();
+      for (const finish of readingSettles) finish();
+      readingSettles.clear();
     }
 
     return { capture, animate, settle };
