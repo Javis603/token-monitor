@@ -415,6 +415,46 @@
     return policies[id]?.settingsRecord?.(rows, { isMimoMembershipProduct }) ?? rows.at(-1);
   }
 
+  function providerIdsWithReadings(providers) {
+    const ids = new Set();
+    for (const row of providers) {
+      if (row.status === 'ok' && !row.stale) ids.add(row.provider);
+    }
+    return ids;
+  }
+
+  function providerReadingDeviceIds(localProviders, devices, aggregateProviders, localDeviceId) {
+    const byProvider = new Map();
+    const localId = deviceKey(localDeviceId);
+    const add = (provider, id) => {
+      const pid = providerId(provider);
+      if (!pid || !id) return;
+      let list = byProvider.get(pid);
+      if (!list) {
+        list = [];
+        byProvider.set(pid, list);
+      }
+      if (!list.includes(id)) list.push(id);
+    };
+    const localKey = localId || '__local__';
+    for (const id of providerIdsWithReadings(localProviders || [])) add(id, localKey);
+    if (localId) {
+      const devicesWithLimits = new Set();
+      for (const device of devices || []) {
+        const id = deviceKey(device?.deviceId);
+        if (!id || id === localId) continue;
+        if (Array.isArray(device?.limits?.providers)) devicesWithLimits.add(id);
+        for (const provider of providerIdsWithReadings(device?.limits?.providers || [])) add(provider, id);
+      }
+      for (const row of aggregateProviders || []) {
+        const id = deviceKey(row?.sourceDeviceId);
+        if (!id || id === localId || devicesWithLimits.has(id) || row.status !== 'ok' || row.stale) continue;
+        add(row.provider, id);
+      }
+    }
+    return byProvider;
+  }
+
   return {
     connectionSources,
     connectionTag,
@@ -445,6 +485,8 @@
     pluginLimitSettingsStatus,
     limitProviderSettingsTags,
     limitProviderSettingsRecord,
+    providerIdsWithReadings,
+    providerReadingDeviceIds,
     thirdPartyAdapterFamily,
     thirdPartyAdapterVisual,
     thirdPartyGroupPlanText,

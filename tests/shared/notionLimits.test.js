@@ -19,6 +19,7 @@ const {
 
 const spacesFixture = require('../fixtures/notionSpaces.json');
 const allowanceFixture = require('../fixtures/notionAllowance.json');
+const personalAllowancesFixture = require('../fixtures/notionPersonalAllowances.json');
 const USER = '8f24ac06-1807-4d51-9317-87d2f1a5f394';
 const USER_B = 'ad5e1e56-1a69-42a5-aede-c8fde578f1a5';
 const SPACE = 'f190126b-0445-43ec-94dd-f069ad1aa064';
@@ -153,6 +154,61 @@ test('Notion preserves zero usage and raw overage while shared percentages clamp
     assert.equal(provider.windows[0].remainingPercent, used === 0 ? 100 : 0);
     assert.equal(provider.windows[0].resetsAt, new Date(NOW).toISOString());
   }
+});
+
+test('Notion reads personal Standard and Select credit amounts from the existing endpoint', async () => {
+  const deps = mockDeps({ allowance: personalAllowancesFixture });
+  const provider = await fetchNotionLimits(options, deps);
+  assert.equal(provider.status, 'ok');
+  assert.equal(provider.accountKey, hashKey('notion', USER + SPACE));
+  assert.deepEqual(deps.calls.map(({ url, init }) => [url, JSON.parse(init.body)]),
+    [[NOTION_SPACES_URL, {}], [NOTION_ALLOWANCE_URL, { spaceId: SPACE }]]);
+  assert.deepEqual(provider.windows.map(({ label, kind, used, limit, remaining, usedPercent, resetsAt }) =>
+    [label, kind, used, limit, remaining, usedPercent, resetsAt]), [
+    ['Standard', 'billing', 134.66869, 1500, 1500 - 134.66869, 134.66869 / 1500 * 100, '2026-11-28T14:00:00.000Z'],
+    ['Select', 'billing', 0, 500, 500, 0, '2026-11-28T14:00:00.000Z']
+  ]);
+  assert.ok(provider.windows.every((window) => window.windowMinutes === null && window.metric === undefined));
+
+  const mixed = { ...allowanceFixture, allowances: personalAllowancesFixture.allowances };
+  assert.deepEqual(parseNotionAllowance(mixed, NOW).windows.map((window) => window.label), ['Standard', 'Select']);
+});
+
+test('Notion validates personal credit pools independently and keeps only measured amounts', () => {
+  const [, standard, select] = personalAllowancesFixture.allowances;
+  for (const invalidSelect of [
+    { ...select, state: 'not_exposed' },
+    { ...select, cadence: 'rolling' },
+    { ...select, credits: null },
+    { ...select, credits: { used: '0', limit: 500 } },
+    { ...select, credits: { used: -1, limit: 500 } },
+    { ...select, credits: { used: 0, limit: 0 } },
+    { ...select, credits: { used: 7, limit: Number.MIN_VALUE } },
+    { ...select, periodEndMs: null },
+    { ...select, periodEndMs: Number.MAX_VALUE }
+  ]) {
+    const response = { status: 'not_applicable', allowances: [standard, invalidSelect] };
+    assert.deepEqual(parseNotionAllowance(response, NOW).windows.map((window) => window.label), ['Standard']);
+    assert.throws(() => parseNotionAllowance({ ...response, allowances: [invalidSelect] }, NOW), { status: 'unavailable' });
+  }
+  const withoutReset = clone(select);
+  delete withoutReset.periodEndMs;
+  const partial = parseNotionAllowance({
+    status: 'not_applicable',
+    allowances: [standard, { ...standard }, withoutReset]
+  }, NOW);
+  assert.deepEqual(partial.windows.map((window) => [window.label, window.resetsAt]), [['Select', undefined]]);
+});
+
+test('Notion falls back to valid legacy windows when neither personal pool is usable', () => {
+  const [, standard] = personalAllowancesFixture.allowances;
+  for (const allowances of [[], null, [null, { ...standard, credits: undefined }]]) {
+    assert.deepEqual(parseNotionAllowance({ ...allowanceFixture, allowances }, NOW),
+      parseNotionAllowance(allowanceFixture, NOW));
+  }
+  assert.throws(() => parseNotionAllowance({
+    ...personalAllowancesFixture, status: 'future_status'
+  }, NOW), { status: 'unavailable' });
 });
 
 test('Notion missing resets and single-window responses never invent zero usage or monthly durations', async () => {

@@ -29,12 +29,16 @@ function createRetainedWindow({ BaseWindow, WebContentsView }, options, previous
   entries.set(win, entry);
   // The desktop host's document-window contract; BaseWindow has no primary page.
   Object.defineProperty(win, 'webContents', { value: view.webContents });
+  // Minimizing can emit 'resize' while the content size reads 0×0. Restoring
+  // to unchanged bounds emits no 'resize', so a 0×0 view would stay hidden
+  // and unpainted behind the backdrop; skip minimized sizes and resync on restore.
   const resize = () => {
-    if (entry.owner !== win) return;
+    if (entry.owner !== win || win.isMinimized()) return;
     const [width, height] = win.getContentSize();
     view.setBounds({ x: 0, y: 0, width, height });
   };
   win.on('resize', resize);
+  win.on('restore', resize);
   // BaseWindow has no primary page to receive keyboard focus automatically.
   // The transfer's viewport restore handles Chromium's scroll-to-focus.
   win.on('focus', () => { if (entry.owner === win) view.webContents.focus(); });

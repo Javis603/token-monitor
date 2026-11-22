@@ -68,7 +68,6 @@ app.whenReady().then(async () => {
   const handlers = {
     'clipboard:write': (_event, text) => { copiedText = text; return true; },
     'settings:get': () => settings,
-    'settings:displayPreview': (_event, surface, phase, slots) => require('../src/electron/displayPreview').buildDisplayPreview(settings, surface, phase, process.platform, Date.now(), slots),
     'settings:update': async (event, patch) => { const after = await runtime.beforeSettingsChange(event, patch); settings = { ...settings, ...patch }; runtime.settingsChanged(); win.webContents.send('settings:push',settings); await after(); return settings; },
     'app:getInfo': () => ({ version: require('../package.json').version, platform: process.platform, systemUiTheme: 'dark', loginItemSupported: false }),
     'appUpdate:get': () => ({}), 'appearance:getNativeMaterial': () => null,

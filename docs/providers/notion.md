@@ -1,5 +1,5 @@
 ---
-summary: "Manual-only Notion AI allowance: internal endpoints, explicit workspace selection, private account identity and fixture-only validation."
+summary: "Manual Notion AI setup, personal credit allowances, legacy limits and private workspace identity."
 ids: [notion]
 read_when:
   - Changing Notion AI account setup or allowance parsing
@@ -11,7 +11,7 @@ read_when:
 
 ## Identity and ids
 
-`notion` is a limits-only provider, not a tracked token client. The integration targets the per-user AI usage allowance of Business/Enterprise workspaces. Only fixtures have been validated; no real response sample is available, and live authentication remains pending explicit approval.
+`notion` is a limits-only provider for personal AI allowances in Business/Enterprise workspaces. Token Monitor validates the parser with fixtures and requires explicit approval for live authentication checks.
 
 The workspace must be selected explicitly with `notionWorkspaceId`, a workspace UUID (`spaceId` in the allowance request), not a page ID. Dashed and undashed UUIDs normalize to the same identity. `getSpaces` must corroborate both the signed-in user ID and that exact workspace ID; it must not silently select a different workspace. The account key is a stable hash of user plus workspace, so the same user's separate workspaces remain distinct during cross-device aggregation. Email and workspace names are not displayed or used as identity signals.
 
@@ -22,9 +22,11 @@ The integration uses two internal POST endpoints at `https://app.notion.com`. To
 - `/api/v3/getSpaces`, with `{}`, supplies corroborated user/workspace records and subscription tier.
 - `/api/v3/getCreditRateLimitStatus`, with `{ "spaceId": "<workspace UUID>" }`, supplies the allowance windows.
 
-For product context, see Notion's official [Manage your usage allowance for Notion AI](https://www.notion.com/help/manage-your-usage-allowance-for-notion-ai). That help page is not a public API contract for these endpoints.
+For product context, see Notion's official [Manage your AI credits](https://www.notion.com/help/manage-your-ai-credits). These endpoints are internal.
 
-The parser accepts the fixture's `basic_ai_credits` / `per_user` shape. `window.window === '6h'` identifies the rolling allowance (`session`, 360 minutes); `resetsInSeconds` supplies its reset when present. `billingPeriodWindow.cadence === 'billing_period'` identifies the Monthly billing window; `periodEndMs` supplies its reset when present. Percentages come from the returned `used / limit`, not an assumed 100-unit limit. Missing reset fields remain unknown. No monthly `windowMinutes`, calendar duration or 30-day sentinel is invented from an end timestamp.
+For migrated accounts, the endpoint can return personal monthly allowances in `allowances[]` even when the top-level legacy status is `not_applicable`. A uniquely identified, resolved `billing_period` entry for bucket `auto` supplies Standard credits and one for `flex` supplies Select credits. Each pool uses its own `credits.used`, `credits.limit` and, when present, `periodEndMs`. The app omits missing or invalid pools and displays the reported credit counts in the selected used or remaining mode.
+
+If neither personal pool is usable, a valid legacy `within_limit` response can still supply Rolling and Monthly windows. The legacy `basic_ai_credits` / `per_user` shape uses `window.window === '6h'` for Rolling and `billingPeriodWindow.cadence === 'billing_period'` for Monthly. The rolling reset comes from `resetsInSeconds` and the monthly reset from `periodEndMs`. Missing reset fields remain unknown. Monthly windows carry the server's reset timestamp when available.
 
 ## Source precedence
 
@@ -41,15 +43,14 @@ Requests use the injected limits transport, `credentials: 'omit'`, and rejected 
 ## Invariants and known gaps
 
 - These are unsupported internal `/api/v3` endpoints with no public API guarantee. Their schema, eligibility and authentication can change; unknown responses fail as unavailable rather than guessed quota data.
-- Fixture validation does not confirm live authentication, current plan eligibility or live enforcement states. Only `within_limit` yields readings; `not_applicable` and undocumented enforcement statuses return unavailable, never a guessed full quota. The generic save flow treats unavailable probes as indeterminate and can save the submitted pair without confirming eligibility. No real request, login or credential collection has been performed. Obtain approval before any live validation.
-- The allowance's `basic_ai_credits` units are neither measured tokens nor a money balance. Do not attach the shared `credits` money metric, currency or token estimates to them.
-- Custom Agents, Workers and premium-model credit pools are outside this integration. No credits-pool endpoint is queried or inferred from the per-user allowance.
+- Without a usable personal pool or a valid legacy allowance, the provider reports unavailable. The generic save flow treats unavailable probes as indeterminate and can save the submitted pair before eligibility is confirmed.
+- These are personal usage quotas. They use ordinary percentage meters and preserve the reported unit counts. The separate workspace-managed Notion Credits balance is outside this integration.
 - HTTP 401 and ordinary 403 reject the session; a 403 explicitly marked `cf-mitigated: challenge` is unavailable and preserves last-good readings through the shared runtime. Error bodies are never inspected or forwarded.
 - Each local account slot holds an explicit cookie/workspace pair. Existing fixed credentials migrate automatically, copying the workspace setting so environment credentials can still use it. Separate slots can track different users or workspaces; workspace discovery remains explicit and no automatic account import is provided.
 - Account identity requires verified user and workspace IDs. Never replace them with an email, a workspace name, the cookie value, or a fallback workspace selected from `getSpaces`.
 
 ## Verification
 
-Run `node --test tests/shared/notionLimits.test.js tests/electron/notionIntegration.test.js` for the fixture parser and generic account integration. Registration, locale keys and docs are covered by the existing provider-order, i18n, vendor-presentation and README consistency checks; the final integration runs `npm run verify` after generated Worker/Hub metadata is refreshed.
+Run `node --test --test-name-pattern=Notion tests/shared/notionLimits.test.js tests/electron/notionIntegration.test.js tests/electron/edgeDockLimitCard.test.js` to check parsing, account integration and the shared Limits and Edge Dock rows.
 
-A real sanitized response sample is still needed to validate live Business/Enterprise authentication and workspace selection. Any such check requires explicit approval and manually provided session credentials; fixture-only results must not be described as confirmed live support.
+The personal allowance fixture uses the relevant fields from [CodexBar's sanitized response sample](https://github.com/steipete/CodexBar/blob/v0.85.0/Tests/CodexBarTests/Fixtures/Providers/Notion/get-credit-rate-limit-status-migrated.json). Token Monitor's live authentication and workspace selection still require separate validation with an approved session.

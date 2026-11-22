@@ -469,6 +469,13 @@ function watchPolicyEntries(clientsCsv, options = {}) {
   // Claude's parser and source fingerprint also read same-stem agent metadata.
   bound('claude', sourceRoots('claude', 'claude-projects', 'claude-transcripts'),
     recursiveSourceFiles((name) => name.endsWith('.jsonl') || name.endsWith('.meta.json')));
+  // Codex compresses a finished rollout to `.jsonl.zst` beside it. chokidar
+  // holds a native watcher per discovered file, so an archive that can never
+  // grow again keeps a descriptor for the rest of the session — 5.8k of them on
+  // a real profile. Scans still read archives, and compressing a live rollout
+  // removes its watched `.jsonl`, whose unlink event already triggers the scan.
+  bound('codex', sourceRoots('codex', 'codex-sessions'),
+    (_parts, resolved) => path.basename(resolved).endsWith('.jsonl.zst'));
   bound('gemini', candidates.gemini || [],
     recursiveSourceFiles((name) => name.endsWith('.json') || name.endsWith('.jsonl')));
   bound('kilo', sourceRoots('kilo', 'kilo-db'), directChildOnly((name) => KILO_DB_WATCH_PATTERN.test(name)));

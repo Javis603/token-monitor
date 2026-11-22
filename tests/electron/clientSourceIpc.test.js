@@ -154,3 +154,76 @@ test('only Antigravity can reveal the fixed sync-lock path', () => {
   assert.equal(handlers.revealClientSyncLock('antigravity'), true);
   assert.deepEqual(calls.revealLocks, ['antigravity']);
 });
+
+function createUntrackedHandlers({ tracked = ['codex'], present = ['kiro'], wsl = [], throws = false, wslThrows = false } = {}) {
+  const probes = [];
+  const wslProbes = [];
+  const handlers = createClientSourceIpcHandlers({
+    knownClients: ['codex', 'kiro', 'workbuddy', 'grok'],
+    trackedClients: () => tracked,
+    visibleDiagnosticRoots: (clientsCsv) => {
+      probes.push(clientsCsv);
+      if (throws) throw new Error('probe failed');
+      return Object.fromEntries(String(clientsCsv).split(',').filter(Boolean).map((client) => [
+        client,
+        [{ id: `${client}-data`, dir: `/tmp/${client}`, exists: present.includes(client) }]
+      ]));
+    },
+    detectWslClients: async (remaining) => {
+      wslProbes.push(remaining);
+      if (wslThrows) throw new Error('wsl probe failed');
+      return wsl;
+    }
+  });
+  return { probes, wslProbes, handlers };
+}
+
+test('untracked clients with data are reported, tracked ones and empty ones are not', async () => {
+  const { probes, handlers } = createUntrackedHandlers({
+    tracked: ['codex'],
+    present: ['kiro', 'workbuddy', 'codex']
+  });
+
+  assert.deepEqual(await handlers.untrackedClientsWithData(), ['kiro', 'workbuddy']);
+  assert.deepEqual(probes, ['kiro,workbuddy,grok']);
+});
+
+test('untracked WSL-only clients are reported and tracked/unknown WSL entries are ignored', async () => {
+  const { wslProbes, handlers } = createUntrackedHandlers({
+    tracked: ['codex'],
+    present: ['kiro'],
+    wsl: ['codex', 'kiro', 'grok', 'unknown-tool']
+  });
+
+  assert.deepEqual(await handlers.untrackedClientsWithData(), ['kiro', 'grok']);
+  assert.deepEqual(wslProbes, [['workbuddy', 'grok']]);
+});
+
+test('an untracked client whose only root is absent is not reported', async () => {
+  const { handlers } = createUntrackedHandlers({ tracked: ['codex'], present: [] });
+
+  assert.deepEqual(await handlers.untrackedClientsWithData(), []);
+});
+
+test('tracking every known client probes nothing', async () => {
+  const { probes, wslProbes, handlers } = createUntrackedHandlers({
+    tracked: ['codex', 'kiro', 'workbuddy', 'grok'],
+    wsl: ['grok']
+  });
+
+  assert.deepEqual(await handlers.untrackedClientsWithData(), []);
+  assert.deepEqual(probes, []);
+  assert.deepEqual(wslProbes, []);
+});
+
+test('a failing probe reports nothing instead of throwing at the IPC boundary', async () => {
+  const { handlers } = createUntrackedHandlers({ throws: true, wslThrows: true });
+
+  assert.deepEqual(await handlers.untrackedClientsWithData(), []);
+});
+
+test('a failing WSL probe does not discard native root detections', async () => {
+  const { handlers } = createUntrackedHandlers({ present: ['kiro'], wslThrows: true });
+
+  assert.deepEqual(await handlers.untrackedClientsWithData(), ['kiro']);
+});

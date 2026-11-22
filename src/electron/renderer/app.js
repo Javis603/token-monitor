@@ -349,6 +349,10 @@ state.codexResetForecast = null;
 state.codexResetForecastBusy = false;
 state.codexResetForecastRequestedAt = 0;
 state.codexResetForecastRetryTimer = null;
+state.untrackedWithData = [];
+state.untrackedWithDataProbed = null;
+state.untrackedWithDataPathsKey = '';
+state.untrackedWithDataRequest = 0;
 state.clientRescans = clientRescanStateApi.createClientRescanState({
   onChange: (clientId) => {
     if (state.clientHealthExpanded === clientId || (state.clientHealthExpanded === 'qoder' && qoderDisplayApi.isQoder(clientId))) refillOpenClientHealthPanel();
@@ -824,7 +828,7 @@ let displaySettings = null;
 function applySettingsSectionDom(id, open) {
   if (id === 'sync' && !open) { syncModeSelect?.close(); syncContentForm?.closeHelp(); }
   if (id === 'appearance' && !open) appearanceColorPicker.close();
-  if (id === 'window' && !open) stopWindowShortcutRecording();
+  if (id === 'window' && !open) { stopWindowShortcutRecording(); displaySettings?.close?.(); }
   const toggle = document.querySelector(`[data-settings-section="${id}"]`);
   const details = document.getElementById(`${id}SettingsDetails`);
   const group = toggle?.closest('.settings-collapsible-group');
@@ -849,6 +853,7 @@ function setSettingsSectionExpanded(section, expanded) {
   if (id === 'sync' && next) void syncContentForm?.refresh();
   if (id === 'general' && next) void refreshAboutStars();
   if (id === 'plugins' && next) void pluginSettingsPanel?.refresh().then(renderSettingsSummaries);
+  if (id === 'tools' && next) loadUntrackedClientsWithData();
 }
 
 // Expanding a section auto-collapses the previously open one. When that one
@@ -883,11 +888,13 @@ function shouldAnchorSettingsScroll(section, expanding) {
   return SETTINGS_SECTION_IDS.slice(0, sectionIndex).some(id => state.settingsSections[id]);
 }
 
-function anchorSettingsScroll(anchorEl, mutate) {
+// targetOffset pins the header at that distance from the panel top instead of
+// where it currently sits.
+function anchorSettingsScroll(anchorEl, mutate, targetOffset) {
   cancelSettingsScrollAnchor();
   const panel = els.settingsPanel;
   if (!panel || !anchorEl) { mutate(); return; }
-  const offset = anchorEl.getBoundingClientRect().top - panel.getBoundingClientRect().top;
+  const offset = targetOffset ?? anchorEl.getBoundingClientRect().top - panel.getBoundingClientRect().top;
   mutate();
   const reducedMotion = prefersReducedMotion();
   const deadline = performance.now() + SETTINGS_SCROLL_ANCHOR_MS;
@@ -2500,20 +2507,10 @@ function animateHomeHistoryVisuals(activityScroll, activityCanvas, trendChart) {
     });
   });
 
-  const line = trendChart?.querySelector('.area-line-stroke');
-  const fill = trendChart?.querySelector('.area-line-fill');
-  const length = line?.getTotalLength?.() || 0;
-  if (length > 0) {
-    line.animate([
-      { strokeDasharray: `${length} ${length}`, strokeDashoffset: length },
-      { strokeDasharray: `${length} ${length}`, strokeDashoffset: 0 }
-    ], {
-      duration: HOME_HISTORY_MOTION_MS,
-      easing: 'cubic-bezier(0.22, 1, 0.36, 1)',
-      fill: 'backwards'
-    });
-  }
-  fill?.animate([
+  // Wipe the line and its fill in together. A dash-offset draw-in would need the
+  // on-screen path length: the stroke is non-scaling, so dashes are laid out in
+  // screen space while getTotalLength() reports stretched viewBox units.
+  trendChart?.querySelector('.area-line')?.animate([
     { clipPath: 'inset(0 100% 0 0)' },
     { clipPath: 'inset(0 0 0 0)' }
   ], {
@@ -6454,14 +6451,19 @@ function openSettingsPanel(section) {
   els.shell.classList.add('settings-open');
   syncPluginLimitsDemand();
   resetMainViewSettings();
+  state.untrackedWithDataProbed = null;
   syncSettingsForm();
   ensureServiceStatusTicker();
   // General stays expanded across closes, so its expand hook alone would leave
   // the count unrefreshed; main's cache decides whether this goes to GitHub.
   if (state.settingsSections?.general) void refreshAboutStars();
   if (section === 'notch') {
-    setSettingsSectionExpanded('window', true);
-    displaySettings?.open('notch');
+    // Tile clicks keep the scroll position; this outside entry point holds the
+    // Window header at the panel top, including while a section above collapses.
+    anchorSettingsScroll(document.querySelector('[data-settings-section="window"]'), () => {
+      setSettingsSectionExpanded('window', true);
+      displaySettings?.open('notch');
+    }, 0);
   }
   els.shell.style.transform = 'translateZ(0)';
   requestAnimationFrame(() => { els.shell.style.transform = ''; });
@@ -6475,8 +6477,10 @@ function openViewFromTray(viewId) {
   syncModeSelect?.close();
   syncContentForm?.closeHelp();
   appearanceColorPicker.close();
+  displaySettings?.close();
   els.settingsPanel?.classList.add('hidden');
   els.shell.classList.remove('settings-open');
+  state.untrackedWithDataProbed = null;
   syncPluginLimitsDemand();
   state.openSession = null;
   // Navigating to the view already on screen changes no breakdown, so it never
@@ -8503,6 +8507,7 @@ async function refreshStats(options = {}) {
     allTimeSessions.invalidate();
     state.stats = sessionStatsForDisplay(allTimeSessions.attach(nextStats));
     observeDisplayLiveTokenRates(nextStats);
+    if (typeof signalHibernateRevealIfReady === 'function') signalHibernateRevealIfReady();
     if (options.forceHistory === true) {
       // A manual history rescan is an explicit retry boundary. Let Home request the
       // corresponding full payload even when its revision is unchanged, and restore
@@ -11218,7 +11223,7 @@ function renderHomeLimitProviderList() {
   page.className = 'main-view-subpage';
   const back = document.createElement('button');
   back.type = 'button';
-  back.className = 'display-settings-back main-view-back';
+  back.className = 'main-view-back';
   back.textContent = t('views.home');
   back.addEventListener('click', () => setHomeLimitProvidersOpen(false));
   const title = document.createElement('strong');
@@ -11842,6 +11847,38 @@ function clientSourcesPanelIds(clientId) {
 function clientSourcesPanelKey(clientId) {
   const keys = clientSourcesPanelIds(clientId).map(id => clientSourceCacheApi.clientSourceRequestKey(clientSourcesIdentity(id)));
   return keys.every(Boolean) ? (keys.length === 1 ? keys[0] : JSON.stringify(keys)) : '';
+}
+
+function loadUntrackedClientsWithData(localUsage = clientHealthPresentationApi.clientIdsWithUsage([localDevice()])) {
+  if (!state.settings || els.settingsPanel?.classList.contains('hidden') || !state.settingsSections?.tools) return;
+  const enabled = enabledClientSet();
+  const untracked = KNOWN_CLIENTS.map(({ id }) => id).filter((id) => !enabled.has(id));
+  const pathsKey = JSON.stringify([state.settings.customScanPaths || {}, Boolean(state.settings.wslScanEnabled)]);
+  if (!untracked.length) {
+    state.untrackedWithDataPathsKey = pathsKey;
+    state.untrackedWithDataProbed = new Set();
+    state.untrackedWithData = [];
+    return;
+  }
+  if (
+    state.untrackedWithDataPathsKey === pathsKey
+    && state.untrackedWithDataProbed
+    && untracked.every((id) => localUsage.has(id) || state.untrackedWithDataProbed.has(id))
+  ) {
+    return;
+  }
+  const request = ++state.untrackedWithDataRequest;
+  state.untrackedWithDataPathsKey = pathsKey;
+  state.untrackedWithDataProbed = new Set(untracked);
+  void window.tokenMonitor?.untrackedClientsWithData?.().then((clients) => {
+    if (state.untrackedWithDataRequest !== request) return;
+    const next = Array.isArray(clients) ? clients : [];
+    if (next.join(',') === state.untrackedWithData.join(',')) return;
+    state.untrackedWithData = next;
+    renderToolPreferences();
+  }).catch(() => {
+    if (state.untrackedWithDataRequest === request) state.untrackedWithDataProbed = null;
+  });
 }
 
 function loadClientSources(clientId, options = {}) {
@@ -12704,7 +12741,7 @@ function renderSettingsListEmptyState(list) {
   list.append(empty);
 }
 
-function toolPreferenceRenderSignature() {
+function toolPreferenceRenderSignature(untrackedTags) {
   const clientStatus = localClientStatus();
   const health = localClientHealth();
   const device = localDevice();
@@ -12727,6 +12764,7 @@ function toolPreferenceRenderSignature() {
     query: toolPreferenceQuery(),
     deviceId: device?.deviceId || '',
     clientStatus,
+    untrackedTags,
     healthRows: KNOWN_CLIENTS.map(({ id }) => [
       id,
       health?.clients?.[id]?.overall || '',
@@ -12736,7 +12774,22 @@ function toolPreferenceRenderSignature() {
 }
 
 function renderToolPreferencesNow() {
-  const renderSignature = toolPreferenceRenderSignature();
+  const { clients, matched } = toolPreferenceRows();
+  const untrackedClients = clients.filter(({ id }) => !clientRowTracked(id));
+  const localUsage = clientHealthPresentationApi.clientIdsWithUsage([localDevice()]);
+  loadUntrackedClientsWithData(localUsage);
+  const detectedSources = new Set(state.untrackedWithData || []);
+  const untrackedTags = Object.fromEntries(untrackedClients.map(({ id }) => {
+    const members = clientSourcesPanelIds(id);
+    if (members.some(member => localUsage.has(member))) {
+      return [id, { key: 'settings.tools.status.hasData', tone: 'neutral' }];
+    }
+    if (members.some(member => detectedSources.has(member))) {
+      return [id, { key: 'settings.tools.status.detected', tone: 'muted' }];
+    }
+    return [id, null];
+  }));
+  const renderSignature = toolPreferenceRenderSignature(untrackedTags);
   const detailSignature = JSON.stringify([
     localClientHealth(),
     localDevice(),
@@ -12746,7 +12799,6 @@ function renderToolPreferencesNow() {
     state.settings?.clients || ''
   ]);
   const sourceSignature = clientSourcesPanelKey(state.clientHealthExpanded);
-  const { clients, matched } = toolPreferenceRows();
   // Every client keeps a row; a query with no match adds the no-matches note on
   // top of them, so the short-circuit compares against what this query is
   // expected to have produced.
@@ -12788,7 +12840,6 @@ function renderToolPreferencesNow() {
   const motion = takeSettingsListMotion('client', isTracked)
     ? captureSettingsRowMotion(els.clientDisplayList, '.tool-preference-row[data-client]', 'client')
     : null;
-  const untrackedClients = clients.filter(({ id }) => !isTracked(id));
   const groups = renderSettingsListGroups(els.clientDisplayList, {
     id: 'clientDisplayUntrackedGroup',
     enabledCount: clients.length - untrackedClients.length,
@@ -12816,7 +12867,7 @@ function renderToolPreferencesNow() {
     name.className = 'tool-preference-name';
     name.textContent = label;
     labelGroup.append(settingsListIcon(id, label, clientsWithIcon), name);
-    let statusTag = null;
+    let tagInfo = untrackedTags[id] || null;
     if (tracked) {
       // A tracked client with no reported status yet (first collect still running)
       // reads as "waiting for data" rather than a bare blank.
@@ -12828,23 +12879,24 @@ function renderToolPreferencesNow() {
       const needsAttention = id === 'qoder'
         ? qoderDisplayApi.IDS.some(member => enabled.has(member) && health?.clients?.[member]?.overall === 'attention')
         : health?.clients?.[id]?.overall === 'attention';
-      const tagInfo = needsAttention
+      tagInfo = needsAttention
         ? { key: 'settings.tools.status.attention', tone: 'warn' }
         : id === 'qoder'
           ? { key: qoderTracking.mixed ? 'settings.tools.qoder.partial' : 'settings.tools.qoder.all', tone: 'ok' }
           : clientStatusPresentationApi.clientStatusTag(id, clientStatus[id] || 'waiting');
-      if (tagInfo) {
-        statusTag = document.createElement('span');
-        statusTag.className = `tool-status-tag tool-status-tag-${tagInfo.tone}`;
-        // A healthy client is a dot: the group heading already says it is
-        // tracked. Every other state keeps its words.
-        if (tagInfo.tone === 'ok' && tagInfo.key !== 'settings.tools.qoder.partial') {
-          statusTag.classList.add('is-dot');
-          statusTag.setAttribute('role', 'img');
-          statusTag.setAttribute('aria-label', t(tagInfo.key));
-        } else {
-          statusTag.textContent = t(tagInfo.key);
-        }
+    }
+    let statusTag = null;
+    if (tagInfo) {
+      statusTag = document.createElement('span');
+      statusTag.className = `tool-status-tag tool-status-tag-${tagInfo.tone}`;
+      // A healthy client is a dot: the group heading already says it is
+      // tracked. Every other state keeps its words.
+      if (tagInfo.tone === 'ok' && tagInfo.key !== 'settings.tools.qoder.partial') {
+        statusTag.classList.add('is-dot');
+        statusTag.setAttribute('role', 'img');
+        statusTag.setAttribute('aria-label', t(tagInfo.key));
+      } else {
+        statusTag.textContent = t(tagInfo.key);
       }
     }
     const track = document.createElement('label');
@@ -12998,12 +13050,53 @@ function renderLimitProviderCheckboxes() {
   return preserveSettingsPanelScroll(renderLimitProviderCheckboxesNow);
 }
 
+const MAX_LIMIT_READING_DEVICE_ICONS = 3;
+
+function disabledLimitReadingDevices(providers) {
+  const localId = state.settings?.deviceId || '';
+  // Device rows retain both origins even when the aggregate picks one account reading.
+  const devices = state.stats?.devices || [];
+  const aggregate = state.stats?.limits?.providers || [];
+  const localProviders = [
+    ...(localId ? localDeviceLimitsProviders() ?? aggregate.filter(row => row.sourceDeviceId === localId) : []),
+    ...(state.pluginCatalog?.limits?.providers || [])
+  ];
+  const byProvider = limitProviderPresentationApi.providerReadingDeviceIds(
+    localProviders,
+    devices,
+    aggregate,
+    localId
+  );
+  const deviceById = new Map(devices.filter(device => device?.deviceId).map(device => [device.deviceId, device]));
+  const local = localDevice() || { deviceId: localId, deviceKind: 'desktop' };
+  const describe = (id) => {
+    const isLocal = !localId || id === localId || id === '__local__';
+    const device = isLocal ? local : (deviceById.get(id) || { deviceId: id });
+    return {
+      deviceId: isLocal ? (localId || '__local__') : id,
+      local: isLocal,
+      kind: deviceIconsApi.deviceIconKind(state.settings, device),
+      name: isLocal ? t('settings.sync.panel.thisDevice') : deviceBreakdownApi.deviceLabel(device)
+    };
+  };
+  return Object.fromEntries(providers.map(({ id }) => {
+    const list = (byProvider.get(id) || []).map(describe).sort((a, b) => {
+      if (a.local !== b.local) return a.local ? -1 : 1;
+      return a.name.localeCompare(b.name) || a.deviceId.localeCompare(b.deviceId);
+    });
+    return [id, list];
+  }));
+}
+
 function renderLimitProviderCheckboxesNow() {
   renderAccountSlotPanels();
   refreshAccountSlotPanels();
   for (const [id, panel] of automaticAccountPanels) panel.controller.update(strictLocalProviderStatuses(id));
-  const renderSignature = limitProviderSettingsRenderSignature();
   const { providers, matched } = limitProviderRows();
+  const enabled = enabledLimitProviderSet();
+  const disabledProviders = providers.filter(({ id }) => !enabled.has(id));
+  const readingDevicesByProvider = disabledLimitReadingDevices(disabledProviders);
+  const renderSignature = limitProviderSettingsRenderSignature(readingDevicesByProvider);
   // Same reasoning as the tracked-tools list: every provider keeps a row, and no
   // matches leaves the no-matches note on top of them.
   if (
@@ -13030,12 +13123,10 @@ function renderLimitProviderCheckboxesNow() {
       reusableSettingInputs.set(`${providerId}:item:${input.dataset.itemId}`, input);
     }
   }
-  const enabled = enabledLimitProviderSet();
   const filtering = Boolean(limitProviderQuery());
   const motion = takeSettingsListMotion('provider', id => enabled.has(id))
     ? captureSettingsRowMotion(els.limitProviderCheckboxes, '.limit-provider-row[data-provider]', 'provider')
     : null;
-  const disabledProviders = providers.filter(({ id }) => !enabled.has(id));
   const groups = renderSettingsListGroups(els.limitProviderCheckboxes, {
     id: 'limitProviderDisabledGroup',
     enabledCount: providers.length - disabledProviders.length,
@@ -13123,6 +13214,27 @@ function renderLimitProviderCheckboxesNow() {
     row.classList.toggle('has-status-tag', Boolean(actions.querySelector('.limit-provider-tag-status')));
     copy.append(nameLine);
     wrap.append(cb);
+    const readingDevices = !isEnabled ? (readingDevicesByProvider[id] || []) : [];
+    let readingIndicator = null;
+    if (readingDevices.length) {
+      readingIndicator = document.createElement('span');
+      readingIndicator.id = `limitProviderReadingDevices-${id}`;
+      readingIndicator.className = 'limit-provider-reading-devices';
+      for (const device of readingDevices.slice(0, MAX_LIMIT_READING_DEVICE_ICONS)) {
+        readingIndicator.append(deviceIconsApi.deviceIconNode(document, device.kind));
+      }
+      if (readingDevices.length > MAX_LIMIT_READING_DEVICE_ICONS) {
+        const overflow = document.createElement('span');
+        overflow.className = 'limit-provider-reading-overflow';
+        overflow.setAttribute('aria-hidden', 'true');
+        overflow.textContent = `+${readingDevices.length - MAX_LIMIT_READING_DEVICE_ICONS}`;
+        readingIndicator.append(overflow);
+      }
+      limitWindowsView.setDetailTooltip(readingIndicator, [
+        { full: t('settings.limits.readingsFrom'), caption: true },
+        ...readingDevices.map(device => ({ full: device.name }))
+      ], { centered: true });
+    }
     const accountStatus = limitProviderAccountStatus(id);
     if (accountStatus) {
       accountStatus.classList.toggle('hidden', !isEnabled);
@@ -13206,7 +13318,9 @@ function renderLimitProviderCheckboxesNow() {
       main.className = 'limit-provider-main';
     }
     main.append(disclosure, copy, actions);
-    row.append(main, wrap);
+    row.classList.toggle('has-reading-devices', Boolean(readingIndicator));
+    if (readingIndicator) row.append(main, readingIndicator, wrap);
+    else row.append(main, wrap);
     // Reordering is suppressed while a filter is on: the drop commits the order
     // it reads off the list, and a filtered list is only part of it. Disabled
     // providers wait in their own group and have no order to change.
@@ -13557,7 +13671,7 @@ const LIMIT_PROVIDER_SETTINGS = {
   }]
 };
 
-function limitProviderSettingsRenderSignature() {
+function limitProviderSettingsRenderSignature(readingDevices) {
   const settings = state.settings || {};
   const providerSignature = (provider) => {
     return [
@@ -13602,6 +13716,7 @@ function limitProviderSettingsRenderSignature() {
     connectionReadings: [...enabledLimitProviderSet()].sort().map((id) => [id, strictLocalProviderStatuses(id)
       .map((row) => [row.status || '', Boolean(row.stale), row.source || '', row.sourceDetail || ''])]),
     query: limitProviderQuery(),
+    readingDevices,
     providers: (state.stats?.limits?.providers || []).map(providerSignature),
     devices: (state.stats?.devices || []).map(deviceSignature)
   });
@@ -14465,6 +14580,14 @@ if (pluginBridge) {
   pluginBridge.onChanged(() => void refreshPluginCatalog());
 }
 
+let hibernateRevealPending = false;
+
+function signalHibernateRevealIfReady() {
+  if (!hibernateRevealPending || !initialSettingsApplied || !state.stats) return;
+  hibernateRevealPending = false;
+  window.tokenMonitor.signalAppearanceReady?.();
+}
+
 async function init() {
   // Subscribe before querying: a native appearance/accessibility change can
   // arrive while the initial state round trip is in flight.
@@ -14521,11 +14644,22 @@ async function init() {
   // Tray startup also needs its saved appearance prepared before native show.
   applyVisibleSettingsAppearance();
   initialSettingsApplied = true;
-  if (state.windowVisible) {
+  // A tray action can arrive at did-finish-load, before this asynchronous init
+  // finishes. Replay it now, before the window can announce appearance, so the
+  // first painted frame is the requested view or settings section.
+  flushPendingTrayOpen();
+  const hibernateReveal = new URLSearchParams(window.location.search).get('hibernateReveal') === '1';
+  if (hibernateReveal) {
+    // Do not reveal the recreated popover on the static zero defaults. Wait for
+    // the first real stats snapshot; the main process still falls back after
+    // its short wake timeout if stats do not arrive.
+    hibernateRevealPending = true;
+    signalHibernateRevealIfReady();
+  } else if (state.windowVisible) {
     const signalAppearanceReady = () => window.tokenMonitor.signalAppearanceReady?.();
     // A retained WebContentsView can be document.hidden until its native host
     // shows. Prepare it now, without waiting on animation frames that pause while
-    // hidden. windowVisible still excludes intentionally hidden tray startup.
+    // hidden.
     if (document.hidden) signalAppearanceReady();
     else requestAnimationFrame(() => requestAnimationFrame(signalAppearanceReady));
   }
@@ -14737,8 +14871,10 @@ els.settingsButton.addEventListener('click', (event) => {
     syncModeSelect?.close();
     syncContentForm?.closeHelp();
     appearanceColorPicker.close();
+    displaySettings?.close();
     resetSettingsListSearch();
     stopWindowShortcutRecording();
+    state.untrackedWithDataProbed = null;
   }
   els.shell.classList.toggle('settings-open', settingsOpen);
   syncPluginLimitsDemand();
@@ -15871,8 +16007,39 @@ reducedMotionMedia?.addEventListener?.('change', () => {
   applyReduceMotionPreference('system');
 });
 
-window.tokenMonitor.onOpenSettings?.(openSettingsPanel);
-window.tokenMonitor.onOpenView?.(openViewFromTray);
+// The main process sends tray navigation as soon as did-finish-load fires,
+// which can be earlier than the asynchronous settings load above. Dispatching
+// then would open the panel or switch views against the default state; keep the
+// last request until init has applied the saved settings instead.
+let pendingTrayOpen = null;
+
+function dispatchTrayOpen(request) {
+  // An explicit tray view outranks the saved startup preference. Consume the
+  // one-time preference so the later syncSettingsForm() cannot replace it; a
+  // plugin page as the last view leaves the query seed absent, so this is not
+  // already covered by initialViewState.
+  if (request.kind === 'view') initialBreakdownPreferenceApplied = true;
+  if (request.kind === 'view') openViewFromTray(request.value);
+  else openSettingsPanel(request.value);
+}
+
+function handleTrayOpenRequest(kind, value) {
+  if (!initialSettingsApplied || !state.settings) {
+    pendingTrayOpen = { kind, value };
+    return;
+  }
+  dispatchTrayOpen({ kind, value });
+}
+
+function flushPendingTrayOpen() {
+  if (!pendingTrayOpen) return;
+  const request = pendingTrayOpen;
+  pendingTrayOpen = null;
+  dispatchTrayOpen(request);
+}
+
+window.tokenMonitor.onOpenSettings?.((section) => handleTrayOpenRequest('settings', section));
+window.tokenMonitor.onOpenView?.((viewId) => handleTrayOpenRequest('view', viewId));
 
 window.tokenMonitor.onFloatingBubbleState?.((payload) => {
   applyFloatingBubbleState(payload);
@@ -16036,6 +16203,7 @@ window.tokenMonitor.onStatsPush?.((payload) => {
     state.stats = sessionStatsForDisplay(allTimeSessions.attach(incomingStats));
     observeLiveTokenRate(state.stats);
     observeDisplayLiveTokenRates(state.stats);
+    if (typeof signalHibernateRevealIfReady === 'function') signalHibernateRevealIfReady();
     applyCodexActiveAccountFromStats();
     // Progressive mid-tick pushes never carry a fresh history scan (see
     // AGENTS.md collector notes), so only the final push can retire the
@@ -17187,7 +17355,6 @@ function refreshTrayComposers() {
     createTrayComposer
   );
   Object.values(trayComposers).forEach((composer) => composer?.refresh());
-  displaySettings?.refreshLivePreview();
   syncCustomTrayClockTimer();
 }
 
@@ -18108,14 +18275,11 @@ setupSettingsAccordion(
   document.getElementById('syncContentDetails'), expanded => syncContentForm.setExpanded(expanded)
 );
 setupSettingsSections();
-const displaySettingsPreview = window.TokenMonitorDisplaySettingsPreview.create({
-  window, document, bridge: window.tokenMonitor, settings: () => state.settings,
-  bitmap: trayComposerPreview, stats: () => state.stats, t
-});
 displaySettings = window.TokenMonitorDisplaySettings.create({
   document, root: document.getElementById('windowSettingsDetails').querySelector('.settings-section-details-inner'),
-  scrollPanel: els.settingsPanel, t, platform: () => state.appInfo?.platform, settings: () => state.settings,
-  preview: displaySettingsPreview.show, cancelScroll: cancelSettingsScrollAnchorOnInteraction,
+  t, platform: () => state.appInfo?.platform, settings: () => state.settings,
+  helpPopover: window.TokenMonitorHelpPopover,
+  cancelScroll: cancelSettingsScrollAnchorOnInteraction,
   stopWindowShortcutRecording
 });
 let legacyAccountOwners;
