@@ -2627,8 +2627,10 @@ test('watchIgnoreMatcher honors HERMES_HOME and is absent when Hermes is not tra
     assert.equal(ignored(path.join(hermesHome, 'state.db-wal')), false);
     assert.equal(ignored(path.join(hermesHome, 'logs')), false);
     assert.equal(ignored(path.join(hermesHome, 'logs', 'agent.log')), false);
-    // No Hermes tracked, so its policy does not add a matcher to Codex.
-    assert.equal(watchIgnoreMatcher('codex'), undefined);
+    // Codex now carries its own archive policy; it must not pick up Hermes'
+    // pruning for paths under a Hermes home, which it has no root over.
+    const codexIgnored = watchIgnoreMatcher('codex');
+    assert.equal(codexIgnored(path.join(hermesHome, 'logs', 'agent.log')), false);
   } finally {
     os.homedir = originalHomedir;
     if (previousHermesHome === undefined) delete process.env.HERMES_HOME;
