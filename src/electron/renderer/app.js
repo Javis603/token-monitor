@@ -11241,7 +11241,7 @@ function renderMainViewInspector(view, { off, lastVisible, unavailable }) {
   if (settings) inspector.append(settings());
   if (focusedReset && document.activeElement === document.body) {
     const heading = inspector.querySelector(`[data-inspector-reset="${CSS.escape(focusedReset)}"]`);
-    const row = heading?.parentElement;
+    const row = heading?.closest('.settings-item, .home-limit-status-setting') || heading?.parentElement;
     const target = heading?.querySelector('.settings-reset-button:not([hidden])')
       || (row && settingResetControl(row));
     target?.focus({ preventScroll: true });
@@ -12828,7 +12828,10 @@ function restoreSettingsListFocus(focusedId) {
   const target = document.getElementById(focusedId);
   const group = target?.closest('.settings-list-group');
   const toggle = group?.inert ? document.getElementById(`${group.id}Toggle`) : null;
-  (toggle || target)?.focus({ preventScroll: true });
+  const control = target?.hidden && target.matches('.settings-reset-button')
+    ? settingResetControl(target.closest('.settings-item'))
+    : target;
+  (toggle || control)?.focus({ preventScroll: true });
   // The toggle can sit below the fold of a long list. Reveal it after the
   // repaint's scroll preservation, by id since a later repaint may replace it,
   // and as an interaction so a pending restore does not scroll it away again.
@@ -13933,6 +13936,8 @@ function limitProviderSettingsList(providerId, settings, reusableInputs = null) 
       input.setAttribute('aria-describedby', desc.id);
       input.setAttribute('aria-label', title.textContent);
       addRenderedSettingReset(item, copy, title, setting.key);
+      const reset = copy.querySelector('.settings-reset-button');
+      if (reset) reset.id = 'resetWorkbuddyQuotaTotalButton';
     }
     list.append(item);
   }

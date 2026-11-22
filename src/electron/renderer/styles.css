@@ -3186,7 +3186,8 @@ button.tool-preference-main:focus-visible {
 }
 @media (forced-colors: active) {
   .tool-visibility-button::before,
-  .tool-pin-button::before {
+  .tool-pin-button::before,
+  .settings-reset-button::before {
     background: ButtonText;
   }
 }

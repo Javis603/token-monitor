@@ -182,3 +182,28 @@ test('existing appearance sliders show reset only for nondefault values', () => 
   sync();
   for (const [, reset] of names) assert.equal(els[reset].hidden, false, reset);
 });
+
+test('provider list restores focus after replacing a setting reset', () => {
+  const app = read('renderer/app.js');
+  const body = {};
+  const focused = [];
+  const checkbox = { focus: () => focused.push('checkbox') };
+  const button = {
+    hidden: true,
+    matches: selector => selector === '.settings-reset-button',
+    closest: selector => selector === '.settings-item' ? { querySelector: () => checkbox } : null,
+    focus: () => focused.push('reset')
+  };
+  const restore = vm.runInNewContext(
+    app.slice(app.indexOf('function restoreSettingsListFocus(')).split('\nfunction ')[0]
+      + '\nrestoreSettingsListFocus',
+    {
+      document: { body, activeElement: body, getElementById: () => button },
+      settingResetControl: row => row.querySelector()
+    }
+  );
+  restore('resetWorkbuddyQuotaTotalButton');
+  button.hidden = false;
+  restore('resetWorkbuddyQuotaTotalButton');
+  assert.deepEqual(focused, ['checkbox', 'reset']);
+});
