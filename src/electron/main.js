@@ -1481,40 +1481,49 @@ const MAIN_WINDOW_WAKE_FALLBACK_MS = 800;
 let mainWindowHibernateTimer = null;
 let mainWindowHibernated = false;
 let mainWindowPopoverReveal = null;
+let screenUiSuspended = false;
+
+function supportsMainWindowHibernate() {
+  // Windows keeps a WebContentsView across BaseWindow replacements. Its
+  // ownership and teardown differ from BrowserWindow.
+  return process.platform === 'darwin' || process.platform === 'linux';
+}
+
+function hasDependentAppWindow() {
+  return BaseWindow.getAllWindows().some(win => win !== mainWindow
+    && !edgeDockController?.owns(win) && !notchController?.owns(win)
+    && !limitsHistoryController?.isIdleWindow(win));
+}
 
 function cancelMainWindowHibernate() {
   clearTimeout(mainWindowHibernateTimer);
   mainWindowHibernateTimer = null;
 }
 
+function hibernateMainWindow() {
+  cancelMainWindowHibernate();
+  const win = mainWindow;
+  mainWindowHibernated = true;
+  mainWindowPopoverReveal = null;
+  mainWindow = null;
+  lastRendererStatsFingerprint = null;
+  if (win && !win.isDestroyed()) win.destroy();
+}
+
 function scheduleMainWindowHibernate(win) {
-  // Windows keeps a WebContentsView across BaseWindow replacements. Destroying
-  // that host has different ownership and teardown semantics from BrowserWindow.
   if (win !== mainWindow || mainWindowHibernateTimer || !settings?.trayMode || quitRequested
-    || (process.platform !== 'darwin' && process.platform !== 'linux')) return;
+    || screenUiSuspended || !supportsMainWindowHibernate()) return;
   const attempt = () => {
     mainWindowHibernateTimer = null;
     if (win !== mainWindow || win.isDestroyed() || win.isVisible() || quitRequested || !settings?.trayMode) return;
-    if (rendererHiddenStatsNeeded()) {
-      // A generated tray icon can turn itself off later; keep one bounded retry
+    if (rendererHiddenStatsNeeded() || hasDependentAppWindow()) {
+      // A generated tray icon or dependent window can clear later; keep retrying
       // instead of dropping the only hibernation attempt.
       mainWindowHibernateTimer = setTimeout(attempt, MAIN_WINDOW_HIBERNATE_RETRY_MS);
       mainWindowHibernateTimer.unref();
       return;
     }
-    if (BaseWindow.getAllWindows().some(other => other !== win
-      && !edgeDockController?.owns(other) && !notchController?.owns(other)
-      && !limitsHistoryController?.isIdleWindow(other))) {
-      // A dashboard or plugin window can close later; retry so hibernation is
-      // not permanently lost without another show/hide cycle.
-      mainWindowHibernateTimer = setTimeout(attempt, MAIN_WINDOW_HIBERNATE_RETRY_MS);
-      mainWindowHibernateTimer.unref();
-      return;
-    }
-    mainWindowHibernated = true;
-    mainWindow = null;
-    lastRendererStatsFingerprint = null;
-    win.destroy();
+    hibernateMainWindow();
   };
   mainWindowHibernateTimer = setTimeout(attempt, MAIN_WINDOW_HIBERNATE_MS);
   mainWindowHibernateTimer.unref();
@@ -4780,10 +4789,11 @@ function pluginQuotaChanged() {
   });
 }
 
-function updateTrayDisplay() {
+function updateTrayDisplay({ wakeRenderer = true } = {}) {
   if (!tray || tray.isDestroyed()) return;
   // A tray menu can switch to a live bitmap while the main renderer is asleep.
-  if (mainWindowHibernated && settings?.trayMode && !quitRequested && rendererHiddenStatsNeeded()) {
+  if (wakeRenderer && !screenUiSuspended && mainWindowHibernated && settings?.trayMode
+    && !quitRequested && rendererHiddenStatsNeeded()) {
     createWindow(undefined, { popoverReveal: { requested: false } });
   }
   // Keep the exported D-Bus menu in sync (radio checks, refresh state, Codex
@@ -5085,7 +5095,7 @@ async function startStatsStream(options = {}) {
 }
 
 function showPopover(clickPoint = null, summon = false) {
-  if (!tray || quitRequested) return;
+  if (!tray || quitRequested || screenUiSuspended) return;
   if (!mainWindow || mainWindow.isDestroyed()) {
     applyMacActivationPolicy();
     createWindow(undefined, { popoverReveal: { requested: true, clickPoint, summon } });
@@ -5139,7 +5149,7 @@ function togglePopover(clickPoint = null, wasVisibleAtMouseDown = null, blurMatc
 }
 
 function focusExistingWindow() {
-  if (quitRequested) return;
+  if (quitRequested || screenUiSuspended) return;
   applyMacActivationPolicy({ mainWindowVisible: true });
   if (settings?.trayMode && (!mainWindow || mainWindow.isDestroyed() || mainWindowPopoverReveal)) {
     showPopover();
@@ -5923,7 +5933,7 @@ function ensureEdgeDockController() {
 
 function syncDockSurfaces(rendererSettings) {
   dockAppearancePreview = null;
-  if (!settings) return;
+  if (!settings || screenUiSuspended) return;
   syncNotch(rendererSettings);
   if (!canUseEdgeDock(settings)) {
     edgeDockController?.stop();
@@ -7249,7 +7259,7 @@ function revealWindow(target = mainWindow, options = {}) {
 function loadWindowFile(target, options = {}) {
   let revealed = false;
   const reveal = () => {
-    if (revealed) return;
+    if (revealed || target.isDestroyed()) return;
     revealed = true;
     if (options.onAppearanceReady) {
       cleanup();
@@ -7287,6 +7297,7 @@ function loadWindowFile(target, options = {}) {
   const filePath = path.join(__dirname, 'renderer', 'index.html');
   const load = options.query ? target.webContents.loadFile(filePath, { query: options.query }) : target.webContents.loadFile(filePath);
   load.catch((error) => {
+    if (target.isDestroyed()) return;
     console.log(`[window] renderer load failed: ${error.message}`);
     reveal();
   });
@@ -7487,7 +7498,7 @@ function handleZoomShortcut(event, input) {
 function replaceMainWindow(bounds, options = {}) {
   const epoch = ++mainWindowReplacementEpoch;
   mainWindowReplacementTask = mainWindowReplacementTask.then(async () => {
-    if (epoch !== mainWindowReplacementEpoch) return;
+    if (epoch !== mainWindowReplacementEpoch || screenUiSuspended) return;
     const old = mainWindow;
     if (process.platform === 'win32') {
       if (!mainWindowChrome.collapsedFloatingBubble) {
@@ -7653,10 +7664,38 @@ function appIsIdleForHeapCollection() {
   return !quitRequested && focusedAppWindow() === null;
 }
 
+function suspendScreenUi() {
+  notchController?.setLocked(true);
+  // Electron emits powerMonitor lock-screen/unlock-screen only on macOS and
+  // Windows. Windows keeps its retained BaseWindow path, so suspension is
+  // macOS-only; Linux keeps the quiet-period hibernate timer.
+  if (screenUiSuspended || quitRequested || !settings?.trayMode
+    || process.platform !== 'darwin' || hasDependentAppWindow()) return;
+  screenUiSuspended = true;
+  edgeDockController?.stop();
+  notchController?.stop({ preserveSummary: true });
+  hidePopover();
+  hibernateMainWindow();
+  // A parked history card has no owner and can be rebuilt on the next open.
+  limitsHistoryController?.dispose();
+}
+
+function resumeScreenUi() {
+  const wasSuspended = screenUiSuspended;
+  screenUiSuspended = false;
+  notchController?.setLocked(false);
+  if (!wasSuspended || quitRequested) return;
+  syncDockSurfaces();
+  // Use cached artwork for this refresh. The normal tray update can wake the
+  // main renderer later if its selected artwork requires a fresh bitmap.
+  updateTrayDisplay({ wakeRenderer: false });
+  if (!settings?.trayMode) focusExistingWindow();
+}
+
 app.whenReady().then(() => {
   ensureSettingsLoaded();
-  powerMonitor.on('lock-screen', () => notchController?.setLocked(true));
-  powerMonitor.on('unlock-screen', () => notchController?.setLocked(false));
+  powerMonitor.on('lock-screen', suspendScreenUi);
+  powerMonitor.on('unlock-screen', resumeScreenUi);
   void sessionProxy.apply();
   // Switching the OS between light and dark repaints the taskbar underneath an
   // icon we have already handed to the shell, so the renderer has to recompose
@@ -8889,7 +8928,11 @@ app.whenReady().then(() => {
     }
     actionWindowForEvent(BrowserWindow, event, mainWindow)?.close();
   });
-  ipcMain.handle('dashboard:open', () => { createDashboardWindow(); return true; });
+  ipcMain.handle('dashboard:open', () => {
+    if (screenUiSuspended) return false;
+    createDashboardWindow();
+    return true;
+  });
   ipcMain.handle('dashboard:getHistory', (_event, options) => getDashboardHistory(options));
   ipcMain.on('dashboard:ready', (event) => {
     const win = BrowserWindow.fromWebContents(event.sender);
@@ -8903,6 +8946,7 @@ app.whenReady().then(() => {
   ipcMain.on('dashboard:minimize', (event) => { BrowserWindow.fromWebContents(event.sender)?.minimize(); });
   ipcMain.on('dashboard:close', (event) => { BrowserWindow.fromWebContents(event.sender)?.close(); });
   app.on('activate', () => {
+    if (screenUiSuspended) return;
     // A parked history window is not owned by the dock or notch, so the normal
     // activation filter would return 'none' and never reach the wake path.
     if (mainWindowHibernated) {

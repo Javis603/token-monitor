@@ -14,6 +14,7 @@ const app = fs.readFileSync(path.join(electronDir, 'renderer/app.js'), 'utf8');
 function startupWindow(options = {}, settings = {}) {
   const ipcMain = new EventEmitter();
   const target = new EventEmitter();
+  target.isDestroyed = () => false;
   target.webContents = new EventEmitter();
   target.webContents.loadFile = () => Promise.resolve();
   let reveals = 0;
