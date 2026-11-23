@@ -400,7 +400,8 @@ test('row accordions expose keyboard and aria interactions', () => {
   assert.match(app, /hasAccordion,/);
   assert.match(app, /expanded: row\.classList\.contains\('expanded'\)/);
   assert.match(app, /\$\{name\}, \$\{t\('dashboard\.stat\.totalTokens'\)\}/);
-  assert.match(app, /\$\{t\('dashboard\.stat\.totalCost'\)\}: \$\{formatCost\(cost \|\| 0, unpricedTokens\)\}/);
+  assert.match(app, /const costLabelText = formatCost\(cost \|\| 0, unpricedTokens\)/);
+  assert.match(app, /\$\{t\('dashboard\.stat\.totalCost'\)\}: \$\{costLabelText\}/);
 });
 
 test('project accordions retain unchanged DOM between live refreshes', () => {
