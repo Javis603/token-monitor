@@ -1220,13 +1220,13 @@ async function refreshLimitProvider(providerId, account) {
   const scope = account && typeof account === 'object'
     ? limitAccountRefreshScope(provider, account)
     : { provider };
+  const explicitRefresh = beginEdgeDockExplicitRefresh();
   try {
-    beginEdgeDockExplicitRefresh();
     const outcome = limitRefreshOutcome(await runLimitInvalidation(deviceRuntimeHandle, scope, 'account-panel', { clear: false }));
-    finishEdgeDockExplicitRefresh(outcome.ok);
+    finishEdgeDockExplicitRefresh(explicitRefresh, outcome.ok);
     return outcome;
   } catch (error) {
-    finishEdgeDockExplicitRefresh(false);
+    finishEdgeDockExplicitRefresh(explicitRefresh, false);
     return { ok: false, reason: 'failed', error: error?.message || String(error) };
   }
 }
@@ -5833,18 +5833,27 @@ const EDGE_DOCK_CELL_PUSH_INTERVAL_MS = 5 * 1000;
 // disabling the floor indefinitely.
 const EDGE_DOCK_EXPLICIT_REFRESH_GRACE_MS = 5 * 1000;
 const EDGE_DOCK_EXPLICIT_REFRESH_MAX_MS = 30 * 1000;
-let edgeDockExplicitRefreshUntil = 0;
+const edgeDockExplicitRefreshDeadlines = new Set();
 
 function beginEdgeDockExplicitRefresh(now = Date.now()) {
-  edgeDockExplicitRefreshUntil = Math.max(edgeDockExplicitRefreshUntil, now + EDGE_DOCK_EXPLICIT_REFRESH_MAX_MS);
+  const request = { until: now + EDGE_DOCK_EXPLICIT_REFRESH_MAX_MS };
+  edgeDockExplicitRefreshDeadlines.add(request);
+  return request;
 }
 
-function finishEdgeDockExplicitRefresh(ok, now = Date.now()) {
-  edgeDockExplicitRefreshUntil = ok ? now + EDGE_DOCK_EXPLICIT_REFRESH_GRACE_MS : 0;
+function finishEdgeDockExplicitRefresh(request, ok, now = Date.now()) {
+  if (request) edgeDockExplicitRefreshDeadlines.delete(request);
+  // A failed request clears only its own in-flight window. A concurrent
+  // successful probe keeps its grace, so two refreshes cannot shorten each
+  // other's publication window.
+  if (ok) edgeDockExplicitRefreshDeadlines.add({ until: now + EDGE_DOCK_EXPLICIT_REFRESH_GRACE_MS });
 }
 
 function edgeDockRefreshIsExplicit(now = Date.now()) {
-  return now < edgeDockExplicitRefreshUntil;
+  for (const request of edgeDockExplicitRefreshDeadlines) {
+    if (request.until <= now) edgeDockExplicitRefreshDeadlines.delete(request);
+  }
+  return edgeDockExplicitRefreshDeadlines.size > 0;
 }
 
 function updateEdgeDockCells(visibleStats) {
