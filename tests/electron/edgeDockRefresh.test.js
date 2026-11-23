@@ -47,6 +47,7 @@ function fixture(options = {}) {
     notchController: null,
     pushEdgeDockCells: (cells) => {
       context.edgeDockCellCoalescer?.cancel();
+      context.dockPaints = (context.dockPaints || 0) + 1;
       context.dockStats = cells.stats;
       context.dockPeriods = cells.derivedPeriods;
     },
@@ -708,6 +709,8 @@ test('a settled explicit refresh flushes a queued publication', () => {
 
   context.settleEdgeDockExplicitRefresh(request, true);
   assert.equal(context.dockStats, b, 'settlement paints the queued snapshot');
+  const paints = context.dockPaints;
   advance(5000);
   assert.equal(context.dockStats, b, 'nothing replays after settlement');
+  assert.equal(context.dockPaints, paints, 'advancing time causes no additional paint');
 });
