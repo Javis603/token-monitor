@@ -36,7 +36,8 @@ test('targeted rescans stay strict while Cursor credential refresh is best effor
   // Login and logout must both request a refresh; future credential actions may
   // legitimately add more best-effort call sites without weakening this policy.
   assert.ok(
-    (main.match(/bestEffortTrackedUsageRefresh\('cursor', \{ forceSync: true \}\)/g) || []).length >= 2
+    (fs.readFileSync(path.join(__dirname, '../../src/electron/providers/cursor/accountService.js'), 'utf8').match(/refreshUsage\(\)/g) || []).length >= 2
+    && /refreshUsage: \(\) => bestEffortTrackedUsageRefresh\('cursor', \{ forceSync: true \}\)/.test(main)
   );
   assert.match(
     main,

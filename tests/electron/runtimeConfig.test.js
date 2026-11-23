@@ -246,7 +246,7 @@ test('runtime config keeps usage, limits credentials, and envelope in separate i
     cursorManualAccountIds: [' manual ', 'manual', ''],
     claudeWebCookie: 'sessionKey=settings-secret',
     kimiApiKey: 'secret',
-    openrouterProfiles: { work: { apiKey: 'openrouter-secret', enabled: true } },
+    openrouterAccountSlots: [{ id: 'work', values: { openrouterApiKey: 'openrouter-secret' }, enabled: true }],
     thirdPartyProfiles: {
       relay: {
         adapter: 'newapi-account',
@@ -273,7 +273,8 @@ test('runtime config keeps usage, limits credentials, and envelope in separate i
   assert.equal(limits.kimiApiKey, 'secret');
   assert.deepEqual(limits.cursorDisabledAccountIds, ['work', 'personal']);
   assert.deepEqual(limits.cursorManualAccountIds, ['manual']);
-  assert.deepEqual(limits.openrouterProfiles, { work: { apiKey: 'openrouter-secret', enabled: true } });
+  assert.equal(limits.openrouterProfiles, undefined);
+  assert.equal(limits.openrouterAccountSlots[0].values.openrouterApiKey, 'openrouter-secret');
   assert.deepEqual(limits.thirdPartyProfiles, {
     relay: {
       adapter: 'newapi-account',
@@ -492,10 +493,10 @@ test('Dots visibility changes projection without replacing the observer runtime'
   assert.equal(usageConfigFromSettings(next).codexDotsVisible, false);
 });
 
-test('OpenRouter profile changes invalidate only the OpenRouter limits lane', () => {
+test('OpenRouter slot changes invalidate only the OpenRouter limits lane', () => {
   const classification = classifySettingsChange(
-    { openrouterProfiles: { work: { apiKey: 'old', enabled: true } } },
-    { openrouterProfiles: { work: { apiKey: 'new', enabled: true } } }
+    { openrouterAccountSlots: [{ id: 'work', values: { openrouterApiKey: 'old' }, enabled: true }] },
+    { openrouterAccountSlots: [{ id: 'work', values: { openrouterApiKey: 'new' }, enabled: true }] }
   );
   assert.deepEqual(classification.limitScopes, [{ provider: 'openrouter' }]);
 });

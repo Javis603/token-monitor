@@ -211,19 +211,52 @@ test('Tool and Model breakdowns consume the shared token-or-cost rows', () => {
   assert.match(app, /cost:\s*Number\(period\.costUsd \|\| 0\),\s*unpricedTokens:\s*Number\(period\.unpricedTokens \|\| 0\),/);
 });
 
-test('Model settings expose and persist the ranking metric without changing the default', () => {
+test('Model settings expose and persist the ranking metric without changing the default', async () => {
   const index = fs.readFileSync(path.join(rendererDir, 'index.html'), 'utf8');
   const app = fs.readFileSync(path.join(rendererDir, 'app.js'), 'utf8');
   const main = fs.readFileSync(path.join(rendererDir, '..', 'main.js'), 'utf8');
 
-  assert.match(index, /role="radiogroup" aria-labelledby="modelRankingMetricLabel"/);
-  assert.match(index, /name="modelRankingMetric" value="tokens"[^>]*><span data-i18n="settings\.modelRanking\.tokens"/);
-  assert.match(index, /name="modelRankingMetric" value="cost"[^>]*><span data-i18n="settings\.modelRanking\.cost"/);
+  assert.doesNotMatch(index, /name="modelRankingMetric"/);
+  assert.match(app, /model: renderModelViewSettingsList/);
   assert.match(main, /modelRankingMetric:\s*'tokens'/);
   assert.match(main, /normalizeRankingMetric\(merged\.modelRankingMetric\)/);
   assert.match(main, /modelRankingMetric: normalizeRankingMetric\(patch\.modelRankingMetric \?\? settings\.modelRankingMetric\)/);
-  assert.match(app, /input\.checked = input\.value === modelRankingMetric/);
-  assert.match(app, /saveSettings\(\{ modelRankingMetric: usageAttributionRowsApi\.normalizeRankingMetric\(input\.value\) \}\)/);
+  const document = {
+    createElement: () => ({
+      children: [],
+      attributes: {},
+      append(...children) { this.children.push(...children); },
+      setAttribute(key, value) { this.attributes[key] = value; },
+      addEventListener(type, listener) { this[type] = listener; }
+    })
+  };
+  const state = { settings: {} };
+  const saves = [];
+  let renders = 0;
+  const context = vm.createContext({
+    document, state, t: (key) => key,
+    usageAttributionRowsApi: { normalizeRankingMetric },
+    addRenderedSettingReset() {},
+    saveSettings: async (patch) => saves.push(patch.modelRankingMetric),
+    render: () => { renders++; }
+  });
+  const start = app.indexOf('function renderModelViewSettingsList()');
+  const end = app.indexOf('function renderTrendSettingsList()', start);
+  vm.runInContext(app.slice(start, end), context);
+  const [heading, group] = context.renderModelViewSettingsList().children[0].children;
+  const [label] = heading.children;
+  assert.equal(group.attributes.role, 'radiogroup');
+  assert.equal(group.attributes['aria-labelledby'], label.id);
+  const [tokens, cost] = group.children.map((option) => option.children[0]);
+  assert.deepEqual([tokens.value, tokens.checked, cost.value, cost.checked], ['tokens', true, 'cost', false]);
+  await cost.change();
+  assert.deepEqual(saves, []);
+  cost.checked = true;
+  await cost.change();
+  assert.deepEqual(saves, ['cost']);
+  assert.equal(renders, 1);
+  state.settings.modelRankingMetric = 'cost';
+  assert.equal(context.renderModelViewSettingsList().children[0].children[1].children[1].children[0].checked, true);
 });
 
 test('Model rows use the selected ranking metric for order and bar scale', () => {

@@ -1,4 +1,5 @@
 'use strict';
+const { mergedOwnerAccounts } = require('../../limits/ownerAccountSlots');
 
 // Claude limits provider: OAuth and Web session credentials, the CLI fallback,
 // identity/prepaid caches, and the usage → provider-window mapping. Reached
@@ -1361,6 +1362,7 @@ async function refreshClaudeCredentials(currentCredentials, deps = {}, options =
 // The single-credential probe remains the save-time validator. Runtime fans out
 // the saved Web sessions alongside the automatic OAuth/CLI lane.
 async function fetchClaudeAccountsLimits(options = {}, deps = {}) {
+  options = { ...options, claudeManagedAccounts: mergedOwnerAccounts(options, 'claude', options.claudeManagedAccounts || []) };
   if (deps.probe === true) return fetchClaudeLimits(options, deps);
   const accounts = normalizeClaudeManagedAccounts(options.claudeManagedAccounts).filter((account) => account.enabled);
   const legacyCookie = claudeWebCookie(deps.env || process.env, options);
@@ -1389,7 +1391,7 @@ async function fetchClaudeAccountsLimits(options = {}, deps = {}) {
     if (deps.signal?.aborted) throw abortError(deps.signal);
     let row;
     try {
-      const credential = account.id === 'legacy' ? account.cookie : await deps.resolveClaudeWebCredential?.(account);
+      const credential = account.id === 'legacy' ? account.cookie : (deps.resolveClaudeWebCredential ? await deps.resolveClaudeWebCredential(account) : options.claudeAccountSlots?.find(slot => slot.id === account.id)?.owner?.credential);
       if (!credential) throw errorWithStatus('notConfigured', 'Claude Web login is not configured');
       const cookie = renewedCookies.get(credential) || credential;
       account.cookie = cookie;
@@ -1450,12 +1452,13 @@ async function fetchClaudeAccountsLimits(options = {}, deps = {}) {
     local = { provider: 'claude', status: error?.status || 'unavailable', windows: [] };
     rows.push(local);
   }
+  const localIdentityMissing = local?.status === 'notConfigured';
   const represented = new Set(rows.map((row) => row.accountKey).filter(Boolean));
   for (const previous of options.previousLimits?.providers || []) {
     if (scopeField || scopeId) break;
     if (previous.provider !== 'claude' || !previous.accountKey || represented.has(previous.accountKey)) continue;
     const retired = previous.source === 'web' ? !unidentifiedWebFailure
-      : local?.status === 'ok' || local?.status === 'notConfigured';
+      : local?.status === 'ok' || localIdentityMissing;
     if (retired) rows.push({ provider: 'claude', accountKey: previous.accountKey, removed: true });
   }
   // Anonymous failures cannot stand in for every saved account in the runtime.
@@ -1466,7 +1469,7 @@ async function fetchClaudeAccountsLimits(options = {}, deps = {}) {
   if (scopeField) {
     result = result.filter(matchesScope);
     if (!result.length) result.push({ provider: 'claude', [scopeField]: scope[scopeField],
-      ...(!unidentifiedWebFailure && ['ok', 'notConfigured'].includes(local?.status)
+      ...(!unidentifiedWebFailure && (local?.status === 'ok' || localIdentityMissing)
         ? { removed: true } : { status: 'unavailable', windows: [] }) });
   }
   // Reuse the account aggregator before the runtime's one-row-per-key commit:

@@ -115,10 +115,10 @@ function createInProcessWatcherHost(config = {}, handlers = {}) {
   // Required lazily so a worker-hosted run never loads chokidar on the owning
   // thread, and so the collector's tests can still swap chokidar.watch.
   const chokidar = require('chokidar');
-  const { openWatch, WATCH_REFUSAL_CODES } = require('./collector');
+  const { openWatch, WATCH_REFUSAL_CODES } = require('./watchPolicy');
   let watcher;
   try {
-    watcher = openWatch(chokidar, config);
+    watcher = openWatch(chokidar, config, handlers.onEvent);
   } catch (error) {
     // A refused watch (polling over the limit, or polling required and
     // forbidden) is an outcome for the owner to act on, not a failure to build
@@ -132,7 +132,6 @@ function createInProcessWatcherHost(config = {}, handlers = {}) {
     });
     return { kind: 'in-process', close() { closed = true; } };
   }
-  watcher.on('all', (event, filePath) => handlers.onEvent?.(event, filePath));
   watcher.on('error', (error) => handlers.onError?.(error));
   watcher.on('ready', () => handlers.onReady?.());
   return {
@@ -245,7 +244,7 @@ function createWatcherCoordinator(deps = {}) {
     if (message?.revision !== undefined && message.revision !== owner.revision) return;
     const handlers = owner.handlers;
     if (message?.type === 'event') {
-      handlers.onEvent?.(message.event, message.filePath);
+      handlers.onEvent?.(message.event, message.filePath, message.unlinkedExporter);
       return;
     }
     if (message?.type === 'ready') {

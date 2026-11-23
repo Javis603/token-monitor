@@ -34,7 +34,8 @@
       || clean(source.accountLabel)
       || clean(source.profileId)
       || 'default';
-    return opaqueKey([normalized(source.provider), identity]);
+    const id = normalized(source.provider);
+    return opaqueKey(id === 'alibaba' ? [id, identity, clean(source.region) || 'cn'] : [id, identity]);
   }
 
   function windowKey(label, window = {}) {

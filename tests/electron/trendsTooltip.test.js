@@ -6,9 +6,15 @@ const path = require('node:path');
 const test = require('node:test');
 const vm = require('node:vm');
 const charts = require('../../src/electron/renderer/usageCharts');
+const currencyApi = require('../../src/shared/currency');
+const compactTokens = require('../../src/shared/compactTokens');
 const source = fs.readFileSync(path.join(__dirname, '../../src/electron/renderer/app.js'), 'utf8');
 const binding = source.slice(source.indexOf('function hideTrendTooltip('), source.indexOf('function renderTrends('));
 const heatmapTooltip = source.slice(source.indexOf('function homeActivityTooltipEl('), source.indexOf('function setupHomeActivityHover('));
+const homeTrendBinding = source.slice(source.indexOf('function bindHomeTrendTooltip('), source.indexOf('const rendererDom ='));
+const periodMenuKeys = source.slice(source.lastIndexOf("document.addEventListener('keydown'", source.indexOf("els.breakdown.addEventListener('scroll'")),
+  source.indexOf("els.breakdown.addEventListener('scroll'"));
+const hidePeriodContent = source.slice(source.indexOf('function hidePeriodContentForMessage('), source.indexOf('function periodMenuButtons('));
 
 class Element {
   constructor() {
@@ -29,6 +35,7 @@ class Element {
   get textContent() { return (this.text || '') + this.children.map(child => child.textContent).join(''); }
   get childElementCount() { return this.children.length; }
   append(...children) { this.children.push(...children); }
+  insertBefore(child, reference) { this.children.splice(this.children.indexOf(reference), 0, child); }
   replaceChildren(...children) { this.children = children; }
   setAttribute(name, value) { this.attributes[name] = String(value); }
   getAttribute(name) { return this.attributes[name] ?? null; }
@@ -46,6 +53,7 @@ class Element {
       ? { width: 120, height: 40 } : { left: 10, top: 150, width: 300, height: 300, right: 310 });
   }
   addEventListener(name, callback) { (this.handlers[name] ||= []).push(callback); }
+  removeEventListener(name, callback) { this.handlers[name] = (this.handlers[name] || []).filter(handler => handler !== callback); }
   fire(name, event = {}) { for (const callback of this.handlers[name] || []) callback(event); }
   showPopover() { this.open = true; }
   hidePopover() { this.open = false; }
@@ -190,4 +198,255 @@ test('window blur hides Trends details without a delayed repaint', () => {
   assert.equal(renders(), 0);
   context[handler]();
   assert.equal(renders(), 0);
+});
+
+function homeTrendFixture(points = [
+  { date: '2026-10-21', tokens: 100, cost: 1.25 },
+  { date: '2026-10-22', tokens: 0, cost: 0 },
+  { date: '2026-10-23', tokens: 40 }
+]) {
+  const body = new Element();
+  const document = { createElement: () => new Element(), body, querySelector: selector => body.querySelector(selector) };
+  const homePanel = new Element();
+  const chart = new Element(); chart.className = 'home-area-chart';
+  const module = new Element(); module.className = 'home-module'; module.tabIndex = 0;
+  module.setAttribute('role', 'button'); module.setAttribute('aria-label', 'Activity');
+  chart.closest = () => module;
+  module.append(chart);
+  const svg = new Element(); svg.className = 'area-line';
+  svg.bounds = { left: 20, top: 100, width: 300, height: 70 };
+  const crosshair = new Element(); crosshair.className = 'home-trend-crosshair';
+  const marker = new Element(); marker.className = 'home-trend-marker';
+  chart.append(svg, crosshair, marker);
+  const state = {};
+  const context = { state, document, els: { homePanel }, window: { innerWidth: 340, innerHeight: 180 }, currencyApi,
+    usageAttributionRowsApi: require('../../src/electron/renderer/usageAttributionRows'),
+    t: key => key === 'home.activity' ? 'Activity' : 'Trend',
+    formatCompact: n => compactTokens.formatCompactTokens(n, state.settings?.compactTokenUnits, 'zh-HK'),
+    formatNumber: n => Number(n).toLocaleString('en-US') };
+  assert.ok(source.includes('function bindHomeTrendTooltip('), 'Home trend hover binding exists');
+  const currentCurrency = source.match(/^function currentCurrency\(\).*$/m)[0];
+  vm.runInNewContext(`${currentCurrency}\n${heatmapTooltip}\n${homeTrendBinding}`, context);
+  let documentKeyDown;
+  document.addEventListener = (name, listener) => {
+    assert.equal(name, 'keydown');
+    documentKeyDown = listener;
+  };
+  vm.runInNewContext(periodMenuKeys, context);
+  const escape = () => documentKeyDown({ key: 'Escape' });
+  const bind = rows => context.bindHomeTrendTooltip(chart,
+    charts.areaLineChart(rows, { width: 300, height: 70, padTop: 4, padRight: 3, padBottom: 4, padLeft: 3, curve: true }), rows);
+  bind(points);
+  const tooltip = body.querySelector('.home-trend-tooltip');
+  tooltip.bounds = { width: 120, height: 50 };
+  return { chart, module, homePanel, crosshair, marker, tooltip, bind, state, context, escape };
+}
+
+function visibleHomeTrendText(tooltip) {
+  const [reading, cost, date] = tooltip.children;
+  return reading.children.filter(child => !child.classList.contains('token-number-reading'))
+    .map(child => child.textContent).join('') + cost.textContent + date.textContent;
+}
+
+test('Home trend hover snaps across the full plot, including zero and edge days', () => {
+  const { chart, crosshair, marker, tooltip } = homeTrendFixture();
+  chart.fire('pointerenter', { clientX: 20, clientY: 130 });
+  assert.equal(visibleHomeTrendText(tooltip), '100tokens$1.25002026-10-21');
+  assert.equal(chart.getAttribute('data-active'), 'true');
+  assert.equal(crosshair.style.left, '1%');
+  assert.equal(marker.style.left, '1%');
+  chart.fire('pointermove', { clientX: 170, clientY: 169 });
+  assert.equal(visibleHomeTrendText(tooltip), '0tokens$0.00002026-10-22');
+  assert.equal(crosshair.style.left, '50%');
+  assert.equal(marker.style.top, `${(66 / 70) * 100}%`);
+  chart.fire('pointermove', { clientX: 500, clientY: 110 });
+  assert.equal(visibleHomeTrendText(tooltip), '40tokens2026-10-23');
+  assert.equal(crosshair.style.left, '99%');
+  chart.fire('pointerleave');
+  assert.equal(chart.getAttribute('data-active'), null);
+  assert.equal(tooltip.dataset.visible, 'false');
+  assert.equal(tooltip.getAttribute('aria-hidden'), 'true');
+});
+
+test('Home trend tooltip remains within the window and refreshes hovered values', () => {
+  const { chart, tooltip, bind, state, context } = homeTrendFixture();
+  chart.fire('pointermove', { clientX: 319, clientY: 175 });
+  assert.equal(tooltip.style.transform, 'translate(214px, 82px)');
+  context.window.innerHeight = 100;
+  chart.fire('pointermove', { clientX: 319, clientY: 175 });
+  assert.equal(tooltip.style.transform, 'translate(214px, 44px)');
+  bind([
+    { date: '2026-10-21', tokens: 100, cost: 1.25 },
+    { date: '2026-10-22', tokens: 0, cost: 0 },
+    { date: '2026-10-23', tokens: 55, cost: 2 }
+  ]);
+  assert.equal(visibleHomeTrendText(tooltip), '55tokens$2.00002026-10-23');
+  assert.equal(Object.values(chart.handlers).flat().length, 3);
+  context.hideHomeTrendTooltip();
+  assert.equal(tooltip.dataset.visible, 'false');
+  assert.equal(chart.getAttribute('data-active'), null);
+  assert.equal(state.homeTrendTooltipBinding.chart, chart);
+});
+
+test('Home trend cost marks days with unpriced tokens as incomplete', () => {
+  const { chart, tooltip } = homeTrendFixture([
+    { date: '2026-10-21', tokens: 100, cost: 1.5, unpricedTokens: 20 },
+    { date: '2026-10-22', tokens: 40, cost: 0, unpricedTokens: 40 }
+  ]);
+  chart.fire('pointerenter', { clientX: 20 });
+  assert.equal(visibleHomeTrendText(tooltip), '100tokens$1.5000 + ?2026-10-21');
+  chart.fire('pointermove', { clientX: 320 });
+  assert.equal(visibleHomeTrendText(tooltip), '40tokens—2026-10-22');
+});
+
+test('Home trend defaults to compact units and can refresh a visible reading to exact tokens', () => {
+  const rows = [{ date: '2026-10-21', tokens: 610_123 }];
+  const { chart, module, tooltip, state, bind } = homeTrendFixture(rows);
+  const count = tooltip.querySelector('[data-home-activity-tooltip-count]');
+
+  chart.fire('pointerenter', { clientX: 20 });
+  assert.equal(count.textContent, '610.1K');
+  assert.equal(count.getAttribute('aria-hidden'), 'true');
+  assert.equal(tooltip.querySelector('.token-number-reading')?.textContent, '610,123');
+  assert.match(module.getAttribute('aria-label'), /610,123 tokens/);
+
+  state.settings = { compactTokenUnits: 'localized' };
+  bind(rows);
+  assert.equal(count.textContent, '61萬');
+  module.fire('keydown', { target: module, key: 'Home', preventDefault() {} });
+  assert.equal(tooltip.querySelector('.token-number-reading').textContent, '610,123');
+
+  state.settings.showExactHomeTrendTokens = true;
+  bind(rows);
+  assert.equal(count.textContent, '610,123');
+
+  state.settings.showExactHomeTrendTokens = false;
+  bind(rows);
+  assert.equal(count.textContent, '61萬');
+});
+
+test('opening Settings dismisses focused Home trend details before refreshing the panel', () => {
+  const { module, chart, tooltip, context } = homeTrendFixture();
+  module.fire('focusin', { target: module });
+  assert.equal(tooltip.dataset.visible, 'true');
+  context.els.settingsPanel = new Element();
+  context.els.shell = new Element();
+  context.syncPluginLimitsDemand = () => {};
+  context.syncSettingsForm = () => assert.equal(tooltip.dataset.visible, 'false');
+  context.ensureServiceStatusTicker = () => {};
+  context.requestAnimationFrame = callback => callback();
+  vm.runInNewContext(source.slice(source.indexOf('function resetMainViewSettings('),
+    source.indexOf('function openViewFromTray(')), context);
+  context.openSettingsPanel();
+  assert.equal(chart.getAttribute('data-active'), null);
+});
+
+test('Home trend cost follows the display currency and leaves the date on the last line', () => {
+  const { chart, tooltip, state } = homeTrendFixture();
+  state.settings = { currency: 'HKD' };
+  chart.fire('pointerenter', { clientX: 20 });
+  assert.equal(visibleHomeTrendText(tooltip), '100tokensHK$9.752026-10-21');
+  const cost = tooltip.querySelector('.home-trend-tooltip-cost');
+  assert.equal(cost.hidden, false);
+  chart.fire('pointermove', { clientX: 320 });
+  assert.equal(cost.hidden, true);
+  assert.equal(visibleHomeTrendText(tooltip), '40tokens2026-10-23');
+});
+
+test('Home trend module exposes day selection by keyboard without changing Enter navigation', () => {
+  const { module, chart, tooltip, bind, context, escape } = homeTrendFixture();
+  module.fire('focusin', { target: module });
+  assert.equal(visibleHomeTrendText(tooltip), '40tokens2026-10-23');
+  assert.match(module.getAttribute('aria-label'), /Activity.*Trend.*40 tokens.*2026-10-23/);
+  assert.equal(module.getAttribute('aria-keyshortcuts'), 'ArrowLeft ArrowRight Home End');
+  let prevented = 0;
+  const press = key => module.fire('keydown', { target: module, key, preventDefault: () => { prevented++; } });
+  press('Home');
+  assert.equal(visibleHomeTrendText(tooltip), '100tokens$1.25002026-10-21');
+  press('ArrowRight');
+  assert.equal(visibleHomeTrendText(tooltip), '0tokens$0.00002026-10-22');
+  chart.fire('pointermove', { clientX: 320 });
+  chart.fire('pointerleave');
+  assert.equal(tooltip.dataset.visible, 'false');
+  assert.equal(chart.getAttribute('data-active'), null);
+  press('Home');
+  assert.equal(tooltip.dataset.visible, 'true');
+  assert.equal(visibleHomeTrendText(tooltip), '100tokens$1.25002026-10-21');
+  press('End');
+  assert.equal(visibleHomeTrendText(tooltip), '40tokens2026-10-23');
+  bind([
+    { date: '2026-10-22', tokens: 0, cost: 0 },
+    { date: '2026-10-23', tokens: 55, cost: 2 },
+    { date: '2026-10-24', tokens: 7, cost: 0.1 }
+  ]);
+  assert.equal(visibleHomeTrendText(tooltip), '55tokens$2.00002026-10-23');
+  press('Enter');
+  assert.equal(prevented, 4);
+  escape();
+  assert.equal(tooltip.dataset.visible, 'false');
+  assert.equal(module.getAttribute('aria-label'), 'Activity');
+  module.fire('focusout', { target: module });
+  assert.equal(tooltip.getAttribute('aria-hidden'), 'true');
+  assert.equal(Object.values(module.handlers).flat().length, 3);
+  context.hideHomeTrendTooltip();
+});
+
+test('document Escape dismisses Home trend hover even when Activity never took focus', () => {
+  const { chart, tooltip, escape } = homeTrendFixture();
+  chart.fire('pointerenter', { clientX: 170 });
+  assert.equal(tooltip.dataset.visible, 'true');
+  escape();
+  assert.equal(tooltip.dataset.visible, 'false');
+  assert.equal(chart.getAttribute('data-active'), null);
+});
+
+test('window blur dismisses a focused Home trend reading', () => {
+  const { chart, module, tooltip, context } = homeTrendFixture();
+  module.fire('focusin', { target: module });
+  assert.equal(tooltip.dataset.visible, 'true');
+  const listeners = [...source.matchAll(/window\.addEventListener\('blur', (\w+)\);/g)];
+  for (const [, name] of listeners) context[name]?.();
+  assert.equal(tooltip.dataset.visible, 'false');
+  assert.equal(chart.getAttribute('data-active'), null);
+});
+
+test('unavailable period hides a visible Home trend tooltip with the panel', () => {
+  const { chart, tooltip, context } = homeTrendFixture();
+  chart.fire('pointerenter', { clientX: 170 });
+  const panel = () => new Element();
+  context.els = {
+    fixedPeriodMessage: panel(), homePanel: panel(), breakdown: panel(), serviceStatusPanel: panel(),
+    limitsPanel: panel(), trendsPanel: panel(), sessionDetail: panel(), sessionDetailHead: panel(),
+    sessionSearchHost: panel()
+  };
+  context.renderSessionPager = () => {};
+  vm.runInNewContext(hidePeriodContent, context);
+  context.hidePeriodContentForMessage('Loading');
+  assert.equal(tooltip.dataset.visible, 'false');
+  assert.equal(chart.getAttribute('data-active'), null);
+});
+
+test('Home panel scroll dismisses keyboard details and chart replacement removes its listener', () => {
+  const { module, homePanel, context, tooltip } = homeTrendFixture();
+  module.fire('focusin', { target: module });
+  assert.equal(tooltip.dataset.visible, 'true');
+  homePanel.fire('scroll');
+  assert.equal(tooltip.dataset.visible, 'false');
+  assert.equal(module.getAttribute('aria-label'), 'Activity');
+  module.fire('keydown', { target: module, key: 'ArrowLeft', preventDefault() {} });
+  assert.equal(visibleHomeTrendText(tooltip), '0tokens$0.00002026-10-22');
+  assert.equal(tooltip.dataset.visible, 'true');
+  assert.equal((homePanel.handlers.scroll || []).length, 1);
+  const chart = new Element(); chart.className = 'home-area-chart'; chart.closest = () => module;
+  const svg = new Element(); svg.className = 'area-line';
+  svg.bounds = { left: 20, top: 100, width: 300, height: 70 };
+  const crosshair = new Element(); crosshair.className = 'home-trend-crosshair';
+  const marker = new Element(); marker.className = 'home-trend-marker';
+  chart.append(svg, crosshair, marker);
+  const rows = [{ date: '2026-10-24', tokens: 7, cost: 0.1 }];
+  context.bindHomeTrendTooltip(chart, charts.areaLineChart(rows, { width: 300, height: 70 }), rows);
+  assert.equal(Object.values(module.handlers).flat().length, 3);
+  assert.equal((homePanel.handlers.scroll || []).length, 1);
+  module.fire('focusin', { target: module });
+  assert.equal(visibleHomeTrendText(tooltip), '7tokens$0.10002026-10-24');
 });

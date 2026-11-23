@@ -37,7 +37,8 @@ const WORKER_PATH = require.resolve('./usageWorker');
 // How long a stopping worker gets to stop its collector (which terminates its
 // tokscale subprocesses) and close the archive before it is terminated anyway.
 const STOP_GRACE_MS = 5000;
-const TRANSFORMED = Object.freeze({ transformed: true });
+// The receiver owns the deserialized summary; the worker keeps its own copy.
+const TRANSFORMED = Object.freeze({ transformed: true, ownsSummary: true });
 const CALLER_OPTION_KEYS = Object.freeze([
   'onUpdate',
   'onSessionActivity',
@@ -80,6 +81,7 @@ function createUsageHostCoordinator(deps = {}) {
   // `host` carries what the worker needs that is not a collector option:
   //   transformSettings   the settings the usage transform reads
   //   agentPidPath        the headless agent's PID file
+  //   workerResourceLimits   V8 limits for this worker isolate
   // A function-valued dailyHistoryArchiveWriteEnabled is taken to mean "write
   // unless the headless agent owns the archive" and is rebuilt in the worker
   // from agentPidPath, which is the only rule any caller passes.
@@ -247,7 +249,7 @@ function createUsageHostCoordinator(deps = {}) {
       }
       let spawned;
       try {
-        spawned = new WorkerClass(workerPath, { workerData });
+        spawned = new WorkerClass(workerPath, { workerData, resourceLimits: host.workerResourceLimits });
       } catch (error) {
         fallBack(error);
         resolveExit();

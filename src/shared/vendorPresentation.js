@@ -76,6 +76,8 @@
     { id: 'mistral', color: '#fa520f' },
     { id: 'prime-agent', color: '#000000', widgetInk: true },
     { id: 'jcode', color: '#000000', widgetInk: true },
+    { id: 'junie', color: '#47E054' },
+    { id: 'opencodereview', color: '#2BDE5E' },
     // Not tracked clients: model vendors and limits providers. A vendor shares
     // the colour of the client it names (moonshot/kimi, zai/zaiteam, xai/grok).
     { id: 'openrouter', label: 'OpenRouter', color: '#6566F1' },

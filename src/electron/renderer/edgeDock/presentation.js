@@ -537,7 +537,8 @@
   function providerCell(id, records, options = {}) {
     const hidden = new Set(options.hiddenAccounts || []);
     const accounts = records
-      .filter((record) => !record?.accountKey || !hidden.has(record.accountKey))
+      .filter((record) => !record?.accountKey || (!hidden.has(record.accountKey)
+        && (id !== 'alibaba' || !hidden.has(`${record.accountKey}:${record.region || 'cn'}`))))
       .map((record) => ({ record, summary: accountSummary(record, options) }));
     // Accounts keep the collector's order, as the Limits view lists them. The
     // live Codex account is taken from this device's records alone, so a synced

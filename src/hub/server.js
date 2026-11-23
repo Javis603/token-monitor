@@ -52,6 +52,7 @@ function resolveBindHost(host, secret) {
 
 function createHub({
   port = 17321,
+  deployment,
   host = '0.0.0.0',
   secret = '',
   syncSessionTitles = false,
@@ -407,6 +408,7 @@ function createHub({
         ok: true,
         role: 'hub',
         runtime: 'node-hub',
+        ...(deployment ? { deployment } : {}),
         version: store.version || 1,
         hubBuild: currentHubBuild('node-hub'),
         deviceCount: Object.keys(store.devices).length,
@@ -419,7 +421,7 @@ function createHub({
 
     if (req.method === 'GET' && url.pathname === '/api/sync/content') return sendJson(res, 200, getSyncContent());
 
-    const settingsMatch = url.pathname.match(/^\/api\/sync\/settings\/(modelAliases|customPricing)$/);
+    const settingsMatch = url.pathname.match(/^\/api\/sync\/settings\/(modelAliases|customPricing|limitAccountPresentation)$/);
     if (settingsMatch && req.method === 'GET') return sendJson(res, 200, { ok: true, ...getSyncSettings(settingsMatch[1]) });
     const titlesMatch = url.pathname.match(/^\/api\/sync\/titles\/([^/]+)$/);
     if (req.method === 'PUT' && (settingsMatch || titlesMatch)) {
@@ -639,7 +641,7 @@ if (require.main === module) {
   const dataFile = String(args.dataFile || process.env.TOKEN_MONITOR_DATA_FILE || path.join(projectRoot(), 'data', 'devices.json'));
 
   const syncSessionTitles = syncSessionTitlesEnabled(args.syncSessionTitles ?? args['sync-session-titles'] ?? process.env.TOKEN_MONITOR_SYNC_SESSION_TITLES);
-  const hub = createHub({ port, host, secret, staleAfterMs, dataFile, syncSessionTitles, persistIntervalMs });
+  const hub = createHub({ port, host, deployment: 'standalone', secret, staleAfterMs, dataFile, syncSessionTitles, persistIntervalMs });
   for (const signal of ['SIGINT', 'SIGTERM']) {
     process.once(signal, () => {
       hub.stop().catch((error) => {

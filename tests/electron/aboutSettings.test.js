@@ -12,32 +12,80 @@ function read(name) {
   return fs.readFileSync(path.join(rendererDir, name), 'utf8');
 }
 
-test('General settings ends with a compact About section', () => {
+test('General settings ends with an About card led by the GitHub star button', () => {
   const html = read('index.html');
   const general = html.match(/<div id="generalSettingsDetails"[\s\S]*?<div id="mainSettingsDetails"/)?.[0] || '';
+  const about = general.slice(general.indexOf('<div class="settings-subgroup settings-page-card about-settings"'));
 
-  assert.match(general, /class="settings-subgroup about-settings"/);
-  assert.match(general, /id="aboutVersion">—<\/span>/);
-  assert.match(general, /id="openRepositoryButton"[\s\S]*settings\.about\.repository/);
-  assert.match(general, /id="openWebsiteButton"[\s\S]*settings\.about\.website/);
-  assert.match(general, /id="reportIssueButton"[\s\S]*settings\.about\.reportIssue/);
-  assert.ok(general.indexOf('settings.advanced.title') < general.indexOf('settings.about.title'));
+  assert.match(about, /^<div class="settings-subgroup settings-page-card about-settings" role="group" aria-labelledby="aboutTitle">/);
+  assert.match(about, /<img class="about-settings-icon" src="icons\/app-icon\.png" alt=""/);
+  assert.match(about, /id="aboutTitle">Token Monitor<\/strong>\s*<span id="aboutVersion">—<\/span>/);
+  assert.match(about, /<button id="openRepositoryButton" type="button" class="about-settings-star">\s*<span class="about-settings-star-label"><span class="about-settings-github-mark" aria-hidden="true"><\/span><span data-i18n="settings\.about\.star">/);
+  assert.match(about, /<span id="aboutStarCount" class="about-settings-star-count" hidden>\s*<svg class="about-settings-star-icon"[^>]*aria-hidden="true">[\s\S]*?<span id="aboutStarCountValue" class="about-settings-star-value"><\/span>/);
+  assert.match(about, /id="openWebsiteButton" type="button" class="inline-link about-settings-link about-settings-link-website"[\s\S]*settings\.about\.website/);
+  assert.match(about, /id="reportIssueButton" type="button" class="inline-link about-settings-link about-settings-link-issue"[\s\S]*settings\.about\.reportIssue/);
+  assert.match(about, /id="diagnosticToggleButton" type="button" class="inline-link about-settings-link about-settings-link-diagnostics"/);
+  const css = read('styles.css');
+  for (const [modifier, icon] of [['website', 'sources/globe.svg'], ['issue', 'actions/bug.svg'], ['diagnostics', 'actions/stethoscope.svg']]) {
+    assert.match(css, new RegExp(`\\.about-settings-link-${modifier} \\{ --about-link-icon: url\\("icons/${icon.replace('.', '\\.')}"\\); \\}`));
+    assert.ok(fs.existsSync(path.join(rendererDir, 'icons', icon)), icon);
+  }
+  assert.match(css, /\.about-settings-github-mark \{[\s\S]*mask: url\("icons\/brands\/github\.svg"\)/);
+  const notices = read('icons/THIRD_PARTY_NOTICES.md');
+  assert.match(notices, /actions\/bug\.svg: bug[\s\S]*actions\/stethoscope\.svg: stethoscope/);
+  assert.match(notices, /brands\/github\.svg: mark-github[\s\S]*GitHub Octicons license:/);
+  assert.ok(general.indexOf('settings.advanced.title') < general.indexOf('about-settings'));
+  assert.ok(fs.statSync(path.join(rendererDir, 'icons', 'app-icon.png')).size < 32 * 1024, 'About uses a small icon, not the 1024px app icon');
+});
+
+test('General settings groups its controls into cards', () => {
+  const html = read('index.html');
+  const general = html.match(/<div id="generalSettingsDetails"[\s\S]*?<div id="mainSettingsDetails"/)?.[0] || '';
+  const cards = [...general.matchAll(/<div (?:id="\w+" )?class="settings-subgroup settings-page-card ?([^"]*)"/g)].map((match) => match[1]);
+
+  assert.deepEqual(cards, [
+    'settings-general-preferences',
+    'maintenance-section app-update-settings',
+    '',
+    'advanced-settings',
+    'about-settings'
+  ]);
+  assert.match(general, /settings\.general\.preferences[\s\S]*id="languageInput"[\s\S]*id="startupGroup"/);
+  // A card opening a section keeps its top edge despite the flat first-subgroup reset.
+  const css = read('styles.css');
+  const reset = css.indexOf('.settings-section-details-inner > .settings-subgroup:first-child {');
+  const cardRule = css.indexOf('.settings-section-details-inner > .settings-page-card:first-child {');
+  assert.ok(reset >= 0 && cardRule > reset);
+  assert.match(css.slice(cardRule, css.indexOf('}', cardRule)), /padding-top: 8px;[\s\S]*border-top: 1px solid var\(--line\);/);
+});
+
+test('App Updates puts the installed version, its status and the actions on one row', () => {
+  const html = read('index.html');
+  const row = html.match(/<div class="settings-item app-update-version-row">[\s\S]*?<\/span>\s*<\/span>\s*<\/div>/)?.[0] || '';
+
+  assert.match(row, /<strong id="appUpdateInstalled" class="app-update-installed">—<\/strong>/);
+  assert.match(row, /<span id="appUpdateLatest" class="cursor-status-pill app-update-status-pill"/);
+  assert.match(row, /<span id="appUpdateCheckedAt" class="settings-item-desc"><\/span>/);
+  assert.match(row, /<span class="settings-actions app-update-actions">[\s\S]*id="appUpdateCheckButton"[\s\S]*id="appUpdateViewReleaseButton"/);
+  assert.ok(html.indexOf('app-update-version-row') < html.indexOf('id="automaticAppUpdatesRow"'));
+  assert.doesNotMatch(html, /app-update-version-grid|settings\.appUpdate\.installed/);
 });
 
 test('General settings keeps Tokscale inside a collapsed Advanced disclosure', () => {
   const html = read('index.html');
   const general = html.match(/<div id="generalSettingsDetails"[\s\S]*?<div id="mainSettingsDetails"/)?.[0] || '';
   const start = general.indexOf('<div id="advancedSettingsGroup"');
-  const end = general.indexOf('<div class="settings-subgroup about-settings">', start);
+  const end = general.indexOf('<div class="settings-subgroup settings-page-card about-settings"', start);
   const advanced = start >= 0 && end >= 0 ? general.slice(start, end) : '';
 
-  assert.match(advanced, /^<div id="advancedSettingsGroup" class="settings-subgroup advanced-settings">/);
+  assert.match(advanced, /^<div id="advancedSettingsGroup" class="settings-subgroup settings-page-card advanced-settings">/);
   assert.match(advanced, /<button id="advancedSettingsToggle"[\s\S]*aria-expanded="false" aria-controls="advancedSettingsDetails">[\s\S]*settings\.advanced\.title/);
   assert.match(advanced, /<div id="advancedSettingsDetails" class="advanced-settings-details hidden" inert>/);
   assert.match(advanced, /id="advancedSettingsSummary"[\s\S]*settings\.advanced\.summary/);
+  assert.ok(advanced.indexOf('id="networkProxyGroup"') < advanced.indexOf('id="tokscaleGroup"'));
   assert.ok(advanced.indexOf('id="tokscaleGroup"') < advanced.indexOf('id="openConfigButton"'));
   assert.ok(general.indexOf('settings.appUpdate.title') < start);
-  assert.ok(end < general.indexOf('settings.about.title'));
+  assert.ok(end > start);
 });
 
 test('General settings explains Discord presence and identifies Tokscale as a bundled CLI dependency', () => {
@@ -134,7 +182,7 @@ test('About links stay visually secondary and wrap in narrow settings', () => {
 
 test('About diagnostics open from the support links and separate generate, view and copy actions', () => {
   const html = read('index.html');
-  const about = html.match(/<div class="settings-subgroup about-settings">[\s\S]*?<\/div>\s*<\/div>\s*<\/div>/)?.[0] || '';
+  const about = html.match(/<div class="settings-subgroup settings-page-card about-settings"[\s\S]*?<\/div>\s*<\/div>\s*<\/div>/)?.[0] || '';
 
   assert.match(about, /id="diagnosticToggleButton"[\s\S]*settings\.about\.diagnostics\.toggle[\s\S]*aria-controls="diagnosticDetails"/);
   assert.match(about, /id="diagnosticDetails" class="about-settings-diagnostics accordion-animated-container hidden"[^>]*inert/);
@@ -176,4 +224,171 @@ test('Diagnostic disclosure uses the shared accordion transition and compact pre
   assert.doesNotMatch(css, /\.about-settings-diagnostics\.hidden,\s*\.diagnostic-preview\.hidden \{ display: none; \}/);
   assert.match(css, /#diagnosticReportText \{[\s\S]*max-height: 260px;[\s\S]*overflow: auto;/);
   assert.match(css, /\.diagnostic-actions button:disabled[\s\S]*opacity: 0\.45/);
+});
+
+test('About shows the repository star count only once main has fetched it', async () => {
+  const app = read('app.js');
+  const body = app.slice(app.indexOf('let aboutStarsRequest = null;'), app.indexOf('// Feedback for the click that opens the repository'));
+  let calls = 0;
+  let reply = 3760;
+  const els = {
+    aboutStarCount: { hidden: true },
+    aboutStarCountValue: { dataset: {}, textContent: '' },
+    openRepositoryButton: { classList: { add() {} }, addEventListener() {} }
+  };
+  const context = {
+    els,
+    state: { repositoryStars: null },
+    currentLocale: () => 'en',
+    prefersReducedMotion: () => true,
+    Intl,
+    Promise,
+    Number,
+    window: { tokenMonitor: { getRepositoryStars: async () => { calls++; return reply; } } }
+  };
+  vm.runInNewContext(`${body}\nthis.renderAboutStars = renderAboutStars; this.refreshAboutStars = refreshAboutStars; this.formatAboutStars = formatAboutStars;`, context);
+
+  context.renderAboutStars();
+  assert.equal(els.aboutStarCount.hidden, true);
+  await Promise.all([context.refreshAboutStars(), context.refreshAboutStars()]);
+  assert.equal(calls, 1, 'concurrent opens share one request');
+  assert.equal(els.aboutStarCount.hidden, false);
+  assert.equal(els.aboutStarCountValue.textContent, '3,760', 'counts below 10,000 keep every digit');
+  reply = null;
+  await context.refreshAboutStars();
+  assert.equal(els.aboutStarCountValue.textContent, '3,760', 'a failed refresh keeps the last count');
+  assert.equal(context.formatAboutStars(12_345), '12.3K');
+  assert.match(app, /if \(id === 'general' && next\) void refreshAboutStars\(\);/);
+  assert.match(read('../preload.js'), /getRepositoryStars: \(\) => ipcRenderer\.invoke\('app:repositoryStars'\)/);
+});
+
+test('the intro plays once, when the star button first comes into view, unless motion is reduced', async () => {
+  const app = read('app.js');
+  const body = app.slice(app.indexOf('let aboutStarsRequest = null;'), app.indexOf('// Feedback for the click that opens the repository'));
+  const element = () => ({
+    children: [], style: {}, attributes: {}, className: '', textContent: '', listeners: {},
+    append(...items) { this.children.push(...items); },
+    setAttribute(name, value) { this.attributes[name] = value; },
+    addEventListener(type, listener) { this.listeners[type] = listener; },
+    removeEventListener(type) { delete this.listeners[type]; }
+  });
+  function harness({ reduced, replies = [3760] }) {
+    const added = [];
+    const observers = [];
+    class FakeIntersectionObserver {
+      constructor(callback) { this.callback = callback; this.disconnected = false; observers.push(this); }
+      observe(target) { this.target = target; }
+      disconnect() { this.disconnected = true; }
+      fire(isIntersecting, intersectionRatio = isIntersecting ? 1 : 0) { this.callback([{ isIntersecting, intersectionRatio }]); }
+    }
+    const els = {
+      aboutStarCount: { hidden: true },
+      aboutStarCountValue: { dataset: {}, textContent: '', replaceChildren(...items) { this.children = items; }, contains(item) { return this.children?.includes(item); } },
+      openRepositoryButton: { classList: { add: (name) => added.push(name) }, addEventListener() {} }
+    };
+    const context = {
+      els,
+      state: { repositoryStars: null },
+      currentLocale: () => 'en',
+      prefersReducedMotion: () => reduced,
+      requestAnimationFrame: (callback) => callback(),
+      document: { createElement: element },
+      IntersectionObserver: FakeIntersectionObserver,
+      Intl,
+      Promise,
+      Number,
+      String,
+      window: { tokenMonitor: { getRepositoryStars: async () => (replies.length > 1 ? replies.shift() : replies[0]) } }
+    };
+    vm.runInNewContext(`${body}\nthis.refreshAboutStars = refreshAboutStars;`, context);
+    return { added, observers, els, refresh: () => context.refreshAboutStars() };
+  }
+
+  const motion = harness({ reduced: false });
+  await motion.refresh();
+  assert.equal(motion.els.aboutStarCountValue.textContent, '3,760', 'the count shows at once');
+  assert.deepEqual(motion.added, [], 'nothing plays while the button is off screen');
+  assert.equal(motion.observers.length, 1);
+  motion.observers[0].fire(false);
+  motion.observers[0].fire(true, 0.4);
+  assert.deepEqual(motion.added, [], 'a partly visible button does not spend the intro');
+  assert.equal(motion.observers[0].disconnected, false);
+  motion.observers[0].fire(true);
+  assert.deepEqual(motion.added, ['is-arriving']);
+  assert.equal(motion.observers[0].disconnected, true);
+  const [reel, label] = motion.els.aboutStarCountValue.children;
+  assert.equal(reel.attributes['aria-hidden'], 'true');
+  assert.equal(label.textContent, '3,760', 'assistive technology reads the plain number');
+  const digits = reel.children.filter((child) => typeof child !== 'string');
+  assert.deepEqual(digits.map((column) => column.style.transform), ['translateY(calc(-3 * 1.2em))', 'translateY(calc(-7 * 1.2em))', 'translateY(calc(-6 * 1.2em))', 'translateY(calc(0 * 1.2em))']);
+  const lastColumn = digits.at(-1);
+  digits[0].listeners.transitionend?.({ target: digits[0], propertyName: 'transform' });
+  lastColumn.listeners.transitionend({ target: lastColumn, propertyName: 'opacity' });
+  assert.equal(motion.els.aboutStarCountValue.children[0], reel, 'the reel stays until the last column stops');
+  lastColumn.listeners.transitionend({ target: lastColumn, propertyName: 'transform' });
+  assert.equal(motion.els.aboutStarCountValue.textContent, '3,760', 'the stopped reel becomes plain text, free of fractional transforms');
+  motion.els.aboutStarCountValue.children = [];
+  await motion.refresh();
+  assert.equal(motion.observers.length, 1, 'the intro is spent for this launch');
+
+  const retry = harness({ reduced: false, replies: [null, 3760] });
+  await retry.refresh();
+  assert.equal(retry.observers.length, 0, 'a failed lookup does not spend the intro');
+  await retry.refresh();
+  assert.equal(retry.observers.length, 1);
+  retry.observers[0].fire(true);
+  assert.deepEqual(retry.added, ['is-arriving']);
+  assert.equal(retry.els.aboutStarCountValue.children[1].textContent, '3,760', 'the retry still rolls the count');
+
+  const quiet = harness({ reduced: true });
+  await quiet.refresh();
+  quiet.observers[0].fire(true);
+  assert.deepEqual(quiet.added, []);
+  assert.equal(quiet.els.aboutStarCountValue.textContent, '3,760');
+});
+
+test('reopening Settings with General already expanded refreshes the star count from the tray and the gear', () => {
+  const app = read('app.js');
+  const tray = app.slice(app.indexOf('function openSettingsPanel('), app.indexOf('function openViewFromTray('));
+  const gear = app.slice(app.indexOf("els.settingsButton.addEventListener('click'"), app.indexOf("els.saveSettingsButton.addEventListener('click'"));
+  assert.match(tray, /if \(state\.settingsSections\?\.general\) void refreshAboutStars\(\);/);
+  assert.match(gear, /if \(settingsOpen && state\.settingsSections\?\.general\) void refreshAboutStars\(\);/, 'only when the gear opens the panel');
+});
+
+test('About star button honours the app motion setting', () => {
+  const css = read('styles.css');
+  assert.match(css, /:root\[data-reduce-motion="on"\] \.settings-panel button\.about-settings-star::before,/);
+  assert.match(css, /@media \(prefers-reduced-motion: reduce\) \{\s*:root:not\(\[data-reduce-motion="off"\]\) \.settings-panel button\.about-settings-star,/);
+  const app = read('app.js');
+  const celebrate = app.slice(app.indexOf('function celebrateAboutStar('), app.indexOf('function compactAge('));
+  assert.match(celebrate, /if \(prefersReducedMotion\(\) \|\| els\.aboutStarCount\.hidden\) return;/);
+  assert.match(app, /openRepositoryButton\?\.addEventListener\('click', \(\) => \{\s*celebrateAboutStar\(\);\s*window\.tokenMonitor\.openExternal\?\.\(TOKEN_MONITOR_REPOSITORY_URL\);/);
+});
+
+test('About describes the app with the README tagline in every locale that has a README', () => {
+  const { translate } = require('../../src/electron/renderer/i18n.js');
+  const root = path.join(rendererDir, '..', '..', '..');
+  const readmes = { en: 'README.md', 'zh-TW': 'README.zh-TW.md', 'zh-CN': 'README.zh-CN.md', ko: 'README.ko.md', ja: 'README.ja.md', 'pt-BR': 'README.pt-BR.md' };
+  for (const [locale, file] of Object.entries(readmes)) {
+    const tagline = fs.readFileSync(path.join(root, file), 'utf8').match(/<em>([^<]*)<\/em>/)?.[1];
+    assert.equal(translate(locale, 'settings.about.description'), tagline, locale);
+  }
+  assert.match(read('index.html'), new RegExp(`data-i18n="settings\\.about\\.description">${translate('en', 'settings.about.description')}</p>`));
+});
+
+test('changing the interface language reformats the star count without another lookup', () => {
+  const app = read('app.js');
+  const apply = app.slice(app.indexOf('function applySettingsTranslations('), app.indexOf('let displaySettings = null;'));
+  assert.match(apply, /renderAboutStars\(\);/);
+  assert.doesNotMatch(apply, /refreshAboutStars/);
+});
+
+test('the star count uses the display font so its comma does not split the number', () => {
+  const css = read('styles.css');
+  const start = css.indexOf('.about-settings-star-count {');
+  const rule = css.slice(start, css.indexOf('}', start));
+  assert.match(rule, /font-family: var\(--display-font,/);
+  // Regular weight at the button's own size, so the digits match the star's outline.
+  assert.match(rule, /font-weight: 400;/);
+  assert.doesNotMatch(rule, /font-size/);
 });

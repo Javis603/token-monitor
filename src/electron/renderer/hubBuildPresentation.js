@@ -5,9 +5,13 @@
   if (typeof module === 'object' && module.exports) module.exports = api;
   if (root) root.TokenMonitorHubBuildPresentation = api;
 })(typeof window !== 'undefined' ? window : null, function createHubBuildPresentation() {
-  function targetKey(runtime) {
+  function targetKey(runtime, deployment) {
     if (runtime === 'cloudflare-worker') return 'settings.sync.hubBuild.targetWorker';
-    if (runtime === 'node-hub') return 'settings.sync.hubBuild.targetNode';
+    if (runtime === 'node-hub') {
+      if (deployment === 'app') return 'settings.sync.hubBuild.targetAppHosted';
+      if (deployment === 'standalone') return 'settings.sync.hubBuild.targetStandalone';
+      return 'settings.sync.hubBuild.targetNode';
+    }
     return 'settings.sync.hubBuild.targetHub';
   }
 
@@ -25,7 +29,7 @@
     if (!key) return null;
     return {
       key,
-      targetKey: targetKey(result.runtime),
+      targetKey: targetKey(result.runtime, result.deployment),
       tone: status === 'current' ? 'ok' : ['updateAvailable', 'legacy'].includes(status) ? 'warning' : ''
     };
   }

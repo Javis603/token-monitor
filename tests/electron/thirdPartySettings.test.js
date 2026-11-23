@@ -7,10 +7,35 @@ const test = require('node:test');
 const vm = require('node:vm');
 
 const root = path.resolve(__dirname, '..', '..');
-const read = (relativePath) => fs.readFileSync(path.join(root, relativePath), 'utf8');
+const read = (relativePath) => {
+  const files = [relativePath];
+  if (relativePath === 'src/electron/renderer/app.js') files.push('src/electron/renderer/limits/providerOwners/thirdparty.js');
+  if (relativePath === 'src/electron/renderer/limits/providerPresentation.js') files.push('src/electron/renderer/providers/thirdparty/presentation.js');
+  if (relativePath === 'src/electron/renderer/limits/windowsView.js') files.push('src/electron/renderer/providers/thirdparty/windows.js');
+  return files.map(file => fs.readFileSync(path.join(root, file), 'utf8')).join('\n');
+};
 const { VENDOR_LABELS, VENDOR_ORDER } = require('../../src/electron/renderer/themePresets');
 const { rendererStyles } = require('../helpers/rendererStyles');
 const { LIMIT_PROVIDER_CATALOG, LIMIT_PROVIDER_LABELS } = require('../../src/shared/limits/providers');
+
+async function thirdPartyRows(profiles, hasEnvVar = false, readings = [], bridge = {}) {
+  const document = require('./accountOwnerDom.fixture.cjs').createDocument();
+  const list = document.createElement('div'); list.id = 'thirdpartyProfileList'; document.root.append(list);
+  const settings = {};
+  const { translate } = require('../../src/electron/renderer/i18n');
+  const owner = require('../../src/electron/renderer/limits/providerOwners/thirdparty').create({
+    document, initial: {}, getSettings: () => settings, getAccountContext: () => ({ settings }), preserveScroll: fn => fn(),
+    t: (key, params) => translate('en', key, params), isSettingsSurfaceVisible: () => true,
+    localProviderStatuses: () => readings, limitProviderEnabled: () => true,
+    accountProfileRequests: { begin: () => () => true }, renderAccountShellError() {}, renderSettingsSummaries() {},
+    accountShellApi: require('../../src/electron/renderer/limits/accountShell'),
+    window: { TokenMonitorLegacyAccountList: require('../../src/electron/renderer/limits/legacyAccountList'),
+      tokenMonitor: { thirdparty: bridge.api || { getProfiles: async () => ({ profiles, hasEnvVar }) }, limits: { accountSlots: { presentation: bridge.presentation } } } }
+  });
+  owner.renderThirdPartyProfiles();
+  await new Promise(resolve => setImmediate(resolve));
+  return { list, rows: [...list.walk()].filter(node => node.dataset.slotId) };
+}
 
 test('third-party settings separate presets, scope, and safe custom mappings', () => {
   const html = read('src/electron/renderer/index.html');
@@ -72,7 +97,7 @@ test('third-party settings separate presets, scope, and safe custom mappings', (
 });
 
 test('third-party credentials stay local while renderer metadata is redacted', () => {
-  const main = read('src/electron/main.js');
+  const main = read('src/electron/main.js') + '\n' + read('src/electron/providers/thirdparty/accountService.js');
   const accountSettings = read('src/electron/limits/accountSettings.js');
   const { CREDENTIAL_SETTING_PATHS } = require('../../src/shared/credentialStore');
   const { accountFieldProjection, normalizeAccountPatch } = require('../../src/electron/limits/accountSettings');
@@ -120,16 +145,14 @@ test('third-party credentials stay local while renderer metadata is redacted', (
   assert.doesNotMatch(main, /errorCode: 'missingUserId'/);
 });
 
-test('third-party profile rows share the named-account component with OpenRouter', () => {
-  const app = read('src/electron/renderer/app.js');
-  assert.match(app, /function appendNamedApiProfileRow/);
-  assert.match(app, /info\.dataset\.managedProfileProvider = providerId/);
-  assert.match(app, /info\.dataset\.managedProfileName = name/);
-  assert.match(app, /info\.dataset\.managedProfileEnvironment = 'true'/);
-  assert.match(app, /providerId: 'openrouter',[\s\S]*?rerender: renderOpenRouterProfiles/);
-  assert.match(app, /providerId: 'thirdparty',[\s\S]*?rerender: renderThirdPartyProfiles/);
-  assert.match(app, /t\('settings\.profiles\.rename'\)/);
-  assert.match(app, /t\('settings\.profiles\.delete'\)/);
+test('third-party profile rows retain named identity and accessible rename/remove actions', async () => {
+  const { rows } = await thirdPartyRows({ 'default (env)': { canonicalAccountKey: 'saved' } }, true);
+  assert.deepEqual(rows.map(row => row.dataset.slotId), ['default (env)', 'environment']);
+  assert.equal(rows[0].querySelector('.slot-name').textContent, 'default (env)');
+  assert.equal(rows[1].querySelector('.slot-name').textContent, 'Environment');
+  for (const row of rows) assert.ok(row.querySelector('.slot-rename-button').attributes['aria-label']);
+  const remove = [...rows[0].walk()].find(node => node.dataset.slotAction === 'remove');
+  assert.equal(remove.attributes['aria-label'], 'Remove account');
 });
 
 test('third-party Limits presentation uses compact scope labels and a details tooltip', () => {
@@ -141,7 +164,7 @@ test('third-party Limits presentation uses compact scope labels and a details to
   const { clientColors } = require('../../src/electron/renderer/usageCharts');
 
   assert.equal(LIMIT_PROVIDER_LABELS.thirdparty, 'Third-party APIs');
-  assert.match(read('src/electron/renderer/limits/windowsView.js'), /provider\.provider === 'thirdparty'/);
+  assert.match(read('src/electron/renderer/limits/windowOwners.js'), /thirdparty: require\('\.\.\/providers\/thirdparty\/windows'\)/);
   assert.match(read('src/electron/renderer/limits/windowsView.js'), /function thirdPartyQuotaWindow/);
   assert.match(read('src/electron/renderer/limits/windowsView.js'), /quotaWindow\?\.label \|\| 'Balance'/);
   assert.match(read('src/electron/renderer/limits/windowsView.js'), /const meterPercent = creditsMeterPercent\(provider, quotaWindow\)/);
@@ -176,15 +199,15 @@ test('third-party Limits presentation uses compact scope labels and a details to
   const view = read('src/electron/renderer/limits/windowsView.js');
   assert.match(view, /function renderLimitProviderGroup\(providerId, label, providers, color\)/);
   assert.match(view, /renderLimitProviderGroupFrame\(\s*providerId, label, providers, color, \{ count: providers\.length, markId \}/);
-  assert.match(view, /thirdparty: \(providers\) => \{[\s\S]*?markId: family \|\| 'thirdparty', sharedFamily: family/);
-  assert.match(view, /thirdparty: \(provider, color, \{ grouped, sharedFamily \}\) => \{[\s\S]*?const visual = presentationApi\.thirdPartyAdapterVisual\(provider, color\)/);
+  assert.match(view, /const groupPolicy =[\s\S]*?markId: family \|\| 'thirdparty', sharedFamily: family/);
+  assert.match(view, /const rowPolicy =[\s\S]*?const visual = presentationApi\.thirdPartyAdapterVisual\(provider, color\)/);
   // The page's group call passes the provider and nothing else, so it cannot
   // render this group differently from the card.
   assert.match(app, /renderLimitProviderGroup\(id, label, visibleProviders, color\)/);
   assert.doesNotMatch(app, /groupPlanText|markIdForProvider|colorForProvider/);
   assert.doesNotMatch(i18n, /settings\.thirdparty\.(?:spend|allTime)/);
   assert.match(read('src/electron/renderer/limits/windowsView.js'), /limitDetailInfoNode\(detailEntries, 'limit-spend-info-wrap'\)/);
-  assert.match(presentation, /thirdparty: \['Relay', 'API'\]/);
+  assert.deepEqual(require('../../src/electron/renderer/limits/providerPresentation').connectionTag('thirdparty').parts, ['API key']);
   assert.match(styles, /^\.row-icon-sub2api/m);
   assert.match(styles, /assets\/icons\/sub2api\.svg/);
   assert.match(styles, /^\.row-icon-thirdparty[\s\S]*?assets\/icons\/thirdparty\.svg/m);
@@ -212,11 +235,9 @@ test('third-party money formatting preserves supported custom units', () => {
 });
 
 test('third-party scope labels do not infer adapters from display text', () => {
-  const presentation = read('src/electron/renderer/limits/providerPresentation.js');
-  const source = thirdPartyPresentationSource(presentation);
+  const helpers = require('../../src/electron/renderer/providers/thirdparty/presentation');
   const result = vm.runInNewContext(
-    `${source}
-    JSON.stringify([
+    `JSON.stringify([
       thirdPartyGroupPlanText({ status: 'ok', planLabel: 'Account' }),
       thirdPartyGroupPlanText({ status: 'ok', planLabel: 'API key' }),
       thirdPartyGroupPlanText({ status: 'ok', planLabel: 'Custom' }),
@@ -224,35 +245,22 @@ test('third-party scope labels do not infer adapters from display text', () => {
       thirdPartyGroupPlanText({ status: 'ok', adapterId: 'sub2api', planLabel: 'Account' }),
       thirdPartyGroupPlanText({ status: 'ok', planLabel: 'Token deluxe' }) ?? null,
       thirdPartyGroupPlanText({ status: 'unavailable', planLabel: 'Account' }) ?? null
-    ]);`
+    ]);`, helpers
   );
   assert.deepEqual(JSON.parse(result), ['Account', 'API key', 'Custom', 'New API · Account', 'Sub2API · Account', null, null]);
 });
 
-// The adapter helpers are the shared module's now. Sliced from `normalizeId`,
-// which they and nothing else before them need, up to the first declaration
-// that reads a module-scope table.
-function thirdPartyPresentationSource(presentation) {
-  const start = presentation.indexOf('function normalizeId(');
-  const end = presentation.indexOf('function antigravityQuotaWindow(', start);
-  assert.notEqual(start, -1);
-  assert.notEqual(end, -1);
-  return presentation.slice(start, end);
-}
-
 test('third-party group icon represents a shared adapter family', () => {
-  const presentation = read('src/electron/renderer/limits/providerPresentation.js');
-  const source = thirdPartyPresentationSource(presentation);
+  const helpers = require('../../src/electron/renderer/providers/thirdparty/presentation');
   const result = vm.runInNewContext(
-    `${source}
-    JSON.stringify([
+    `JSON.stringify([
       thirdPartySharedAdapterFamily([{ adapterId: 'newapi-account' }, { adapterId: 'newapi-token' }]),
       thirdPartySharedAdapterFamily([{ adapterId: 'sub2api' }, { adapterId: 'sub2api' }]),
       thirdPartySharedAdapterFamily([{ adapterId: 'custom' }, { adapterId: 'custom' }]),
       thirdPartySharedAdapterFamily([{ adapterId: 'newapi-account' }, { adapterId: 'sub2api' }]),
       thirdPartySharedAdapterFamily([{ adapterId: 'newapi-account' }, {}]),
       thirdPartySharedAdapterFamily([{}, {}])
-    ]);`
+    ]);`, helpers
   );
   assert.deepEqual(JSON.parse(result), [
     'newapi',
@@ -264,13 +272,21 @@ test('third-party group icon represents a shared adapter family', () => {
   ]);
 });
 
-test('third-party profile rows keep metadata on line two and rename on line one', () => {
+test('third-party profile rows keep metadata on line two and rename on line one', async () => {
   const html = read('src/electron/renderer/index.html');
   const styles = rendererStyles();
   const app = read('src/electron/renderer/app.js');
 
   assert.match(html, /id="thirdpartyProfileList" class="opencode-profile-list thirdparty-profile-list"/);
-  assert.match(app, /if \(detail\) \{[\s\S]*?detailSpan\.className = 'profile-detail'/);
+  const { rows } = await thirdPartyRows({ work: { canonicalAccountKey: 'saved', baseUrl: 'https://quota.example.com', adapter: 'newapi-account', enabled: false } });
+  const copy = rows[0].querySelector('.slot-copy');
+  const nameLine = rows[0].querySelector('.slot-name-line');
+  const rename = rows[0].querySelector('.slot-rename-button');
+  const detail = rows[0].querySelector('.slot-detail');
+  assert.equal(rename.parentElement, nameLine);
+  assert.deepEqual(copy.children.slice(0, 2), [nameLine, detail]);
+  assert.equal(detail.textContent, 'New API · Account · quota.example.com');
+  assert.equal(rows[0].querySelector('.slot-status').textContent, 'Paused');
   assert.match(styles, /grid-template-columns: minmax\(0, max-content\) auto minmax\(0, 1fr\);/);
   assert.match(styles, /grid-template-areas:\s*"name rename \."\s*"detail detail detail";/);
   assert.match(styles, /\.opencode-profile-item \.profile-name \{[\s\S]*?grid-area: name;/);
@@ -283,7 +299,7 @@ test('third-party profile rows keep metadata on line two and rename on line one'
   assert.match(styles, /\.thirdparty-field \{[\s\S]*?display: grid;/);
   assert.match(app, /new URL\(String\(profile\?\.baseUrl \|\| ''\)\)\.host/);
   assert.match(app, /settings\.thirdparty\.detailCustom/);
-  assert.match(app, /formatCompactMoney,?[\s\S]{0,120}?\} = window\.TokenMonitorLimitBalanceDisplay/);
+  assert.match(app, /formatCompactMoney/);
   assert.match(app, /formatCompactMoney\(balance, provider\.balance\?\.currency \|\| 'USD', state\.settings\?\.compactTokenUnits, currentLocale\(\)\)/);
 });
 
@@ -303,9 +319,9 @@ test('third-party status settles after refresh and pushed stats', () => {
   );
 
   assert.match(refreshStats, /statsRenderScheduler\.request\(\);/);
-  assert.match(statsRender, /updateThirdPartyProfilesStatus\(\);/);
+  assert.match(statsRender, /refreshAccountOwnerReadings\(\);/);
   assert.match(statsPush, /statsRenderScheduler\.request\(\);/);
-  assert.match(app, /function updateThirdPartyProfilesStatus/);
+  assert.match(read('src/electron/renderer/limits/providerOwners/thirdparty.js'), /refreshReadings: updateThirdPartyProfilesStatus/);
   assert.match(app, /function thirdPartyProfileStatusText/);
   assert.match(app, /settings\.thirdparty\.unlimited/);
 });
@@ -375,11 +391,80 @@ test('third-party adapters share one documentation icon and preserve compatibili
 });
 
 test('OpenRouter remains official-only and does not inherit third-party Base URL settings', () => {
-  const html = read('src/electron/renderer/index.html');
-  const openrouterSection = html.slice(
-    html.indexOf('id="openrouterAccountGroup"'),
-    html.indexOf('id="thirdpartyAccountGroup"')
-  );
-  assert.doesNotMatch(openrouterSection, /Base URL|baseUrl|newapi|thirdparty/i);
-  assert.match(openrouterSection, /id="openrouterApiKeyInput"/);
+  const { limitAccountFormsForRenderer } = require('../../src/electron/limits/accountSettings');
+  const form = limitAccountFormsForRenderer().find(form => form.id === 'openrouter');
+  assert.deepEqual(form.fields.map(field => field.key), ['openrouterApiKey']);
+  assert.equal(form.openUrl.url, 'https://openrouter.ai/settings/keys');
 });
+
+test('third-party service DTO retains collector identity through redaction and shared rows', async () => {
+  const limits = require('../../src/shared/providers/thirdparty/limits');
+  const { createThirdpartyAccountService } = require('../../src/electron/providers/thirdparty/accountService');
+  const profiles = {
+    account: { adapter: 'newapi-account', baseUrl: 'https://account.example', accessToken: 'private-access', userId: '42' },
+    token: { adapter: 'newapi-token', baseUrl: 'https://token.example', apiKey: 'private-api' },
+    sub: { adapter: 'sub2api', baseUrl: 'https://sub.example', accessToken: 'private-sub', refreshToken: 'private-refresh', canonicalAccountKey: `sha256:${'a'.repeat(64)}` },
+    custom: { adapter: 'custom', baseUrl: 'https://custom.example', apiKey: 'private-custom', endpointPath: '/balance', authMode: 'bearer', remainingPath: 'balance', currency: 'USD', divisor: 1 }
+  };
+  const service = createThirdpartyAccountService({ getThirdPartyProfiles: () => profiles, env: {} });
+  const { profiles: safe } = await service.getProfiles();
+  for (const [name, profile] of Object.entries(profiles)) {
+    const reading = await limits.fetchThirdPartyAccount({ name, ...limits.normalizeThirdPartyProfile(profile) }, { env: {}, fetch: async () => ({ ok: false, status: 401 }) });
+    assert.ok(safe[name].accountKey, name);
+    assert.equal(safe[name].accountKey, reading.accountKey, name);
+    const { rows } = await thirdPartyRows({ [name]: safe[name] }, false, [{ ...reading, status: 'ok' }]);
+    assert.equal(rows.length, 1);
+    assert.match(rows[0].querySelector('.slot-status').attributes['aria-label'], /Connected/);
+    const rename = [...rows[0].walk()].find(node => node.dataset.slotAction === 'rename');
+    assert.ok(rename);
+    assert.notEqual(rename.disabled, true);
+    assert.equal(rename.classList.contains('hidden'), false);
+  }
+  assert.equal(safe.sub.accountKey, profiles.sub.canonicalAccountKey);
+  assert.ok(!JSON.stringify(safe).includes('private-'));
+  profiles.sub.enabled = false;
+  assert.equal((await service.getProfiles()).profiles.sub.accountKey, safe.sub.accountKey);
+});
+
+for (const mode of ['account', 'token']) for (const status of ['ok', 'unauthorized']) {
+  test(`third-party ${mode} environment DTO drives ${status} status and presentation controls`, async () => {
+    const limits = require('../../src/shared/providers/thirdparty/limits');
+    const { createThirdpartyAccountService } = require('../../src/electron/providers/thirdparty/accountService');
+    const env = { TOKEN_MONITOR_NEWAPI_BASE_URL: 'https://env.example/v1/',
+      ...(mode === 'account' ? { TOKEN_MONITOR_NEWAPI_ACCESS_TOKEN: 'private-env-access', TOKEN_MONITOR_NEWAPI_USER_ID: '42' }
+        : { TOKEN_MONITOR_NEWAPI_API_KEY: 'private-env-api' }) };
+    const profiles = { saved: { adapter: 'newapi-token', baseUrl: 'https://saved.example', apiKey: 'private-saved-api' } };
+    const service = createThirdpartyAccountService({ getThirdPartyProfiles: () => profiles, env });
+    const dto = await service.getProfiles();
+    const readings = await limits.fetchThirdPartyLimits({}, { env, fetch: async url => {
+      const path = new URL(url).pathname;
+      const http = status === 'unauthorized' && path !== '/api/status' ? 401 : 200;
+      const data = path === '/api/status' ? { quota_per_unit: 500000 }
+        : path === '/api/data/self' ? []
+        : { quota: 2500000, used_quota: 500000, total_available: 2500000, total_used: 500000 };
+      return { ok: http === 200, status: http, json: async () => ({ success: true, data }) };
+    } });
+    assert.equal(readings.length, 1);
+    assert.equal(readings[0].status, status);
+    assert.equal(dto.hasEnvVar, true);
+    assert.equal(dto.environmentAccountKey, readings[0].accountKey);
+    assert.doesNotMatch(JSON.stringify(dto), /private-/);
+    const calls = [];
+    const { rows } = await thirdPartyRows({}, false, readings, { api: service, presentation: async (...args) => {
+      calls.push(args); return { ok: true };
+    } });
+    const row = rows.find(row => row.dataset.slotId === 'environment');
+    assert.ok(row);
+    assert.equal(row.querySelector('.slot-status').classList.contains(status === 'ok' ? 'slot-connected' : 'slot-invalid'), true);
+    const action = name => [...row.walk()].find(node => node.dataset.slotAction === name);
+    assert.equal(action('rename').classList.contains('hidden'), false);
+    action('rename').click();
+    const input = row.querySelector('.slot-rename'); input.value = 'Environment display name';
+    await input.key('Enter');
+    assert.deepEqual(calls[0], ['thirdparty', readings[0].accountKey, 'rename', 'Environment display name']);
+    await action('up').click();
+    assert.deepEqual(calls[1], ['thirdparty', readings[0].accountKey, 'order', [readings[0].accountKey, dto.profiles.saved.accountKey]]);
+    for (const name of ['replaceKey', 'pause', 'remove']) assert.equal(action(name).classList.contains('hidden'), true, name);
+    assert.equal(row.querySelector('.slot-fix').classList.contains('hidden'), true);
+  });
+}

@@ -95,7 +95,9 @@
     { id: 'mcode', label: 'MiniMax Code' },
     { id: 'mistral', label: 'Mistral Vibe' },
     { id: 'prime-agent', label: 'Prime Agent' },
-    { id: 'jcode', label: 'Jcode' }
+    { id: 'jcode', label: 'Jcode' },
+    { id: 'junie', label: 'Junie' },
+    { id: 'opencodereview', label: 'OpenCodeReview' }
   ].map((client) => Object.freeze({
     defaultTracked: true,
     forkOnly: false,

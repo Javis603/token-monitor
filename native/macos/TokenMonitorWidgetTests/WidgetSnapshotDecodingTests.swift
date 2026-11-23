@@ -1,6 +1,29 @@
+import AppKit
 import XCTest
 
 final class WidgetSnapshotDecodingTests: XCTestCase {
+    func testGeminiArtworkRendersItsCenterInAppKit() throws {
+        let root = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent().deletingLastPathComponent()
+            .deletingLastPathComponent().deletingLastPathComponent()
+        let url = root.appendingPathComponent("assets/icons/gemini.svg")
+        // Use the Widget's SVG normalization before asking AppKit to rasterize.
+        let source = try String(contentsOf: url, encoding: .utf8)
+            .replacingOccurrences(
+                of: #"(width|height)=["']1em["']"#,
+                with: #"$1="24""#,
+                options: .regularExpression
+            )
+            .replacingOccurrences(of: "currentColor", with: "#000000", options: .caseInsensitive)
+        let image = try XCTUnwrap(NSImage(data: Data(source.utf8)))
+        let raster = try XCTUnwrap(image.cgImage(forProposedRect: nil, context: nil, hints: nil))
+        let bitmap = NSBitmapImageRep(cgImage: raster)
+        // Compact arc flags used to leave only a small fragment at the right
+        // edge. The Gemini star must include an opaque center.
+        let center = try XCTUnwrap(bitmap.colorAt(x: bitmap.pixelsWide / 2, y: bitmap.pixelsHigh / 2))
+        XCTAssertGreaterThan(center.alphaComponent, 0.9)
+    }
+
     func testTrendChangeSkipsLeadingZeroBuckets() {
         XCTAssertEqual(
             WidgetTrendChange.label(for: [

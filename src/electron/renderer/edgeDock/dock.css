@@ -164,11 +164,7 @@ html.edge-dock-reduced-motion .edge-dock-refresh[data-state="busy"] .edge-dock-r
   border-radius: 12px;
   transition: background-color 140ms ease;
 }
-/* Hover is carried by the mark itself rather than a selection box: the focused
-   ring thickens and glows in its own colour. */
-.edge-dock-cell.is-focused .edge-dock-ring-fill {
-  filter: drop-shadow(0 0 3px var(--ring-glow-color));
-}
+/* The focused ring's hover glow is shared with the limit meters (styles.css). */
 
 .edge-dock-ring {
   position: relative;
@@ -723,11 +719,16 @@ html.edge-dock-reduced-motion .edge-dock-refresh[data-state="busy"] .edge-dock-r
   color: inherit;
 }
 .edge-dock-session-context-meter {
+  flex: 0 0 16px;
   width: 16px;
   height: 3px;
   overflow: hidden;
   border-radius: 2px;
   background: rgba(var(--overlay-rgb), 0.18);
+}
+.edge-dock-session-context-value {
+  min-width: 3ch;
+  text-align: right;
 }
 .edge-dock-session-context-fill {
   display: block;

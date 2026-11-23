@@ -230,7 +230,7 @@ function applyAppearance(payload) {
   }
   const vendors = themePresetsApi.mergeVendorColors(BRAND_VENDOR_COLORS, appearance.vendorColors);
   window.TokenMonitorUsageCharts.applyVendorColors(vendors);
-  const { interfaceFont, displayFont } = fontSettingsApi.resolveEffectiveFontSettings(appearance);
+  const { interfaceFont, displayFont } = fontSettingsApi.resolveEffectiveFontSettings(appearance, appearance.fontContext);
   style.setProperty('--ui-font', interfaceFont);
   style.setProperty('--display-font', displayFont);
 
@@ -244,7 +244,7 @@ function applyAppearance(payload) {
   if (reduceMotion) settleDockMotions();
   pluginHost?.refreshMotion();
 
-  state.locale = i18n.resolveLocale(appearance.language, navigator.languages);
+  state.locale = appearance.fontContext?.locale || i18n.resolveLocale(appearance.language, navigator.languages);
   docEl.lang = state.locale;
   if (appearance.currencyRatesEffective) currencyApi.configureRates(appearance.currencyRatesEffective);
 }
@@ -269,9 +269,7 @@ function luminance(rgb) {
   return 0.2126 * r + 0.7152 * g + 0.0722 * b;
 }
 
-// Brand marks such as Cursor's are near-black (or near-white), which vanish as
-// a ring on a surface of the same tone. Keep the brand colour whenever it reads
-// against the current glass tint and fall back to the text colour otherwise.
+// Keep chart accents readable against the current glass tint.
 function readableColor(color) {
   const rgb = parseColor(color);
   const surface = parseColor(`rgb(${getComputedStyle(document.documentElement).getPropertyValue('--glass-rgb')})`);
@@ -295,13 +293,6 @@ function limitProviderColor(id) {
   if (module) return pluginViewsApi.presentationColor(module.presentation, clientColors);
   if (id === 'factory') return clientColors.droid;
   return clientColors[id] || clientColors.default;
-}
-
-// The same colour corrected for contrast against the current glass tint. Only
-// the rail uses it: a near-black brand mark vanishes as a ring, while a meter
-// on the card is a filled bar the page paints in the raw brand colour.
-function providerColor(id) {
-  return readableColor(limitProviderColor(id));
 }
 
 function providerLabel(id) {
@@ -736,7 +727,7 @@ function ringNode(remainingPercent, color, mark) {
   // Chromium interpolates color-mix() filter colours near black. Supply legacy
   // RGBA so the hover shadow keeps the ring's colour throughout the transition.
   const glowColor = color === 'var(--text)' ? getComputedStyle(document.documentElement).getPropertyValue('--text') : color;
-  ring.style.setProperty('--ring-glow-color', colorWithAlpha(glowColor, 0.55));
+  ring.style.setProperty('--mark-glow-color', colorWithAlpha(glowColor, 0.55));
   const svg = document.createElementNS(SVG_NS, 'svg');
   svg.setAttribute('viewBox', '0 0 42 42');
   svg.setAttribute('aria-hidden', 'true');
@@ -801,7 +792,7 @@ function providerCellNode(cell) {
   const waiting = presentation.waitingSessionSummary(cell.sessions).count;
   if (running > 0) node.dataset.running = 'yes';
   if (waiting > 0) node.dataset.waiting = 'yes';
-  const color = providerColor(cell.provider);
+  const color = limitProviderColor(cell.provider);
   const shown = presentation.displayPercent(cell.remainingPercent, appearance().showLimitUsed === true);
   const value = el('span', 'edge-dock-value');
   const hasCreditsAmount = Boolean(cell.credits) && cell.credits.amount !== null && cell.credits.amount !== undefined;
@@ -939,10 +930,7 @@ function runningMarksNode(cell, now = Date.now()) {
   if (!clients.length) return null;
   const row = el('span', 'edge-dock-cell-marks');
   for (const client of clients.slice(0, CELL_MARK_LIMIT)) {
-    // Brand colour, corrected for contrast like every other mark the dock
-    // draws: the client id is what the mark is looked up by, and the rail
-    // already reserves colour for severity, so these stay marks and not meters.
-    row.append(markNode(client, readableColor(clientColors[client] || clientColors.default)));
+    row.append(markNode(client, clientColors[client] || clientColors.default));
   }
   const rest = clientCount - Math.min(clients.length, CELL_MARK_LIMIT);
   if (rest > 0) row.append(el('span', 'edge-dock-cell-more', `+${rest}`));
@@ -2363,7 +2351,6 @@ let selfRepaintTimer = null;
 function scheduleSelfRepaint() {
   if (selfRepaintTimer) clearTimeout(selfRepaintTimer);
   selfRepaintTimer = null;
-  if (bridge.isSettingsPreview) return;
   const delay = selfRepaintDelayMs();
   // 0 means this surface has nothing to wake for: a rail with no sessions expiry, or
   // the peek handle. Leaving the timer unarmed is what keeps the rail push-driven.

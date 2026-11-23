@@ -1,0 +1,19 @@
+// @ts-check
+'use strict';
+/** @param {any} row */
+function freshnessKey(row) { return `${row.provider}:${row.source}`; }
+// Confirmed API/Code affiliation survives a newer unlinked observation.
+/** @param {any} winner @param {any} loser */
+function carryObservation(winner, loser) {
+  if (loser?.provider !== 'minimax') return winner;
+  if (!winner.accountKey || winner.accountKey !== loser.accountKey) return winner;
+  if (!winner.region || winner.region !== loser.region) return winner;
+  if (winner.relatedAccountKey || !loser.relatedAccountKey) return winner;
+  return { ...winner, relatedAccountKey: loser.relatedAccountKey };
+}
+/** @param {any[]} rows */
+function suppressCandidates(rows) {
+  const sources = new Set(rows.filter(row => row.accountKey).map(row => row.source));
+  return rows.filter(row => !row.accountKey && (sources.has(row.source) || (sources.size > 0 && !row.source)));
+}
+module.exports = { preserveAccount: true, preserveStaleAccount: () => true, freshnessKey, carryObservation, suppressCandidates };

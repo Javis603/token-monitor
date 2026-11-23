@@ -28,6 +28,12 @@ class Element {
   }
   append(...children) { this.children.push(...children); }
   appendChild(child) { this.append(child); }
+  insertBefore(child, before) {
+    const index = this.children.indexOf(before);
+    if (index < 0) this.append(child);
+    else this.children.splice(index, 0, child);
+  }
+  querySelector() { return null; }
   addEventListener(name, fn) { this.events[name] = fn; }
   setAttribute(name, value) { this.attributes[name] = value; }
 }
@@ -86,7 +92,7 @@ test('each Home count control saves only its own count and refreshes immediately
     let patch;
     let refreshed = false;
     const wrap = vm.runInNewContext(`${source('renderHomeModuleCountSettings', 'renderHomeSettingsList')}; renderHomeModuleCountSettings(id);`, {
-      id, state, document: { createElement: () => new Element() }, homeModulePreferencesApi: preferences,
+      id, state, document: { createElement: () => new Element() }, homeModulePreferencesApi: preferences, addRenderedSettingReset() {},
       t: key => i18n.translate('en', key),
       saveSettings: async value => { patch = value; }, renderHomeIfVisible: () => { refreshed = true; }
     });
@@ -116,7 +122,7 @@ test('failed Home count saves restore persisted controls without rejecting the c
     let successRefreshes = 0;
     let control;
     const context = {
-      id, state, document: { createElement: () => new Element() }, homeModulePreferencesApi: preferences,
+      id, state, document: { createElement: () => new Element() }, homeModulePreferencesApi: preferences, addRenderedSettingReset() {},
       t: key => i18n.translate('en', key), appearancePreview: {}, pendingSettingsPatches: new Set(), syncContentForm: null,
       window: { tokenMonitor: {
         updateSettings: async () => { throw error; },
@@ -188,7 +194,7 @@ test('Home sessions respect a smaller count while retaining an active session be
 
 test('all supported locales translate the Home count controls and active-session explanation', () => {
   for (const { value: locale } of i18n.LANGUAGE_OPTIONS.filter(option => option.value !== 'auto')) {
-    for (const key of ['settings.home.itemCount', 'settings.home.configureModule', 'settings.home.sessionCountNote']) {
+    for (const key of ['settings.home.itemCount', 'settings.home.itemCountValue', 'settings.home.sessionCountNote']) {
       assert.notEqual(i18n.translate(locale, key, { name: 'Models' }), key);
     }
   }

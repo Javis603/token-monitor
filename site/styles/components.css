@@ -1095,7 +1095,8 @@
 .tool-chip img[src$="notion.svg"],
 .tool-chip img[src$="opendesign.svg"],
 .tool-chip img[src$="prime-agent.svg"],
-.tool-chip img[src$="thirdparty.svg"] {
+.tool-chip img[src$="thirdparty.svg"],
+.tool-chip img[src$="hark.svg"] {
   filter: brightness(0) invert(1);
   opacity: .88;
 }

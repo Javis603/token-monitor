@@ -40,6 +40,21 @@ test('remote Hub probe identifies legacy health responses without guessing an up
   });
 });
 
+test('Node deployment labels are optional and independent of build status', async () => {
+  for (const [runtime, deployment, expected] of [
+    ['node-hub', 'app', { deployment: 'app' }],
+    ['node-hub', 'standalone', { deployment: 'standalone' }],
+    ['node-hub', undefined, {}],
+    ['node-hub', 'unexpected', {}],
+    ['cloudflare-worker', 'app', {}]
+  ]) {
+    const result = await probeHubBuild('https://hub.example', {
+      fetchImpl: async () => response({ role: 'hub', hubBuild: currentHubBuild(runtime), deployment })
+    });
+    assert.deepEqual(result, { status: 'current', runtime, ...expected, hubUrl: 'https://hub.example' });
+  }
+});
+
 test('remote Hub probe treats present but malformed build metadata as unknown', async () => {
   const result = await probeHubBuild('https://hub.example', {
     fetchImpl: async () => response({

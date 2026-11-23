@@ -47,32 +47,45 @@ class Element {
   setAttribute(name, value) { this[name] = value; }
 }
 
-test('sync connection stays inline and optional content follows frequency before devices', () => {
+test('sync settings draw one map from the target to its devices, with preferences after it', () => {
   const html = fs.readFileSync(path.join(rendererDir, 'index.html'), 'utf8');
   const start = html.indexOf('id="syncSettingsDetails"');
   const end = html.indexOf('<section class="total-panel">', start);
   const section = html.slice(start, end);
-  assert.ok(section.indexOf('id="hubModeOptions"') < section.indexOf('id="hubUrlInput"'));
-  assert.ok(section.indexOf('id="syncPanelConnection"') < section.indexOf('id="hubUrlInput"'));
-  assert.ok(section.indexOf('id="saveSettingsButton"') < section.indexOf('id="syncUploadIntervalRow"'));
-  assert.ok(section.indexOf('id="syncUploadIntervalRow"') < section.indexOf('id="syncDevicePanel"'));
-  assert.ok(section.indexOf('id="syncUploadIntervalRow"') < section.indexOf('id="syncContentDetails"'));
-  assert.ok(section.indexOf('id="syncContentDetails"') < section.indexOf('id="syncDevicePanel"'));
+  const order = ['syncMap', 'hubModeOptions', 'syncLocalIntro', 'syncPanelConnection', 'hubUrlInput', 'hubHostFields', 'icloudFields',
+    'saveSettingsButton', 'syncDevicePanel', 'syncThisDeviceCard', 'deviceIconLocalRow', 'syncUploadIntervalRow', 'syncContentDetails'];
+  const positions = order.map(id => section.indexOf(`id="${id}"`));
+  assert.ok(positions.every(position => position >= 0));
+  assert.deepEqual([...positions].sort((a, b) => a - b), positions);
+  // The device list and the save form live inside the map; preferences do not.
+  const map = section.slice(section.indexOf('id="syncMap"'), section.indexOf('id="syncThisDeviceCard"'));
+  assert.match(map, /^id="syncMap" class="settings-page-card sync-map"/);
+  assert.ok(map.includes('id="syncDevicePanel"') && map.includes('id="syncDeviceSettings"'));
+  assert.deepEqual([...section.matchAll(/data-sync-icon="(\w+)"/g)].map(match => match[1]), ['client', 'host', 'icloud']);
+  assert.match(section, /id="syncLocalIntro"[^>]*data-sync-modes="local"/);
   assert.equal((section.match(/id="syncPanelConnection"/g) || []).length, 1);
   assert.doesNotMatch(section.slice(0, section.indexOf('id="syncContentDetails"')), /<summary|syncConnectionSettings|syncConnectionMode/);
   assert.match(section, /id="syncContentToggle"[^>]*class="settings-group-header cursor-settings-toggle"[^>]*aria-expanded="false"[^>]*aria-controls="syncContentDetails"/);
   assert.match(section, /id="syncContentDetails" class="cursor-settings-details hidden" inert/);
   assert.match(section, /class="sync-mode-select"[\s\S]*?<select id="hubModeOptions"[\s\S]*?<span class="settings-section-disclosure" aria-hidden="true">/);
   const css = fs.readFileSync(path.join(rendererDir, 'styles.css'), 'utf8');
-  assert.doesNotMatch(css.match(/\.sync-connection-fields\s*\{([^}]+)\}/)?.[1] || '', /\bgap:/);
   assert.doesNotMatch(css, /\.settings-sync-group\.expanded[^}]*\.settings-section-summary\s*\{\s*display:\s*none/);
+  // The rail reaches the target only while nothing sits between them, and stops at the last device.
+  assert.match(css, /\.sync-map:has\(\.sync-device-row\):not\(:has\(> #syncDeviceSettings:not\(\[hidden\]\)\)\) \{ --rail-link: var\(--rail\); \}/);
+  assert.match(css, /\.sync-map \.sync-device-row:first-child \{ --rail-above: var\(--rail-link\); \}/);
+  assert.match(css, /\.sync-map \.sync-device-row:last-child \{ --rail-below: transparent; \}/);
+  // Collapsing a mode's fields must also collapse the space below them.
+  assert.match(css, /\.sync-map-hub > \.accordion-animation-inner::after \{ content: ""; height: 12px; \}/);
+  const mode = functionSource('syncHubModeUi', 'renderIcloudStatus');
+  assert.match(mode, /node\.hidden = !shown;\s*node\.inert = !shown;/);
+  assert.match(appSource, /for \(const slot of document\.querySelectorAll\('\[data-sync-icon\]'\)\) slot\.replaceChildren\(syncModeIcons\[slot\.dataset\.syncIcon\]\(document\)\);/);
 });
 
 test('sync edit and removal actions use local SVG masks without replacing their text labels', () => {
   const css = fs.readFileSync(path.join(rendererDir, 'styles.css'), 'utf8');
   const notices = fs.readFileSync(path.join(rendererDir, 'icons/THIRD_PARTY_NOTICES.md'), 'utf8');
   const html = fs.readFileSync(path.join(rendererDir, 'index.html'), 'utf8');
-  assert.match(html, /id="syncConnectionEdit"[^>]*data-i18n="settings\.sync\.editConnection">Change connection<\/button>/);
+  assert.match(html, /id="syncConnectionEdit"[^>]*data-i18n="settings\.sync\.editConnection"[^>]*data-i18n-aria-label="settings\.sync\.editConnection"[^>]*>Change connection<\/button>/);
   for (const [selector, icon] of [
     ['.sync-connection-edit::before', 'pencil-line'],
     ['.sync-device-side .device-delete-label::before', 'trash']
@@ -97,11 +110,10 @@ test('sync status aligns icon and text in one heading and keeps a separate clipp
   assert.match(connection, /display:\s*grid/);
   assert.doesNotMatch(connection, /flex-wrap/);
   const html = fs.readFileSync(path.join(rendererDir, 'index.html'), 'utf8');
-  assert.match(html, /class="sync-connection-heading">\s*<span class="sync-connection-status">[\s\S]*?id="syncPanelSignal"[\s\S]*?id="syncPanelState"/);
-  assert.match(css.match(/\.sync-connection-status\s*\{([^}]+)\}/)?.[1], /align-items:\s*center/);
+  assert.match(html, /class="sync-node-icon">\s*<span id="syncPanelSignal"[\s\S]*?class="sync-connection-heading">\s*<div id="syncConnectionIdentity"[\s\S]*?id="syncPanelState"/);
   assert.match(css.match(/\.sync-connection-heading\s*\{([^}]+)\}/)?.[1], /align-items:\s*center/);
   assert.doesNotMatch(css.match(/\.sync-panel-signal\s*\{([^}]+)\}/)?.[1], /margin-top/);
-  assert.match(css.match(/\.sync-connection-identity\s*\{([^}]+)\}/)?.[1], /display:\s*grid/);
+  assert.match(css.match(/\.sync-connection-identity\s*\{([^}]+)\}/)?.[1], /display:\s*flex/);
   const endpoint = css.match(/#syncConnectionEndpoint\s*\{([^}]+)\}/)?.[1];
   assert.match(endpoint, /overflow:\s*hidden/);
   assert.match(endpoint, /white-space:\s*nowrap/);
@@ -115,7 +127,7 @@ test('select and navigation popups share their regular and native glass surface'
   const css = fs.readFileSync(path.join(rendererDir, 'styles.css'), 'utf8');
   const rule = selector => [...css.replace(/\/\*[\s\S]*?\*\//g, '').matchAll(/([^{}]+)\{([^{}]*)\}/g)]
     .find(match => match[1].trim() === selector)?.[2];
-  const surface = rule('.plugin-menu,\n.view-switcher-menu,\n.select-control-popup,\n.sync-content-dialog,\n.plugin-catalog-dialog,\n.settings-help-popover,\n.app-update-popover');
+  const surface = rule('.plugin-menu,\n.view-switcher-menu,\n.select-control-popup,\n.appearance-color-picker,\n.sync-content-dialog,\n.plugin-catalog-dialog,\n.settings-help-popover,\n.app-update-popover');
   assert.ok(surface);
   for (const property of ['border', 'border-radius', 'background', 'box-shadow', 'backdrop-filter']) {
     assert.ok(surface.includes(`${property}:`), property);
@@ -125,7 +137,7 @@ test('select and navigation popups share their regular and native glass surface'
   assert.doesNotMatch(rule('.select-control-popup'), /background:|border-radius:|box-shadow:/);
   assert.doesNotMatch(rule('.sync-content-dialog,\n.settings-help-popover'), /background:|border-radius:|box-shadow:/);
   assert.doesNotMatch(rule('.view-switcher-menu'), /background:|border-radius:|box-shadow:/);
-  assert.ok(rule('html.native-liquid-glass .plugin-menu,\nhtml.native-liquid-glass .select-control-popup,\nhtml.native-liquid-glass .view-switcher-menu,\nhtml.native-liquid-glass .sync-content-dialog,\nhtml.native-liquid-glass .plugin-catalog-dialog,\nhtml.native-liquid-glass .settings-help-popover,\nhtml.native-liquid-glass .app-update-popover'));
+  assert.ok(rule('html.native-liquid-glass .plugin-menu,\nhtml.native-liquid-glass .select-control-popup,\nhtml.native-liquid-glass .appearance-color-picker,\nhtml.native-liquid-glass .view-switcher-menu,\nhtml.native-liquid-glass .sync-content-dialog,\nhtml.native-liquid-glass .plugin-catalog-dialog,\nhtml.native-liquid-glass .settings-help-popover,\nhtml.native-liquid-glass .app-update-popover'));
   assert.ok(rule('html.native-liquid-glass .plugin-menu button,\nhtml.native-liquid-glass .select-control-option,\nhtml.native-liquid-glass .view-switcher-menu-item'));
   const selected = '.select-control-option[data-selected="true"]';
   const highlighted = '.select-control-option[data-highlighted="true"]';
@@ -170,13 +182,15 @@ test('sync method selects the corresponding fields without touching draft input 
   for (const mode of ['local', 'client', 'host', 'icloud']) {
     const hidden = {};
     const field = id => ({ classList: { toggle(name, value) { hidden[id] = value; } } });
+    const localIntro = { dataset: { syncModes: 'local' } };
     const context = vm.createContext({
       syncContentForm: null,
       state: { settings: { hubMode: mode }, appInfo: { platform: 'win32' } },
       els: {
         hubModeOptions: {}, icloudModeOption: {},
         hubClientFields: field('client'), hubHostFields: field('host'), icloudFields: field('icloud'),
-        hubSecretInput: {}, hubUrlInput: { value: 'https://draft.test' }, secretInput: { value: 'draft' }
+        hubSecretInput: {}, hubUrlInput: { value: 'https://draft.test' }, secretInput: { value: 'draft' },
+        syncMap: { querySelectorAll: () => [localIntro] }
       },
       SYNC_MODE_DESCRIPTIONS: { local: 'local', client: 'client', host: 'host', icloud: 'icloud' },
       syncModeSelect: { sync() {} },
@@ -194,6 +208,8 @@ test('sync method selects the corresponding fields without touching draft input 
     }
     assert.equal(context.els.hubUrlInput.value, 'https://draft.test');
     assert.equal(context.els.secretInput.value, 'draft');
+    assert.equal(localIntro.hidden, mode !== 'local');
+    assert.equal(localIntro.inert, mode !== 'local');
   }
 });
 
@@ -204,6 +220,7 @@ test('sync mode enhances the native source with shared icons and translated desc
   const context = vm.createContext({
     window: { TokenMonitorSelectControl: { enhance(select, options) { calls.push({ select, options }); return {}; } }, addEventListener() {} },
     els: { hubModeOptions: {} },
+    document: { querySelectorAll: () => [] },
     t: key => key
   });
   vm.runInContext(appSource.slice(start, end), context);
@@ -282,7 +299,7 @@ test('empty device list refreshes when the runtime starts syncing', () => {
   const list = new Element();
   const context = vm.createContext({
     document: { createElement: () => new Element() },
-    els: { syncDeviceList: list, syncPanelCount: {}, syncPanelOpenDevices: {} },
+    els: { syncDeviceList: list, syncPanelCount: {} },
     state: { mode: 'local', settings: { hubMode: 'client' } },
     syncDevicePanelApi: panelApi,
     currentLocale: () => 'en',
@@ -307,7 +324,7 @@ test('sync timestamp changes reuse the device row and pass the latest data to it
   const updates = [];
   const context = vm.createContext({
     document: { createElement: () => new Element() },
-    els: { syncDeviceList: list, syncPanelCount: {}, syncPanelOpenDevices: {} },
+    els: { syncDeviceList: list, syncPanelCount: {} },
     state: { mode: 'sync', settings: { hubMode: 'client' } },
     syncDevicePanelApi: panelApi,
     currentLocale: () => 'en',

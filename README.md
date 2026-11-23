@@ -30,7 +30,7 @@
 
 ## What is Token Monitor?
 
-A desktop app that shows live token usage and AI Tool Limits across 54+ AI coding tools — Claude Code, Codex, Cursor, GitHub Copilot, Cherry Studio, and more — with real-time multi-device sync, historical usage trends, and breakdowns by tool, device, model, session, or project. It lives wherever you look: the main window, the MacBook notch, the menu bar or system tray, the edge of the screen, a floating bubble, and native macOS widgets.
+A desktop app that shows live token usage and AI Tool Limits across 56+ AI coding tools — Claude Code, Codex, Cursor, GitHub Copilot, Cherry Studio, and more — with real-time multi-device sync, historical usage trends, and breakdowns by tool, device, model, session, or project. It lives wherever you look: the main window, the MacBook notch, the menu bar or system tray, the edge of the screen, a floating bubble, and native macOS widgets.
 
 ## Supported Tools
 
@@ -79,6 +79,8 @@ Token usage, AI Tool Limits and session details from the AI coding tools and pro
     <img src=".github/assets/tools-icon/mistral.png" width="40" alt="Mistral Vibe" title="Mistral Vibe" />
     <img src=".github/assets/tools-icon/prime-agent.png" width="40" alt="Prime Agent" title="Prime Agent" />
     <img src=".github/assets/tools-icon/jcode.png" width="40" alt="Jcode" title="Jcode" />
+    <img src=".github/assets/tools-icon/junie.png" width="40" alt="Junie" title="Junie" />
+    <img src=".github/assets/tools-icon/opencodereview.png" width="40" alt="OpenCodeReview" title="OpenCodeReview" />
     <img src=".github/assets/tools-icon/typesafe.png" width="40" alt="TypeSafe" title="TypeSafe" />
     <img src=".github/assets/tools-icon/openrouter.png" width="40" alt="OpenRouter" title="OpenRouter" />
     <img src=".github/assets/tools-icon/volcengine.png" width="40" alt="Volcengine" title="Volcengine" />
@@ -160,18 +162,22 @@ Launch the app to start tracking this device locally, with no hub setup required
 
 ### Tracking usage
 
-- **Live token tracking** — Claude Code, Codex, Cursor, GitHub Copilot, Antigravity, OpenCode, and 42+ AI tools, with the UI updating within seconds of each turn (full list in the table above)
+- **Live token tracking** — Claude Code, Codex, Cursor, GitHub Copilot, Antigravity, OpenCode, and 44+ AI tools, with the UI updating within seconds of each turn (full list in the table above)
 - **Live token rate** — an optional live readout of generation speed in `tok/s` or total burn in `tok/min`
 - **Per-session detail** — open a session to see tokens per prompt, expandable to each reply's exact token split and tools used (read on-demand from local transcripts or databases, never synced)
+- **Session search & filters** — search sessions by title, tool, model, or ID, filter them by tool, and see which device a synced session came from
 - **Cache hit statistics** — click any tool or model to expand a detailed breakdown of input tokens (cache hit vs miss), output tokens, and hit-rate percentages
 - **Cost & currency** — cost alongside token counts, shown in USD, CNY, TWD, HKD, KRW, JPY, BRL and other supported currencies; exchange rates auto-update daily and can be manually overridden in Settings
+- **Model aliases & custom pricing** — show different names for the same model as one row, and override the price of any model
 - **Custom scan paths** — point a tool at extra session folders when yours live outside the defaults
-- **WSL usage (Windows)** — file-based usage from running WSL distros is merged about every 5 minutes; SQLite-backed tools such as OpenCode and Hermes may require a [headless agent inside WSL](docs/wsl-sqlite-setup.md)
+- **WSL usage (Windows)** — off by default; file-based usage from running WSL distros is merged about every 5 minutes; SQLite-backed tools such as OpenCode and Hermes may require a [headless agent inside WSL](docs/wsl-sqlite-setup.md)
 
 ### Limits, trends & export
 
 - **AI Tool Limits detection** — provider-specific session, daily, weekly, billing, and credits windows for Claude Code, Codex, Cursor, OpenRouter, third-party APIs, GLM, Kimi, and 34+ providers, including multiple OpenRouter/third-party profiles and balance-style accounts (Claude credits, DeepSeek prepaid balance and spend history, third-party balances)
 - **Multiple accounts & Codex switching** — track several accounts per provider, each with its own limits; a tracked Codex account can be switched as the active local account in one click, without re-authenticating
+- **Quota history** — hover or click an account in the Limits view for its current-cycle trend and the last 14 days of measured usage; history is recorded locally and never uploaded
+- **Network proxy** — route AI Tool Limits and account requests through a proxy set in Settings → General
 - **Codex reset forecast** — an optional third-party forecast below Codex limits, showing the expected reset time, the reset type (Regular or Banked), and when the window last reset
 - **Preserve deleted session usage** — many tools prune old sessions (Claude Code drops transcripts after 30 days by default), losing that history. When enabled, Token Monitor archives observed daily tool/model usage locally so the heatmap and trends survive even after the source files are gone (see [Session data retention](#session-data-retention) below)
 - **Usage Trends & Dashboard** — a home-screen activity heatmap and trend chart, plus a dedicated dashboard window with streaks and stacked per-tool/per-model history (bar and K-line views) across all your devices
@@ -198,7 +204,7 @@ Launch the app to start tracking this device locally, with no hub setup required
 - **Floating Bubble mode** — collapses the widget into a draggable mini-window with click or hover preview and tray-style content
 - **Native macOS Widgets** — View token usage and cost, trends, AI tool quota remaining and reset times, activity heatmaps, and breakdowns by tool or model in Small, Medium, and Large layouts on macOS 14+
 - **Breakdown views** — grouped by tool, device, model, session, project, or account limits
-- **Appearance controls** — interface theme switching (incl. a light mode), per-tool vendor colours, glass opacity, blur, transparent window mode, and custom fonts
+- **Appearance controls** — interface themes (incl. a light mode) with custom colours, per-tool vendor colours, native glass styles on macOS and Windows, a background image, and text size and fonts
 - **Customizable tool list** — hide, pin, and reorder tools in the main dashboard without changing what gets tracked
 - **Recordable global shortcut** — show or hide the window from anywhere
 - **Discord Rich Presence** — broadcast today's tokens, cost, and top client (opt-in)
@@ -257,6 +263,8 @@ Token Monitor supports token usage, account-limit checks, and session details se
 | <img src=".github/assets/tools-icon/mistral.png" width="28" alt="Mistral" /> | Mistral Vibe | `$VIBE_HOME/logs/session/` (`~/.vibe/logs/session/`); Mistral Admin cookie (Included API / Vibe monthly allowance and credit balance) | ✅ | ✅ | — |
 | <img src=".github/assets/tools-icon/prime-agent.png" width="28" alt="Prime Agent" /> | Prime Agent | `~/.prime/agent/` (`sessions/`, `session-artifacts/`) | ✅ | — | — |
 | <img src=".github/assets/tools-icon/jcode.png" width="28" alt="Jcode" /> | Jcode | `~/.jcode/sessions/` | ✅ | — | — |
+| <img src=".github/assets/tools-icon/junie.png" width="28" alt="Junie" /> | Junie | `~/.junie/sessions/**/events.jsonl` | ✅ | — | — |
+| <img src=".github/assets/tools-icon/opencodereview.png" width="28" alt="OpenCodeReview" /> | OpenCodeReview | `~/.opencodereview/sessions/**/*.jsonl` | ✅ | — | — |
 | <img src=".github/assets/tools-icon/typesafe.png" width="28" alt="TypeSafe" /> | TypeSafe | TypeSafe Console Cookie (billing balance and estimated token spend via usage data) | — | ✅ | — |
 | <img src=".github/assets/tools-icon/openrouter.png" width="28" alt="OpenRouter" /> | OpenRouter | OpenRouter API key (usage/key limit; balance when credits access is authorized, documented for Management keys) | — | ✅ | — |
 | <img src=".github/assets/tools-icon/volcengine.png" width="28" alt="Volcengine" /> | Volcengine | Ark API key or Volcengine AK/SK (Ark Coding Plan & Agent Plan quota via Volcengine API) | — | ✅ | — |
@@ -264,7 +272,7 @@ Token Monitor supports token usage, account-limit checks, and session details se
 | <img src=".github/assets/tools-icon/trae.png" width="28" alt="Trae CN" /> | Trae CN | Trae CN access token (Trae CN / SOLO credits via trae.cn) | — | ✅ | — |
 | <img src=".github/assets/tools-icon/alibaba.png" width="28" alt="Alibaba Cloud" /> | Alibaba Cloud | Alibaba Cloud console cookie (Bailian / Model Studio Token Plan quota, Team & Personal) | — | ✅ | — |
 | <img src=".github/assets/tools-icon/stepfun.png" width="28" alt="StepFun" /> | StepFun | StepFun Oasis-Token (Coding Plan / Token Plan quota) | — | ✅ | — |
-| <img src=".github/assets/tools-icon/notion.png" width="28" alt="Notion AI" /> | Notion AI | Notion AI rolling/monthly allowance for Business/Enterprise; manual token_v2 cookie + explicit workspace ID | — | ✅ | — |
+| <img src=".github/assets/tools-icon/notion.png" width="28" alt="Notion AI" /> | Notion AI | Business/Enterprise Standard and Select credits or legacy rolling/monthly allowances; manual token_v2 cookie + explicit workspace ID | — | ✅ | — |
 | <img src=".github/assets/tools-icon/manus.png" width="28" alt="Manus" /> | Manus | Manus credits (monthly + daily/periodic refresh + balance); desktop session (macOS/Windows) or manual web session (all OSes) | — | ✅ | — |
 | <img src=".github/assets/tools-icon/hark.png" width="28" alt="Hark" /> | Hark | Hark Pro daily and monthly token pools; macOS desktop session or pasted session cookie | — | ✅ | — |
 | <img src=".github/assets/tools-icon/opendesign.png" width="28" alt="OpenDesign" /> | OpenDesign | Five-hour / weekly subscription allowance for the current workspace; manual Cookie | — | ✅ | — |
@@ -284,7 +292,7 @@ Token Monitor supports token usage, account-limit checks, and session details se
 - LM Studio tracking currently covers OpenAI-compatible `/v1/chat/completions` and `/v1/responses` requests recorded in server logs. Conversations started from LM Studio's built-in Chat UI and native `/api/v1/chat` requests are not included.
 - Unsloth Studio tracks inference usage from `studio.db`: Studio chats and its local API. Local inference has zero API cost; recognized metered providers use Tokscale's price estimates. Training tokens are not included. See [Unsloth source notes](docs/providers/unsloth.md).
 - Devin tracks Devin CLI sessions from the local `sessions.db` and Devin Desktop agent sessions from `acp-events` ACP logs; where both cover the same session the CLI database is authoritative. Desktop coverage depends on the connected ACP agent: only agents that write `usage_update` events locally are counted, and Devin Desktop's default `devin-cloud` agent meters its usage server-side, so a default Desktop setup reports no Desktop tokens. Session titles and project attribution come from the CLI database. See [Devin source notes](docs/providers/devin.md).
-- Notion AI uses internal APIs with a manually pasted `token_v2` cookie and an explicit Business/Enterprise workspace ID. Only fixtures have been validated; a real response sample is unavailable and live authentication awaits approval. There is no automatic cookie retrieval or public API guarantee. See [Notion source notes](docs/providers/notion.md).
+- Notion AI uses internal APIs with a manually pasted `token_v2` cookie and an explicit Business/Enterprise workspace ID. Token Monitor tests against fixtures, including a sanitized Standard/Select response. See [Notion source notes](docs/providers/notion.md) for validation details.
 - Manus reads a signed-in desktop session on macOS/Windows, or a manually supplied web session on any OS (including Linux). Monthly credits, refresh allowance and balance use the same undocumented internal endpoint, with no compatibility guarantee. See [Manus source notes](docs/providers/manus.md).
 - Hark reads the signed-in macOS desktop session, or a pasted session cookie on any OS. It shows account-level daily and monthly token pools. See [Hark source notes](docs/providers/hark.md).
 - MiniMax Code reads the local session history the CLI writes, under `~/.minimax` or `MINIMAX_DATA_DIR` / `MAVIS_DATA_DIR` (also `~/.mavis` and `~/.minimax-<profile>` / `~/.mavis-<profile>`), plus runs captured with `tokscale headless mcode`; a turn found in both counts once.
@@ -302,7 +310,7 @@ Token Monitor supports token usage, account-limit checks, and session details se
 |---------|-------------------------|------------|
 | Session titles | Claude Code, Codex, OpenCode, Cursor, Antigravity, Cline CLI, Factory Droid, Kimi CLI, Grok Build, Pi, Oh My Pi, OmO Native, MiMo, ZCode, CodeBuddy, WorkBuddy, Reasonix, DeepSeek Harness, Cherry Studio, Devin CLI, fx, MiniMax Code | — |
 | Per-prompt/reply usage and tool calls | Claude Code, Codex, OpenCode, Pi, Oh My Pi, OmO Native, CodeBuddy, WorkBuddy, Reasonix, DeepSeek Harness | Details are read locally and are not synced. |
-| Context usage/remaining space | Claude Code, Codex, DeepSeek Harness | Claude Code's context limit is estimated from the model. |
+| Context usage/remaining space | Claude Code, Codex, DeepSeek Harness, Grok Build, WorkBuddy, CatPaw | Claude Code's context limit is estimated from the model. |
 | Cache usage/session cache hit rate | Sources exposing cache fields, including Claude Code, Codex, OpenCode, Cursor, Kimi, Pi, Oh My Pi, OmO Native, DeepSeek Harness | Hit rate is shown when cache usage data is available. |
 | Estimated cache time remaining | Claude Code | 5 minutes or 1 hour, based on the recorded cache tier. |
 | Output speed/token consumption rate | Claude Code, Codex, OpenCode, Antigravity, Kimi, GitHub Copilot, Pi, Oh My Pi, OmO Native, Kilo CLI, MiMo Code/MiMo Desktop, Muse Code, ZCode CLI, Kiro, DeepSeek Harness, Devin CLI | Output speed in `tok/s`, total token consumption in `tok/min`; timing can include waiting. |
@@ -461,7 +469,7 @@ This archive only covers days Token Monitor has already observed; data deleted b
 
 There are two places to configure Token Monitor; day-to-day use only needs the first:
 
-- **Widget (GUI)** — click the `⚙` button in the bottom-right corner. Sections, in order: General (language, launch at login, updates), Main (Home modules and display currency), Window (window behavior, menu bar and floating-bubble layout, tray mode, shortcut), Appearance (theme and vendor colours), Collection (tracked tools, collection cadence, Preserve deleted session usage, data export), AI Tool Limits (provider selection, limits, and credentials), Subscriptions (what you pay per account), and Multi-device Sync. The `⇧` button in the title bar cycles the window behavior.
+- **Widget (GUI)** — click the `⚙` button in the bottom-right corner. Sections, in order: General (language, launch at login, updates, network proxy), Main (view order, Home modules, default usage range, and display currency), Window (window behavior, menu bar and floating-bubble layout, tray mode, Edge Dock and Notch Panel, shortcut), Appearance (theme, glass, text size, and colours), Collection (tracked tools, collection cadence, Preserve deleted session usage, WSL scanning, data export, model aliases and pricing), AI Tool Limits (provider selection, limits, and credentials), Subscriptions (what you pay per account), Multi-device Sync (sync method and saved Hubs), and Plugins (experimental). The `⇧` button in the title bar cycles the window behavior.
 - **Headless agent & hub** — no UI; configured with a `.env` file at the project root (copy from `.env.example`), precedence CLI flag → env var → built-in default. See [docs/configuration.md](docs/configuration.md#headless-agent--hub-env).
 
 See the [configuration reference](docs/configuration.md) for every setting and all environment variables.

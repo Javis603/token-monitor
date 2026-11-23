@@ -321,7 +321,7 @@ async function fetchZaiLimits(options = {}, deps = {}) {
   const env = deps.env || process.env;
   const now = (deps.now || Date.now)();
   const updatedAt = new Date(now).toISOString();
-  const key = zaiToken(env, options.zaiApiKey);
+  const key = deps.accountSlotDiscovered ? '' : zaiToken(env, options.zaiApiKey);
   const region = zaiRegion(options, env);
 
   const keyLane = key
@@ -411,7 +411,8 @@ async function fetchZaiLimits(options = {}, deps = {}) {
   };
 
   const planLane = (async () => {
-    const discovery = discoverZcodeConnection(options, {
+    if (deps.accountSlotSaved) return emptyLane();
+    const discovery = deps.accountSlotDiscovery || discoverZcodeConnection(options, {
       readFileSync: deps.readFileSync || fs.readFileSync,
       env,
       homeDir: deps.homeDir || options.homeDir || os.homedir()
@@ -832,7 +833,26 @@ function parseZcodeStartPlanBalances(payload) {
   return { plan: String(plans[0]?.name || '').trim(), windows };
 }
 
+function discoverAccountSlots(deps = {}) {
+  const discovery = (deps.discoverZcodeConnection || discoverZcodeConnection)({}, { ...deps, env: deps.env || process.env });
+  if (!discovery.credential && !discovery.billing) {
+    // ZCode still names the signed-in account but its credential cannot be
+    // read: not a sign-out, so the known account stays listed as unavailable.
+    if (['billing_jwt_unavailable', 'coding_plan_key_missing'].includes(discovery.reason)) {
+      throw Object.assign(new Error('ZCode credential unavailable'), { status: 'unavailable' });
+    }
+    return [];
+  }
+  const token = discovery.credential?.token || discovery.billing.credential.token;
+  return [{ values: { zaiApiKey: token, zaiApiRegion: discovery.family === 'bigmodel' ? 'bigmodel-cn' : 'global' },
+    accountKey: hashKey('zai', token), sourceName: 'ZCode',
+    combineMatchingCredential: discovery.kind === 'coding-quota',
+    combinedFetchDeps: { accountSlotDiscovery: discovery, accountSlotDiscovered: false, accountSlotSaved: false },
+    fetchDeps: { accountSlotDiscovery: discovery, accountSlotDiscovered: true, accountSlotSaved: false } }];
+}
+
 module.exports = {
+  discoverAccountSlots,
   ZAI_FETCH_TIMEOUT_MS,
   ZAI_QUOTA_URL,
   ZAI_SUBSCRIPTION_URL,

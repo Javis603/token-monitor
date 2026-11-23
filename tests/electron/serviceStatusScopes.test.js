@@ -220,7 +220,7 @@ test('revealed status providers render immediately without bypassing manual refr
 
 test('unhiding checks status immediately and follows an in-flight request with the new selection', async () => {
   const source = fs.readFileSync(path.join(__dirname, '../../src/electron/renderer/app.js'), 'utf8');
-  const names = ['refreshServiceStatus', 'onServiceProviderVisibilityToggle', 'showAllServiceProviders'];
+  const names = ['refreshServiceStatus', 'onServiceProviderVisibilityToggle'];
   const functions = names.map((name) => {
     const start = source.indexOf(`async function ${name}(`);
     return source.slice(start, source.indexOf('\n}\n', start) + 3);
@@ -262,15 +262,6 @@ test('unhiding checks status immediately and follows an in-flight request with t
   await inFlight;
   assert.equal(state.serviceStatusBusy, false);
   assert.equal(state.serviceStatus.providers[1].status, 'ok');
-  await vm.runInContext('showAllServiceProviders()', context);
-  assert.equal(calls.length, 3, 'show all with nothing hidden does not fetch');
-  await vm.runInContext('onServiceProviderVisibilityToggle("minimax-intl")', context);
-  const showAll = vm.runInContext('showAllServiceProviders()', context);
-  await new Promise(setImmediate);
-  assert.equal(calls.length, 4);
-  assert.equal(calls[3].force, true);
-  pending.shift()();
-  await showAll;
 });
 
 test('a failed status request only marks providers included in that request', async () => {

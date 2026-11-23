@@ -30,7 +30,7 @@
 
 ## Token Monitor とは
 
-Claude Code、Codex、Cursor、GitHub Copilot、Cherry Studio など 54+ 種類の AI コーディングツールのリアルタイムトークン使用量と AI ツール制限を表示するデスクトップアプリです。複数デバイス間のリアルタイム同期、使用履歴トレンド、ツール・デバイス・モデル・セッション・プロジェクト別の内訳表示に対応しています。メインウィンドウ、MacBook のノッチ、メニューバーやシステムトレイ、画面の端、フローティングバブル、ネイティブ macOS ウィジェットなど、目に入るあらゆる場所で確認できます。
+Claude Code、Codex、Cursor、GitHub Copilot、Cherry Studio など 56+ 種類の AI コーディングツールのリアルタイムトークン使用量と AI ツール制限を表示するデスクトップアプリです。複数デバイス間のリアルタイム同期、使用履歴トレンド、ツール・デバイス・モデル・セッション・プロジェクト別の内訳表示に対応しています。メインウィンドウ、MacBook のノッチ、メニューバーやシステムトレイ、画面の端、フローティングバブル、ネイティブ macOS ウィジェットなど、目に入るあらゆる場所で確認できます。
 
 ## 対応ツール
 
@@ -79,6 +79,8 @@ Claude Code、Codex、Cursor、GitHub Copilot、Cherry Studio など 54+ 種類�
     <img src=".github/assets/tools-icon/mistral.png" width="40" alt="Mistral Vibe" title="Mistral Vibe" />
     <img src=".github/assets/tools-icon/prime-agent.png" width="40" alt="Prime Agent" title="Prime Agent" />
     <img src=".github/assets/tools-icon/jcode.png" width="40" alt="Jcode" title="Jcode" />
+    <img src=".github/assets/tools-icon/junie.png" width="40" alt="Junie" title="Junie" />
+    <img src=".github/assets/tools-icon/opencodereview.png" width="40" alt="OpenCodeReview" title="OpenCodeReview" />
     <img src=".github/assets/tools-icon/typesafe.png" width="40" alt="TypeSafe" title="TypeSafe" />
     <img src=".github/assets/tools-icon/openrouter.png" width="40" alt="OpenRouter" title="OpenRouter" />
     <img src=".github/assets/tools-icon/volcengine.png" width="40" alt="Volcengine" title="Volcengine" />
@@ -160,18 +162,22 @@ brew install --cask token-monitor
 
 ### 使用量の追跡
 
-- **リアルタイムトークン追跡** — Claude Code、Codex、Cursor、GitHub Copilot、Antigravity、OpenCode など 42+ 種類の AI ツール、各ターンから数秒以内に UI 更新（全リストは上の表を参照）
+- **リアルタイムトークン追跡** — Claude Code、Codex、Cursor、GitHub Copilot、Antigravity、OpenCode など 44+ 種類の AI ツール、各ターンから数秒以内に UI 更新（全リストは上の表を参照）
 - **リアルタイムトークンレート** — 生成速度を `tok/s`、総消費を `tok/min` で表示する任意のライブ表示
 - **セッション別詳細** — セッションを開くとプロンプトごとのトークン、各応答のトークン分割・使用ツールまで展開（ローカル transcript/DB を必要時のみ読み込み、同期しない）
+- **セッション検索とフィルター** — タイトル、ツール、モデル、ID でセッションを検索し、ツールで絞り込み、同期されたセッションがどのデバイスのものかも表示
 - **キャッシュヒット統計** — ツール・モデルをクリックすると入力トークン（キャッシュ hit/miss）、出力トークン、ヒット率の詳細
 - **コストと通貨** — トークン数とともにコストを表示。USD、CNY、TWD、HKD、KRW、JPY、BRL などに対応し、為替レートは毎日自動更新、設定で手動上書き可能
+- **モデルの別名とカスタム価格** — 同じモデルの異なる名前を 1 行にまとめて表示し、任意のモデルの価格を上書き可能
 - **カスタムスキャンパス** — セッションが既定の場所にない場合、ツールごとに追加フォルダーを指定できます
-- **WSL 使用量 (Windows)** — 実行中の WSL ディストリビューションのファイルベースの使用量を約 5 分ごとに合算。OpenCode や Hermes など SQLite ベースのツールでは、[WSL 内のヘッドレスエージェント](docs/wsl-sqlite-setup.md)が必要になる場合があります
+- **WSL 使用量 (Windows)** — 既定ではオフ。実行中の WSL ディストリビューションのファイルベースの使用量を約 5 分ごとに合算。OpenCode や Hermes など SQLite ベースのツールでは、[WSL 内のヘッドレスエージェント](docs/wsl-sqlite-setup.md)が必要になる場合があります
 
 ### 制限・トレンド・エクスポート
 
 - **AI ツール制限検出** — Claude Code、Codex、Cursor、OpenRouter、サードパーティAPI、GLM、Kimi など 34+ プロバイダーの session/daily/weekly/billing/credits、複数の OpenRouter／サードパーティプロファイル、残高型アカウント（Claude クレジット、DeepSeek のプリペイド残高と使用履歴、サードパーティ残高）
 - **複数アカウントと Codex 切り替え** — 1 つのプロバイダーで複数アカウントを追跡し、それぞれの制限を表示。追跡済みの Codex アカウントは、再認証なしでローカルアカウントとしてワンクリック切り替え可能
+- **クォータ履歴** — 制限ビューでアカウントにホバーまたはクリックすると、現在のサイクルの推移と過去 14 日間の実測使用量を表示。履歴はローカルにのみ保存され、アップロードされない
+- **ネットワークプロキシ** — 「設定 → 一般」で指定したプロキシ経由で AI ツール制限とアカウントのリクエストを送信
 - **Codex リセット予測** — 任意で有効にできるサードパーティのリセット予測。予測されるリセット時刻、リセットタイプ（Regular / Banked）、前回のリセット時刻を表示
 - **削除されたセッション使用量を保持** — 多くのツールは古いセッションを削除します（Claude Code はデフォルトで 30 日後にトランスクリプトを削除）。有効にすると、Token Monitor は観測済みの日別ツール/モデル使用量をローカルにアーカイブし、元ファイルが消えてもヒートマップとトレンドを維持します（下記 [セッションデータの保持期間](#セッションデータの保持期間) を参照）
 - **使用トレンド & ダッシュボード** — ホーム画面のアクティビティヒートマップ・トレンドチャート、連続日数・全デバイス横断のツール/モデル別累積使用（棒・K 線）専用ダッシュボードウィンドウ
@@ -198,7 +204,7 @@ brew install --cask token-monitor
 - **フローティングバブル** — ドラッグ可能なミニウィンドウ、クリック/ホバープレビュー
 - **ネイティブ macOS ウィジェット** — macOS 14 以降で、小・中・大サイズのレイアウトにトークン使用量とコスト、推移、AI ツールごとのクォータ残量とリセット時刻、アクティビティヒートマップ、ツール・モデル別の内訳を表示します
 - **内訳ビュー** — ツール、デバイス、モデル、セッション、プロジェクト、アカウント制限別
-- **外観** — テーマ（ライトモード含む）、ツール別カラー、ガラス透明度・ぼかし、透明ウィンドウ、フォントのカスタマイズ
+- **外観** — テーマ（ライトモード含む）とカスタムカラー、ツール別カラー、macOS・Windows のネイティブガラススタイル、背景画像、文字サイズとフォント
 - **ツールリストのカスタマイズ** — 追跡は維持したまま非表示、ピン留め、順序変更
 - **グローバルショートカット** — どこからでもウィンドウの表示/非表示
 - **Discord Rich Presence** — 本日のトークン・コスト・主要クライアント（オプトイン）
@@ -257,6 +263,8 @@ Token Monitor は **トークン使用量**、**アカウント制限**、**セ�
 | <img src=".github/assets/tools-icon/mistral.png" width="28" alt="Mistral" /> | Mistral Vibe | `$VIBE_HOME/logs/session/` (`~/.vibe/logs/session/`); Mistral Admin Cookie（Included API／Vibe 月間割当とクレジット残高） | ✅ | ✅ | — |
 | <img src=".github/assets/tools-icon/prime-agent.png" width="28" alt="Prime Agent" /> | Prime Agent | `~/.prime/agent/` (`sessions/`, `session-artifacts/`) | ✅ | — | — |
 | <img src=".github/assets/tools-icon/jcode.png" width="28" alt="Jcode" /> | Jcode | `~/.jcode/sessions/` | ✅ | — | — |
+| <img src=".github/assets/tools-icon/junie.png" width="28" alt="Junie" /> | Junie | `~/.junie/sessions/**/events.jsonl` | ✅ | — | — |
+| <img src=".github/assets/tools-icon/opencodereview.png" width="28" alt="OpenCodeReview" /> | OpenCodeReview | `~/.opencodereview/sessions/**/*.jsonl` | ✅ | — | — |
 | <img src=".github/assets/tools-icon/typesafe.png" width="28" alt="TypeSafe" /> | TypeSafe | TypeSafe Console の Cookie（請求残高とトークン使用量からの推定支出） | — | ✅ | — |
 | <img src=".github/assets/tools-icon/openrouter.png" width="28" alt="OpenRouter" /> | OpenRouter | OpenRouter API キー（使用量／キー上限。creditsアクセス許可時は残高も表示。公式文書ではManagementキーを指定） | — | ✅ | — |
 | <img src=".github/assets/tools-icon/volcengine.png" width="28" alt="Volcengine" /> | Volcengine | Ark API key または Volcengine AK/SK（Volcengine API で Ark Coding Plan / Agent Plan クォータ取得） | — | ✅ | — |
@@ -264,7 +272,7 @@ Token Monitor は **トークン使用量**、**アカウント制限**、**セ�
 | <img src=".github/assets/tools-icon/trae.png" width="28" alt="Trae CN" /> | Trae CN | Trae CN access token（trae.cn で Trae CN／SOLO credits を取得） | — | ✅ | — |
 | <img src=".github/assets/tools-icon/alibaba.png" width="28" alt="Alibaba Cloud" /> | Alibaba Cloud | Alibaba Cloud コンソール cookie（Bailian／Model Studio Token Plan のクォータ、Team と Personal） | — | ✅ | — |
 | <img src=".github/assets/tools-icon/stepfun.png" width="28" alt="StepFun" /> | StepFun | StepFun Oasis-Token（Coding Plan／Token Plan のクォータ） | — | ✅ | — |
-| <img src=".github/assets/tools-icon/notion.png" width="28" alt="Notion AI" /> | Notion AI | Business/Enterprise 向けの Notion AI ローリング／月間使用枠；手動 token_v2 Cookie + 明示的なワークスペース ID | — | ✅ | — |
+| <img src=".github/assets/tools-icon/notion.png" width="28" alt="Notion AI" /> | Notion AI | Business/Enterprise 向けの Standard／Select クレジット、または従来のローリング／月間使用枠；手動 token_v2 Cookie + 明示的なワークスペース ID | — | ✅ | — |
 | <img src=".github/assets/tools-icon/manus.png" width="28" alt="Manus" /> | Manus | Manus クレジット（月間＋毎日／定期リフレッシュ＋残高）；デスクトップセッション（macOS／Windows）または手動 Web セッション（全 OS） | — | ✅ | — |
 | <img src=".github/assets/tools-icon/hark.png" width="28" alt="Hark" /> | Hark | Hark Pro の日次と月次トークンプール。macOS のデスクトップセッション、または貼り付けたセッションクッキー | — | ✅ | — |
 | <img src=".github/assets/tools-icon/opendesign.png" width="28" alt="OpenDesign" /> | OpenDesign | 現在のワークスペースの5時間／週間サブスクリプション枠；手動 Cookie | — | ✅ | — |
@@ -284,7 +292,7 @@ Token Monitor は **トークン使用量**、**アカウント制限**、**セ�
 - LM Studio の追跡対象は現在、サーバーログに記録される OpenAI 互換の `/v1/chat/completions` および `/v1/responses` リクエストのみです。LM Studio 内蔵 Chat UI から開始した会話と、ネイティブの `/api/v1/chat` リクエストは含まれません。
 - Unsloth Studio は `studio.db` から Studio のチャットとローカル API の推論使用量を追跡します。ローカル推論の API コストはゼロで、識別可能な従量課金プロバイダーには Tokscale の推定価格を使用します。学習トークンは含まれません。[Unsloth のデータソース](docs/providers/unsloth.md)も参照してください。
 - Devin はローカルの `sessions.db` から Devin CLI セッションを、`acp-events` ACP ログから Devin Desktop のエージェントセッションを追跡します。同じセッションが両方にある場合は CLI データベースが優先されます。Desktop の対象範囲は接続する ACP エージェントに依存します。ローカルに `usage_update` イベントを書き出すエージェントのみが集計対象で、Devin Desktop の既定の `devin-cloud` エージェントはサーバー側で計測されるため、既定の Desktop 構成では Desktop のトークンは報告されません。セッションタイトルとプロジェクト帰属は CLI データベースから取得します。詳しくは [Devin のデータソース](docs/providers/devin.md)を参照してください。
-- Notion AI は内部 API を使用します。`token_v2` Cookie の手動貼り付けと Business/Enterprise の明示的なワークスペース ID が必要です。テストデータのみで検証しており、実際のレスポンスサンプルはなく、実際の認証検証は承認待ちです。Cookie の自動取得は行わず、公開 API としての互換性は保証されません。[Notion のデータソース](docs/providers/notion.md)を参照してください。
+- Notion AI は内部 API を使用します。`token_v2` Cookie の手動貼り付けと Business/Enterprise の明示的なワークスペース ID が必要です。Token Monitor は、匿名化された Standard／Select のレスポンスを含むテストデータで検証しています。詳しくは [Notion のデータソース](docs/providers/notion.md)を参照してください。
 - Manus は macOS／Windows のデスクトップセッションを自動取得し、Linux を含む全 OS で手動 Web セッションも利用できます。月間クレジット、リフレッシュ枠、残高は同じ非公開の内部 API を使用し、互換性は保証されません。[Manus のデータソース](docs/providers/manus.md)を参照してください。
 - Hark は macOS のサインイン済みデスクトップセッションを読むか、任意の OS でセッションクッキーを貼り付けます。アカウント単位の日次と月次トークンプールを表示します。[Hark のデータソース](docs/providers/hark.md)を参照してください。
 - MiniMax Code は、CLI が書き込むローカルのセッション履歴（`~/.minimax` または `MINIMAX_DATA_DIR` / `MAVIS_DATA_DIR`、`~/.mavis` と `~/.minimax-<profile>` / `~/.mavis-<profile>` も含む）と、`tokscale headless mcode` でキャプチャした実行を読み取ります。両方にある同じターンは 1 回だけ集計されます。
@@ -303,7 +311,7 @@ Token Monitor は **トークン使用量**、**アカウント制限**、**セ�
 |---------|-------------------------|------------|
 | セッションタイトル | Claude Code, Codex, OpenCode, Cursor, Antigravity, Cline CLI, Factory Droid, Kimi CLI, Grok Build, Pi, Oh My Pi, OmO Native, MiMo, ZCode, CodeBuddy, WorkBuddy, Reasonix, DeepSeek Harness, Cherry Studio, Devin CLI, fx, MiniMax Code | — |
 | プロンプト／応答ごとの使用量とツール呼び出し | Claude Code, Codex, OpenCode, Pi, Oh My Pi, OmO Native, CodeBuddy, WorkBuddy, Reasonix, DeepSeek Harness | 詳細はローカルで読み取り、同期されません。 |
-| コンテキスト使用量／残り容量 | Claude Code, Codex, DeepSeek Harness | Claude Code のコンテキスト上限はモデルから推定します。 |
+| コンテキスト使用量／残り容量 | Claude Code, Codex, DeepSeek Harness, Grok Build, WorkBuddy, CatPaw | Claude Code のコンテキスト上限はモデルから推定します。 |
 | キャッシュ使用量／セッションのキャッシュヒット率 | キャッシュ項目を提供するデータソース。例： Claude Code, Codex, OpenCode, Cursor, Kimi, Pi, Oh My Pi, OmO Native, DeepSeek Harness | キャッシュ使用量のデータがある場合にヒット率を表示します。 |
 | キャッシュ残存時間の推定 | Claude Code | 記録されたキャッシュの種類に基づき、5 分または 1 時間と推定します。 |
 | 出力速度／トークン消費速度 | Claude Code, Codex, OpenCode, Antigravity, Kimi, GitHub Copilot, Pi, Oh My Pi, OmO Native, Kilo CLI, MiMo Code/MiMo Desktop, Muse Code, ZCode CLI, Kiro, DeepSeek Harness, Devin CLI | 出力速度は `tok/s`、総トークン消費速度は `tok/min`。計測時間には待機を含む場合があります。 |
@@ -460,7 +468,7 @@ npm run pack         # インストーラーなしのアプリディレクトリ
 
 Token Monitor の設定は 2 か所にあります。日常利用に必要なのは前者だけです。
 
-- **ウィジェット (GUI)** — 右下の `⚙` ボタンで開きます。セクションは順に：一般（言語、ログイン時に起動、アップデート）、メイン画面（ホームモジュールと表示通貨）、ウィンドウ（ウィンドウ動作、メニューバー／フローティングバブルのレイアウト、トレイモード、ショートカット）、外観（テーマとツール別カラー）、収集（追跡ツール、収集間隔、削除されたセッション使用量を保持、データエクスポート）、AI ツール制限（プロバイダー選択、制限、認証情報）、サブスクリプション（アカウントごとの支払い額）、マルチデバイス同期。タイトルバーの `⇧` ボタンでウィンドウ動作を切り替えます。
+- **ウィジェット (GUI)** — 右下の `⚙` ボタンで開きます。セクションは順に：一般（言語、ログイン時に起動、アップデート、ネットワークプロキシ）、メイン画面（ビューの順序、ホームモジュール、既定の使用量範囲と表示通貨）、ウィンドウ（ウィンドウ動作、メニューバー／フローティングバブルのレイアウト、トレイモード、エッジドックとノッチパネル、ショートカット）、外観（テーマ、ガラス、文字サイズとカラー）、収集（追跡ツール、収集間隔、削除されたセッション使用量を保持、WSL スキャン、データエクスポート、モデルの別名と価格）、AI ツール制限（プロバイダー選択、制限、認証情報）、サブスクリプション（アカウントごとの支払い額）、マルチデバイス同期（同期方法と保存済みの Hub）、プラグイン（実験的）。タイトルバーの `⇧` ボタンでウィンドウ動作を切り替えます。
 - **Headless agent と hub** — UI なし。プロジェクトルートの `.env`（`.env.example` をコピー）で設定します。優先順位は CLI フラグ → 環境変数 → 既定値。詳しくは [docs/configuration.md](docs/configuration.md#headless-agent--hub-env) を参照。
 
 すべての設定と環境変数の詳細は [設定リファレンス](docs/configuration.md) を参照してください。

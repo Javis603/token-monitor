@@ -352,7 +352,7 @@ async function fetchMimoAccount(account, deps = {}) {
       accountEmail,
       accountLabel: MIMO_CONSOLE_LABEL,
       planLabel,
-      windows,
+      windows: windows.map(window => ({ ...window, productId: 'console' })),
       balance: {
         ...balance,
         // What the console reports as spent. The row's meter percentage is
@@ -723,7 +723,7 @@ function mimoRowsForEntry(entry, { consoleRow, consoleFailure, membership }, upd
     accountEmail: identity.email,
     accountLabel: MIMO_MEMBERSHIP_LABEL,
     planLabel: label,
-    windows: membershipWindows
+    windows: membershipWindows.map(window => ({ ...window, productId: 'membership' }))
   }));
   return rows;
 }

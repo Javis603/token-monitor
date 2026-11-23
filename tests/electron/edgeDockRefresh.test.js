@@ -65,16 +65,21 @@ function fixture() {
     edgeDockRateHistory: require('../../src/electron/renderer/tokenRatePresentation').createLiveTokenRateHistory(), edgeDockLiveRateSample: () => null,
     statsHistoryRevision: (stats) => stats?.historyRevision,
     injectLocalDeviceStatus: (stats) => stats,
+    getAccountPresentationSync: () => ({ notifyStats() {}, refresh: async () => {} }),
     getSyncContentRuntime: () => ({ notifyStats() {} }),
     getLimitsHistoryStore: () => ({ record: (...args) => calls.push(['history', ...args]) }),
     limitsHistoryController: null,
     migrateCodexAdditionalLimits() {},
     rendererSnapshots: { stamp: (_, stats) => stats },
     rendererStats: (stats) => stats,
+    buildStatsDelta: () => ({ delta: null, fingerprint: null }),
+    fingerprintStats: () => null,
+    lastRendererStatsFingerprint: null,
     scheduleMacWidgetSnapshot() {},
     pluginRuntime: null,
     updateTrayDisplay() {},
     mainWindow: null,
+    mainWindowStatsPushWanted: () => true,
     dashboardWindow: null,
     maybeAdoptSharedSubscriptionRevision() {},
     console: { log() {} }
@@ -220,6 +225,7 @@ test('dock re-projections keep manual stats through settings updates but never a
   const fresh = context.localStats;
   const syncSource = main.slice(main.indexOf('function syncDockSurfaces('), main.indexOf('function refreshLimitStatsPresentation('));
   Object.assign(context, {
+    screenUiSuspended: false,
     canUseEdgeDock: () => true,
     syncNotch() {},
     ensureEdgeDockController: () => ({ setAppearance() {}, sync() {} }),
@@ -361,6 +367,63 @@ test('runtime replacement without a mode change invalidates the dock manual sour
   await pending;
   assert.equal(context.dockStats, old);
   limits.resolve();
+});
+
+test('Settings gets completed local quotas before Host, iCloud, or cold Client stats', () => {
+  const { accountStatus } = require('../../src/electron/renderer/limits/accountSlotsPanel');
+  const accountIdentityApi = require('../../src/electron/renderer/accountIdentity');
+  const app = fs.readFileSync(require.resolve('../../src/electron/renderer/app.js'), 'utf8');
+  const scope = { provider: 'antigravity', account: null };
+  const reading = { provider: 'antigravity', status: 'ok' };
+  const result = { updatedAt: '2026-11-19T10:01:00.000Z', providers: [reading] };
+  const oldLimits = { updatedAt: result.updatedAt, providers: [] };
+
+  for (const hubMode of ['host', 'icloud', 'client']) {
+    const trace = [];
+    const publishedLimits = hubMode === 'icloud' ? { providers: [] } : oldLimits;
+    const previousStats = hubMode === 'client' ? null : { devices: [{ deviceId: 'here', limits: publishedLimits }] };
+    const state = { settings: { deviceId: 'here' }, stats: previousStats };
+    const renderer = vm.createContext({
+      state, accountIdentityApi, settingsLocalLimits: null, limitProbes: [],
+      localDeviceLimitsProviders: () => accountIdentityApi.localDeviceLimitsProviders(state.stats, 'here'),
+      isSettingsSurfaceVisible: () => true, preserveSettingsPanelScroll: paint => paint(),
+      limitWindowsView: { syncLimitRefreshButtons() {} },
+      accountSlotPanels: new Map(), automaticAccountPanels: new Map(), legacyAccountOwners: {
+        antigravity: { refreshReadings() {
+          trace.push(accountStatus({ enabled: true }, renderer.localProviderStatuses('antigravity')[0],
+            true, renderer.limitProbes.some(probe => probe.provider === 'antigravity')));
+        } }
+      }
+    });
+    vm.runInContext(app.slice(app.indexOf('function settingsLocalDeviceLimitsProviders('), app.indexOf('function renderWorkbuddyStatus(')), renderer);
+    vm.runInContext(app.slice(app.indexOf('function setLimitProbes('), app.indexOf('let limitProbesPushed')), renderer);
+    const microtasks = [];
+    const mainContext = vm.createContext({
+      settings: { deviceId: 'here', hubMode }, edgeDockController: null,
+      mainWindow: { isDestroyed: () => false, webContents: { send(_channel, { probes, local }) {
+        renderer.setLimitProbes(probes, local);
+      } } },
+      queueMicrotask: (callback) => microtasks.push(callback)
+    });
+    vm.runInContext(main.slice(main.indexOf('let limitProbes = [];'), main.indexOf('let copilotLoginController')), mainContext);
+    mainContext.publishLimitProbes([scope]);
+    mainContext.updateSettingsLocalLimits(result);
+    mainContext.publishLimitProbes([]);
+    microtasks.shift()();
+    assert.deepEqual(trace, ['checking', 'connected'], hubMode);
+    assert.deepEqual(renderer.localProviderStatuses('antigravity'), [reading], hubMode);
+    assert.equal(state.stats, previousStats, 'the usage/sync snapshot has not arrived');
+
+    state.stats = { devices: [{ deviceId: 'here', limits: { ...result, providers: [{ ...reading, stale: true }] } }] };
+    assert.equal(renderer.localProviderStatuses('antigravity')[0].stale, true, 'return to published presentation once it catches up');
+    mainContext.clearSettingsLimitState();
+    state.stats = previousStats;
+    mainContext.publishLimitProbes([scope]);
+    mainContext.updateSettingsLocalLimits({ ...result, providers: [] });
+    mainContext.publishLimitProbes([]);
+    microtasks.shift()();
+    assert.deepEqual(trace.slice(-2), ['checking', 'unavailable'], 'a finished check with no reading remains unavailable');
+  }
 });
 
 for (const entry of ['App', 'Edge Dock']) {

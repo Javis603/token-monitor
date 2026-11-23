@@ -636,6 +636,34 @@ test('Notion rolling and monthly allowances render in both display modes and hid
   assert.equal(JSON.stringify(provider), before);
 });
 
+test('Notion personal credit pools show their own amounts, percentages and resets', () => {
+  const now = Date.now();
+  const provider = normalizeLimitProvider({
+    provider: 'notion', status: 'ok', source: 'web',
+    windows: [
+      { kind: 'billing', label: 'Standard', used: 150.25, limit: 1500, usedPercent: 150.25 / 1500 * 100,
+        resetsAt: new Date(now + 86400000).toISOString() },
+      { kind: 'billing', label: 'Select', used: 0, limit: 500, usedPercent: 0,
+        resetsAt: new Date(now + 2 * 86400000).toISOString() }
+    ]
+  });
+  const usedView = dockView({ showLimitUsed: true });
+  const usedCard = usedView.renderProviderWindows(provider, '#888888');
+  assert.deepEqual(windowTitles(usedCard), ['Standard', 'Select']);
+  assert.deepEqual(usedCard.children.map((row) => row.find('limit-detail')?.textContent), ['150.25/1500', '0/500']);
+  assert.match(usedCard.children[0].text, /10% used/);
+  assert.match(usedCard.children[1].text, /0% used/);
+  assert.deepEqual(usedCard.children.map((row) => row.dataset.limitResetAt), provider.windows.map((window) => window.resetsAt));
+  assert.ok(usedCard.children.every((row) => row.find('limit-reset').text));
+
+  const remainingCard = dockView().renderProviderWindows(provider, '#888888');
+  assert.deepEqual(remainingCard.children.map((row) => row.find('limit-detail')?.textContent), ['1349.75/1500', '500/500']);
+  const select = usedView.limitProviderUsageItems([provider]).find((item) => item.label === 'Select');
+  assert.ok(select);
+  const filteredView = dockView({ limitProviderHiddenItems: { notion: [select.id] } });
+  assert.deepEqual(windowTitles(filteredView.renderProviderWindows(provider, '#888888')), ['Standard']);
+});
+
 test('Qoder personal and team credits render as independent, hideable windows', () => {
   const now = Date.now();
   const provider = normalizeLimitProvider({
@@ -1849,10 +1877,9 @@ for (const id of ['codex', 'minimax']) {
     assert.equal(group.find('limit-plan').textContent, '4 accounts');
     assert.equal([...group.walk()].filter((node) => node.classNames.has('limit-account-row')).length, 4);
 
-    // A provider with no count phrase of its own prints nothing rather than the
-    // untranslated key.
+    // Providers without specialized wording show the shared localized count.
     const untranslated = dockView().renderLimitProviderGroup('deepseek', 'DeepSeek', [account('a@x'), account('b@x')], '#4D6BFE');
-    assert.equal(untranslated.find('limit-plan').textContent, '');
+    assert.equal(untranslated.find('limit-plan').textContent, '2 accounts');
   });
 }
 
@@ -3597,5 +3624,33 @@ test('Mistral renders both monthly allowances and an unmetered wallet, with inde
       const hidden = dockView({ showLimitUsed, limitProviderHiddenItems: { mistral: [item.id] } });
       assert.equal(hidden.renderProviderWindows(provider, '#FA520F').children.length, 2);
     }
+  }
+});
+
+test('rail quota rings preserve the selected vendor color against either glass tint', () => {
+  const source = fs.readFileSync(path.join(root, 'src/electron/renderer/edgeDock/dock.js'), 'utf8');
+  const colors = source.slice(source.indexOf('function parseColor('), source.indexOf('function providerLabel('));
+  const renderCell = balancedCall(source, 'function providerCellNode(cell) {');
+  for (const [glass, selected] of [['21 21 21', '#060a19'], ['245 245 245', '#fafafa']]) {
+    const cell = vm.runInNewContext(`${colors}\n${renderCell}\nproviderCellNode({ provider: 'opencode', remainingPercent: 97 });`, {
+      document: { documentElement: {} },
+      getComputedStyle: () => ({ getPropertyValue: () => glass }),
+      state: {},
+      clientColors: { opencode: selected },
+      presentation: { displayPercent: value => value, waitingSessionSummary: () => ({ count: 0 }) },
+      runningSessionSummary: () => ({ count: 0 }),
+      el: tag => new FakeElement(tag),
+      appearance: () => ({}),
+      markRoll: () => {},
+      displaySeverity: () => 'ok',
+      markNode: () => new FakeElement('span'),
+      ringNode: (_percent, color) => {
+        const ring = new FakeElement('span');
+        ring.style.setProperty('--ring-color', color);
+        return ring;
+      },
+      providerLabel: id => id
+    });
+    assert.equal(cell.children[0].style['--ring-color'], selected);
   }
 });

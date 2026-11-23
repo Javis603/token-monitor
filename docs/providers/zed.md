@@ -49,7 +49,7 @@ The widget asks the user to copy the request-header `Cookie` value from a signed
 
 The normalized credential must contain `zed.session`. Token Monitor forwards only the observed Zed billing cookies (`zed.session`, `c15t`, and supported Cloudflare helpers) to `cloud.zed.dev`; unrelated cookies from the copied header are discarded. Provider requests use `credentials: 'omit'` so Electron's ambient cookie jar cannot replace the explicitly managed credential.
 
-GUI credentials live under the fixed `zedCookie` path in the shared credential store. The renderer receives only configured/source markers, never the stored Cookie value. Headless installations can set `TOKEN_MONITOR_ZED_COOKIE` (or the compatibility alias `ZED_COOKIE`).
+GUI credentials live in account slots in the shared credential store; an existing fixed `zedCookie` migrates automatically. Each slot accepts its own dashboard Cookie. The renderer receives only configured/source markers, never the stored Cookie value. Headless installations can set `TOKEN_MONITOR_ZED_COOKIE` (or the compatibility alias `ZED_COOKIE`).
 
 ## Snapshot mapping
 
@@ -72,7 +72,7 @@ Spend values are converted from cents to USD. `zed.token-spend` is the measured 
 
 The required `zed.session` cookie always seeds the hashed `accountKey`, so optional subscription enrichment cannot change provider identity when it times out or fails. Raw credential material never enters the wire record; subscription metadata only enriches the plan label and Token Spend reset.
 
-The key can change when the browser session rotates. That is acceptable for the single-cookie settings model, but a future multi-account implementation must obtain a stable dashboard account identifier before promising cross-device deduplication.
+The key can change when the browser session rotates. Multiple local accounts use separate slots; replacing a Cookie retains the prior key as a history alias. Cookie hashes do not prove a server account identity or guarantee deduplication across independently captured browser sessions.
 
 ## Platform behavior
 

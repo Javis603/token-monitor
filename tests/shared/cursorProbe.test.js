@@ -184,8 +184,10 @@ test('probe returns unauthorized error for 401', async () => {
   assert.equal(result.error.kind, 'unauthorized');
 });
 
-test('probe includes legacy request usage when auth returns a user id', async () => {
+test('probe caches Cursor identity while refreshing legacy request usage', async () => {
   const calls = [];
+  let now = 0;
+  let unauthorized = false;
   const fakeHttps = {
     request(opts, cb) {
       const call = { path: opts.path, method: opts.method, headers: opts.headers, body: '', timeoutMs: null };
@@ -212,7 +214,7 @@ test('probe includes legacy request usage when auth returns a user id', async ()
         payload = {};
       }
       const res = new EventEmitter();
-      res.statusCode = 200;
+      res.statusCode = unauthorized && opts.path === '/api/usage-summary' ? 401 : 200;
       setImmediate(() => {
         cb(res);
         setImmediate(() => {
@@ -229,7 +231,8 @@ test('probe includes legacy request usage when auth returns a user id', async ()
     }
   };
 
-  const result = await probe('tok', { httpsLib: fakeHttps });
+  const deps = { httpsLib: fakeHttps, providerRuntimeState: new Map(), now: () => now };
+  const result = await probe('tok', deps);
   assert.equal(result.ok, true);
   assert.equal(result.usage.requestsUsed, 4);
   assert.equal(result.usage.requestsLimit, 8);
@@ -246,6 +249,40 @@ test('probe includes legacy request usage when auth returns a user id', async ()
   assert.equal(sand.headers['Content-Type'], 'application/json');
   assert.equal(sand.body, '{}');
   assert.equal(sand.timeoutMs, 5000);
+
+  calls.length = 0;
+  const warm = await probe('tok', deps);
+  assert.deepEqual(warm, result);
+  assert.equal(calls.length, 4);
+  assert.ok(!calls.some(call => call.path === '/api/auth/me'));
+  assert.ok(calls.some(call => call.path === '/api/usage?user=user_1'));
+
+  calls.length = 0;
+  await probe('different-token', deps);
+  assert.ok(calls.some(call => call.path === '/api/auth/me'));
+
+  calls.length = 0;
+  now = 60 * 60_000;
+  await probe('different-token', deps);
+  assert.equal(deps.providerRuntimeState.get('cursor-user-info').size, 1);
+  calls.length = 0;
+  await probe('tok', deps);
+  assert.ok(calls.some(call => call.path === '/api/auth/me'));
+
+  unauthorized = true;
+  assert.equal((await probe('tok', deps)).error.kind, 'unauthorized');
+  unauthorized = false;
+  calls.length = 0;
+  await probe('tok', deps);
+  assert.ok(calls.some(call => call.path === '/api/auth/me'));
+
+  calls.length = 0;
+  const dateClock = { ...deps, now: () => new Date(now) };
+  await probe('date-clock-token', dateClock);
+  assert.ok(calls.some(call => call.path === '/api/auth/me'));
+  calls.length = 0;
+  assert.deepEqual(await probe('date-clock-token', dateClock), result);
+  assert.equal(calls.length, 4);
 });
 
 test('probe treats Grok Bot as a best-effort optional request', async () => {

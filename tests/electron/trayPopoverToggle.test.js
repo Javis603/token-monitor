@@ -50,17 +50,19 @@ function fixture({ visible = true, focused = visible, platform = 'darwin', histo
   }
   const screen = { getCursorScreenPoint: () => point };
   const context = vm.createContext({
-    mainWindow: win, win, tray: null, recentPopoverBlur: null,
+    mainWindow: win, mainWindowPopoverReveal: null, win, tray: null, recentPopoverBlur: null,
     limitsHistoryController: historyPreview ? { hide() { historyHides += 1; } } : null,
     sendMainWindowEvent: channel => { if (channel === 'window:summonCancelled') cancellations.push(channel); else summons.push(channel); },
     pluginWindowActions: createWindowVisibilityActions(hidden => assert.equal(hidden, win)),
     settings: { trayMode: true, showTrayIcon: true },
     process: { platform }, performance: { now: () => now }, screen,
     popoverBlurMatchesPress, popoverToggleAction, trayToggleAction, windowToggleShortcutAction,
-    suppressNextBlurHide: false, quitRequested: false, floatingBubbleState: { collapsed: false },
+    suppressNextBlurHide: false, quitRequested: false, screenUiSuspended: false, floatingBubbleState: { collapsed: false },
     popoverBounds: () => ({}), setTimeout: (fn) => timers.push(fn),
     applyMacActivationPolicy() {}, applyMacSpaceBehavior() {}, applyWindowSettings() {},
     nudgeTaskbarZOrder() {}, scheduleFloatingBubbleAutoCollapse() {}, expandFloatingBubble() {},
+    cancelMainWindowHibernate() {}, scheduleMainWindowHibernate() {},
+    scheduleMainWindowShowSync() {},
     focusExistingWindow: () => win.show()
   });
   vm.runInContext([

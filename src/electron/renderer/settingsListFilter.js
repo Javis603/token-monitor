@@ -1,12 +1,12 @@
 'use strict';
 
-// Text filter shared by the settings lists that are long enough to need one
-// (tracked tools, limit providers). The lists differ in every other respect —
-// row shape, ordering setting, drag commit — so only the matching rule is
-// factored out, deliberately matching the tray composer's picker search:
-// one case-insensitive substring over the row's searchable text, no token
-// splitting and no fuzzy matching, so a query means the same thing everywhere
-// in the app.
+// Text filter and group ordering shared by the settings lists that are long
+// enough to need them (tracked tools, limit providers). The lists differ in
+// every other respect — row shape, ordering setting, drag commit — so only
+// these rules are factored out. The matching rule deliberately matches the
+// tray composer's picker search: one case-insensitive substring over the row's
+// searchable text, no token splitting and no fuzzy matching, so a query means
+// the same thing everywhere in the app.
 (function exposeSettingsListFilter(root, factory) {
   const api = factory();
   if (typeof module === 'object' && module.exports) module.exports = api;
@@ -49,5 +49,15 @@
     return (orderedIds || []).filter((id) => enabled.has(id));
   }
 
-  return { normalizeListQuery, listTextMatches, filterListItems, mergeRenderedSelection };
+  // Both lists group their enabled rows above the rest, and only the enabled
+  // group can be reordered. The saved order still covers every row, so a
+  // reordered group is written back into the slots it already occupied: rows
+  // outside it keep their positions, and re-enabling one restores its place.
+  function mergeSubsetOrder(fullOrder, subsetOrder) {
+    const subset = new Set(subsetOrder || []);
+    const pending = [...(subsetOrder || [])];
+    return (fullOrder || []).map((id) => (subset.has(id) ? pending.shift() : id));
+  }
+
+  return { normalizeListQuery, listTextMatches, filterListItems, mergeRenderedSelection, mergeSubsetOrder };
 });

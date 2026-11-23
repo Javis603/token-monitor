@@ -1,6 +1,8 @@
 'use strict';
 
 const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const path = require('node:path');
 const test = require('node:test');
 
 const {
@@ -344,6 +346,16 @@ test('areaLineSvg renders line and filled area paths', () => {
   // The fill is a blue vertical gradient (defined in styles.css), not the accent slab.
   assert.match(svg, /<linearGradient id="area-line-grad"/);
   assert.match(svg, /fill="url\(#area-line-grad\)"|class="area-line-fill"/);
+});
+
+test('stretched area line keeps a uniform on-screen stroke width', () => {
+  // areaLineSvg stretches a fixed viewBox with preserveAspectRatio="none"; without a
+  // non-scaling stroke a wide window turns the line into a thick-on-slopes ribbon.
+  const model = areaLineChart([{ date: '2026-06-01', tokens: 5 }, { date: '2026-06-02', tokens: 9 }], { width: 300, height: 70 });
+  assert.match(areaLineSvg(model), /preserveAspectRatio="none"/);
+  const css = fs.readFileSync(path.join(__dirname, '../../src/electron/renderer/styles.css'), 'utf8');
+  const rule = css.match(/\.area-line-stroke \{[^}]*\}/)?.[0] || '';
+  assert.match(rule, /vector-effect: non-scaling-stroke/);
 });
 
 test('areaLineChart can smooth a compact trend path', () => {

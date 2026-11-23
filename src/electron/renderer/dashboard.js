@@ -232,6 +232,7 @@ function applyAppearance(settings) {
 function applyFontSettings(settings) {
   const root = document.documentElement.style;
   const { interfaceFont, displayFont } = fontSettingsApi.resolveEffectiveFontSettings(settings, {
+    ...settings?.fontContext,
     interfaceDefault: fontSettingsApi.DEFAULT_DASHBOARD_INTERFACE_FONT
   });
   root.setProperty('--ui-font', interfaceFont);
@@ -355,7 +356,10 @@ function renderLegend(model) {
 function renderTrends() {
   const previousKind = state.chartKind;
   const previousGeometry = captureGeometry(els.chart, '.bar-stack[data-motion-key]');
-  const daily = charts.clampDaily(state.history?.daily || [], state.range === 'all' ? 0 : Number(state.range));
+  // Give each calendar day a slot even when history has no record for it.
+  const daily = charts.dailyWindow(state.history?.daily || [], {
+    days: state.range === 'all' ? 0 : Number(state.range)
+  });
   if (daily.length === 0) { els.chart.innerHTML = ''; els.legend.innerHTML = ''; state.chartModel = null; return; }
   const pad = { padTop: 10, padRight: 14, padBottom: 24, padLeft: 52 };
   
@@ -604,6 +608,11 @@ function positionTooltip(ev) {
 }
 
 function showBarTooltip(bar, ev) {
+  if (bar.hasRecord === false) {
+    els.tooltip.innerHTML = `<div class="tt-head">${shortDate(bar.label)} · ${t('dashboard.noRecord')}</div>`;
+    positionTooltip(ev);
+    return;
+  }
   const segs = (bar.segments || []).filter((s) => s.value > 0).sort((a, b) => b.value - a.value);
   const rows = segs.map((s) =>
     `<div class="tt-row"><span class="tt-dot" data-c="${colorFor(s.key)}"></span><span class="tt-name">${s.key}</span><span class="tt-val">${formatCompact(s.value)}</span></div>`
@@ -614,8 +623,13 @@ function showBarTooltip(bar, ev) {
 }
 
 function showCandleTooltip(c, ev) {
-  // Each candle spans a bucket of days: O = first day, C = last day, H/L = busiest/quietest.
+  // The date range covers the whole bucket. OHLC uses its recorded days.
   const head = c.endKey && c.endKey !== c.key ? `${longDate(c.key)} – ${longDate(c.endKey)}` : longDate(c.key);
+  if (c.hasRecord === false) {
+    els.tooltip.innerHTML = `<div class="tt-head">${head}</div><div class="tt-row"><span class="tt-name">${t('dashboard.noRecord')}</span></div>`;
+    positionTooltip(ev);
+    return;
+  }
   const ohlc = [['O', c.open], ['H', c.high], ['L', c.low], ['C', c.close]];
   els.tooltip.innerHTML = `<div class="tt-head">${head}</div>`
     + ohlc.map(([k, v]) => `<div class="tt-row"><span class="tt-name">${k}</span><span class="tt-val">${formatCompact(v)}</span></div>`).join('');
@@ -712,7 +726,6 @@ window.tokenMonitor.onSettingsPush?.((next) => {
   // so a changed preference still repaints below.
   const previousReduceMotion = state.reduceMotion;
   applyAppearance(state.settings);
-  applyFontSettings(next);
   let needsRender = false;
   const nextLocale = i18n.resolveLocale(next.locale || next.language, navigator.languages);
   if (state.locale !== nextLocale) {

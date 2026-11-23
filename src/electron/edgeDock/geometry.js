@@ -84,6 +84,10 @@ function normalizeEdgeDockMode(value) {
   return EDGE_DOCK_MODES.includes(value) ? value : 'autoHide';
 }
 
+function normalizeEdgeDockTriggerRange(value) {
+  return value === 'handle' ? 'handle' : 'rail';
+}
+
 function normalizeEdgeDockSide(value) {
   return EDGE_DOCK_SIDES.includes(value) ? value : 'right';
 }
@@ -614,6 +618,7 @@ module.exports = {
   normalizeEdgeDockOffset,
   normalizeEdgeDockSide,
   normalizeEdgeDockSize,
+  normalizeEdgeDockTriggerRange,
   railLength,
   rectContains,
   scaledEdgeDockMetrics,

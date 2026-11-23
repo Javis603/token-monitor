@@ -1,6 +1,6 @@
 'use strict';
 
-const SHARED_SYNC_KINDS = Object.freeze(['modelAliases', 'customPricing']);
+const SHARED_SYNC_KINDS = Object.freeze(['modelAliases', 'customPricing', 'limitAccountPresentation']);
 const RATE_KEYS = Object.freeze(['inputPerM', 'outputPerM', 'cacheReadPerM', 'cacheWritePerM', 'cacheWrite1hPerM']);
 const MAX_ENTRIES = 4096;
 const MAX_MODEL_LENGTH = 256;
@@ -35,6 +35,25 @@ function aliasKey(value) {
 // Refuse malformed replacements rather than filtering them into successful
 // clears. This whitelist is intentionally independent of settings.json.
 function normalizeSharedSyncValue(kind, value) {
+  if (kind === 'limitAccountPresentation') {
+    const { LIMIT_PROVIDER_IDS } = require('./limits/providers');
+    const { normalizeLimitProvider } = require('./limits/core');
+    if (!object(value) || Object.keys(value).length > LIMIT_PROVIDER_IDS.length) throw badRequest('invalid account presentation');
+    const validKey = key => typeof key === 'string' && key.length > 0 && key.length <= 256 && key.trim() === key;
+    return Object.fromEntries(Object.entries(value).sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0)).map(([id, group]) => {
+      if (!LIMIT_PROVIDER_IDS.includes(id)) throw badRequest('unknown provider');
+      onlyKeys(group, ['labels', 'order']);
+      if (!object(group.labels) || Object.keys(group.labels).length > 200 || !Array.isArray(group.order)
+        || group.order.length > 200 || !group.order.every(validKey) || new Set(group.order).size !== group.order.length) throw badRequest('invalid account presentation entries');
+      const labels = Object.fromEntries(Object.entries(group.labels).map(([key, label]) => {
+        if (!validKey(key) || typeof label !== 'string' || label.length > 256) throw badRequest('invalid account label');
+        const clean = normalizeLimitProvider({ provider: id, accountLabel: label })?.accountLabel || '';
+        if (label.trim() && !clean) throw badRequest('invalid account label');
+        return [key, clean];
+      }));
+      return [id, { labels, order: [...group.order] }];
+    }));
+  }
   if (kind === 'modelAliases') {
     onlyKeys(value, ['modelAliases', 'modelAliasGrouping']);
     if (!object(value.modelAliases) || !['off', 'duplicates', 'prefix'].includes(value.modelAliasGrouping)) {

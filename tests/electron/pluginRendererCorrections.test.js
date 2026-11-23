@@ -50,7 +50,7 @@ test('Home drag preserves inactive plugin placement and hidden slot through re-e
  assert.deepEqual(value.split(',').filter(id=>id!==token),reordered);
  const keyboard=prefs.moveHomeModuleOrder(original,builtins,'model','up');assert.ok(keyboard.includes(token));
 
- const globalDrag=c.createMainPreferenceRowDrag({kind:'view',settingKey:'viewDisplayOrder'});
+ const globalDrag=c.createMainPreferenceRowDrag({kind:'statusProvider',settingKey:'serviceProviderDisplayOrder'});
  assert.equal(globalDrag.mirrorOrder(['device','model']),'device,model');
 });
 

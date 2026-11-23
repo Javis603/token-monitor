@@ -28,6 +28,11 @@ function selectLocalDeviceRecord(options = {}) {
     .find((device) => device?.deviceId === deviceId) || null;
   if (options.externalAgentActive === true && options.hubMode !== 'icloud') return rawHubRecord;
 
+  const forClientArchive = options.forClientArchive === true;
+  // The widget owns this device's collection here. Hub and display summaries
+  // can omit session IDs needed to reconcile the client and session archives.
+  if (forClientArchive && options.lastCollectedDevice?.deviceId === deviceId) return options.lastCollectedDevice;
+
   const candidates = [options.lastCollectedDevice, options.localDevice, displayHubRecord, rawHubRecord]
     .filter((device) => device?.deviceId === deviceId);
   let selected = null;

@@ -33,7 +33,8 @@ const {
   deriveClientHealth,
   deriveClientStatus,
   mergeClientActivityDays,
-  visibleDiagnosticRoots
+  visibleDiagnosticRoots,
+  watchIgnoreMatcher
 } = require('../../src/shared/collector');
 const { KNOWN_CLIENTS } = require('../../src/shared/clientTracking');
 const { createSelfSyncThrottle } = require('../../src/shared/selfSyncThrottle');
@@ -557,6 +558,10 @@ test('MiniMax Code watches every runtime store and the headless captures', () =>
     const custom = path.join(homeDir, 'custom-data');
     const overridden = clientSourceRoots('mcode', { homeDir, env: { ...env, MAVIS_DATA_DIR: custom } }).mcode;
     assert.deepEqual(overridden.slice(0, 1), [{ id: 'mcode-sessions', dir: path.join(custom, 'v2', 'sessions') }]);
+
+    const relocated = path.join(homeDir, 'relocated-minimax');
+    const withCustom = clientSourceRoots('mcode', { ...options, customScanPaths: { mcode: [relocated] } }).mcode;
+    assert.deepEqual(withCustom.slice(-1), [{ id: 'custom-scan-path', dir: relocated, custom: true }]);
   } finally {
     fs.rmSync(homeDir, { recursive: true, force: true });
     fs.rmSync(elsewhere, { recursive: true, force: true });
@@ -1184,4 +1189,25 @@ test('older devices can still upload retired Qoder CN database health checks', (
     checks: [{ id: 'qodercn-db', exists: true }, { id: 'qodercn-projects', exists: false }] };
   const health = normalizeClientHealth({ clients: { qodercn: { ...core(), source } } });
   assert.deepEqual(health.clients.qodercn.source.checks, source.checks);
+});
+
+test('Junie and OpenCodeReview source checks and watches follow their separate session trees', (t) => {
+  const homeDir = fs.realpathSync.native(fs.mkdtempSync(path.join(os.tmpdir(), 'tm-review-sources-')));
+  t.after(() => fs.rmSync(homeDir, { recursive: true, force: true }));
+  const options = { homeDir, env: { XDG_DATA_HOME: path.join(homeDir, 'xdg') } };
+  const clients = 'junie,opencodereview';
+  const junie = path.join(homeDir, '.junie', 'sessions');
+  const review = path.join(homeDir, '.opencodereview', 'sessions');
+  fs.mkdirSync(path.join(junie, 'session'), { recursive: true });
+  fs.mkdirSync(path.join(review, 'nested', 'session'), { recursive: true });
+  assert.deepEqual(clientWatchCandidates(clients, options), { junie: [junie], opencodereview: [review] });
+  assert.deepEqual(clientSourceChecks(clients, options), {
+    junie: [{ id: 'junie-sessions', exists: true }],
+    opencodereview: [{ id: 'opencodereview-sessions', exists: true }]
+  });
+  const ignored = watchIgnoreMatcher(clients, options);
+  assert.equal(ignored(path.join(junie, 'session', 'events.jsonl')), false);
+  assert.equal(ignored(path.join(junie, 'session', 'other.jsonl')), true);
+  assert.equal(ignored(path.join(review, 'nested', 'session', 'run.jsonl')), false);
+  assert.equal(ignored(path.join(review, 'nested', 'session', 'config.json')), true);
 });

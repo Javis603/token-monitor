@@ -20,6 +20,7 @@ test('a row refresh names the account only where the provider filters by it', ()
   // Cursor's probe ignores the scope and answers for every account, which the
   // runtime would file under the one scoped identity.
   assert.deepEqual(limitAccountRefreshScope('cursor', row), { provider: 'cursor' });
+  assert.deepEqual(limitAccountRefreshScope('volcengine', { accountKey: 'k' }), { provider: 'volcengine', accountKey: 'k' });
   // Only an account key names one account precisely enough: a provider's
   // name- or email-only path can fall back to reading every account.
   assert.deepEqual(limitAccountRefreshScope('codex', { accountLabel: 'Pro' }), { provider: 'codex' });
@@ -28,8 +29,7 @@ test('a row refresh names the account only where the provider filters by it', ()
 });
 
 test('providers with a source that answers for every account refresh as a whole', () => {
-  // Volcengine's signed API returns the Coding and Agent plans together whatever
-  // the scope, Antigravity's local RPC answers for whichever account is signed
+  // Antigravity's local RPC answers for whichever account is signed
   // in now, OpenCode's scoped collection leaves out its auto-detected key, and a
   // WorkBuddy local session without a user id is keyed by an id its scoped
   // matcher never computes: narrowing would file another account's row under
@@ -37,7 +37,7 @@ test('providers with a source that answers for every account refresh as a whole'
   // nothing.
   // MiMo's desktop fallback answers with an unattributed placeholder whatever
   // the scope names.
-  for (const provider of ['volcengine', 'antigravity', 'opencode', 'workbuddy', 'mimo']) {
+  for (const provider of ['antigravity', 'opencode', 'workbuddy', 'mimo']) {
     assert.deepEqual(limitAccountRefreshScope(provider, { accountKey: 'k', accountName: 'Work' }), { provider });
   }
 });
@@ -68,4 +68,25 @@ test('a probe in flight covers the rows the runtime would file its answer under'
   assert.equal(accountScope.probeCoversRow({ provider: 'claude', account: null }, row), false);
   // Exactly the runtime's own scope match, from the same module.
   assert.ok(accountScope.rowMatchesScope(row, { accountKey: ' k-1 ' }));
+});
+
+test('the Limits renderer refreshes only the selected Alibaba plan for a shared UID', async () => {
+  const fs = require('node:fs');
+  const vm = require('node:vm');
+  const { alibabaAccountSlotsForScope } = require('../../src/shared/providers/alibaba/runtimeIdentity');
+  const app = fs.readFileSync(require.resolve('../../src/electron/renderer/app.js'), 'utf8');
+  const handler = app.slice(app.indexOf('async function refreshLimitAccount('), app.indexOf('async function clearAccountCredential('));
+  const slots = ['cn', 'cn-personal'].map(region => ({
+    accountKey: 'same-uid', accountKeyAliases: [], values: { alibabaVariant: region }
+  }));
+  const rows = [];
+  const refreshLimitAccount = vm.runInNewContext(handler + ';refreshLimitAccount', {
+    window: { tokenMonitor: { limits: { refresh(provider, row) {
+      rows.push(...alibabaAccountSlotsForScope(slots, limitAccountRefreshScope(provider, row)));
+      return { ok: true };
+    } } } },
+    refreshStats() {}
+  });
+  assert.equal((await refreshLimitAccount({ provider: 'alibaba', accountKey: 'same-uid', region: 'cn-personal' })).ok, true);
+  assert.deepEqual(rows, [slots[1]]);
 });

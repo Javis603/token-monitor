@@ -14,6 +14,7 @@ const app = fs.readFileSync(path.join(electronDir, 'renderer/app.js'), 'utf8');
 function startupWindow(options = {}, settings = {}) {
   const ipcMain = new EventEmitter();
   const target = new EventEmitter();
+  target.isDestroyed = () => false;
   target.webContents = new EventEmitter();
   target.webContents.loadFile = () => Promise.resolve();
   let reveals = 0;
@@ -124,23 +125,78 @@ test('early appearance does not consume a plugin-dependent initial Limits prefer
   assert.equal(context.state.breakdown, 'limits');
 });
 
-function initialAppearance({ nativeHidden, windowVisible }) {
+test('tray navigation waits for initial settings and replays only the last request', () => {
+  const calls = [];
+  let onOpenSettings;
+  let onOpenView;
+  const context = vm.createContext({
+    state: { settings: null },
+    initialSettingsApplied: false,
+    initialBreakdownPreferenceApplied: false,
+    openSettingsPanel: section => calls.push(['settings', section]),
+    openViewFromTray: viewId => calls.push(['view', viewId]),
+    window: {
+      tokenMonitor: {
+        onOpenSettings: (callback) => { onOpenSettings = callback; },
+        onOpenView: (callback) => { onOpenView = callback; }
+      }
+    }
+  });
+  const helper = app.slice(app.indexOf('let pendingTrayOpen = null;'), app.indexOf('window.tokenMonitor.onFloatingBubbleState'));
+  vm.runInContext(helper, context);
+  assert.match(helper, /handleTrayOpenRequest\('settings', section\)/);
+  assert.match(helper, /handleTrayOpenRequest\('view', viewId\)/);
+  onOpenView('limits');
+  onOpenSettings('notch');
+  onOpenView('trends');
+  assert.deepEqual(calls, []);
+  context.state.settings = { themeColors: {} };
+  context.initialSettingsApplied = true;
+  vm.runInContext('flushPendingTrayOpen()', context);
+  assert.deepEqual(calls, [['view', 'trends']]);
+  assert.equal(context.initialBreakdownPreferenceApplied, true, 'the tray view consumes the saved preference');
+  onOpenSettings('notch');
+  assert.deepEqual(calls.at(-1), ['settings', 'notch'], 'a loaded renderer dispatches at once');
+  context.initialSettingsApplied = false;
+  context.initialBreakdownPreferenceApplied = false;
+  onOpenSettings('notch');
+  context.initialSettingsApplied = true;
+  vm.runInContext('flushPendingTrayOpen()', context);
+  assert.equal(context.initialBreakdownPreferenceApplied, false, 'settings alone leaves the saved preference to apply');
+  const init = app.slice(app.indexOf('async function init()'));
+  assert.ok(init.indexOf('flushPendingTrayOpen();') > init.indexOf('initialSettingsApplied = true;'));
+});
+
+function initialAppearance({ nativeHidden, windowVisible, search = '', stats = {} }) {
   let applied = 0;
   let signaled = 0;
   const frames = [];
   const context = vm.createContext({
-    state: { windowVisible },
+    state: { windowVisible, stats },
     document: { hidden: nativeHidden },
     isRendererWindowHidden: () => nativeHidden || !windowVisible,
     applyVisibleSettingsAppearance: () => { applied += 1; },
-    window: { tokenMonitor: { signalAppearanceReady: () => { signaled += 1; } } },
+    URLSearchParams,
+    window: { location: { search }, tokenMonitor: { signalAppearanceReady: () => { signaled += 1; } } },
     requestAnimationFrame: callback => { frames.push(callback); }
   });
   const init = app.slice(app.indexOf('async function init()'));
+  const helper = app.slice(app.indexOf('let hibernateRevealPending'), app.indexOf('async function init()'));
+  const trayOpen = app.slice(app.indexOf('let pendingTrayOpen = null;'), app.indexOf('window.tokenMonitor.onFloatingBubbleState'));
   const early = init.slice(init.indexOf('// Local appearance'), init.indexOf('try { await pluginApi?.list();'));
-  vm.runInContext(`let initialSettingsApplied = false;\n${early}`, context);
-  return { applied: () => applied, signaled: () => signaled, frames };
+  vm.runInContext(`let initialSettingsApplied = false;\n${trayOpen}\n${helper}\n${early}`, context);
+  return { applied: () => applied, signaled: () => signaled, frames, context };
 }
+
+test('a hibernated tray window waits for a real stats snapshot before signaling appearance', () => {
+  const run = initialAppearance({ nativeHidden: false, windowVisible: false, search: '?windowHidden=1&hibernateReveal=1', stats: null });
+  assert.equal(run.applied(), 1);
+  assert.equal(run.signaled(), 0);
+  assert.equal(run.frames.length, 0);
+  run.context.state.stats = { periods: {} };
+  vm.runInContext('signalHibernateRevealIfReady()', run.context);
+  assert.equal(run.signaled(), 1);
+});
 
 test('an initially hidden retained startup view prepares appearance without waiting for hidden-page frames', () => {
   const run = initialAppearance({ nativeHidden: true, windowVisible: true });

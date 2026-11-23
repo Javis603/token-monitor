@@ -187,11 +187,11 @@ test('the all-time session list stays out of the renderer copy in every mode', (
 test('every stats payload sent to the renderer goes through rendererStats and names its snapshot', () => {
   const main = fs.readFileSync(path.join(__dirname, '../../src/electron/main.js'), 'utf8');
   assert.equal(
-    (main.match(/stats: rendererSnapshots\.stamp\(latestStats, rendererStats\(visibleStats\)\)/g) || []).length,
+    (main.match(/const copy = rendererSnapshots\.stamp\(latestStats, rendererStats\(visibleStats\), visibleStats\)/g) || []).length,
     2,
     'stats push and presentation refresh'
   );
-  assert.match(main, /ipcMain\.handle\('stats:get'[\s\S]*?return rendererSnapshots\.stamp\(stats, rendererStats\(electronPresentationStats\(stats\)\)\);/);
+  assert.match(main, /ipcMain\.handle\('stats:get'[\s\S]*?const copy = rendererSnapshots\.stamp\(stats, rendererStats\(visibleStats\), visibleStats\);[\s\S]*?return copy;/);
   assert.doesNotMatch(main, /stats: visibleStats\b/);
   assert.match(
     main,

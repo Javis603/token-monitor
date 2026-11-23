@@ -20,6 +20,7 @@ function createClientSourceIpcHandlers(options = {}) {
   const trackedClients = () => clientSet(options.trackedClients);
   const visibleDiagnosticRoots = options.visibleDiagnosticRoots || (() => ({}));
   const clientDiagnosticRoots = options.clientDiagnosticRoots || (() => ({}));
+  const detectWslClients = typeof options.detectWslClients === 'function' ? options.detectWslClients : () => [];
   const canRunRescan = options.canRunRescan || (() => true);
   const revealFile = options.showItemInFolder || (() => {});
   const revealSyncLock = options.revealClientSyncLock || (() => false);
@@ -63,6 +64,30 @@ function createClientSourceIpcHandlers(options = {}) {
     } catch (_) {
       return null;
     }
+  }
+
+  async function untrackedClientsWithData() {
+    const tracked = trackedClients();
+    const untracked = [...knownClients()].filter((client) => !tracked.has(client));
+    if (!untracked.length) return [];
+    const found = new Set();
+    try {
+      const roots = visibleDiagnosticRoots(untracked.join(','));
+      for (const client of untracked) {
+        if ((roots[client] || []).some((root) => root.exists === true)) found.add(client);
+      }
+    } catch (_) {}
+    const remaining = untracked.filter((client) => !found.has(client));
+    if (remaining.length) {
+      try {
+        const remainingSet = new Set(remaining);
+        for (const raw of (await detectWslClients(remaining)) || []) {
+          const client = normalizeClientId(raw);
+          if (remainingSet.has(client)) found.add(client);
+        }
+      } catch (_) {}
+    }
+    return untracked.filter((client) => found.has(client));
   }
 
   async function revealClientSource(clientId) {
@@ -141,6 +166,7 @@ function createClientSourceIpcHandlers(options = {}) {
     canInspectClient,
     canRescanClient,
     clientSources,
+    untrackedClientsWithData,
     repairClientSyncLock,
     revealClientSyncLock,
     revealClientSource,

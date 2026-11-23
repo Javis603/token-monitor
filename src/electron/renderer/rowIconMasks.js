@@ -36,8 +36,11 @@
       const client = vendorPresentation.CLIENT_PRESENTATION[id];
       if (client?.fullColor) {
         const clientUrl = `${iconBaseUrl}${client.icon}.svg`.replace(/["\\]/g, '\\$&');
+        // `.ink-icon` keeps the client's artwork but paints it in the text
+        // colour, for lists where every other mark is monochrome.
         return `.row-icon-${id} { -webkit-mask-image: none; mask-image: none; background: url("${clientUrl}") center / contain no-repeat; }\n`
-          + `.row-icon-${id}.model-icon { background: currentColor; -webkit-mask-image: url("${url}"); mask-image: url("${url}"); }`;
+          + `.row-icon-${id}.model-icon { background: currentColor; -webkit-mask-image: url("${url}"); mask-image: url("${url}"); }\n`
+          + `.row-icon-${id}.ink-icon { background: currentColor; -webkit-mask-image: url("${clientUrl}"); mask-image: url("${clientUrl}"); }`;
       }
       return `.row-icon-${id} { -webkit-mask-image: url("${url}"); mask-image: url("${url}"); }`;
     }).join('\n');
