@@ -12755,14 +12755,23 @@ function toolPreferenceRows() {
   return { clients, matched: new Set(matches.map(({ id }) => id)) };
 }
 
-// Leads a tracked-tool or limit-provider row, always in the text colour. A tool
-// without a mark keeps the same footprint with its initial, so names still
-// line up.
+// Leads a tracked-tool or limit-provider row, always in the text colour. A
+// plugin limit shows the mark its manifest declares, as it does on the Limits
+// page. A tool without a mark keeps the same footprint with its initial, so
+// names still line up.
 function settingsListIcon(id, label, iconSet, extraClass = '') {
   const icon = document.createElement('span');
   icon.setAttribute('aria-hidden', 'true');
+  const pluginModule = iconSet.has(id) ? null : pluginLimitMetadata(id);
   if (iconSet.has(id)) {
     icon.className = `settings-list-icon ink-icon row-icon-${id}${extraClass ? ` ${extraClass}` : ''}`;
+  } else if (pluginModule?.presentation?.icon || pluginModule?.identityIcon) {
+    icon.className = 'settings-list-icon settings-list-plugin-icon';
+    const mark = window.TokenMonitorPluginViews.navigationIcon(document, pluginModule, 14);
+    // The list sizes the slot (smaller in the collapsed group's chips).
+    mark.style.width = '100%';
+    mark.style.height = '100%';
+    icon.append(mark);
   } else {
     icon.className = 'settings-list-icon settings-list-icon-fallback';
     icon.textContent = String(label || id).trim().charAt(0).toUpperCase();

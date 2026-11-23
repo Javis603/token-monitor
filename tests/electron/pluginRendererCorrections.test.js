@@ -93,3 +93,19 @@ test('Notch choices exclude inactive plugins without removing native pages', () 
  const chips=container.querySelectorAll('.notch-page-chip');
  assert.equal(chips.length,6);assert.equal(chips.some(n=>n.dataset.page==='plugin:idle/main'),false);
 });
+
+test('settings limit list leads plugin rows with their manifest mark, not an initial', () => {
+ const d=makeDoc(), marks=[];
+ const modules={'plugin:pass:plan':{id:'plugin:pass:plan',label:'Pass',presentation:{icon:{data:'data:image/svg+xml;base64,PHN2Zy8+',mode:'mask'}}},'plugin:bare:plan':{id:'plugin:bare:plan',label:'Bare',presentation:{}}};
+ const c=scope(['settingsListIcon'],{document:d,window:{TokenMonitorPluginViews:{navigationIcon:(doc,view,size)=>{const n=doc.createElement('span');n.style.width=`${size}px`;n.style.height=`${size}px`;marks.push(view);return n;}}},pluginLimitMetadata:id=>modules[id]||null});
+ const plugin=c.settingsListIcon('plugin:pass:plan','Pass',new Set(['codex']),'limit-icon');
+ assert.equal(plugin.className,'settings-list-icon settings-list-plugin-icon');
+ assert.equal(plugin.textContent||'','');
+ assert.equal(marks[0],modules['plugin:pass:plan']);
+ assert.equal(plugin.children[0].style.width,'100%');
+ const bare=c.settingsListIcon('plugin:bare:plan','Bare',new Set(['codex']),'limit-icon');
+ assert.equal(bare.className,'settings-list-icon settings-list-icon-fallback');
+ assert.equal(bare.textContent,'B');
+ assert.equal(c.settingsListIcon('codex','Codex',new Set(['codex']),'limit-icon').className,'settings-list-icon ink-icon row-icon-codex limit-icon');
+ assert.equal(marks.length,1);
+});
