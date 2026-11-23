@@ -75,11 +75,13 @@ test('the search affordance is scoped to the session list and closing it clears 
   const state = { breakdown: 'session', openSession: null, sessionSearchOpen: false,
     sessionSearchQuery: '', sessionPage: 3, rowSignature: 'rows' };
   const api = Function('state', 'els', 't',
-    `let sessionSearchComposing = false;\n${app.slice(start, end)}\nreturn { syncSessionSearchChrome, setSessionSearchOpen };`)(state, els, (key) => key);
+    `let sessionSearchComposing = false;\n${app.slice(start, end)}\nreturn { syncSessionSearchChrome, setSessionSearchOpen };`)(
+    state, els, (key) => ({ sortNewest: '↕ Newest', sortMostTokens: '↕ Most tokens' })[key] ?? key
+  );
 
   api.syncSessionSearchChrome();
   assert.equal(els.sessionSortToggle.classes.has('hidden'), false);
-  assert.equal(els.sessionSortToggle.textContent, 'sortNewest');
+  assert.equal(els.sessionSortToggle.textContent, 'Newest');
   assert.equal(els.sessionSearchToggle.classes.has('hidden'), false);
   assert.equal(els.sessionSearchHost.classes.has('hidden'), false);
   assert.equal(els.sessionSearchHost.classes.has('is-open'), false);
@@ -90,7 +92,7 @@ test('the search affordance is scoped to the session list and closing it clears 
   state.sessionSearchQuery = 'review';
   state.sessionSort = 'tokens';
   api.syncSessionSearchChrome();
-  assert.equal(els.sessionSortToggle.textContent, 'sortMostTokens');
+  assert.equal(els.sessionSortToggle.textContent, 'Most tokens');
   assert.equal(els.sessionSearchHost.classes.has('hidden'), false);
   assert.equal(els.sessionSearchHost.classes.has('is-open'), true);
   assert.equal(els.sessionSearchHost.inert, false);

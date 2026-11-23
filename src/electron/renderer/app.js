@@ -3280,7 +3280,7 @@ function syncSessionSearchChrome() {
   const visible = state.breakdown === 'session' && !state.openSession;
   const open = visible && state.sessionSearchOpen;
   els.sessionSortToggle.classList.toggle('hidden', !visible);
-  const sortLabel = t(state.sessionSort === 'tokens' ? 'sortMostTokens' : 'sortNewest');
+  const sortLabel = t(state.sessionSort === 'tokens' ? 'sortMostTokens' : 'sortNewest').replace(/^↕ /, '');
   if (els.sessionSortToggle.textContent !== sortLabel) els.sessionSortToggle.textContent = sortLabel;
   els.sessionSearchToggle?.classList.toggle('hidden', !visible);
   els.sessionSearchToggle?.classList.toggle('is-active', open);

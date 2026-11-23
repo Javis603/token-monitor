@@ -4389,15 +4389,10 @@ html.is-windows .settings-panel select option {
   min-width: 0;
   margin-top: 0;
 }
-.session-sort-toggle { margin-inline-start: auto; -webkit-app-region: no-drag; }
+.session-sort-toggle,
 .session-search-toggle {
-  display: grid;
-  flex: 0 0 28px;
-  width: 28px;
   height: 28px;
-  margin: -7px -4px -7px 0;
-  place-items: center;
-  padding: 0;
+  margin-block: -7px;
   border: 0;
   border-radius: 7px;
   background: transparent;
@@ -4405,6 +4400,27 @@ html.is-windows .settings-panel select option {
   cursor: pointer;
   transition: color 120ms ease, background-color 120ms ease;
 }
+.session-sort-toggle {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex: 0 0 auto;
+  margin-inline-start: auto;
+  padding: 0 7px;
+  font-size: 0.6875rem;
+  white-space: nowrap;
+  -webkit-app-region: no-drag;
+}
+.session-search-toggle {
+  display: grid;
+  place-items: center;
+  flex: 0 0 28px;
+  width: 28px;
+  margin-inline-end: -4px;
+  padding: 0;
+}
+.session-sort-toggle:hover,
+.session-sort-toggle:active,
 .session-search-toggle:hover,
 .session-search-toggle:active {
   background: rgba(var(--overlay-rgb), 0.08);
@@ -4417,10 +4433,18 @@ html.is-windows .settings-panel select option {
   outline-offset: 1px;
   color: var(--text);
 }
+.session-sort-toggle::before,
 .session-search-toggle-icon {
   width: 13px;
   height: 13px;
   background: currentColor;
+}
+.session-sort-toggle::before {
+  content: "";
+  -webkit-mask: url("icons/actions/arrow-up-down.svg") center / contain no-repeat;
+  mask: url("icons/actions/arrow-up-down.svg") center / contain no-repeat;
+}
+.session-search-toggle-icon {
   -webkit-mask: url("icons/actions/search.svg") center / contain no-repeat;
   mask: url("icons/actions/search.svg") center / contain no-repeat;
 }
