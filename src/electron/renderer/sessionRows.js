@@ -960,9 +960,12 @@
       ...options.grokBot, id: 'cursor-grok-bot', client: 'cursor',
       label: options.grokBot?.label || 'Grok Bot'
     }));
-    return grouped.sort((a, b) => finiteNumber(b.sortTime) - finiteNumber(a.sortTime)
-      || finiteNumber(b.value) - finiteNumber(a.value) || finiteNumber(b.cost) - finiteNumber(a.cost)
-      || a.name.localeCompare(b.name));
+    return grouped.sort((a, b) => {
+      const recent = finiteNumber(b.sortTime) - finiteNumber(a.sortTime);
+      const tokens = finiteNumber(b.value) - finiteNumber(a.value);
+      return (options.sortBy === 'tokens' ? tokens || recent : recent || tokens)
+        || finiteNumber(b.cost) - finiteNumber(a.cost) || a.name.localeCompare(b.name);
+    });
   }
 
   function sessionBreakdownIncomplete(stats, periodName) {

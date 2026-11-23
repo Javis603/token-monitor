@@ -4389,6 +4389,7 @@ html.is-windows .settings-panel select option {
   min-width: 0;
   margin-top: 0;
 }
+.session-sort-toggle { margin-inline-start: auto; -webkit-app-region: no-drag; }
 .session-search-toggle {
   display: grid;
   flex: 0 0 28px;
@@ -4410,6 +4411,7 @@ html.is-windows .settings-panel select option {
   color: var(--text);
 }
 .session-search-toggle.is-active { color: var(--accent); }
+.session-sort-toggle:focus-visible,
 .session-search-toggle:focus-visible {
   outline: 2px solid rgba(var(--accent-rgb), 0.32);
   outline-offset: 1px;
