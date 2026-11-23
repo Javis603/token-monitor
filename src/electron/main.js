@@ -1221,13 +1221,12 @@ async function refreshLimitProvider(providerId, account) {
     ? limitAccountRefreshScope(provider, account)
     : { provider };
   try {
+    beginEdgeDockExplicitRefresh();
     const outcome = limitRefreshOutcome(await runLimitInvalidation(deviceRuntimeHandle, scope, 'account-panel', { clear: false }));
-    // A quota row's own refresh is an explicit user read. The probe's limits
-    // update normally reaches the rail through the live lane; paint the result
-    // now instead of leaving it behind that lane's cooldown.
-    if (outcome.ok) repaintDockSurfaces();
+    finishEdgeDockExplicitRefresh(outcome.ok);
     return outcome;
   } catch (error) {
+    finishEdgeDockExplicitRefresh(false);
     return { ok: false, reason: 'failed', error: error?.message || String(error) };
   }
 }
@@ -4696,7 +4695,9 @@ function sendPush(payload, options = {}) {
     pluginRuntime?.publishStats(visibleStats, latestStats);
     // An explicit user read is not live-stream traffic: it is the refresh the
     // user is waiting on, so it paints at once instead of behind the live floor.
-    if (payload.data.reason === 'manual') updateEdgeDockCells(visibleStats);
+    // The same applies to the publication that carries an explicit quota probe's
+    // result, which in Client mode arrives through the display batcher.
+    if (payload.data.reason === 'manual' || edgeDockRefreshIsExplicit()) updateEdgeDockCells(visibleStats);
     else updateEdgeDockCellsLive(visibleStats);
     syncCodexPresentationActiveAccount();
     updateTrayDisplay();
@@ -5824,6 +5825,27 @@ function edgeDockCellsFor(visibleStats, items = settings?.edgeDockItems, options
 // floor collapses the activity storm onto that cadence. Only the dock's cells
 // are coalesced; the notch and every explicit repaint keep the immediate path.
 const EDGE_DOCK_CELL_PUSH_INTERVAL_MS = 5 * 1000;
+
+// A quota row's own refresh is an explicit user read. Its result can reach the
+// rail through a display batcher (Client mode) well after the probe resolves, so
+// the probe itself and a short grace window bypass the live floor; the
+// coalescer resumes after it. The in-flight cap keeps a hung probe from
+// disabling the floor indefinitely.
+const EDGE_DOCK_EXPLICIT_REFRESH_GRACE_MS = 5 * 1000;
+const EDGE_DOCK_EXPLICIT_REFRESH_MAX_MS = 30 * 1000;
+let edgeDockExplicitRefreshUntil = 0;
+
+function beginEdgeDockExplicitRefresh(now = Date.now()) {
+  edgeDockExplicitRefreshUntil = Math.max(edgeDockExplicitRefreshUntil, now + EDGE_DOCK_EXPLICIT_REFRESH_MAX_MS);
+}
+
+function finishEdgeDockExplicitRefresh(ok, now = Date.now()) {
+  edgeDockExplicitRefreshUntil = ok ? now + EDGE_DOCK_EXPLICIT_REFRESH_GRACE_MS : 0;
+}
+
+function edgeDockRefreshIsExplicit(now = Date.now()) {
+  return now < edgeDockExplicitRefreshUntil;
+}
 
 function updateEdgeDockCells(visibleStats) {
   if ((!edgeDockController?.isRunning() && !notchController?.isRunning()) || !visibleStats) return;

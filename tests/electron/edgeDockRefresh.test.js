@@ -617,11 +617,38 @@ test('an explicit manual push is not held behind the live floor', () => {
   assert.equal(context.dockStats, manual, 'the user-waited refresh is painted at once');
 });
 
+test('a publication during an explicit quota probe bypasses the live floor', () => {
+  const { context, advance } = fixture({ realCoalescer: true });
+  const live = { historyRevision: '1', devices: [{ today: 'live' }] };
+  const fresh = { historyRevision: '2', devices: [{ today: 'fresh' }] };
+  context.latestStats = live;
+  context.sendPush({ event: 'stats', data: { stats: live, reason: 'local' } });
+
+  context.beginEdgeDockExplicitRefresh();
+  context.sendPush({ event: 'stats', data: { stats: fresh, reason: 'local' } });
+  assert.equal(context.dockStats, fresh, 'the probe publication is painted at once');
+  context.finishEdgeDockExplicitRefresh(true);
+
+  const batched = { historyRevision: '3', devices: [{ today: 'batched' }] };
+  context.sendPush({ event: 'stats', data: { stats: batched, reason: 'local' } });
+  assert.equal(context.dockStats, batched, 'the grace window covers the batched publication');
+
+  // A window in the past is not explicit: a live push waits for the floor.
+  context.finishEdgeDockExplicitRefresh(false);
+  context.beginEdgeDockExplicitRefresh(0);
+  const later = { historyRevision: '4', devices: [{ today: 'later' }] };
+  context.sendPush({ event: 'stats', data: { stats: later, reason: 'local' } });
+  assert.equal(context.dockStats, batched, 'outside the window the floor applies again');
+  advance(5000);
+  assert.equal(context.dockStats, later);
+});
+
 test('explicit manual and quota-row refreshes paint the rail immediately', () => {
   const provider = main.slice(main.indexOf('async function refreshLimitProvider('), main.indexOf('// The limits probes running right now'));
-  assert.match(provider, /if \(outcome\.ok\) repaintDockSurfaces\(\);/);
+  assert.match(provider, /beginEdgeDockExplicitRefresh\(\);/);
+  assert.match(provider, /finishEdgeDockExplicitRefresh\(outcome\.ok\);/);
   const manualPath = main.slice(main.indexOf('function refreshManualStats('), main.indexOf('async function fetchStats('));
   assert.match(manualPath, /repaintDockSurfaces\(\);/);
   const pushPath = main.slice(main.indexOf('function sendPush('), main.indexOf('function statsHistoryRevision('));
-  assert.match(pushPath, /if \(payload\.data\.reason === 'manual'\) updateEdgeDockCells\(visibleStats\);/);
+  assert.match(pushPath, /payload\.data\.reason === 'manual' \|\| edgeDockRefreshIsExplicit\(\)\) updateEdgeDockCells\(visibleStats\);/);
 });

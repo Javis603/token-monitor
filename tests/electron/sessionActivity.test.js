@@ -30,7 +30,7 @@ test('host and iCloud activity snapshots retain the captured local history for T
       snapshotLocalDevices: snapshots, rendererSnapshots: publisher.createRendererSnapshots({ source: () => mode }),
       presentationCache: publisher.createStatsPresentationCache(), allTimeSessionsCache: publisher.createStatsPresentationCache(),
       mergedLocalAllTimeSessions, projectModelAliasSessions: (_stats, sessions) => sessions,
-      electronPresentationStats: stats => stats, updateEdgeDockCells: () => {}, updateEdgeDockCellsLive: () => {}, sendPush: () => {},
+      electronPresentationStats: stats => stats, updateEdgeDockCells: () => {}, updateEdgeDockCellsLive: () => {}, edgeDockRefreshIsExplicit: () => false, sendPush: () => {},
       withoutSessionTitles: titles.withoutSessionTitles, pluginRuntime: null
     };
     vm.runInNewContext(source.slice(publishStart, publishEnd) + '\n' + source.slice(pullStart, pullEnd), context);
@@ -132,7 +132,7 @@ function mainActivityHarness(hubMode, externalAgent = false) {
     getAccountPresentationSync: () => ({ notifyStats() {}, refresh: async () => {} }),
     getSyncContentRuntime: () => ({ notifyStats() {} }), electronPresentationStats: stats => stats,
     getLimitsHistoryStore: () => ({ record() {} }), limitsHistoryController: null,
-    migrateCodexAdditionalLimits() {}, scheduleMacWidgetSnapshot() {}, updateEdgeDockCells() {}, updateEdgeDockCellsLive() {}, pluginRuntime: null,
+    migrateCodexAdditionalLimits() {}, scheduleMacWidgetSnapshot() {}, updateEdgeDockCells() {}, updateEdgeDockCellsLive() {}, edgeDockRefreshIsExplicit: () => false, pluginRuntime: null,
     syncCodexPresentationActiveAccount() {}, updateTrayDisplay() {}, statsHistoryRevision: () => '',
     maybeAdoptSharedSubscriptionRevision() {}, withoutSessionTitles: titles.withoutSessionTitles,
     mainWindow: { isDestroyed: () => false, webContents: { send: (_topic, payload) => pushes.push(payload) } },
