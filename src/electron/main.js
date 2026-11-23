@@ -1223,10 +1223,10 @@ async function refreshLimitProvider(providerId, account) {
   const explicitRefresh = beginEdgeDockExplicitRefresh();
   try {
     const outcome = limitRefreshOutcome(await runLimitInvalidation(deviceRuntimeHandle, scope, 'account-panel', { clear: false }));
-    finishEdgeDockExplicitRefresh(explicitRefresh, outcome.ok);
+    settleEdgeDockExplicitRefresh(explicitRefresh, outcome.ok);
     return outcome;
   } catch (error) {
-    finishEdgeDockExplicitRefresh(explicitRefresh, false);
+    settleEdgeDockExplicitRefresh(explicitRefresh, false);
     return { ok: false, reason: 'failed', error: error?.message || String(error) };
   }
 }
@@ -5854,6 +5854,14 @@ function edgeDockRefreshIsExplicit(now = Date.now()) {
     if (request.until <= now) edgeDockExplicitRefreshDeadlines.delete(request);
   }
   return edgeDockExplicitRefreshDeadlines.size > 0;
+}
+
+function settleEdgeDockExplicitRefresh(request, ok, now = Date.now()) {
+  finishEdgeDockExplicitRefresh(request, ok, now);
+  // A probe that outlived the in-flight cap can publish its result into the live
+  // lane just before settling. Paint that queued snapshot now instead of leaving
+  // it on the floor; the success grace still covers a later batched publication.
+  edgeDockCellCoalescer?.flushNow();
 }
 
 function updateEdgeDockCells(visibleStats) {

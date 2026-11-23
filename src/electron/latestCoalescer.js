@@ -43,7 +43,19 @@ function createLatestCoalescer({ flush, intervalMs, now = Date.now, setTimer = s
     pending = null;
   }
 
-  return { enqueue, cancel };
+  // Paints the newest queued value now. Used when an explicit refresh settles
+  // after its bypass window expired: a result that landed in the live lane just
+  // before settlement must not wait out the floor.
+  function flushNow() {
+    if (pending === null) return;
+    if (timer) {
+      clearTimer(timer);
+      timer = null;
+    }
+    run();
+  }
+
+  return { enqueue, cancel, flushNow };
 }
 
 module.exports = { createLatestCoalescer };

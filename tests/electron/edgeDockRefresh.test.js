@@ -45,7 +45,11 @@ function fixture(options = {}) {
     syncPluginQuotaSurfaceDemand() {},
     edgeDockController: { isRunning: () => true },
     notchController: null,
-    pushEdgeDockCells: (cells) => { context.dockStats = cells.stats; context.dockPeriods = cells.derivedPeriods; },
+    pushEdgeDockCells: (cells) => {
+      context.edgeDockCellCoalescer?.cancel();
+      context.dockStats = cells.stats;
+      context.dockPeriods = cells.derivedPeriods;
+    },
     // The live lane coalesces dock cells; these tests exercise the explicit
     // repaint paths, so the queue hands each value straight through with the
     // same projection the immediate path uses.
@@ -667,9 +671,38 @@ test('one probe finishing cannot clear another probe bypass', () => {
 test('explicit manual and quota-row refreshes paint the rail immediately', () => {
   const provider = main.slice(main.indexOf('async function refreshLimitProvider('), main.indexOf('// The limits probes running right now'));
   assert.match(provider, /const explicitRefresh = beginEdgeDockExplicitRefresh\(\);/);
-  assert.match(provider, /finishEdgeDockExplicitRefresh\(explicitRefresh, outcome\.ok\);/);
+  assert.match(provider, /settleEdgeDockExplicitRefresh\(explicitRefresh, outcome\.ok\);/);
+  assert.match(provider, /settleEdgeDockExplicitRefresh\(explicitRefresh, false\);/);
+  const settlePath = main.slice(main.indexOf('function settleEdgeDockExplicitRefresh('), main.indexOf('function updateEdgeDockCells('));
+  assert.match(settlePath, /edgeDockCellCoalescer\?\.flushNow\(\);/);
   const manualPath = main.slice(main.indexOf('function refreshManualStats('), main.indexOf('async function fetchStats('));
   assert.match(manualPath, /repaintDockSurfaces\(\);/);
   const pushPath = main.slice(main.indexOf('function sendPush('), main.indexOf('function statsHistoryRevision('));
   assert.match(pushPath, /payload\.data\.reason === 'manual' \|\| edgeDockRefreshIsExplicit\(\)\) updateEdgeDockCells\(visibleStats\);/);
+});
+
+test('an explicit paint cancels a queued live snapshot', () => {
+  const { context, advance } = fixture({ realCoalescer: true });
+  const a = { historyRevision: '1', devices: [{ today: 'a' }] };
+  const b = { historyRevision: '2', devices: [{ today: 'b' }] };
+  const c = { historyRevision: '3', devices: [{ today: 'c' }] };
+  context.latestStats = a;
+  context.sendPush({ event: 'stats', data: { stats: a, reason: 'local' } });
+  context.sendPush({ event: 'stats', data: { stats: b, reason: 'local' } });
+  context.sendPush({ event: 'stats', data: { stats: c, reason: 'manual' } });
+  assert.equal(context.dockStats, c, 'the explicit paint wins at once');
+  advance(5000);
+  assert.equal(context.dockStats, c, 'the cancelled snapshot never replays');
+});
+
+test('a settled explicit refresh flushes a queued publication', () => {
+  const { context } = fixture({ realCoalescer: true });
+  const a = { historyRevision: '1', devices: [{ today: 'a' }] };
+  const b = { historyRevision: '2', devices: [{ today: 'b' }] };
+  context.latestStats = a;
+  context.sendPush({ event: 'stats', data: { stats: a, reason: 'local' } });
+  context.sendPush({ event: 'stats', data: { stats: b, reason: 'local' } });
+  assert.equal(context.dockStats, a, 'b waits behind the floor');
+  context.edgeDockCellCoalescer.flushNow();
+  assert.equal(context.dockStats, b, 'settlement paints the queued snapshot');
 });

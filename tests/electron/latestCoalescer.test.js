@@ -69,3 +69,17 @@ test('empty values never arm a timer or reach the flush', () => {
   assert.deepEqual(h.flushes, []);
   assert.equal(h.waiting(), 0);
 });
+
+test('flushNow paints the newest queued value without waiting for the window', () => {
+  const h = harness();
+  h.coalescer.enqueue('a');
+  h.coalescer.enqueue('b');
+  assert.deepEqual(h.flushes, ['a'], 'b waits for the window');
+  h.coalescer.flushNow();
+  assert.deepEqual(h.flushes, ['a', 'b']);
+  assert.equal(h.waiting(), 0, 'the queued timer is gone');
+  h.coalescer.enqueue('c');
+  assert.deepEqual(h.flushes, ['a', 'b'], 'a new value starts a fresh window');
+  h.advance(10_000);
+  assert.deepEqual(h.flushes, ['a', 'b', 'c']);
+});
