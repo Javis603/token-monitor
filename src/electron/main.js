@@ -5487,6 +5487,7 @@ function primeLocalStatsFromAnchor(usageOptions, widgetProducerOwner) {
       wslSupported: process.platform === 'win32',
       historyEnabled: usageOptions.historyEnabled,
       dailyHistoryArchiveEnabled: usageOptions.dailyHistoryArchiveEnabled,
+      dailyHistoryArchiveVisible: usageOptions.dailyHistoryArchiveVisible,
       hostname: os.hostname(),
       platform: `${process.platform}-${process.arch}`
     }
@@ -8845,9 +8846,8 @@ app.whenReady().then(() => {
       }
       restartDeviceRuntimeForMode();
     } else {
-      if (runtimeChange.usageStructural) {
-        reconfigureUsageRuntimeForMode();
-      } else if (previousRuntimeSettings.codexDotsVisible !== settings.codexDotsVisible) {
+      const usageReconfigureScheduled = runtimeChange.usageStructural && reconfigureUsageRuntimeForMode();
+      if (!usageReconfigureScheduled && previousRuntimeSettings.codexDotsVisible !== settings.codexDotsVisible) {
         const dotsVisibilityApplied = Promise.resolve(deviceRuntimeHandle?.setCodexDotsVisible(settings.codexDotsVisible));
         onDotsVisibilityRefresh(dotsVisibilityApplied);
         // Keep failure observable to settings:update without an unhandled

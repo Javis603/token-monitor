@@ -37,6 +37,7 @@ function deviceRecordFromAnchor(saved, options = {}) {
     platform = '',
     historyEnabled = true,
     dailyHistoryArchiveEnabled = false,
+    dailyHistoryArchiveVisible = true,
     dailyHistoryArchiveOptions = {},
     now = new Date()
   } = options;
@@ -83,7 +84,7 @@ function deviceRecordFromAnchor(saved, options = {}) {
   // the meantime. It is read for today's calendar, not the anchor's. An archive
   // that cannot be read leaves History to the first scan, as before.
   let history = null;
-  if (historyEnabled !== false && dailyHistoryArchiveEnabled === true) {
+  if (historyEnabled !== false && dailyHistoryArchiveEnabled === true && dailyHistoryArchiveVisible !== false) {
     try {
       history = archivedHistory({
         ...dailyHistoryArchiveOptions,

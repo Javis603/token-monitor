@@ -438,7 +438,7 @@ The widget chooses local vs sync mode based on Settings → Multi-device Sync. T
 
 **Preserve deleted session usage** (Settings → Collection) controls whether individual session totals are kept.
 
-With **Enable Trends** on, Token Monitor keeps a local archive of observed daily tool and model totals without a time limit. The heatmap and trends show those totals even after the source tool deletes its sessions.
+With **Enable Trends** on, Token Monitor keeps a local archive of observed daily tool and model totals without a time limit. The heatmap and trends include those totals while session retention is on. Pausing session retention hides archived totals while daily recording continues.
 
 <details>
 <summary><strong>Advanced: extend the source tool's own retention</strong></summary>

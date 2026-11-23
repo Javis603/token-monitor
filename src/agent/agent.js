@@ -101,6 +101,7 @@ const usageOptions = {
   historyEnabled,
   historyIntervalMs: normalizeHistoryIntervalMs(process.env.TOKEN_MONITOR_HISTORY_INTERVAL_MS),
   dailyHistoryArchiveEnabled: historyEnabled,
+  dailyHistoryArchiveVisible: sessionUsageArchiveEnabled,
   dailyHistoryArchiveWriteEnabled: !dryRun,
   anchorPersistenceEnabled: !once && !dryRun,
   intervalMs,

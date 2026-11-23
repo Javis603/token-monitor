@@ -436,7 +436,7 @@ O widget escolhe entre o modo local e o de sincronização com base em Configura
 
 **Preservar o uso de sessões excluídas** (Configurações → Coleta) controla a retenção dos totais de cada sessão.
 
-Com **Ativar Tendências** ligado, o Token Monitor guarda localmente os totais diários observados por ferramenta e modelo, sem limite de tempo, para o mapa de calor e as tendências, mesmo depois que a ferramenta de origem exclui suas sessões.
+Com **Ativar Tendências** ligado, o Token Monitor guarda localmente os totais diários observados por ferramenta e modelo, sem limite de tempo, para o mapa de calor e as tendências. Pausar a retenção de sessões oculta os totais arquivados e mantém o registro diário.
 
 <details>
 <summary><strong>Avançado: estender a retenção da própria ferramenta de origem</strong></summary>
