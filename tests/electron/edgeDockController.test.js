@@ -1189,6 +1189,44 @@ for (const style of ['frosted', 'regular', 'clear']) {
   });
 }
 
+test('an open left dock survives a pointer overshoot onto the display beside it', (t) => {
+  const advance = mockDockClock(t);
+  const fixture = createFixture({
+    settings: { edgeDockMode: 'autoHide', edgeDockSide: 'left' },
+    primaryButtonDown: () => false,
+    displays: [{
+      id: 1,
+      scaleFactor: 1,
+      bounds: { x: 0, y: 0, width: 1200, height: 900 },
+      workArea: { x: 0, y: 0, width: 1200, height: 860 }
+    }, {
+      id: 2,
+      scaleFactor: 1,
+      bounds: { x: -1536, y: 0, width: 1536, height: 900 },
+      workArea: { x: -1536, y: 0, width: 1536, height: 860 }
+    }]
+  });
+  t.after(() => fixture.controller.stop());
+  const rail = fixture.windowFor('rail');
+  const besideRail = (x) => ({ x, y: rail.bounds.y + 4 });
+
+  fixture.screen.point = besideRail(-1);
+  advance(500);
+  assert.equal(rail.opacity, 0, 'the neighbouring display never reveals the dock');
+
+  fixture.screen.point = besideRail(0);
+  advance(500);
+  assert.equal(rail.opacity, 1);
+
+  fixture.screen.point = besideRail(-EDGE_DOCK_METRICS.overshootDepth);
+  advance(600);
+  assert.equal(rail.opacity, 1, 'a small overshoot past the shared edge keeps the dock open');
+
+  fixture.screen.point = besideRail(-EDGE_DOCK_METRICS.overshootDepth - 1);
+  advance(600);
+  assert.equal(rail.opacity, 0, 'moving further onto the other display still retracts it');
+});
+
 test('auto-hide can limit hover reveal to the handle without changing the open dock hover area', (t) => {
   const advance = mockDockClock(t);
   const fixture = createFixture({

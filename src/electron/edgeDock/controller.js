@@ -24,6 +24,7 @@ const {
   edgeDockScale,
   edgeDockBubbleScale,
   edgeDockTriggerBounds,
+  edgeDockOvershootBounds,
   normalizeEdgeDockCustomScale,
   normalizeEdgeDockDisplayId,
   normalizeEdgeDockFloatingX,
@@ -327,12 +328,13 @@ function createEdgeDockController(deps) {
     const handle = edgeDockHandleBounds({ side, peekBounds: peek, handle: handleSize(), metrics: m });
     const restingHandle = edgeDockHandleBounds({ side, peekBounds: peek, metrics: m });
     const trigger = edgeDockTriggerBounds({ workArea, displayBounds: current.bounds, side, railBounds: rail, metrics: m });
+    const overshoot = edgeDockOvershootBounds({ side, triggerBounds: trigger, metrics: m });
     const zones = edgeDockHandleZones({ side, peekBounds: peek, metrics: m });
     const bubble = bubbleCell !== null
       ? edgeDockBubbleBounds({ railBounds: rail, cellIndex: bubbleCell, height: Math.round(Math.min(bubbleHeight, maxCardHeight() ?? Infinity) * bubbleScale()), workArea, side, metrics: { ...bm, bubbleWidth } })
       : null;
     const refresh = edgeDockRefreshBounds({ workArea, displayBounds: current.bounds, railBounds: rail, metrics: m });
-    return { side, workArea, rail, peek, handle, restingHandle, trigger: floatingX === null ? trigger : null, wake: floatingX === null ? zones?.wake || null : null, approach: floatingX === null ? zones?.approach || null : null, bubble, bubbleWidth, refresh };
+    return { side, workArea, rail, peek, handle, restingHandle, trigger: floatingX === null ? trigger : null, overshoot: floatingX === null ? overshoot : null, wake: floatingX === null ? zones?.wake || null : null, approach: floatingX === null ? zones?.approach || null : null, bubble, bubbleWidth, refresh };
   }
 
   function alive(win) {
@@ -1246,7 +1248,9 @@ function createEdgeDockController(deps) {
         const input = {
           // The trigger strip also keeps an open rail visible across work-area
           // insets. Limit only the reveal from the collapsed state.
-          inTrigger: (revealed || settings().edgeDockTriggerRange !== 'handle') && rectContains(current.trigger, point),
+          inTrigger: revealed
+            ? rectContains(current.overshoot, point)
+            : settings().edgeDockTriggerRange !== 'handle' && rectContains(current.trigger, point),
           inPeek: !revealed && rectContains(current.restingHandle, point),
           // Only with the button known to be up: a held one is a scrollbar or a
           // selection being dragged past the handle, not a reach for it, and an
