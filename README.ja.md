@@ -30,7 +30,7 @@
 
 ## Token Monitor とは
 
-Claude Code、Codex、Cursor、GitHub Copilot、Cherry Studio など 56+ 種類の AI コーディングツールのリアルタイムトークン使用量と AI ツール制限を表示するデスクトップアプリです。複数デバイス間のリアルタイム同期、使用履歴トレンド、ツール・デバイス・モデル・セッション・プロジェクト別の内訳表示に対応しています。メインウィンドウ、MacBook のノッチ、メニューバーやシステムトレイ、画面の端、フローティングバブル、ネイティブ macOS ウィジェットなど、目に入るあらゆる場所で確認できます。
+Claude Code、Codex、Cursor、GitHub Copilot、Cherry Studio など 57+ 種類の AI コーディングツールのリアルタイムトークン使用量と AI ツール制限を表示するデスクトップアプリです。複数デバイス間のリアルタイム同期、使用履歴トレンド、ツール・デバイス・モデル・セッション・プロジェクト別の内訳表示に対応しています。メインウィンドウ、MacBook のノッチ、メニューバーやシステムトレイ、画面の端、フローティングバブル、ネイティブ macOS ウィジェットなど、目に入るあらゆる場所で確認できます。
 
 ## 対応ツール
 
@@ -92,6 +92,7 @@ Claude Code、Codex、Cursor、GitHub Copilot、Cherry Studio など 56+ 種類�
     <img src=".github/assets/tools-icon/manus.png" width="40" alt="Manus" title="Manus" />
     <img src=".github/assets/tools-icon/hark.png" width="40" alt="Hark" title="Hark" />
     <img src=".github/assets/tools-icon/opendesign.png" width="40" alt="OpenDesign" title="OpenDesign" />
+    <img src=".github/assets/tools-icon/codingpass.png" width="40" alt="CodingPass" title="CodingPass" />
     <img src=".github/assets/tools-icon/thirdparty.gif" width="40" alt="サードパーティAPI" title="サードパーティAPI" />
 </p>
 
@@ -174,7 +175,7 @@ brew install --cask token-monitor
 
 ### 制限・トレンド・エクスポート
 
-- **AI ツール制限検出** — Claude Code、Codex、Cursor、OpenRouter、サードパーティAPI、GLM、Kimi など 34+ プロバイダーの session/daily/weekly/billing/credits、複数の OpenRouter／サードパーティプロファイル、残高型アカウント（Claude クレジット、DeepSeek のプリペイド残高と使用履歴、サードパーティ残高）
+- **AI ツール制限検出** — Claude Code、Codex、Cursor、OpenRouter、サードパーティAPI、GLM、Kimi など 35+ プロバイダーの session/daily/weekly/billing/credits、複数の OpenRouter／サードパーティプロファイル、残高型アカウント（Claude クレジット、DeepSeek のプリペイド残高と使用履歴、サードパーティ残高）
 - **複数アカウントと Codex 切り替え** — 1 つのプロバイダーで複数アカウントを追跡し、それぞれの制限を表示。追跡済みの Codex アカウントは、再認証なしでローカルアカウントとしてワンクリック切り替え可能
 - **クォータ履歴** — 制限ビューでアカウントにホバーまたはクリックすると、現在のサイクルの推移と過去 14 日間の実測使用量を表示。履歴はローカルにのみ保存され、アップロードされない
 - **ネットワークプロキシ** — 「設定 → 一般」で指定したプロキシ経由で AI ツール制限とアカウントのリクエストを送信
@@ -276,6 +277,7 @@ Token Monitor は **トークン使用量**、**アカウント制限**、**セ�
 | <img src=".github/assets/tools-icon/manus.png" width="28" alt="Manus" /> | Manus | Manus クレジット（月間＋毎日／定期リフレッシュ＋残高）；デスクトップセッション（macOS／Windows）または手動 Web セッション（全 OS） | — | ✅ | — |
 | <img src=".github/assets/tools-icon/hark.png" width="28" alt="Hark" /> | Hark | Hark Pro の日次と月次トークンプール。macOS のデスクトップセッション、または貼り付けたセッションクッキー | — | ✅ | — |
 | <img src=".github/assets/tools-icon/opendesign.png" width="28" alt="OpenDesign" /> | OpenDesign | 現在のワークスペースの5時間／週間サブスクリプション枠；手動 Cookie | — | ✅ | — |
+| <img src=".github/assets/tools-icon/codingpass.png" width="28" alt="CodingPass" /> | CodingPass | 5時間／週間／月間の USD プラン枠と従量ウォレット；手動コンソール Cookie | — | ✅ | — |
 | <img src=".github/assets/tools-icon/thirdparty.gif" width="28" alt="サードパーティAPI" /> | サードパーティAPI | New API / Sub2API互換アカウントプリセット（互換性のあるOne APIフォークを含む）、New APIキープリセット、カスタム残高エンドポイント | — | ✅ | — |
 
 <details>

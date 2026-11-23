@@ -55,6 +55,12 @@ const fixtures = {
     values: n => ({ opendesignCookie: `session=${n}` }),
     key: n => hashKey('opendesign', `workspace-${n}`),
     body: (n, url) => url.endsWith('/current') ? { workspaceId: `workspace-${n}` } : { workspaceId: `workspace-${n}`, eligible: true, windows: [{ durationSeconds: 18000, usedCredits: 1, limitCredits: 20 }] }
+  },
+  codingpass: {
+    values: n => ({ codingpassCookie: `session=${n}` }),
+    key: n => hashKey('codingpass', `user-${n}`),
+    body: (n, url) => url.endsWith('/auth/state') ? { userId: `user-${n}` }
+      : url.endsWith('/usage') ? { json: { quota: { used5hMicro: 1000000, limit5hMicro: 5000000 } } } : { json: {} }
   }
 };
 // Identify each request from its actual credential headers, never its call order.

@@ -142,6 +142,9 @@ test('CREDENTIAL_SETTING_PATHS is exactly this set (the store is default-deny)',
     opendesignCookie: ['providers', 'opendesign', 'cookie'],
     opendesignAccountSlots: ['providers', 'opendesign', 'accountSlots'],
     opendesignDefaultAccountIdentity: ['providers', 'opendesign', 'defaultAccountIdentity'],
+    codingpassCookie: ['providers', 'codingpass', 'cookie'],
+    codingpassAccountSlots: ['providers', 'codingpass', 'accountSlots'],
+    codingpassDefaultAccountIdentity: ['providers', 'codingpass', 'defaultAccountIdentity'],
     manusAccountSlots: ['providers', 'manus', 'accountSlots'],
     manusDefaultAccountIdentity: ['providers', 'manus', 'defaultAccountIdentity'],
     manusAmbientAccounts: ['providers', 'manus', 'ambientAccounts'],
@@ -243,6 +246,7 @@ test('LIMIT_PROVIDER_SETTING_KEYS is exactly this set (drives per-provider refre
     stepfun: ['stepfunToken', 'stepfunAccountSlots'],
     notion: ['notionCookie', 'notionWorkspaceId', 'notionAccountSlots'],
     opendesign: ['opendesignCookie', 'opendesignAccountSlots'],
+    codingpass: ['codingpassCookie', 'codingpassAccountSlots'],
     manus: ['manusSessionToken', 'manusAccountSlots'],
     hark: ['harkCookie', 'harkAccountSlots'],
     muse: ['museWebCookie', 'museAccountSlots'],
@@ -361,7 +365,7 @@ test('settings:update normalizes provider fields and strips separately managed a
     'volcengineAgentSecretAccessKey', 'volcengineAgentRegion', 'qoderCookie', 'qoderSite',
     'devinBearerToken', 'devinOrganization', 'alibabaCookie', 'alibabaVariant',
     'traeCookie', 'traeAccessToken', 'traeDeviceId', 'zedCookie', 'typesafeCookie', 'stepfunToken',
-    'mistralCookie', 'commandcodeCookie', 'kimiApiKey', 'kimiWebAccessToken', 'ollamaApiKey', 'ollamaCookie', 'notionCookie', 'notionWorkspaceId', 'manusSessionToken', 'harkCookie', 'museWebCookie', 'opendesignCookie'
+    'mistralCookie', 'commandcodeCookie', 'kimiApiKey', 'kimiWebAccessToken', 'ollamaApiKey', 'ollamaCookie', 'notionCookie', 'notionWorkspaceId', 'manusSessionToken', 'harkCookie', 'museWebCookie', 'opendesignCookie', 'codingpassCookie'
   ].sort());
   for (const key of normalizedKeys) {
     const value = key === 'claudeWebCookie' ? 'sessionKey=sk-ant-test'

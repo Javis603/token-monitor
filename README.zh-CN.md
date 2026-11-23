@@ -30,7 +30,7 @@
 
 ## Token Monitor 是什么？
 
-一款桌面应用，实时显示 Claude Code、Codex、Cursor、GitHub Copilot、Cherry Studio 等 56+ 种 AI 编程工具的 Token 用量与 AI 工具额度，具备实时多设备同步与历史使用趋势功能，并支持按工具、设备、模型、session 或项目分项显示。它出现在你目光所及之处：主窗口、MacBook 刘海、菜单栏或系统托盘、屏幕边缘、悬浮小窗，以及原生 macOS 小部件。
+一款桌面应用，实时显示 Claude Code、Codex、Cursor、GitHub Copilot、Cherry Studio 等 57+ 种 AI 编程工具的 Token 用量与 AI 工具额度，具备实时多设备同步与历史使用趋势功能，并支持按工具、设备、模型、session 或项目分项显示。它出现在你目光所及之处：主窗口、MacBook 刘海、菜单栏或系统托盘、屏幕边缘、悬浮小窗，以及原生 macOS 小部件。
 
 ## 支持的工具
 
@@ -92,6 +92,7 @@
     <img src=".github/assets/tools-icon/manus.png" width="40" alt="Manus" title="Manus" />
     <img src=".github/assets/tools-icon/hark.png" width="40" alt="Hark" title="Hark" />
     <img src=".github/assets/tools-icon/opendesign.png" width="40" alt="OpenDesign" title="OpenDesign" />
+    <img src=".github/assets/tools-icon/codingpass.png" width="40" alt="CodingPass" title="CodingPass" />
     <img src=".github/assets/tools-icon/thirdparty.gif" width="40" alt="第三方 API" title="第三方 API" />
 </p>
 
@@ -174,7 +175,7 @@ brew install --cask token-monitor
 
 ### 额度、趋势与导出
 
-- **AI 工具额度检测**：涵盖 Claude Code、Codex、Cursor、OpenRouter、第三方 API、GLM、Kimi 等 34+ 家提供方的 session、每日、每周、账单与 credits 窗口，支持多个 OpenRouter／第三方 profile，以及余额型账户（Claude credits、DeepSeek 预付余额与消费历史、第三方余额）
+- **AI 工具额度检测**：涵盖 Claude Code、Codex、Cursor、OpenRouter、第三方 API、GLM、Kimi 等 35+ 家提供方的 session、每日、每周、账单与 credits 窗口，支持多个 OpenRouter／第三方 profile，以及余额型账户（Claude credits、DeepSeek 预付余额与消费历史、第三方余额）
 - **多账号与 Codex 账号切换**：同一提供方可追踪多个账号、各自显示额度；已加入追踪的 Codex 账号还能一键切换为本机使用账号，免重新登录授权
 - **额度历史**：在额度视图悬停或点击账号，即可查看本周期的趋势与最近 14 天的实测用量；历史只存于本地、绝不上传
 - **网络代理**：在“设置 → 常规”设置代理，让 AI 工具额度与账号请求经代理发出
@@ -276,6 +277,7 @@ Token Monitor 对 Token 用量、账户额度和 session 明细分别支持：
 | <img src=".github/assets/tools-icon/manus.png" width="28" alt="Manus" /> | Manus | Manus 积分（月度 + 每日／周期刷新额度 + 余额）；桌面会话（macOS／Windows）或手动网页会话（所有 OS） | — | ✅ | — |
 | <img src=".github/assets/tools-icon/hark.png" width="28" alt="Hark" /> | Hark | Hark Pro 的每日与每月 token 池；macOS 桌面会话或粘贴的会话 cookie | — | ✅ | — |
 | <img src=".github/assets/tools-icon/opendesign.png" width="28" alt="OpenDesign" /> | OpenDesign | 当前工作区的 5 小时／每周订阅额度；手动 Cookie | — | ✅ | — |
+| <img src=".github/assets/tools-icon/codingpass.png" width="28" alt="CodingPass" /> | CodingPass | 5 小时／每周／每月美元套餐额度及按量钱包；手动控制台 Cookie | — | ✅ | — |
 | <img src=".github/assets/tools-icon/thirdparty.gif" width="28" alt="第三方 API" /> | 第三方 API | New API / Sub2API 兼容账号预设方案（包括兼容的 One API 分支）、New API 密钥预设方案与自定义余额端点 | — | ✅ | — |
 
 <details>

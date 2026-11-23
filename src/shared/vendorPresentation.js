@@ -104,6 +104,7 @@
     { id: 'manus', label: 'Manus', color: '#FFFFFF' },
     { id: 'hark', label: 'Hark', color: '#1C1C1C', widgetInk: true },
     { id: 'opendesign', label: 'OpenDesign', color: '#FFFFFF' },
+    { id: 'codingpass', label: 'CodingPass', color: '#FF5A1F' },
     { id: 'thirdparty', label: 'Third-party APIs', color: '#8090A6' },
     // Marks without a colour of their own. Factory is the limits provider for
     // the Droid client and borrows its mark; the relays only ever appear as a

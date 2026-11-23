@@ -27,6 +27,7 @@
     'alibaba',
     'antigravity',
     'cline',
+    'codingpass',
     'commandcode',
     'kimi',
     'volcengine',

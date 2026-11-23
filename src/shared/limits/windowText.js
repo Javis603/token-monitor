@@ -152,6 +152,10 @@
       return result(null, moneyOfRemaining(window, showUsed), window.showMeter !== false);
     }
 
+    // CodingPass caps every window in USD; the money pair sits under the
+    // percentage bar. The PAYG wallet is a credits balance with its own row.
+    if (id === 'codingpass') return metric ? EMPTY : result(null, moneyOfUsed(window, showUsed));
+
     if (id === 'mistral') {
       if (!billing || metric === 'credits') return EMPTY;
       // Match the grant detail's used/remaining mode without a text prefix.

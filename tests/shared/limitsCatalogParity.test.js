@@ -14,7 +14,7 @@ const expectedCounts = {
   workbuddy: 2, qoder: 2, deepseek: 2, devin: 1, minimax: 2,
   mistral: 1, typesafe: 1, openrouter: 2, volcengine: 2, ollama: 1,
   trae: 1, alibaba: 2, stepfun: 1, notion: 2, manus: 2, hark: 2,
-  opendesign: 2, thirdparty: 2
+  opendesign: 2, codingpass: 2, thirdparty: 2
 };
 
 test('catalog aggregation matches the per-provider collapse table', () => {

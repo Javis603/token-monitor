@@ -30,7 +30,7 @@
 
 ## O que é o Token Monitor?
 
-Um app de desktop que mostra o uso de tokens ao vivo e os Limites de Ferramentas de IA em 56+ ferramentas de programação com IA — Claude Code, Codex, Cursor, GitHub Copilot, Cherry Studio e muitas outras — com sincronização multidispositivo em tempo real, tendências de uso histórico e detalhamentos por ferramenta, dispositivo, modelo, sessão ou projeto. Ele aparece onde você estiver olhando: a janela principal, o notch do MacBook, a barra de menus ou a bandeja do sistema, a borda da tela, uma bolha flutuante e widgets nativos do macOS.
+Um app de desktop que mostra o uso de tokens ao vivo e os Limites de Ferramentas de IA em 57+ ferramentas de programação com IA — Claude Code, Codex, Cursor, GitHub Copilot, Cherry Studio e muitas outras — com sincronização multidispositivo em tempo real, tendências de uso histórico e detalhamentos por ferramenta, dispositivo, modelo, sessão ou projeto. Ele aparece onde você estiver olhando: a janela principal, o notch do MacBook, a barra de menus ou a bandeja do sistema, a borda da tela, uma bolha flutuante e widgets nativos do macOS.
 
 ## Ferramentas suportadas
 
@@ -92,6 +92,7 @@ Uso de tokens, limites de ferramentas de IA e detalhes de sessão das ferramenta
     <img src=".github/assets/tools-icon/manus.png" width="40" alt="Manus" title="Manus" />
     <img src=".github/assets/tools-icon/hark.png" width="40" alt="Hark" title="Hark" />
     <img src=".github/assets/tools-icon/opendesign.png" width="40" alt="OpenDesign" title="OpenDesign" />
+    <img src=".github/assets/tools-icon/codingpass.png" width="40" alt="CodingPass" title="CodingPass" />
     <img src=".github/assets/tools-icon/thirdparty.gif" width="40" alt="Third-party APIs" title="Third-party APIs" />
 </p>
 
@@ -174,7 +175,7 @@ Abra o app para começar a acompanhar o uso local deste dispositivo, sem configu
 
 ### Limites, tendências e exportação
 
-- **Detecção de Limites de Ferramentas de IA** — janelas de sessão, diária, semanal, de cobrança e de créditos específicas de cada provedor para Claude Code, Codex, Cursor, OpenRouter, APIs de terceiros, GLM, Kimi e 34+ provedores, incluindo vários perfis do OpenRouter/de terceiros e contas no estilo de saldo (créditos do Claude, saldo pré-pago e histórico de gastos do DeepSeek, saldos de terceiros)
+- **Detecção de Limites de Ferramentas de IA** — janelas de sessão, diária, semanal, de cobrança e de créditos específicas de cada provedor para Claude Code, Codex, Cursor, OpenRouter, APIs de terceiros, GLM, Kimi e 35+ provedores, incluindo vários perfis do OpenRouter/de terceiros e contas no estilo de saldo (créditos do Claude, saldo pré-pago e histórico de gastos do DeepSeek, saldos de terceiros)
 - **Várias contas e troca do Codex** — acompanhe várias contas por provedor, cada uma com seus próprios limites; uma conta do Codex acompanhada pode ser definida como a conta local ativa com um clique, sem precisar autenticar de novo
 - **Histórico de cotas** — passe o mouse ou clique em uma conta na tela de Limites para ver a tendência do ciclo atual e o uso medido nos últimos 14 dias; o histórico fica só no computador e nunca é enviado
 - **Proxy de rede** — envie as solicitações de Limites de Ferramentas de IA e de contas por um proxy definido em Configurações → Geral
@@ -276,6 +277,7 @@ O Token Monitor suporta uso de tokens, verificação de limites da conta e detal
 | <img src=".github/assets/tools-icon/manus.png" width="28" alt="Manus" /> | Manus | Créditos do Manus (mensais + recarga diária/periódica + saldo); sessão desktop (macOS/Windows) ou sessão web manual (todos os SOs) | — | ✅ | — |
 | <img src=".github/assets/tools-icon/hark.png" width="28" alt="Hark" /> | Hark | Cotas diária e mensal do Hark Pro; sessão desktop no macOS ou cookie de sessão colado | — | ✅ | — |
 | <img src=".github/assets/tools-icon/opendesign.png" width="28" alt="OpenDesign" /> | OpenDesign | Cotas de cinco horas e semanais para o workspace atual; Cookie manual | — | ✅ | — |
+| <img src=".github/assets/tools-icon/codingpass.png" width="28" alt="CodingPass" /> | CodingPass | Cotas em USD de cinco horas, semanais e mensais e carteira PAYG; Cookie manual do console | — | ✅ | — |
 | <img src=".github/assets/tools-icon/thirdparty.gif" width="28" alt="Third-party APIs" /> | APIs de terceiros | Predefinições de conta compatíveis com New API / Sub2API (incluindo forks compatíveis do One API), uma predefinição com chave de API da New API e um endpoint de saldo personalizado | — | ✅ | — |
 
 <details>
