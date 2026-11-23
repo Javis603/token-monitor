@@ -1,0 +1,26 @@
+{
+  "status": "not_applicable",
+  "allowances": [
+    { "bucketId": "standard", "cadence": "billing_period", "state": "not_exposed" },
+    {
+      "bucketId": "auto",
+      "cadence": "billing_period",
+      "state": "resolved",
+      "used": 8.98,
+      "limit": 100,
+      "periodStartMs": 1793196000000,
+      "periodEndMs": 1795874400000,
+      "credits": { "used": 134.66869, "limit": 1500 }
+    },
+    {
+      "bucketId": "flex",
+      "cadence": "billing_period",
+      "state": "resolved",
+      "used": 0,
+      "limit": 100,
+      "periodStartMs": 1793196000000,
+      "periodEndMs": 1795874400000,
+      "credits": { "used": 0, "limit": 500 }
+    }
+  ]
+}

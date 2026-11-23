@@ -581,6 +581,7 @@
     const meter = document.createElement('div');
     meter.className = 'limit-meter';
     meter.style.background = colorWithAlpha(color, 0.16);
+    meter.style.setProperty('--mark-glow-color', colorWithAlpha(color, 0.55));
     const fill = document.createElement('div');
     fill.className = 'limit-meter-fill';
     applyBarScale(fill, safePercent / 100);

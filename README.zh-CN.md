@@ -165,15 +165,19 @@ brew install --cask token-monitor
 - **实时 Token 追踪**：Claude Code、Codex、Cursor、GitHub Copilot、Antigravity、OpenCode 等 44+ 种 AI 工具，每轮对话后 UI 在数秒内刷新（完整列表见上方表格）
 - **实时 Token 速率**：可选显示的实时读数，以 `tok/s` 显示生成速度或以 `tok/min` 显示总消耗
 - **单个 session 明细**：点进某个 session，可看每条提问的 Token 消耗，并展开查看每次回复的 Token 拆分与用到的工具（打开时才实时读取本机 transcript 或数据库，绝不同步）
+- **Session 搜索与筛选**：可按标题、工具、模型或 ID 搜索 session、按工具筛选，并看出同步过来的 session 来自哪台设备
 - **缓存命中统计**：点击任何工具或模型，展开查看输入 Token（缓存命中与未命中）、输出 Token 的详细分类及命中率百分比
 - **成本与币别**：Token 数量旁附带成本；可用 USD、CNY、TWD、HKD、KRW、JPY、BRL 等支持的币别显示，汇率每日自动更新，也可在设置中手动覆写
+- **模型别名与自定义单价**：把同一模型的不同名称合并成一行显示，也可自定义任何模型的单价
 - **自定义扫描路径**：session 不在默认位置时，可为个别工具加入额外的文件夹
-- **WSL 用量（Windows）**：运行中 WSL 发行版里的文件型用量约每 5 分钟并入总量；OpenCode、Hermes 等 SQLite 来源可能需要按照[指南](docs/wsl-sqlite-setup.zh-CN.md)在 WSL 内运行 headless agent
+- **WSL 用量（Windows）**：默认关闭；运行中 WSL 发行版里的文件型用量约每 5 分钟并入总量；OpenCode、Hermes 等 SQLite 来源可能需要按照[指南](docs/wsl-sqlite-setup.zh-CN.md)在 WSL 内运行 headless agent
 
 ### 额度、趋势与导出
 
 - **AI 工具额度检测**：涵盖 Claude Code、Codex、Cursor、OpenRouter、第三方 API、GLM、Kimi 等 34+ 家提供方的 session、每日、每周、账单与 credits 窗口，支持多个 OpenRouter／第三方 profile，以及余额型账户（Claude credits、DeepSeek 预付余额与消费历史、第三方余额）
 - **多账号与 Codex 账号切换**：同一提供方可追踪多个账号、各自显示额度；已加入追踪的 Codex 账号还能一键切换为本机使用账号，免重新登录授权
+- **额度历史**：在额度视图悬停或点击账号，即可查看本周期的趋势与最近 14 天的实测用量；历史只存于本地、绝不上传
+- **网络代理**：在“设置 → 常规”设置代理，让 AI 工具额度与账号请求经代理发出
 - **Codex 重置预测**：可选开启的第三方重置预测，显示预计重置时间、重置类型（Regular 或 Banked）与上次重置时间
 - **保留已删除会话用量**：许多工具会定期清除旧 session（Claude Code 默认清 30 天前的 transcript），一删就再也算不到。开启后，Token Monitor 会在本地不设期限地归档已观测到的每日工具／模型用量，让热力图与趋势即使在来源文件被清掉后仍然完整（详见下方[〈会话数据保留期〉](#会话数据保留期)）
 - **使用趋势与仪表板**：主页的活跃热力图与趋势图，加上独立的仪表板窗口，提供连续天数，以及跨所有设备、按工具／按模型堆叠的历史（柱状图与 K 线两种视图）
@@ -200,7 +204,7 @@ brew install --cask token-monitor
 - **悬浮小窗模式**：可将组件收成可拖动的紧凑小窗，支持点击或悬停预览展开，并可显示托盘同款内容
 - **原生 macOS 小部件**：在 macOS 14+ 上通过小号、中号和大号布局查看 Token 用量与成本、趋势、各 AI 工具的剩余额度与重置时间、活动热力图，以及按工具或模型分类的明细
 - **分组视图**：可按工具、设备、模型、session、项目或账户额度分组查看用量
-- **外观控制**：界面主题切换（含浅色模式）、各工具厂商色、玻璃透明度、模糊度、完全透明窗口、自定义字体
+- **外观控制**：界面主题（含浅色模式）与自定义颜色、各工具厂商色、macOS 与 Windows 原生玻璃样式、背景图片、文字大小与字体
 - **工具列表自定义**：可隐藏、置顶和拖曳排序主列表中的工具，不影响实际追踪
 - **可录制全局快捷键**：可从任何地方快速显示或隐藏窗口
 - **Discord Rich Presence**：将今日 Token、花费与主要工具广播到你的 Discord 个人资料（需手动开启）
@@ -268,7 +272,7 @@ Token Monitor 对 Token 用量、账户额度和 session 明细分别支持：
 | <img src=".github/assets/tools-icon/trae.png" width="28" alt="Trae CN" /> | Trae CN | Trae CN access token（通过 trae.cn 查询 Trae CN／SOLO credits） | — | ✅ | — |
 | <img src=".github/assets/tools-icon/alibaba.png" width="28" alt="Alibaba Cloud" /> | Alibaba Cloud | 阿里云控制台 cookie（百炼／Model Studio Token Plan 额度，团队版与个人版） | — | ✅ | — |
 | <img src=".github/assets/tools-icon/stepfun.png" width="28" alt="StepFun" /> | StepFun | StepFun Oasis-Token（Coding Plan／Token Plan 额度） | — | ✅ | — |
-| <img src=".github/assets/tools-icon/notion.png" width="28" alt="Notion AI" /> | Notion AI | Notion AI 滚动／每月额度，仅限 Business/Enterprise；手动 token_v2 Cookie + 明确的工作区 ID | — | ✅ | — |
+| <img src=".github/assets/tools-icon/notion.png" width="28" alt="Notion AI" /> | Notion AI | Business/Enterprise 的标准与自选积分，或旧版滚动／每月额度；手动 token_v2 Cookie + 明确的工作区 ID | — | ✅ | — |
 | <img src=".github/assets/tools-icon/manus.png" width="28" alt="Manus" /> | Manus | Manus 积分（月度 + 每日／周期刷新额度 + 余额）；桌面会话（macOS／Windows）或手动网页会话（所有 OS） | — | ✅ | — |
 | <img src=".github/assets/tools-icon/hark.png" width="28" alt="Hark" /> | Hark | Hark Pro 的每日与每月 token 池；macOS 桌面会话或粘贴的会话 cookie | — | ✅ | — |
 | <img src=".github/assets/tools-icon/opendesign.png" width="28" alt="OpenDesign" /> | OpenDesign | 当前工作区的 5 小时／每周订阅额度；手动 Cookie | — | ✅ | — |
@@ -288,7 +292,7 @@ Token Monitor 对 Token 用量、账户额度和 session 明细分别支持：
 - LM Studio 追踪目前仅涵盖服务器日志中记录的 OpenAI 兼容 `/v1/chat/completions` 和 `/v1/responses` 请求。通过 LM Studio 内置 Chat 界面发起的对话，以及原生 `/api/v1/chat` 请求均不包括在内。
 - Unsloth Studio 从 `studio.db` 追踪 Studio 对话与本地 API 的推理用量。本地推理的 API 费用为零；可识别的按量计费供应商使用 Tokscale 的价格估算。不包括训练 Token。详见 [Unsloth 数据来源说明](docs/providers/unsloth.md)。
 - Devin 从本地 `sessions.db` 追踪 Devin CLI 会话，并从 `acp-events` ACP 日志追踪 Devin Desktop 代理会话；同一 session 两边都有数据时以 CLI 数据库为准。Desktop 的覆盖范围取决于连接的 ACP 代理：只有会在本地写入 `usage_update` 事件的代理才会计入，而 Devin Desktop 默认的 `devin-cloud` 代理在服务端计量，因此默认的 Desktop 配置不会报告 Desktop token。session 标题与项目归属取自 CLI 数据库。详见 [Devin 数据来源说明](docs/providers/devin.md)。
-- Notion AI 使用内部 API，需要手动粘贴 `token_v2` Cookie 和明确的 Business/Enterprise 工作区 ID。目前仅以测试数据验证，尚无真实响应样本，实际登录验证待批准。不会自动获取 Cookie，也不保证公开 API 兼容性。详见 [Notion 数据来源说明](docs/providers/notion.md)。
+- Notion AI 使用内部 API，需要手动粘贴 `token_v2` Cookie 和明确的 Business/Enterprise 工作区 ID。Token Monitor 使用包含已脱敏的标准与自选积分响应在内的测试样本进行验证。详见 [Notion 数据来源说明](docs/providers/notion.md)。
 - Manus 支持 macOS／Windows 桌面会话自动读取，所有 OS（含 Linux）也可手动输入网页会话。月度积分、刷新额度与余额使用相同的未公开内部接口，不保证兼容性。详见 [Manus 数据来源说明](docs/providers/manus.md)。
 - Hark 在 macOS 上读取已登录的桌面会话，任何系统都可以粘贴会话 cookie。显示账户级的每日与每月 token 池。详见 [Hark 数据来源说明](docs/providers/hark.md)。
 - MiniMax Code 读取 CLI 写入的本地会话记录，位于 `~/.minimax` 或 `MINIMAX_DATA_DIR` / `MAVIS_DATA_DIR`（也包括 `~/.mavis` 与 `~/.minimax-<profile>` / `~/.mavis-<profile>`），并加上通过 `tokscale headless mcode` 捕获的运行；两边都有的同一轮只计一次。
@@ -464,7 +468,7 @@ npm run pack         # 未打包的 app 目录（无安装包），方便本机�
 
 设置分两处，日常使用只需要前者：
 
-- **小部件（GUI）**——点右下角的 `⚙` 打开，分区依次为：常规（语言、登录启动、更新）、主画面（首页模块与显示币别）、窗口（窗口行为、菜单栏与悬浮小窗排版、托盘模式、快捷键）、外观（主题与厂商色）、采集（追踪的工具、采集频率、保留已删除会话用量、数据导出）、AI 工具额度（提供方选择、额度与凭据）、订阅资料（每个账号实际付多少）、多设备同步。标题栏的 `⇧` 按钮可循环切换窗口行为。
+- **小部件（GUI）**——点右下角的 `⚙` 打开，分区依次为：常规（语言、登录启动、更新、网络代理）、主画面（视图排序、首页模块、默认用量范围与显示币别）、窗口（窗口行为、菜单栏与悬浮小窗排版、托盘模式、侧边栏与刘海面板、快捷键）、外观（主题、玻璃、文字大小与颜色）、采集（追踪的工具、采集频率、保留已删除会话用量、WSL 扫描、数据导出、模型别名与单价）、AI 工具额度（提供方选择、额度与凭据）、订阅资料（每个账号实际付多少）、多设备同步（同步方式与已保存的 Hub）、插件（实验性）。标题栏的 `⇧` 按钮可循环切换窗口行为。
 - **无头代理与 hub**——没有 UI，用项目根目录的 `.env` 配置（从 `.env.example` 复制）；优先级为 CLI 参数 → 环境变量 → 内置默认。详见 [docs/configuration.md](docs/configuration.md#headless-agent--hub-env)。
 
 每一项设置与所有环境变量的完整说明，请见[设置参考文档](docs/configuration.md)。

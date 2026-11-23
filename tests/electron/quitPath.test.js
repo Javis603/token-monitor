@@ -66,7 +66,7 @@ test('tray and signal quit flush plugin and quota history state before immediate
   const events = [];
   const context = { console, quitRequested: false, quitInProgress: false,
     pluginRuntime: { dispose() { events.push('flush'); } },
-    stopPersistBoundsTimer() {}, stopLocalCollector() {}, stopStatsStream() {}, stopHostStats() {},
+    cancelMainWindowHibernate() {}, stopPersistBoundsTimer() {}, stopLocalCollector() {}, stopStatsStream() {}, stopHostStats() {},
     stopSyncCollector() {}, stopIcloudRuntime() {}, terminateUsageHostSubprocesses() {},
     syncStatsPublication: { cancel() {} }, macWidgetSnapshotController: null, macWidgetDemand: null,
     stopEmbeddedHub() {}, stopDiscordRpc() {}, sessionUsageArchiveStore: { close() {} }, tray: null,
@@ -104,7 +104,7 @@ test('an aborted updater handoff can reopen quota history after draining the pri
     path, createLimitsHistoryStore: (file, options) => { historyOptions = options; return createLimitsHistoryStore(file, { ...options, now: () => clock }); }, limitsHistoryStore: null,
     limitsHistoryController: { dispose() { events.push('preview-close'); }, refresh() {} },
     app: { getPath: () => directory, on: (_event, callback) => { beforeQuit = callback; } },
-    console, quitRequested: false, skipForcedQuit: false,
+    console, quitRequested: false, skipForcedQuit: false, idleHeapCollector: null, cancelMainWindowHibernate() {},
     cancelAntigravityManagedAccountLogin() {}, workbuddyManagedAccountService: null,
     resetMacWidgetReloadThrottle() {}, rateRefreshTimer: null, appUpdateBackgroundTimer: null,
     clearInterval() {}, stopTaskbarZOrderKeeper() {}, unregisterWindowToggleShortcut() {},

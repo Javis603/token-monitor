@@ -117,6 +117,9 @@ function mainActivityHarness(hubMode, externalAgent = false) {
     lastCollectedDevice: local, localDevice: null, localStats: null, latestStats: null, statsPushSource: null,
     statsPushRevision: 0, lastExportAt: 0, edgeDockManualStats: null, deviceRuntimeHandle: {},
     ...projection, ...syncDisplay, rendererStats: publisher.rendererStats,
+    buildStatsDelta: () => ({ delta: null, fingerprint: null }),
+    fingerprintStats: () => null,
+    lastRendererStatsFingerprint: null,
     rendererSnapshots: publisher.createRendererSnapshots({ source: () => context.currentHubStatsIdentity() }),
     snapshotLocalDevices: new WeakMap(), presentationCache: publisher.createStatsPresentationCache(),
     isExternalAgentActive: () => externalAgent,
@@ -133,6 +136,7 @@ function mainActivityHarness(hubMode, externalAgent = false) {
     syncCodexPresentationActiveAccount() {}, updateTrayDisplay() {}, statsHistoryRevision: () => '',
     maybeAdoptSharedSubscriptionRevision() {}, withoutSessionTitles: titles.withoutSessionTitles,
     mainWindow: { isDestroyed: () => false, webContents: { send: (_topic, payload) => pushes.push(payload) } },
+    mainWindowStatsPushWanted: () => true,
     dashboardWindow: null,
     ipcMain: { handle: (channel, handler) => { if (channel === 'stats:get') get = handler; } }
   };

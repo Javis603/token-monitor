@@ -8,6 +8,7 @@ const {
   clientHealthDetail,
   clientHealthGroups,
   clientHealthNotes,
+  clientIdsWithUsage,
   clientPeriodUsage,
   exactDevice,
   friendlyPath,
@@ -210,4 +211,15 @@ test('every overall state has a tone', () => {
   for (const overall of ['healthy', 'waiting', 'attention', 'unavailable', 'unknown']) {
     assert.ok(clientHealthDetail(health({ codex: entry({ overall }) }), 'codex').tone, overall);
   }
+});
+
+test('clientIdsWithUsage collects clients with positive tokens or cost-only usage', () => {
+  const device = {
+    periods: {
+      today: { clients: { codex: 0, cursor: 120 }, clientCosts: { codex: 0, reasonix: 12 } },
+      month: { clients: { kiro: 0 }, clientCosts: { kiro: 0 } },
+      allTime: { clients: { gemini: 5 }, clientCosts: {} }
+    }
+  };
+  assert.deepEqual([...clientIdsWithUsage([null, device])].sort(), ['cursor', 'gemini', 'reasonix']);
 });

@@ -310,6 +310,7 @@ const {
   edgeDockRefreshBounds,
   edgeDockRefreshCorridor,
   edgeDockTriggerBounds,
+  edgeDockOvershootBounds,
   normalizeEdgeDockDisplayId,
   normalizeEdgeDockOffset,
   edgeDockFittingScale,
@@ -1392,6 +1393,23 @@ test('trigger strip reaches the physical display edge past a side Dock', () => {
   assert.equal(trigger.x + trigger.width, 1440);
   assert.equal(trigger.y, rail.y);
   assert.equal(trigger.height, rail.height);
+});
+
+test('overshoot band extends the trigger past the edge onto a neighbouring display', () => {
+  const { triggerDepth, overshootDepth } = EDGE_DOCK_METRICS;
+  const leftRail = edgeDockRailBounds({ workArea, side: 'left', offset: 0.5, cellCount: 2 });
+  const leftTrigger = edgeDockTriggerBounds({ workArea, displayBounds, side: 'left', railBounds: leftRail });
+  const left = edgeDockOvershootBounds({ side: 'left', triggerBounds: leftTrigger });
+  assert.equal(left.x, -overshootDepth);
+  assert.equal(left.x + left.width, triggerDepth);
+  assert.equal(left.y, leftRail.y);
+  assert.equal(left.height, leftRail.height);
+
+  const rightRail = edgeDockRailBounds({ workArea, side: 'right', offset: 0.5, cellCount: 2 });
+  const rightTrigger = edgeDockTriggerBounds({ workArea, displayBounds, side: 'right', railBounds: rightRail });
+  const right = edgeDockOvershootBounds({ side: 'right', triggerBounds: rightTrigger });
+  assert.equal(right.x, 1440 - triggerDepth);
+  assert.equal(right.x + right.width, 1440 + overshootDepth);
 });
 
 test('cursor resolves to the cell under it, including the gap below a cell', () => {

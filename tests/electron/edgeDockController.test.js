@@ -1189,13 +1189,162 @@ for (const style of ['frosted', 'regular', 'clear']) {
   });
 }
 
-// The rail's entrance is keyed to the reveal rather than to the push, so the page
-// has to be able to tell which payload is the reveal: without that it has neither
-// a transition to fire on nor a way to keep a stats update from replaying the
-// slide. It is a count rather than a flag because only the reveal renders - the
-// retract fades the window out with no payload at all, so a page told the state
-// alone keeps believing the rail is up and reads the next reveal as no change,
-// which is what left the entrance playing once per page load.
+for (const mode of ['autoHide', 'alwaysExceptFullScreen']) {
+  test(`an open left dock survives a pointer overshoot onto the display beside it (${mode})`, (t) => {
+    const advance = mockDockClock(t);
+    const fixture = createFixture({
+      settings: { edgeDockMode: mode, edgeDockSide: 'left' },
+      isFullScreen: () => true,
+      primaryButtonDown: () => false,
+      displays: [{
+        id: 1,
+        scaleFactor: 1,
+        bounds: { x: 0, y: 0, width: 1200, height: 900 },
+        workArea: { x: 0, y: 0, width: 1200, height: 860 }
+      }, {
+        id: 2,
+        scaleFactor: 1,
+        bounds: { x: -1536, y: 0, width: 1536, height: 900 },
+        workArea: { x: -1536, y: 0, width: 1536, height: 860 }
+      }]
+    });
+    t.after(() => fixture.controller.stop());
+    const rail = fixture.windowFor('rail');
+    const besideRail = (x) => ({ x, y: rail.bounds.y + 4 });
+
+    fixture.screen.point = besideRail(-1);
+    advance(500);
+    assert.equal(rail.opacity, 0, 'the neighbouring display never reveals the dock');
+
+    fixture.screen.point = besideRail(0);
+    advance(500);
+    assert.equal(rail.opacity, 1);
+
+    fixture.screen.point = besideRail(-EDGE_DOCK_METRICS.overshootDepth);
+    advance(600);
+    assert.equal(rail.opacity, 1, 'a small overshoot past the shared edge keeps the dock open');
+
+    fixture.screen.point = besideRail(-EDGE_DOCK_METRICS.overshootDepth - 1);
+    advance(600);
+    assert.equal(rail.opacity, 0, 'moving further onto the other display still retracts it');
+  });
+}
+
+for (const mode of ['always', 'alwaysExceptFullScreen']) {
+  test(`a visible dock dismisses its detail card after a pointer overshoot (${mode} on desktop)`, (t) => {
+    const advance = mockDockClock(t);
+    const displayWidth = 1200;
+    const fixture = createFixture({
+      settings: { edgeDockMode: mode, edgeDockSide: 'right' },
+      isFullScreen: () => false,
+      displays: [{
+        id: 1,
+        scaleFactor: 1,
+        bounds: { x: 0, y: 0, width: displayWidth, height: 900 },
+        workArea: { x: 0, y: 0, width: displayWidth, height: 860 }
+      }, {
+        id: 2,
+        scaleFactor: 1,
+        bounds: { x: displayWidth, y: 0, width: 1536, height: 900 },
+        workArea: { x: displayWidth, y: 0, width: 1536, height: 860 }
+      }]
+    });
+    t.after(() => fixture.controller.stop());
+    const rail = fixture.windowFor('rail');
+    const card = fixture.windowFor('bubble');
+
+    fixture.ipcMain.emit('edgeDock:click', { sender: rail.webContents }, { cellIndex: 1 });
+    fixture.ipcMain.emit('edgeDock:bubbleSize', { sender: card.webContents }, { cellId: 'codex', height: 180 });
+    assert.equal(card.opacity, 1, 'the quota detail card is open');
+
+    fixture.screen.point = { x: displayWidth + 1, y: rail.bounds.y + 4 };
+    advance(600);
+    assert.equal(rail.opacity, 1, 'the rail stays visible');
+    assert.equal(card.opacity, 0, 'the card closes when the pointer leaves for the neighbouring display');
+  });
+
+  test(`a visible dock dismisses its detail card in the side work-area inset (${mode} on desktop)`, (t) => {
+    const advance = mockDockClock(t);
+    const workAreaWidth = 1160;
+    const fixture = createFixture({
+      platform: 'darwin',
+      settings: { edgeDockMode: mode, edgeDockSide: 'right' },
+      isFullScreen: () => false,
+      displays: [{
+        id: 1,
+        scaleFactor: 2,
+        bounds: { x: 0, y: 0, width: 1200, height: 900 },
+        workArea: { x: 0, y: 30, width: workAreaWidth, height: 870 }
+      }]
+    });
+    t.after(() => fixture.controller.stop());
+    const rail = fixture.windowFor('rail');
+    const card = fixture.windowFor('bubble');
+    const y = rail.bounds.y + 4;
+
+    fixture.screen.point = { x: workAreaWidth - 4, y };
+    fixture.ipcMain.emit('edgeDock:click', { sender: rail.webContents }, { cellIndex: 1 });
+    fixture.ipcMain.emit('edgeDock:bubbleSize', { sender: card.webContents }, { cellId: 'codex', height: 180 });
+    assert.equal(card.opacity, 1, 'the quota detail card is open');
+
+    fixture.screen.point = { x: workAreaWidth + 1, y };
+    advance(600);
+    assert.equal(rail.opacity, 1, 'the rail stays visible');
+    assert.equal(card.opacity, 0, 'the card closes in the system-reserved strip beside the rail');
+  });
+}
+
+test('auto-hide can limit hover reveal to the handle without changing the open dock hover area', (t) => {
+  const advance = mockDockClock(t);
+  const fixture = createFixture({
+    settings: { edgeDockMode: 'autoHide' },
+    primaryButtonDown: () => false,
+    displays: [{
+      id: 1,
+      scaleFactor: 1,
+      bounds: { x: 0, y: 0, width: 1200, height: 900 },
+      workArea: { x: 0, y: 0, width: 1160, height: 900 }
+    }]
+  });
+  t.after(() => fixture.controller.stop());
+  const peek = fixture.windowFor('peek');
+  const rail = fixture.windowFor('rail');
+  const edgeAwayFromHandle = { x: 1199, y: rail.bounds.y + 4 };
+
+  fixture.screen.point = edgeAwayFromHandle;
+  advance(500);
+  assert.equal(rail.opacity, 1, 'existing settings reveal anywhere along the strip');
+
+  fixture.screen.point = { x: 300, y: 0 };
+  advance(600);
+  assert.equal(rail.opacity, 0);
+  fixture.settings.edgeDockTriggerRange = 'handle';
+  fixture.controller.sync();
+  fixture.screen.point = edgeAwayFromHandle;
+  advance(500);
+  assert.equal(rail.opacity, 0, 'handle mode ignores the edge away from the handle');
+
+  fixture.screen.point = {
+    x: peek.bounds.x + peek.bounds.width - EDGE_DOCK_METRICS.wakeDepth + 4,
+    y: peek.bounds.y + peek.bounds.height / 2
+  };
+  advance(500);
+  assert.equal(rail.opacity, 1, 'the handle tolerance still reveals the dock');
+
+  fixture.screen.point = edgeAwayFromHandle;
+  advance(600);
+  assert.equal(rail.opacity, 1, 'the strip still keeps the open dock visible');
+
+  fixture.screen.point = { x: 300, y: 0 };
+  advance(600);
+  assert.equal(rail.opacity, 0);
+  fixture.settings.edgeDockTriggerRange = 'rail';
+  fixture.controller.sync();
+  fixture.screen.point = edgeAwayFromHandle;
+  advance(500);
+  assert.equal(rail.opacity, 1, 'switching back restores the full strip');
+});
+
 test('the handle grows on approach and reveals from its wake zone unless a button is held', async (t) => {
   let buttonDown = false;
   const fixture = createFixture({ platform: 'darwin', nativeGlass: true, settings: { edgeDockMode: 'autoHide' }, primaryButtonDown: () => buttonDown });
@@ -1362,6 +1511,13 @@ test('the handle grows through intermediate silhouettes unless motion is reduced
   assert.equal(grown.key.endsWith(`:${EDGE_DOCK_METRICS.handleNearWidth}x${EDGE_DOCK_METRICS.handleNearLength}`), true);
 });
 
+// The rail's entrance is keyed to the reveal rather than to the push, so the page
+// has to be able to tell which payload is the reveal: without that it has neither
+// a transition to fire on nor a way to keep a stats update from replaying the
+// slide. It is a count rather than a flag because only the reveal renders - the
+// retract fades the window out with no payload at all, so a page told the state
+// alone keeps believing the rail is up and reads the next reveal as no change,
+// which is what left the entrance playing once per page load.
 test('a rail payload carries the reveal that keys the entrance', (t) => {
   const fixture = createFixture({ settings: { edgeDockMode: 'autoHide' } });
   t.after(() => fixture.controller.stop());

@@ -1,6 +1,5 @@
 'use strict';
 
-const { Client } = require('@xhayper/discord-rpc');
 const { formatCurrencyFromUsd, normalizeCurrency } = require('../shared/currency');
 const compactTokens = require('../shared/compactTokens');
 const { CLIENT_LABELS } = require('../shared/clientCatalog');
@@ -91,6 +90,9 @@ function scheduleReconnect() {
 
 function connect() {
   if (stopped || client) return;
+  // Discord RPC is off by default and the client library is large (about
+  // 18 MiB of module footprint), so it loads only when this feature starts.
+  const { Client } = require('@xhayper/discord-rpc');
   client = new Client({ clientId: CLIENT_ID });
   client.on('ready', () => {
     isConnected = true;

@@ -386,7 +386,9 @@ function createLimitsHistoryController({ BrowserWindow, screen, ipcMain, isOwner
     if (win && !win.isDestroyed()) win.destroy();
     win = null;
   }
-  return { register, refresh, hide, containsPoint, syncMaterial, dispose };
+  // A cached panel with no active or pending owner can outlive the main window.
+  const isIdleWindow = (target) => target === win && !owner && !pendingOpen;
+  return { register, refresh, hide, containsPoint, syncMaterial, isIdleWindow, dispose };
 }
 
 module.exports = { createLimitsHistoryController, historyBounds };

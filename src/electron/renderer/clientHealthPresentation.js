@@ -56,6 +56,22 @@
     return usage;
   }
 
+  function clientIdsWithUsage(devices) {
+    const clients = new Set();
+    for (const device of devices) {
+      for (const period of ['today', 'month', 'allTime']) {
+        const values = device?.periods?.[period] || device?.[period];
+        for (const [id, tokens] of Object.entries(values?.clients || {})) {
+          if (tokens > 0) clients.add(id);
+        }
+        for (const [id, cost] of Object.entries(values?.clientCosts || {})) {
+          if (cost > 0) clients.add(id);
+        }
+      }
+    }
+    return clients;
+  }
+
   function friendlyPath(dir, home, platform = '') {
     const candidate = String(dir || '');
     const rawHome = String(home || '');
@@ -233,6 +249,7 @@
     clientHealthPlaceholderDetail,
     clientHealthGroups,
     clientHealthNotes,
+    clientIdsWithUsage,
     clientPeriodUsage,
     exactDevice,
     friendlyPath,

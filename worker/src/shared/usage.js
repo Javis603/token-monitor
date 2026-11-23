@@ -1338,16 +1338,16 @@ function fallbackUsagePeriod(json) {
 // Build the public aggregate and exact internal per-client partitions in one
 // pass. The partitions stay collector-internal; they let a watch tick replace
 // only the client whose files changed without reconstructing model/cache/project
-// attribution from the already-aggregated public period.
-function extractUsageBundleFromTokscale(json) {
+// attribution from the already-aggregated public period. Callers that only keep
+// the public period (month/allTime scans) pass `partitions: false` so they do not
+// allocate a second full set of session rows that is dropped immediately.
+function extractUsageBundleFromTokscale(json, options = {}) {
+  if (options.partitions === false) return { period: extractUsageFromTokscale(json) };
   const rows = [];
   collectUsageRows(json, rows);
   if (rows.length === 0 && json && typeof json === 'object') {
     const period = fallbackUsagePeriod(json);
-    return {
-      period,
-      byClient: { [UNATTRIBUTED_USAGE_CLIENT]: period }
-    };
+    return { period, byClient: { [UNATTRIBUTED_USAGE_CLIENT]: period } };
   }
   const period = emptyPeriod();
   const byClient = Object.create(null);
@@ -1355,8 +1355,8 @@ function extractUsageBundleFromTokscale(json) {
     const client = detectClient(row);
     const partitionKey = client || UNATTRIBUTED_USAGE_CLIENT;
     if (!byClient[partitionKey]) byClient[partitionKey] = emptyPeriod();
-    addUsageRowToPeriod(period, row, client);
     addUsageRowToPeriod(byClient[partitionKey], row, client);
+    addUsageRowToPeriod(period, row, client);
   }
   return { period, byClient };
 }

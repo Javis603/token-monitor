@@ -4,6 +4,7 @@ ids: [kimi]
 read_when:
   - Changing or debugging Kimi session discovery, project attribution, timestamps or session names
   - Investigating Kimi usage that is missing from, or zero in, the widget
+  - Investigating Kimi response timing, missing speed or generation rate
   - Touching providers/kimi/sessionMetadata.js or the kimi roots in clientSources.js
   - Adding a Kimi surface (a new front-end root, client id or limits source)
 ---
@@ -39,8 +40,20 @@ is the one applied: clients that carry their own path (kimi, droid, opencode) st
 design, while the transcript-reading resolvers skip their expensive read for a session the scan
 already attributed.
 
-Only `usage.record` lines count, and only with `usageScope: "turn"`. `step.end` repeats the same
-usage in the same turn (skipped to avoid double counting), and `"session"`-scoped records are the
+Only `usage.record` lines count tokens, and only with `usageScope: "turn"`. A valid paired
+`llm.request` supplies the interval from its `time` to `usage.record.time`, anchored at the
+request's start. An intervening `step.begin` preserves the request unless its explicit
+`turnId.step` differs from the request's `turnStep`.
+
+Without a valid request interval, the parser uses the matching `step.end`'s
+`llmFirstTokenLatencyMs + llmStreamDurationMs`: whole-response time, including first-token wait,
+rather than decode-only time. All four usage buckets must match within the same agent and step;
+the step supplies timing and never another token row. This path anchors the row at the matching
+`step.begin.time`, or, without that start, at `usage.record.time` minus the response duration.
+It never uses the later `step.end.time` as the response's end, so tool execution is excluded.
+Usage without either timing source still counts tokens but supplies no `performance` sample.
+
+`"session"`-scoped records are the
 runtime's own bookkeeping — compaction calls today. Whether those should be counted is an open
 question tracked outside this provider: tokscale excludes them, so the widget's totals are ~1% below
 the vendor's own accounting on a compaction-heavy history.

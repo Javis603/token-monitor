@@ -129,25 +129,29 @@ function resetIso(ms) {
   return new Date(ms).toISOString();
 }
 
-function parseAllowanceWindow(raw, rolling, resets, nowMs) {
-  if (raw === undefined) return null;
+function parseQuotaAmounts(raw) {
   if (!isObject(raw)
-    || raw.creditType !== 'basic_ai_credits'
-    || raw.scope !== 'per_user'
     || typeof raw.used !== 'number' || !Number.isFinite(raw.used) || raw.used < 0
     || typeof raw.limit !== 'number' || !Number.isFinite(raw.limit) || raw.limit <= 0
+  ) return null;
+  const usedPercent = raw.used / raw.limit * 100;
+  if (!Number.isFinite(usedPercent)) return null;
+  return { used: raw.used, limit: raw.limit, usedPercent, remaining: Math.max(0, raw.limit - raw.used) };
+}
+
+function parseAllowanceWindow(raw, rolling, resets, nowMs) {
+  if (raw === undefined) return null;
+  const amounts = parseQuotaAmounts(raw);
+  if (!amounts
+    || raw.creditType !== 'basic_ai_credits'
+    || raw.scope !== 'per_user'
     || (rolling ? raw.window !== '6h' : raw.cadence !== 'billing_period')
   ) throw invalidResponse();
-  const usedPercent = raw.used / raw.limit * 100;
-  if (!Number.isFinite(usedPercent)) throw invalidResponse();
   const end = optionalReset(raw.periodEndMs, Object.hasOwn(raw, 'periodEndMs'), Number.MIN_VALUE);
   const window = {
     kind: rolling ? 'session' : 'billing',
     label: rolling ? 'Rolling' : 'Monthly',
-    used: raw.used,
-    limit: raw.limit,
-    usedPercent,
-    remaining: Math.max(0, raw.limit - raw.used),
+    ...amounts,
     showMeter: true
   };
   if (rolling) {
@@ -162,17 +166,42 @@ function parseAllowanceWindow(raw, rolling, resets, nowMs) {
   return window;
 }
 
+function parsePersonalAllowance(allowances, bucketId, label) {
+  const matches = allowances.filter((entry) => isObject(entry)
+    && entry.bucketId === bucketId && entry.cadence === 'billing_period');
+  if (matches.length !== 1 || matches[0].state !== 'resolved') return null;
+  const [entry] = matches;
+  const amounts = parseQuotaAmounts(entry.credits);
+  if (!amounts) return null;
+
+  const window = { kind: 'billing', label, ...amounts, resetDescription: 'Monthly', showMeter: true };
+  if (Object.hasOwn(entry, 'periodEndMs')) {
+    const end = entry.periodEndMs;
+    if (!Number.isFinite(end) || end <= 0) return null;
+    const reset = new Date(end);
+    if (Number.isNaN(reset.getTime())) return null;
+    window.resetsAt = reset.toISOString();
+  }
+  return window;
+}
+
 function parseNotionAllowance(body, nowMs = Date.now()) {
-  if (!isObject(body)) throw invalidResponse();
+  if (!isObject(body) || !['within_limit', 'not_applicable'].includes(body.status)
+    || (Object.hasOwn(body, 'enforcement') && typeof body.enforcement !== 'string')) throw invalidResponse();
+  // The top-level status describes the legacy allowance. Resolved personal
+  // pools can be present even when that allowance is not applicable.
+  if (Array.isArray(body.allowances)) {
+    const windows = [
+      parsePersonalAllowance(body.allowances, 'auto', 'Standard'),
+      parsePersonalAllowance(body.allowances, 'flex', 'Select')
+    ].filter(Boolean);
+    if (windows.length) return { windows };
+  }
   if (body.status === 'not_applicable') {
     const error = invalidResponse();
     error.code = 'NOTION_ALLOWANCE_NOT_APPLICABLE';
     throw error;
   }
-  // The reference documents within_limit only. Unknown statuses (including
-  // possible future quota enforcement states) are schema changes, not HTTP 429.
-  if (body.status !== 'within_limit'
-    || (Object.hasOwn(body, 'enforcement') && typeof body.enforcement !== 'string')) throw invalidResponse();
   const resets = optionalReset(body.resetsInSeconds, Object.hasOwn(body, 'resetsInSeconds'));
   if (resets !== null) resetIso(nowMs + resets * 1000);
   const windows = [

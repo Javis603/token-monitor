@@ -2,7 +2,7 @@
 
 const { orderAccountRows, defaultIdentityKey, configuredMultiAccountProviders, normalizeAccountSlots, accountSlotKey, defaultAccountValues, accountValuesFingerprint } = require('./accountSlots');
 const { alibabaVariantIdentityPart, alibabaRetiredVariantScopes } = require('../providers/alibaba/runtimeIdentity');
-const { LIMIT_PROVIDER_REGISTRY } = require('./registry');
+const { LIMIT_PROVIDER_REGISTRY, limitProviderEntry } = require('./registry');
 
 const crypto = require('node:crypto');
 const { hashKey } = require('../hashKey');
@@ -601,12 +601,22 @@ function createLimitsRuntime(initialOptions = {}, deps = {}) {
     return keys.every(key => (lane.accountRevisions.get(key) || 0) === (dispatch.accountRevisions.get(key) || 0));
   }
 
-  function applyAttempt(lane, identityKey, row, status, at, invalidatedWindowLabels) {
+  function applyAttempt(lane, identityKey, row, status, at, invalidatedWindowLabels, oauthReading) {
     const existing = lane.identities.get(identityKey) || {
       identityKey,
       lastGood: null,
       lastAttempt: null
     };
+    if (lane.provider === 'antigravity') {
+      const oauth = row.source === 'oauth' ? row : oauthReading;
+      // Keep the independent OAuth reading in case RPC is turned off after
+      // a merged reading takes over the displayed identity.
+      if (!existing.antigravityOAuthLastGood && existing.lastGood?.source === 'oauth') {
+        existing.antigravityOAuthLastGood = existing.lastGood;
+      }
+      if (oauth?.status === 'ok') existing.antigravityOAuthLastGood = oauth;
+      else if (oauth && !TRANSIENT_STATUSES.has(oauth.status)) delete existing.antigravityOAuthLastGood;
+    }
     if (lane.provider === 'alibaba' && row.source === 'cli' && row.region) {
       // CLI and Cookie can report the same identity. Keep the CLI's own quota
       // when a later Cookie result becomes the displayed row. A confirmed CLI
@@ -692,10 +702,15 @@ function createLimitsRuntime(initialOptions = {}, deps = {}) {
     // It is consumed here and never enters the normalized or synced wire shape.
     const removals = inputRows.filter((row) => row?.removed === true);
     const cacheInvalidations = new Map();
+    // This optional hook runs synchronously after a healthy row commits under
+    // its own identity, with its original probe input kept out of the snapshot.
+    const commitAcceptedReading = limitProviderEntry(lane.provider)?.limits.commitAcceptedReading;
+    const rawRowsByReading = commitAcceptedReading && new WeakMap();
     const normalizedRows = inputRows
       .filter((row) => row?.removed !== true)
       .map((input) => {
         const row = normalizeLimitProvider({ ...input, provider: lane.provider });
+        if (row) rawRowsByReading?.set(row, input);
         // An explicit provider result can invalidate known-bad windows without
         // disabling transient retention for its other windows or other accounts.
         // Require an account key; a generic failure cannot invalidate a lane.
@@ -800,14 +815,21 @@ function createLimitsRuntime(initialOptions = {}, deps = {}) {
       }
 
       represented.add(identityKey);
-      const committedRow = applyAttempt(lane, identityKey, row, row.status, attemptAt, cacheInvalidations.get(rowIdentityKey(row)));
+      const oauthReading = lane.provider === 'antigravity' ? rawRowsByReading?.get(row)?.oauthReading : undefined;
+      const committedRow = applyAttempt(lane, identityKey, row, row.status, attemptAt,
+        cacheInvalidations.get(rowIdentityKey(row)), oauthReading && normalizeLimitProvider(oauthReading));
       committedRows.push(committedRow);
       // An answer that dropped windows still on screen is published as stale
       // `unavailable`; say so, or the report reads it as a failed request.
       if (row.status === 'ok' && committedRow.status !== 'ok') addFailureDetail(dispatch, { kind: 'stale-windows' });
       // Marks the row as measurable by this runtime, so a persisted seed for a
       // provider that has not answered yet can never become a burn baseline.
-      if (committedRow.status === 'ok') markLimitsProbeSuccess(burnState, committedRow);
+      if (committedRow.status === 'ok') {
+        markLimitsProbeSuccess(burnState, committedRow);
+        if (commitAcceptedReading && rowIdentityKey(committedRow) === identityKey) {
+          commitAcceptedReading(rawRowsByReading.get(row), committedRow, providerRuntimeState);
+        }
+      }
     }
 
     // Retire anonymous state only after its healthy replacement actually commits;
@@ -1068,6 +1090,21 @@ function createLimitsRuntime(initialOptions = {}, deps = {}) {
     const previousProviders = configuredProviders;
     const previousConfig = config;
     config = { ...config, ...cloneValue(nextOptions) };
+    const antigravity = lanes.get('antigravity');
+    if (antigravity && previousConfig.antigravityLocalLimitsEnabled !== false && config.antigravityLocalLimitsEnabled === false) {
+      // Fence probes started with RPC enabled before publishing the OAuth-only snapshot.
+      cancelLane(antigravity, 'settings-change');
+      resetRetryPolicy(antigravity);
+      for (const [key, state] of antigravity.identities) {
+        if ((state.lastGood || state.lastAttempt?.row)?.source !== 'rpc') continue;
+        const oauth = state.antigravityOAuthLastGood;
+        if (oauth) {
+          state.lastGood = oauth;
+          // Preserve the cached timestamp and freshness until OAuth answers again.
+          state.lastAttempt = { row: oauth, status: 'unavailable', at: oauth.updatedAt };
+        } else antigravity.identities.delete(key);
+      }
+    }
     const alibaba = LIMIT_PROVIDER_REGISTRY.find(entry => entry.id === 'alibaba');
     if (alibaba && Object.hasOwn(nextOptions, accountSlotKey(alibaba))) {
       const describe = options => normalizeAccountSlots(alibaba, options[accountSlotKey(alibaba)]).map(slot => ({ ...slot,
@@ -1223,6 +1260,7 @@ function createLimitsRuntime(initialOptions = {}, deps = {}) {
 
   for (const row of normalizeLimitsSummary(config.previousLimits || {}).providers) {
     if (!configuredProviders.has(row.provider)) continue;
+    if (config.antigravityLocalLimitsEnabled === false && row.provider === 'antigravity' && row.source === 'rpc') continue;
     const lane = laneFor(row.provider);
     const identityKey = rowIdentityKey(row);
     const at = row.updatedAt || new Date(now()).toISOString();

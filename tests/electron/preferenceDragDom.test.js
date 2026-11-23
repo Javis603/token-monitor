@@ -341,9 +341,14 @@ test('Main Screen pairs the switcher views with the selected view settings', () 
   assert.match(row, /createPreferenceOrderHandle\(\{ kind: 'view'/);
   assert.match(row, /settings\.views\.showView/);
   const inspector = functionBody(app, 'renderMainViewInspector', 'homeLimitProviders');
-  assert.match(inspector, /settings\.views\.showInSwitcher/);
+  // The switch lives in the header; its subtitle names its state or why it is locked.
+  assert.match(inspector, /visibilityInput\.setAttribute\('aria-label', t\('settings\.views\.showInSwitcher'\)\)/);
+  assert.match(inspector, /header\.append\(badge, heading, visibilityInput\)/);
+  assert.match(inspector, /visibilityInput\.setAttribute\('aria-describedby', subtitle\.id\)/);
   // The last visible view cannot be switched off.
   assert.match(inspector, /visibilityInput\.disabled = lastVisible \|\| unavailable/);
+  assert.match(inspector, /settings\.views\.lastVisible/);
+  assert.match(inspector, /settings\.views\.limitsUnavailable/);
   assert.match(inspector, /const settings = MAIN_VIEW_SETTINGS\[view\.id\]/);
   // Each visit starts on Home.
   assert.match(functionBody(app, 'openSettingsPanel', 'openViewFromTray'), /resetMainViewSettings\(\)/);
@@ -610,12 +615,12 @@ test('settings mode choices use inline options and compact home limit rows', () 
   const html = readRendererFile('index.html');
   // Each mode choice is a labelled radiogroup, not a bare cluster of inputs.
   assert.match(html, /<div id="floatingBubbleTriggerRow" class="settings-item">/);
-  assert.match(html, /<span id="floatingBubbleTriggerLabel" class="settings-item-text">/);
+  assert.match(html, /<span id="floatingBubbleTriggerLabel" class="settings-item-title"/);
   assert.match(html, /role="radiogroup" aria-labelledby="floatingBubbleTriggerLabel"/);
   for (const value of ['click', 'hover']) {
     assert.match(html, new RegExp(`<input type="radio" name="floatingBubbleTrigger" value="${value}"`));
   }
-  assert.match(html, /<span id="showLimitUsedLabel" class="settings-item-text">/);
+  assert.match(html, /<span id="showLimitUsedLabel" class="settings-item-title"/);
   assert.match(html, /role="radiogroup" aria-labelledby="showLimitUsedLabel"/);
   for (const value of ['remaining', 'used']) {
     assert.match(html, new RegExp(`<input type="radio" name="showLimitUsed" value="${value}"`));
@@ -803,7 +808,7 @@ test('sync section icon uses a local sync asset instead of a hand-drawn refresh 
 
 test('startup setting stays visible when login items are unsupported', () => {
   const html = readRendererFile('index.html');
-  const startupGroup = html.match(/<label id="startupGroup"[\s\S]*?id="startupNote"[\s\S]*?<\/label>/)?.[0] || '';
+  const startupGroup = html.match(/<div id="startupGroup"[\s\S]*?id="startupNote"[\s\S]*?<\/div>/)?.[0] || '';
   assert.match(startupGroup, /id="startAtLoginInput"/);
 
   const app = readRendererFile('app.js');
@@ -855,12 +860,9 @@ test('the session context gauge has its own setting, separate from AI Tool Limit
   // Sessions owns its Main-screen settings, following the project/trends pattern.
   assert.match(app, /session: renderSessionSettingsList/);
   assert.match(app, /name = 'sessionContextMetric'/);
-  // The row must be a plain .settings-item. `.home-activity-settings` carries
-  // its own indent rule for the Home modules list, so reusing it inside the
-  // nested list paints a second line beside the list's own.
+  // The row must be a plain .settings-item inside the nested list.
   const sessionList = functionBody(app, 'renderSessionSettingsList', 'renderServiceProviderList');
   assert.match(sessionList, /row\.className = 'settings-item'/);
-  assert.doesNotMatch(sessionList, /className = 'home-activity-settings'/);
   // The preference has to invalidate the painted rows, the way showLimitUsed does.
   assert.match(app, /sessionContextMetric: state\.settings\?\.sessionContextMetric === 'remaining' \? 'remaining' : 'used'/);
 });

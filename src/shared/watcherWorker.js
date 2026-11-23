@@ -31,7 +31,7 @@ const port = parentPort || {
 // process would otherwise keep holding every descriptor it watches.
 if (!parentPort) process.on('disconnect', () => process.exit(0));
 
-const { openWatch } = require('./collector');
+const { openWatch } = require('./watchPolicy');
 
 // Latest-wins rather than a queue. A teardown can run for seconds, and a user
 // flipping several settings in that window must not make the worker replay
@@ -45,22 +45,6 @@ let running = false;
 
 function post(message) {
   try { port.postMessage(message); } catch (_) { /* owner is gone */ }
-}
-
-function wire(instance, revision) {
-  instance.on('all', (event, filePath) => {
-    // Keyed on the live watcher rather than the applied revision: a teardown
-    // has not finished applying the next config yet, so comparing against
-    // appliedRevision would keep forwarding events from roots being released.
-    if (revision !== watcherRevision) return;
-    post({ type: 'event', revision, event, filePath });
-  });
-  instance.on('error', (error) => post({
-    type: 'error',
-    revision,
-    message: error?.message || String(error),
-    code: error?.code || ''
-  }));
 }
 
 async function closeCurrent() {
@@ -87,11 +71,21 @@ async function pump() {
       if (desired !== target) continue;
       if (target.config) {
         try {
-          const instance = openWatch(chokidar, target.config);
+          const revision = target.revision;
+          const instance = openWatch(chokidar, target.config, (event, filePath, unlinkedExporter) => {
+            // Teardown clears watcherRevision before closing the old roots.
+            if (revision !== watcherRevision) return;
+            post({ type: 'event', revision, event, filePath, unlinkedExporter });
+          });
           watcher = instance;
-          watcherRevision = target.revision;
-          appliedRevision = target.revision;
-          wire(instance, target.revision);
+          watcherRevision = revision;
+          appliedRevision = revision;
+          instance.on('error', (error) => post({
+            type: 'error',
+            revision,
+            message: error?.message || String(error),
+            code: error?.code || ''
+          }));
           // `ready` is a notification, not a lifecycle step. Awaiting it here
           // held the pump for the length of an initial scan, so a configure
           // arriving in that window waited on a watcher that was already being

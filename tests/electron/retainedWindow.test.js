@@ -104,6 +104,33 @@ test('a show whose page never paints is revealed by the fallback, and obsolete h
   assert.deepEqual(old.opacities, [0, 1, 0, 0], 'a transferred page belongs to its new host');
 });
 
+test('a resize emitted while minimizing cannot leave the retained view at 0×0 after restore', () => {
+  const f = fixture();
+  const win = f.create({ width: 400, height: 600, show: true });
+  const view = f.views[0];
+  assert.deepEqual(view.bounds, { x: 0, y: 0, width: 400, height: 600 });
+  // Windows reports a 0×0 content size for a minimized host, and minimize can
+  // emit 'resize' in that state.
+  win.minimized = true;
+  win.size = [0, 0];
+  win.emit('resize');
+  win.emit('minimize');
+  assert.deepEqual(view.bounds, { x: 0, y: 0, width: 400, height: 600 }, 'a minimized size must not reach the view');
+  // Restoring to the same bounds emits 'restore' without another 'resize'.
+  win.minimized = false;
+  win.size = [400, 600];
+  win.emit('restore');
+  assert.deepEqual(view.bounds, { x: 0, y: 0, width: 400, height: 600 });
+  // Bounds that changed while minimized are applied when the host is restored.
+  win.minimized = true;
+  win.size = [0, 0];
+  win.emit('resize');
+  win.minimized = false;
+  win.size = [420, 640];
+  win.emit('restore');
+  assert.deepEqual(view.bounds, { x: 0, y: 0, width: 420, height: 640 });
+});
+
 function fixture() {
   const views = [];
   class BaseWindow extends EventEmitter {
@@ -116,7 +143,7 @@ function fixture() {
     getContentSize() { return this.size; }
     isDestroyed() { return this.destroyed === true; }
     isVisible() { return this.options.show === true; }
-    isMinimized() { return false; }
+    isMinimized() { return this.minimized === true; }
     setTitle(title) { this.title = title; }
     setOpacity(value) { (this.opacities ||= []).push(value); }
     destroy() { this.destroyed = true; this.emit('closed'); }

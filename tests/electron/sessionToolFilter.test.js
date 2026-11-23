@@ -169,9 +169,12 @@ test('both direct detail render paths hide the list filter immediately', () => {
     const end = app.indexOf('  const head =', start);
     const hidden = new Set();
     const node = {classList:{add(name) {hidden.add(name);},remove(){}}};
-    const els = {sessionToolFilter:node,breakdown:{classList:{add(){}}},sessionDetail:node,sessionDetailHead:node};
+    const sortClasses = new Set();
+    const els = {sessionToolFilter:node, sessionSortToggle:{classList:{add(name){sortClasses.add(name);}}},
+      breakdown:{classList:{add(){}}},sessionDetail:node,sessionDetailHead:node};
     Function('els', `${app.slice(start, end)}\n}; return ${name};`)(els)();
     assert.equal(hidden.has('hidden'), true, name);
+    assert.equal(sortClasses.has('hidden'), true, name);
   }
 });
 
