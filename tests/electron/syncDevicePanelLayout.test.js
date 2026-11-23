@@ -242,6 +242,68 @@ test('sync mode enhances the native source with shared icons and translated desc
   assert.match(css, /\.select-control-trigger:focus-visible/);
 });
 
+function hubPairingFixture(loadPairingQr) {
+  const address = '192.168.1.20';
+  const url = `http://${address}:17321`;
+  const dialog = {
+    open: false,
+    showModal() { this.open = true; },
+    close() { this.open = false; }
+  };
+  const context = vm.createContext({
+    state: {
+      settings: { hubMode: 'host' },
+      hubInfo: { listening: true, listeningPort: 17321, lanAddresses: [{ address }] }
+    },
+    els: {
+      hubModeOptions: { value: 'host' }, hubStatusRow: {},
+      hubAddressList: { replaceChildren() {} }, hubPairingDialog: dialog,
+      hubPairingAddress: {}, hubPairingQr: {}, hubPairingHelp: {}, hubPairingError: {},
+      hubSecretInput: { value: 'fixture-secret' }
+    },
+    loadPairingQr, renderIcloudStatus() {}, isSettingsSurfaceVisible: () => true, t: key => key
+  });
+  const start = appSource.indexOf('let hubAddressesExpanded =');
+  const end = appSource.indexOf('els.hubPairingDialog?.addEventListener', start);
+  const pairing = appSource.slice(start, end).replace("import('./hubPairingQr.mjs')", 'loadPairingQr()');
+  const status = appSource.slice(appSource.indexOf('function renderHubStatus('),
+    appSource.indexOf('const SYNC_PANEL_AGE_REFRESH_MS'));
+  vm.runInContext(status + pairing, context);
+  context.renderHubAddresses = () => {};
+  return { url, dialog, context };
+}
+
+test('the pairing dialog closes when its advertised endpoint changes', async () => {
+  const { url, dialog, context } = hubPairingFixture(async () => ({ drawHubPairingQr() {} }));
+  await context.showHubPairingQr(url, { isConnected: true });
+  assert.equal(dialog.open, true);
+  context.renderHubStatus();
+  assert.equal(dialog.open, true);
+
+  context.state.hubInfo.listeningPort = 17322;
+  context.renderHubStatus();
+  assert.equal(dialog.open, false);
+});
+
+test('leaving Host mode while the QR module loads prevents opening the dialog', async () => {
+  const loadResults = [
+    async () => ({ drawHubPairingQr() { assert.fail('drawing after leaving Host mode'); } }),
+    async () => { throw new Error('load failed'); }
+  ];
+  for (const loadPairingQr of loadResults) {
+    const { url, dialog, context } = hubPairingFixture(loadPairingQr);
+    const opening = context.showHubPairingQr(url, { isConnected: true });
+    context.els.hubModeOptions.value = 'local';
+    await opening;
+    assert.equal(dialog.open, false);
+  }
+});
+
+test('the pairing button has a visible keyboard focus outline', () => {
+  const css = fs.readFileSync(path.join(rendererDir, 'styles.css'), 'utf8');
+  assert.match(css, /\.hub-pairing-button:focus-visible\s*\{[^}]*outline:\s*1px solid/);
+});
+
 test('closing sync settings or navigating away cancels the active picker', () => {
   assert.match(functionSource('applySettingsSectionDom', 'setSettingsSectionExpanded'), /id === 'sync' && !open[\s\S]*?syncModeSelect\?\.close\(\)/);
   const viewStart = appSource.indexOf('function openViewFromTray(');

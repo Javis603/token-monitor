@@ -9727,6 +9727,7 @@ function syncHubModeUi() {
     els.hubSecretInput.value = state.settings.hubHostSecret || '';
     renderHubStatus();
   } else {
+    els.hubPairingDialog?.close();
     renderIcloudStatus();
   }
   syncModeSelect?.sync();
@@ -9768,7 +9769,9 @@ function renderHubStatus() {
   renderIcloudStatus();
   if (!els.hubStatusRow || !els.hubAddressList) return;
   const info = state.hubInfo;
-  if (!info?.listening || info.error || state.settings.hubMode !== 'host') els.hubPairingDialog?.close();
+  if (els.hubPairingDialog?.open && !isCurrentHubPairingUrl(els.hubPairingAddress.textContent)) {
+    els.hubPairingDialog.close();
+  }
   const port = Number(state.settings.hubHostPort || 17321);
   if (!info) {
     els.hubStatusRow.textContent = t('settings.sync.starting');
@@ -10097,8 +10100,19 @@ function renderHubBuildStatus() {
 }
 
 let hubAddressesExpanded = false;
+function hubAddressUrl(address, port) {
+  return `http://${address}:${port}`;
+}
+
+function isCurrentHubPairingUrl(url) {
+  const info = state.hubInfo;
+  return state.settings.hubMode === 'host' && els.hubModeOptions.value === 'host'
+    && info?.listening && !info.error
+    && (info.lanAddresses || []).some(({ address }) => hubAddressUrl(address, info.listeningPort) === url);
+}
+
 function hubAddressRow(addr, port) {
-  const url = `http://${addr.address}:${port}`;
+  const url = hubAddressUrl(addr.address, port);
   const row = document.createElement('div');
   row.className = 'hub-address-row';
   const code = document.createElement('code');
@@ -10171,15 +10185,17 @@ function renderHubAddresses(addresses, port) {
 async function showHubPairingQr(url, trigger) {
   const { hubPairingDialog: dialog, hubPairingAddress: address, hubPairingQr: canvas,
     hubPairingHelp: help, hubPairingError: error } = els;
+  const canOpen = () => trigger.isConnected && !dialog.open && isSettingsSurfaceVisible()
+    && isCurrentHubPairingUrl(url);
   try {
     const { drawHubPairingQr } = await import('./hubPairingQr.mjs');
-    if (!trigger.isConnected || dialog.open || !isSettingsSurfaceVisible()) return;
+    if (!canOpen()) return;
     address.textContent = url;
     drawHubPairingQr(canvas, url, els.hubSecretInput.value);
     canvas.hidden = help.hidden = false;
     error.hidden = true;
   } catch (_) {
-    if (!trigger.isConnected || dialog.open || !isSettingsSurfaceVisible()) return;
+    if (!canOpen()) return;
     address.textContent = url;
     canvas.hidden = help.hidden = true;
     error.hidden = false;
