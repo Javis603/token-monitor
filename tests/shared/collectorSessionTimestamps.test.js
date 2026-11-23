@@ -718,3 +718,35 @@ test('applySessionTimestamps retries a progressive miss in the final pass', () =
   assert.equal(reads, 2, 'the final pass should retry a prior miss once');
   assert.equal(periods.today.sessions['opencode:s1'].projectLabel, 'project');
 });
+
+test('a Pi title cleared by a watch scan is removed from the broader session windows', async () => {
+  const { collectUsageOnce, localTodayKey } = require('../../src/shared/collector');
+  const now = new Date();
+  const key = 'pi:fixture';
+  let anchor;
+  const scan = async (title) => ({
+    entries: [{ client: 'pi', sessionId: 'fixture', model: 'gpt-5', input: 10, output: 5 }],
+    sessions: [{ client: 'pi', sessionId: 'fixture', title }]
+  });
+  const options = {
+    clients: 'pi', now, limitsEnabled: false, historyEnabled: false,
+    homeDir: '/no/such/home'
+  };
+  await collectUsageOnce({
+    ...options,
+    runTokscale: () => scan('Saved name'),
+    onAnchorComputed: (captured) => { anchor = { dateKey: localTodayKey(now), ...captured.windowsPeriods }; }
+  });
+
+  for (const title of [undefined, '']) {
+    const summary = await collectUsageOnce({
+      ...options,
+      todayOnlyAnchor: anchor,
+      runTokscale: () => scan(title)
+    });
+    for (const window of ['month', 'allTime']) {
+      assert.equal(summary[window].sessions[key].title || '', title === '' ? '' : 'Saved name');
+      assert.equal(summary[window].sessions[key].totalTokens, 15);
+    }
+  }
+});
