@@ -35,7 +35,6 @@ const USAGE_STRUCTURAL_KEYS = Object.freeze([
   'collectionMode',
   'historyEnabled',
   'historyIntervalMs',
-  'sessionUsageArchiveEnabled',
   'projectsEnabled',
   'wslScanEnabled'
 ]);

@@ -157,7 +157,6 @@ test('every usage structural setting maps to an effective fingerprint change', (
     collectionMode: { collectionMode: 'live' },
     historyEnabled: { historyEnabled: false },
     historyIntervalMs: { historyIntervalMs: 30 * 60 * 1000 },
-    sessionUsageArchiveEnabled: { sessionUsageArchiveEnabled: false },
     projectsEnabled: { projectsEnabled: false },
     wslScanEnabled: { wslScanEnabled: false }
   };
@@ -169,6 +168,15 @@ test('every usage structural setting maps to an effective fingerprint change', (
     assert.equal(classifySettingsChange(previous, next).usageStructural, true, key);
     assert.notEqual(fingerprintForSettings(previous), fingerprintForSettings(next), key);
   }
+});
+
+test('pausing session retention leaves daily history and the collector fingerprint intact', () => {
+  const pausedSettings = { ...BASE_USAGE_SETTINGS, sessionUsageArchiveEnabled: false };
+  assert.equal(classifySettingsChange(BASE_USAGE_SETTINGS, pausedSettings).usageStructural, false);
+  assert.equal(fingerprintForSettings(BASE_USAGE_SETTINGS), fingerprintForSettings(pausedSettings));
+  assert.equal(usageConfigFromSettings(pausedSettings).dailyHistoryArchiveEnabled, true);
+  const historyDisabled = { ...BASE_USAGE_SETTINGS, historyEnabled: false };
+  assert.equal(usageConfigFromSettings(historyDisabled).dailyHistoryArchiveEnabled, false);
 });
 
 test('diagnostic configuration projects effective normalized values without credentials', () => {

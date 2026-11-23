@@ -173,7 +173,7 @@ Abra o app para começar a acompanhar o uso local deste dispositivo, sem configu
 - **Detecção de Limites de Ferramentas de IA** — janelas de sessão, diária, semanal, de cobrança e de créditos específicas de cada provedor para Claude Code, Codex, Cursor, OpenRouter, APIs de terceiros, GLM, Kimi e 34+ provedores, incluindo vários perfis do OpenRouter/de terceiros e contas no estilo de saldo (créditos do Claude, saldo pré-pago e histórico de gastos do DeepSeek, saldos de terceiros)
 - **Várias contas e troca do Codex** — acompanhe várias contas por provedor, cada uma com seus próprios limites; uma conta do Codex acompanhada pode ser definida como a conta local ativa com um clique, sem precisar autenticar de novo
 - **Previsão de reset do Codex** — uma previsão opcional de terceiros abaixo dos limites do Codex, mostrando o horário previsto do reset, o tipo de reset (Regular ou Acumulado) e quando a janela fez o último reset
-- **Preservar o uso de sessões excluídas** — muitas ferramentas eliminam sessões antigas (o Claude Code descarta transcrições após 30 dias por padrão), perdendo esse histórico. Quando ativado, o Token Monitor arquiva localmente o uso diário observado por ferramenta/modelo para que o mapa de calor e as tendências sobrevivam mesmo depois que os arquivos de origem sumirem (veja [Retenção de dados de sessão](#retenção-de-dados-de-sessão) abaixo)
+- **Preservar o uso de sessões excluídas** mantém os totais de cada sessão no dispositivo depois que a ferramenta de origem a exclui. Consulte [Retenção de dados de sessão](#retenção-de-dados-de-sessão).
 - **Tendências de Uso e Painel** — um mapa de calor de atividade na tela inicial e um gráfico de tendências, além de uma janela de painel dedicada com sequências e histórico empilhado por ferramenta/modelo (visualizações em barra e linha K) em todos os seus dispositivos
 - **Intervalos de uso fixos** — alterne entre Esta semana, Últimos 7 dias e Últimos 30 dias junto dos períodos nativos de dia, mês e total
 - **Tela de Status opcional** — páginas de status do Claude, OpenAI, Cursor e DeepSeek, com reverificações manuais ou por intervalo
@@ -434,7 +434,9 @@ O widget escolhe entre o modo local e o de sincronização com base em Configura
 
 ## Retenção de dados de sessão
 
-Com **Preservar o uso de sessões excluídas** ativado (Configurações → Coleta), o Token Monitor arquiva localmente o uso diário observado por ferramenta/modelo, sem limite de tempo — de modo que, mesmo depois de uma ferramenta de origem eliminar as próprias sessões, o mapa de calor e as tendências não são afetados.
+**Preservar o uso de sessões excluídas** (Configurações → Coleta) controla a retenção dos totais de cada sessão.
+
+Com **Ativar Tendências** ligado, o Token Monitor guarda localmente os totais diários observados por ferramenta e modelo, sem limite de tempo, para o mapa de calor e as tendências, mesmo depois que a ferramenta de origem exclui suas sessões.
 
 <details>
 <summary><strong>Avançado: estender a retenção da própria ferramenta de origem</strong></summary>
