@@ -35,7 +35,6 @@ const USAGE_STRUCTURAL_KEYS = Object.freeze([
   'collectionMode',
   'historyEnabled',
   'historyIntervalMs',
-  'sessionUsageArchiveEnabled',
   'projectsEnabled',
   'wslScanEnabled'
 ]);
@@ -242,9 +241,11 @@ function classifySettingsChange(previous = {}, next = {}) {
       && !changedAny(previous, next, keys.filter((key) => key !== 'claudeCliFallbackEnabled'));
     limitScopes.push({ provider, ...(preserveReadings ? { preserveReadings: true } : {}) });
   }
+  const dailyArchiveVisibilityChanged = next.historyEnabled !== false
+    && (previous.sessionUsageArchiveEnabled === false) !== (next.sessionUsageArchiveEnabled === false);
   return {
     modeStructural: changedAny(previous, next, MODE_STRUCTURAL_KEYS),
-    usageStructural: changedAny(previous, next, USAGE_STRUCTURAL_KEYS),
+    usageStructural: changedAny(previous, next, USAGE_STRUCTURAL_KEYS) || dailyArchiveVisibilityChanged,
     limitsReconfigure: changedAny(previous, next, LIMITS_RECONFIGURE_KEYS),
     sinkStructural: changedAny(previous, next, SINK_STRUCTURAL_KEYS),
     limitScopes,

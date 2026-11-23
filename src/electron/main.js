@@ -8388,8 +8388,9 @@ app.whenReady().then(() => {
       }
       restartDeviceRuntimeForMode();
     } else {
-      const usageReconfigureScheduled = runtimeChange.usageStructural && reconfigureUsageRuntimeForMode();
-      if (!usageReconfigureScheduled && previousRuntimeSettings.codexDotsVisible !== settings.codexDotsVisible) {
+      if (runtimeChange.usageStructural) {
+        reconfigureUsageRuntimeForMode();
+      } else if (previousRuntimeSettings.codexDotsVisible !== settings.codexDotsVisible) {
         const dotsVisibilityApplied = Promise.resolve(deviceRuntimeHandle?.setCodexDotsVisible(settings.codexDotsVisible));
         onDotsVisibilityRefresh(dotsVisibilityApplied);
         // Keep failure observable to settings:update without an unhandled
