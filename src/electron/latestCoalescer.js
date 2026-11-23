@@ -43,7 +43,7 @@ function createLatestCoalescer({ flush, intervalMs, now = Date.now, setTimer = s
     pending = null;
   }
 
-  return { enqueue, cancel, pending: () => pending };
+  return { enqueue, cancel };
 }
 
 module.exports = { createLatestCoalescer };

@@ -1221,7 +1221,12 @@ async function refreshLimitProvider(providerId, account) {
     ? limitAccountRefreshScope(provider, account)
     : { provider };
   try {
-    return limitRefreshOutcome(await runLimitInvalidation(deviceRuntimeHandle, scope, 'account-panel', { clear: false }));
+    const outcome = limitRefreshOutcome(await runLimitInvalidation(deviceRuntimeHandle, scope, 'account-panel', { clear: false }));
+    // A quota row's own refresh is an explicit user read. The probe's limits
+    // update normally reaches the rail through the live lane; paint the result
+    // now instead of leaving it behind that lane's cooldown.
+    if (outcome.ok) repaintDockSurfaces();
+    return outcome;
   } catch (error) {
     return { ok: false, reason: 'failed', error: error?.message || String(error) };
   }
@@ -4689,7 +4694,10 @@ function sendPush(payload, options = {}) {
     }
     scheduleMacWidgetSnapshot(visibleStats, options.widgetProducerOwner);
     pluginRuntime?.publishStats(visibleStats, latestStats);
-    updateEdgeDockCellsLive(visibleStats);
+    // An explicit user read is not live-stream traffic: it is the refresh the
+    // user is waiting on, so it paints at once instead of behind the live floor.
+    if (payload.data.reason === 'manual') updateEdgeDockCells(visibleStats);
+    else updateEdgeDockCellsLive(visibleStats);
     syncCodexPresentationActiveAccount();
     updateTrayDisplay();
     if (!options.skipExport && settings.exportAutoEnabled && settings.exportDir && Date.now() - lastExportAt >= exportIntervalMs()) {
@@ -6747,10 +6755,13 @@ function refreshManualStats() {
   const revision = statsPushRevision;
   const request = { runtime, generation, promise: null };
   request.promise = fetchStats({ force: true, forceHistory: true, forceSelfSync: true }).then((stats) => {
-    // Both buttons update the dock once. A push received while this read was
-    // pending has already taken over, so a late read must not replace it.
-    if (runtime === deviceRuntimeHandle && generation === hubModeGeneration && revision === statsPushRevision) {
-      edgeDockManualStats = { stats, generation, runtime };
+    if (runtime === deviceRuntimeHandle && generation === hubModeGeneration) {
+      // Both buttons update the dock once. A push received while this read was
+      // pending has taken over the shared snapshot and cleared the manual
+      // override; paint that latest snapshot now rather than leaving the rail on
+      // the coalesced cadence until its timer fires. A late read never replaces
+      // the push either way.
+      if (revision === statsPushRevision) edgeDockManualStats = { stats, generation, runtime };
       repaintDockSurfaces();
     }
     return stats;

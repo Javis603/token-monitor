@@ -6,6 +6,7 @@ const path = require('node:path');
 const test = require('node:test');
 const vm = require('node:vm');
 const { runManualDeviceRefresh } = require('../../src/electron/deviceRuntimeCoordinator');
+const { createLatestCoalescer } = require('../../src/electron/latestCoalescer');
 const { createStatsPublicationBatcher } = require('../../src/electron/statsPublisher');
 
 const main = fs.readFileSync(path.join(__dirname, '../../src/electron/main.js'), 'utf8');
@@ -21,7 +22,7 @@ function deferred() {
   return { promise, resolve, reject };
 }
 
-function fixture() {
+function fixture(options = {}) {
   const usage = deferred();
   const limits = deferred();
   const history = deferred();
@@ -91,8 +92,30 @@ function fixture() {
     maybeAdoptSharedSubscriptionRevision() {},
     console: { log() {} }
   };
+  const clock = { now: 0, timers: new Map(), nextId: 0 };
+  if (options.realCoalescer) {
+    context.edgeDockCellCoalescer = createLatestCoalescer({
+      intervalMs: 5000,
+      flush: (stats) => context.pushEdgeDockCells(context.edgeDockCellsFor(stats)),
+      now: () => clock.now,
+      setTimer: (callback, ms) => {
+        const id = ++clock.nextId;
+        clock.timers.set(id, { at: clock.now + ms, callback });
+        return id;
+      },
+      clearTimer: (id) => clock.timers.delete(id)
+    });
+  }
   vm.runInNewContext(`${refreshSource}\n${dockSource}\n${pushSource}`, context);
-  return { context, usage, limits, history, calls };
+  return {
+    context, usage, limits, history, calls,
+    advance(ms) {
+      clock.now += ms;
+      for (const [id, timer] of [...clock.timers]) {
+        if (timer.at <= clock.now) { clock.timers.delete(id); timer.callback(); }
+      }
+    }
+  };
 }
 
 for (const first of ['App', 'Edge Dock']) {
@@ -561,4 +584,44 @@ test('Tray-menu refresh retains its existing full usage request', async () => {
   usage.resolve();
   limits.resolve();
   await request;
+});
+
+test('a newer push during a manual read is painted at completion, not after the live floor', async () => {
+  const { context, usage, limits, advance } = fixture({ realCoalescer: true });
+  const first = { historyRevision: '1', devices: [{ today: 'first' }] };
+  const newer = { historyRevision: '2', devices: [{ today: 'newer' }] };
+  context.latestStats = first;
+  context.sendPush({ event: 'stats', data: { stats: first, reason: 'local' } });
+  assert.equal(context.dockStats, first, 'the first push opens the window immediately');
+
+  const request = context.refreshManualStats();
+  context.sendPush({ event: 'stats', data: { stats: newer, reason: 'local' } });
+  assert.equal(context.dockStats, first, 'the newer push waits behind the floor');
+
+  limits.resolve(true);
+  usage.resolve(true);
+  await request;
+  assert.equal(context.dockStats, newer, 'completion paints the newer snapshot without the timer');
+
+  advance(5000);
+  assert.equal(context.dockStats, newer);
+});
+
+test('an explicit manual push is not held behind the live floor', () => {
+  const { context } = fixture({ realCoalescer: true });
+  const live = { historyRevision: '1', devices: [{ today: 'live' }] };
+  const manual = { historyRevision: '2', devices: [{ today: 'manual' }] };
+  context.latestStats = live;
+  context.sendPush({ event: 'stats', data: { stats: live, reason: 'local' } });
+  context.sendPush({ event: 'stats', data: { stats: manual, reason: 'manual' } });
+  assert.equal(context.dockStats, manual, 'the user-waited refresh is painted at once');
+});
+
+test('explicit manual and quota-row refreshes paint the rail immediately', () => {
+  const provider = main.slice(main.indexOf('async function refreshLimitProvider('), main.indexOf('// The limits probes running right now'));
+  assert.match(provider, /if \(outcome\.ok\) repaintDockSurfaces\(\);/);
+  const manualPath = main.slice(main.indexOf('function refreshManualStats('), main.indexOf('async function fetchStats('));
+  assert.match(manualPath, /repaintDockSurfaces\(\);/);
+  const pushPath = main.slice(main.indexOf('function sendPush('), main.indexOf('function statsHistoryRevision('));
+  assert.match(pushPath, /if \(payload\.data\.reason === 'manual'\) updateEdgeDockCells\(visibleStats\);/);
 });
