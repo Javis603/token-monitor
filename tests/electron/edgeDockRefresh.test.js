@@ -641,8 +641,8 @@ test('outside the explicit window the live floor applies again', () => {
   context.latestStats = live;
   context.sendPush({ event: 'stats', data: { stats: live, reason: 'local' } });
 
-  const expired = context.beginEdgeDockExplicitRefresh(0);
-  context.finishEdgeDockExplicitRefresh(expired, false);
+  // Leave the expired token in the set: the explicit check must prune it.
+  context.beginEdgeDockExplicitRefresh(0);
   context.sendPush({ event: 'stats', data: { stats: later, reason: 'local' } });
   assert.equal(context.dockStats, live, 'outside the window the floor applies again');
   advance(5000);
