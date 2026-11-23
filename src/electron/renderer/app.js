@@ -7530,10 +7530,11 @@ function homeVendorRevealColor(color) {
   return homeNearBlackColor(color) ? 'rgba(var(--overlay-rgb), 0.55)' : color;
 }
 
-// A list mark without an icon: the vendor colour when vendor colours are on,
-// otherwise ink, so monochrome Home keeps colour for status alone.
+// A list mark without an icon: the vendor colour when vendor colours are on
+// (near-black ones take the theme ink), otherwise ink, so monochrome Home
+// keeps colour for status alone.
 function homeListMarkColor(color) {
-  return homeVendorColorsEnabled() ? color : 'rgba(var(--overlay-rgb), 0.5)';
+  return homeVendorColorsEnabled() ? homeVendorRevealColor(color) : 'rgba(var(--overlay-rgb), 0.5)';
 }
 
 // Tools and Models list their split as aligned rows; the share column carries
@@ -7691,13 +7692,12 @@ function renderHomeSessionModule(rows) {
   const isLive = (activityState) => activityState === 'running' || activityState === 'waiting';
   const entries = rows.map((row) => ({ row, activityState: window.TokenMonitorEdgeDockPresentation.sessionActivityState(row) }));
   const ordered = [...entries.filter((entry) => isLive(entry.activityState)), ...entries.filter((entry) => !isLive(entry.activityState))];
-  const grouped = ordered.some((entry) => isLive(entry.activityState)) && ordered.some((entry) => !isLive(entry.activityState));
   ordered.forEach(({ row, activityState }, index) => {
     const live = isLive(activityState);
     const item = document.createElement('div');
     item.className = live ? 'home-list-row home-session-row' : 'home-list-row home-session-row is-compact';
     item.dataset.key = row.key;
-    if (grouped && !live && isLive(ordered[index - 1].activityState)) {
+    if (!live && index > 0 && isLive(ordered[index - 1].activityState)) {
       item.dataset.groupLabel = t('session.recent');
       item.classList.add('starts-recent');
     }
@@ -11906,26 +11906,24 @@ function renderHomeSettingsList() {
     }
   }
   // Home is monochrome by default; this brings back each provider's colour.
-  const appearanceToggle = (key, titleKey, inputId, checked) => {
-    const row = document.createElement('div');
-    row.className = 'checkbox-label settings-item home-appearance-setting';
-    const input = document.createElement('input');
-    input.id = inputId;
-    input.type = 'checkbox';
-    input.checked = checked;
-    input.addEventListener('change', () => void saveSettings({ [key]: input.checked }));
-    const text = document.createElement('span');
-    text.className = 'settings-item-text';
-    const title = document.createElement('label');
-    title.className = 'settings-item-title';
-    title.htmlFor = inputId;
-    title.textContent = t(titleKey);
-    text.append(title);
-    row.append(text, input);
-    addRenderedSettingReset(row, text, title, key);
-    wrap.append(row);
-  };
-  appearanceToggle('homeVendorColors', 'settings.home.vendorColors', 'homeVendorColorsInput', homeVendorColorsEnabled());
+  // The row is not a <label>, so a click on its reset button does not toggle it.
+  const vendorColors = document.createElement('div');
+  vendorColors.className = 'checkbox-label settings-item';
+  const vendorColorsText = document.createElement('span');
+  vendorColorsText.className = 'settings-item-text';
+  const vendorColorsTitle = document.createElement('label');
+  vendorColorsTitle.className = 'settings-item-title';
+  vendorColorsTitle.htmlFor = 'homeVendorColorsInput';
+  vendorColorsTitle.textContent = t('settings.home.vendorColors');
+  vendorColorsText.append(vendorColorsTitle);
+  const vendorColorsInput = document.createElement('input');
+  vendorColorsInput.id = 'homeVendorColorsInput';
+  vendorColorsInput.type = 'checkbox';
+  vendorColorsInput.checked = homeVendorColorsEnabled();
+  vendorColorsInput.addEventListener('change', () => void saveSettings({ homeVendorColors: vendorColorsInput.checked }));
+  vendorColors.append(vendorColorsText, vendorColorsInput);
+  addRenderedSettingReset(vendorColors, vendorColorsText, vendorColorsTitle, 'homeVendorColors');
+  wrap.append(vendorColors);
   return wrap;
 }
 

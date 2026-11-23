@@ -562,8 +562,9 @@ test('Home low-limit indicators and vendor colours persist through the settings 
   assert.match(main, /merged\.homeVendorColors = parseBoolean\(merged\.homeVendorColors, false\)/);
   assert.match(main, /homeVendorColors:\s*parseBoolean\(patch\.homeVendorColors \?\? settings\.homeVendorColors, false\)/);
   assert.match(main, /'homeLimitAccountCount',\s*'homeVendorColors',/, 'vendor colours offer a reset');
-  assert.match(app, /saveSettings\(\{ \[key\]: input\.checked \}\)/);
-  assert.match(app, /appearanceToggle\('homeVendorColors', 'settings\.home\.vendorColors', 'homeVendorColorsInput', homeVendorColorsEnabled\(\)\)/);
+  assert.match(app, /vendorColorsInput\.checked = homeVendorColorsEnabled\(\)/);
+  assert.match(app, /saveSettings\(\{ homeVendorColors: vendorColorsInput\.checked \}\)/);
+  assert.match(app, /addRenderedSettingReset\(vendorColors, vendorColorsText, vendorColorsTitle, 'homeVendorColors'\)/);
   const { MESSAGES } = require('../../src/electron/renderer/i18n');
   for (const messages of Object.values(MESSAGES)) {
     assert.ok(messages['settings.home.vendorColors']);

@@ -213,7 +213,7 @@ test('Home session rows expose named states and keep idle marks decorative', () 
   assert.equal(marks[3].getAttribute('aria-label'), null);
 });
 
-test('Home sessions lead with live work, label both groups and keep finished ones to one line', () => {
+test('Home sessions lead with live work, head only the recent group and keep finished ones to one line', () => {
   const body = new Element();
   const module = new Element();
   module.append(body);
