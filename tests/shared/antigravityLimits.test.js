@@ -287,6 +287,46 @@ test('Antigravity commits RPC source bindings only for accepted readings', { tim
   assert.deepEqual(reading().windows, []);
 });
 
+test('Antigravity retires anonymous quota when the same RPC source recovers its identity', async (t) => {
+  const accountEmail = 'same@example.com';
+  let rpcEmail = '';
+  let sourceKey = 'A';
+  const runtime = createLimitsRuntime({
+    limitProviders: ['antigravity'],
+    antigravityManagedAccounts: [{ id: 'managed', accountEmail, credentials: { accessToken: 'fixture', projectId: 'fixture' } }]
+  }, {
+    autoStart: false, autoRetry: false,
+    antigravityProbe: async () => ({
+      accountEmail: rpcEmail, sourceDetail: 'app', sourceKey,
+      windows: [{ name: 'Gemini weekly', kind: 'weekly', remainingFraction: 0.7 }]
+    }),
+    fetch: async (url) => {
+      if (url.endsWith(':loadCodeAssist')) return Response.json({});
+      assert.ok(url.endsWith(':retrieveUserQuotaSummary'), url);
+      return Response.json(quotaSummary);
+    }
+  });
+  t.after(() => runtime.stop());
+  async function refresh(scope = {}) {
+    await runtime.refresh({ provider: 'antigravity', ...scope }, 'manual');
+    return runtime.getSnapshot().providers;
+  }
+
+  const split = await refresh();
+  const { accountKey } = split.find(row => row.source === 'oauth');
+  const anonymous = split.find(row => row.source === 'rpc' && !row.accountEmail);
+  assert.ok(anonymous);
+
+  rpcEmail = accountEmail;
+  sourceKey = 'B';
+  assert.ok((await refresh()).some(row => row.accountKey === anonymous.accountKey));
+
+  sourceKey = 'A';
+  const scoped = await refresh({ accountKey });
+  assert.equal(scoped.find(row => row.accountKey === accountKey)?.source, 'oauth');
+  assert.deepEqual((await refresh()).map(row => [row.source, row.accountEmail]), [['rpc', accountEmail]]);
+});
+
 test('Antigravity keeps the previous account read when a process switches accounts', async () => {
   let suffix = '';
   let rpcStatus = 200;

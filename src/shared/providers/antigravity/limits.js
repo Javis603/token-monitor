@@ -143,6 +143,17 @@ function rpcSourceKeyForAccount(sourceDetail, accountKey, deps = {}) {
   return deps.providerRuntimeState.get(RPC_SOURCE_BINDINGS_STATE_KEY)?.get(`${sourceDetail}:${accountKey}`) || '';
 }
 
+function anonymousRpcRemoval(reading, options, deps) {
+  if (!reading?.accountEmail || reading.status !== 'ok' || !reading.rpcSourceKey) return null;
+  const previous = options.previousLimits?.providers?.find(row =>
+    row.provider === 'antigravity' && row.source === 'rpc' && !row.accountEmail
+    && row.sourceDetail === reading.sourceDetail && row.accountKey
+    && rpcSourceKeyForAccount(row.sourceDetail, row.accountKey, deps) === reading.rpcSourceKey);
+  if (!previous) return null;
+  return { provider: 'antigravity', accountKey: previous.accountKey, removed: true,
+    replacementAccount: { accountKey: reading.accountKey } };
+}
+
 async function fetchAntigravityLimits(options = {}, deps = {}) {
   if (options.antigravityAccountSlots?.length) options = { ...options, antigravityManagedAccounts: mergedOwnerAccounts(options, 'antigravity', options.antigravityManagedAccounts || []).map(account => ({ ...account, credentials: account.credentials })) };
   const nowMs = (deps.now || Date.now)();
@@ -159,7 +170,9 @@ async function fetchAntigravityLimits(options = {}, deps = {}) {
 
   if (accounts.length === 0 && !scope) {
     try {
-      return mapAntigravitySnapshot(await probeFn(deps), { nowMs, source: 'rpc' });
+      const reading = mapAntigravitySnapshot(await probeFn(deps), { nowMs, source: 'rpc' });
+      const removal = anonymousRpcRemoval(reading, options, deps);
+      return removal ? [reading, removal] : reading;
     } catch (error) {
       const base = {
         provider: 'antigravity',
@@ -188,7 +201,7 @@ async function fetchAntigravityLimits(options = {}, deps = {}) {
     }
   }
 
-  const localPromise = scope?.sourceDetail === 'oauth'
+  const localPromise = scope
     ? Promise.resolve(null)
     : probeFn(deps).then(
         (snapshot) => mapAntigravitySnapshot(snapshot, { nowMs, source: 'rpc' }),
@@ -219,6 +232,8 @@ async function fetchAntigravityLimits(options = {}, deps = {}) {
       providers[duplicateIndex] = mergeMissingOAuthGroups(local, providers[duplicateIndex]);
     }
   }
+  const removal = anonymousRpcRemoval(local, options, deps);
+  if (removal) providers.push(removal);
   return providers;
 }
 
