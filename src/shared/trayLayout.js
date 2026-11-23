@@ -12,12 +12,13 @@
       : root?.TokenMonitorCompactMoney,
     typeof module === 'object' && module.exports
       ? require('./limits/windowLabels')
-      : root?.TokenMonitorLimitWindowLabels
+      : root?.TokenMonitorLimitWindowLabels,
+    typeof module === 'object' && module.exports ? require('./limits/accountScope') : root?.TokenMonitorLimitAccountScope
   );
 
   if (typeof module === 'object' && module.exports) module.exports = api;
   if (root) root.TokenMonitorTrayLayout = api;
-})(typeof window !== 'undefined' ? window : globalThis, function createTrayLayoutApi(currencyApi, trayTextApi, balanceDisplay, compactMoneyApi, limitWindowLabelsApi) {
+})(typeof window !== 'undefined' ? window : globalThis, function createTrayLayoutApi(currencyApi, trayTextApi, balanceDisplay, compactMoneyApi, limitWindowLabelsApi, accountScope) {
   const { mimoProductLabel } = limitWindowLabelsApi;
   const VERSION = 3;
   const MAX_ITEMS = 12;
@@ -666,7 +667,21 @@
     return options;
   }
 
-  function accountLabel(provider, siblings) {
+  function selectionKey(provider) {
+    return accountScope.accountSelectionKey(providerId(provider), provider?.accountKey, provider?.region);
+  }
+  function matchesSelection(provider, key) {
+    return selectionKey(provider) === key || clean(provider.accountKey) === key;
+  }
+  function accountLabel(provider, siblings, translate) {
+    if (providerId(provider) === 'alibaba' && provider?.region) {
+      const plan = /-personal$/.test(provider.region) ? 'Personal' : 'Team';
+      const site = provider.region.startsWith('intl') ? 'International' : 'China mainland';
+      const name = clean(provider.accountDisplayName || provider.accountName || provider.accountEmail);
+      const labelKey = { cn: 'planCn', intl: 'planIntl', 'cn-personal': 'planCnPersonal', 'intl-personal': 'planIntlPersonal' }[provider.region];
+      const localized = labelKey && translate?.(`settings.alibaba.${labelKey}`);
+      return [name, localized || `${site} · ${plan}`].filter(Boolean).join(' · ');
+    }
     const email = clean(provider?.accountEmail);
     const name = clean(provider?.accountName);
     const product = providerId(provider) === 'mimo' ? mimoProductLabel(provider) : '';
@@ -690,16 +705,16 @@
     ) || providerId(provider);
   }
 
-  function accountOptions(stats, selectedProvider) {
+  function accountOptions(stats, selectedProvider, translate) {
     const id = clean(selectedProvider, 80).toLowerCase();
     const rows = providersFromStats(stats).filter((provider) => providerId(provider) === id);
     const seen = new Set();
     const options = [];
     for (const provider of rows) {
-      const key = clean(provider.accountKey) || `${id}:${accountLabel(provider, rows)}`;
+      const key = selectionKey(provider) || `${id}:${accountLabel(provider, rows)}`;
       if (!key || seen.has(key)) continue;
       seen.add(key);
-      options.push({ value: key, label: accountLabel(provider, rows), provider });
+      options.push({ value: key, label: accountLabel(provider, rows, translate), provider });
     }
     return options;
   }
@@ -711,7 +726,7 @@
     const options = [];
     for (const provider of providersFromStats(stats)) {
       if (id && id !== 'auto' && providerId(provider) !== id) continue;
-      if (key && clean(provider.accountKey) !== key) continue;
+      if (key && !matchesSelection(provider, key)) continue;
       for (const window of provider.windows || []) {
         if (!window || window.showMeter === false || windowPercent(provider, window) === null) continue;
         const value = windowKey(window);
@@ -732,7 +747,7 @@
     if (!selection) return '';
     return [
       selection.provider,
-      clean(selection.providerRecord?.accountKey),
+      selectionKey(selection.providerRecord),
       windowKey(selection.window)
     ].join('|');
   }
@@ -845,7 +860,7 @@
     if (normalized.accountMode === 'active') {
       candidates = candidates.filter((provider) => activeAccountCandidate(provider, options));
     } else if (normalized.accountMode === 'specific') {
-      candidates = candidates.filter((provider) => clean(provider.accountKey) === normalized.accountKey);
+      candidates = candidates.filter((provider) => matchesSelection(provider, normalized.accountKey));
     }
     let selected = null;
     for (const provider of candidates) {

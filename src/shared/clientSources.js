@@ -161,7 +161,46 @@ function copilotExporterWatch(home) {
   const otelRoot = path.resolve(canonicalWatchPath(path.join(home, '.copilot', 'otel')));
   const canonicalFile = canonicalWatchFilePath(file);
   if (canonicalFile.startsWith(otelRoot + path.sep)) return null;
-  return { file, canonicalFile, dir: path.dirname(file) };
+  const parent = path.dirname(canonicalFile);
+  let observedAlias;
+  function matches(resolved) {
+    if (resolved === canonicalFile) return true;
+    if (path.dirname(resolved) !== parent) return false;
+    try {
+      const configured = fs.lstatSync(canonicalFile, { bigint: true, throwIfNoEntry: false });
+      if (!configured && resolved !== observedAlias) return false;
+      const reported = fs.lstatSync(resolved, { bigint: true, throwIfNoEntry: false });
+      // Chokidar reports the directory entry's spelling even when the configured
+      // spelling resolves to the same file. Use the volume's name rules and
+      // distinguish separate directory entries that hard-link the same inode.
+      if (configured && reported && configured.dev === reported.dev && configured.ino === reported.ino
+        && (reported.nlink === 1n || fs.realpathSync.native(canonicalFile) === fs.realpathSync.native(resolved))) {
+        observedAlias = resolved;
+        return true;
+      }
+      // Preserve unlink for an alias we actually saw the filesystem resolve.
+      return !configured && !reported && resolved === observedAlias;
+    } catch (_) { return false; }
+  }
+  function rememberExistingAlias() {
+    try {
+      const stat = fs.lstatSync(canonicalFile, { throwIfNoEntry: false });
+      if (!stat) return;
+      if (!stat.isSymbolicLink()) {
+        matches(path.join(parent, path.basename(fs.realpathSync.native(canonicalFile))));
+        return;
+      }
+      // A symlink's realpath names its target, so look up the watched entry
+      // itself. This is only needed when starting a watch on a symlink.
+      const siblings = fs.opendirSync(parent);
+      try {
+        for (let entry = siblings.readSync(); entry; entry = siblings.readSync()) {
+          if (matches(path.join(parent, entry.name))) break;
+        }
+      } finally { siblings.closeSync(); }
+    } catch (_) { /* The exporter can disappear while the watcher starts. */ }
+  }
+  return { file, canonicalFile, dir: path.dirname(file), matches, rememberExistingAlias };
 }
 
 function clineCliSessionRoot(home) {
@@ -239,6 +278,8 @@ function clientSourceRoots(clientsCsv, options = {}) {
     add('prime-agent', ['prime-agent-sessions', sessions], ['prime-agent-artifacts', artifacts]);
   }
   const xdgHome = xdgDataHome(tokscaleHome, env);
+  add('junie', ...simpleHostSourceRoots('junie', tokscaleHome));
+  add('opencodereview', ...simpleHostSourceRoots('opencodereview', tokscaleHome));
   const gooseFiles = enabled.has('goose')
     ? gooseSessionFiles({ homeDir: home, platform, env, windowsFolders: options.windowsFolders }) : [];
   add('goose', ...gooseFiles.map((file) => ['goose-db', path.dirname(file), file]));

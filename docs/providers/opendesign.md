@@ -17,7 +17,7 @@ The provider makes two read-only GET requests: `/api/v1/workspaces/current`, the
 
 ## Credentials and transport
 
-OpenDesign reports the current workspace's five-hour and weekly subscription allowance. In Settings → AI Tool Limits → OpenDesign, paste the complete Cookie request header from a `coding-plan-usage` request to `amr-api.open-design.ai`, or set `TOKEN_MONITOR_OPENDESIGN_COOKIE` (`OPENDESIGN_COOKIE` is also accepted). Sign in at <https://open-design.ai/cloud/dashboard> and use DevTools → Network to obtain that header. Cookies are not imported automatically. Inference API keys cannot authenticate these billing endpoints.
+OpenDesign reports the current workspace's five-hour and weekly subscription allowance. In Settings → AI Tool Limits → OpenDesign, paste the complete Cookie request header from a `coding-plan-usage` request to `amr-api.open-design.ai`, or set `TOKEN_MONITOR_OPENDESIGN_COOKIE` (`OPENDESIGN_COOKIE` is also accepted). Sign in at <https://open-design.ai/cloud/dashboard> and use DevTools → Network to obtain that header. Each local account slot holds its own Cookie; existing fixed credentials migrate automatically. Cookies are not imported automatically. Multiple slots reporting the same current workspace represent the same quota account. Inference API keys cannot authenticate these billing endpoints.
 
 ## Invariants and known gaps
 

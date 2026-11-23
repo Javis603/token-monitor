@@ -8,17 +8,21 @@ const { createModelAliasForm } = require('../../src/electron/renderer/modelAlias
 const { normalizeModelAliases, upsertModelAlias, upsertModelAliasBatch, modelAliasChoices } = require('../../src/electron/renderer/modelAliases');
 const i18n = require('../../src/electron/renderer/i18n');
 const pricingApi = require('../../src/electron/renderer/customPricingForm');
+const helpApi = require('../../src/electron/renderer/helpPopover');
 
 function documentFixture() {
   const nodes = new Map();
-  function node() {
+  function node(tagName = 'div') {
     const classes = new Set();
     const listeners = {};
-    return { value: '', textContent: '', children: [], disabled: false,
+    return { tagName, ownerDocument: document, value: '', textContent: '', children: [], disabled: false,
       classList: { add: (key) => classes.add(key), remove: (key) => classes.delete(key), contains: (key) => classes.has(key), toggle: (key, active) => active ? classes.add(key) : classes.delete(key) },
       append(...children) { for (const child of children) child.parent = this; this.children.push(...children); }, replaceChildren(...children) { this.children = children; },
       remove() { this.parent.children.splice(this.parent.children.indexOf(this), 1); },
       setAttribute(key, value) { this[key] = value; },
+      hasAttribute(key) { return Object.hasOwn(this, key); },
+      contains(other) { return this === other || this.children.some(child => child.contains(other)); },
+      matches() { return false; },
       addEventListener: (event, handler) => { listeners[event] = handler; },
       dispatchEvent: (event) => listeners[event.type]?.(event),
       click() { if (!this.disabled) return listeners.click?.(); },
@@ -39,16 +43,17 @@ function fixture(save, initial = {}) {
   let aliases = initial.aliases || {};
   let modelIds = initial.modelIds || [];
   let locale = initial.locale;
-  const t = key => locale ? i18n.translate(locale, key) : key;
+  const t = (key, params) => locale ? i18n.translate(locale, key, params) : key;
   const form = createModelAliasForm({ document, t, getAliases: () => aliases, getModelIds: () => modelIds, saveAliases: async (value) => { if (save) await save(value); aliases = normalizeModelAliases(value); } });
   const get = (suffix) => document.getElementById(`modelAliases${suffix}`);
   const select = (suffix, id) => { get(`${suffix}Select`).focus(); get(`${suffix}Select`).value = id === null ? '__manual__' : `model:${id}`; get(`${suffix}Select`).dispatchEvent({ type: 'change' }); };
   const manual = (suffix, id) => { select(suffix, null); get(`${suffix}Input`).value = id; };
   const extra = (index = 0) => {
     const row = get('MoreSources').children[index];
-    return { label: row.children[0].children[0], select: row.children[0].children[1], input: row.children[0].children[2], remove: row.children[1] };
+    return { label: row.children[0].children[0], select: row.children[0].children[1], input: row.children[0].children[2], remove: row.children[1].children[0] };
   };
   return { form, get, select, manual, extra, aliases: () => aliases,
+    focused: () => document.activeElement,
     updateModels: (ids) => { modelIds = ids; form.syncSettings(); },
     updateLocale: next => { locale = next; form.syncSettings(); } };
 }
@@ -56,32 +61,71 @@ function fixture(save, initial = {}) {
 test('alias editor adds, edits and removes a persisted mapping', async () => {
   const f = fixture();
   f.get('AddButton').click();
+  assert.equal(f.get('Form').inert, false);
   f.manual('Alias', ' anthropic/claude-opus-5 ');
   f.manual('Canonical', 'claude-opus-5');
   await f.get('SaveButton').click();
+  assert.equal(f.get('Form').inert, true);
   assert.deepEqual(f.aliases(), { 'anthropic/claude-opus-5': 'claude-opus-5' });
   const row = f.get('List').children[0];
   assert.equal(row.children[0].children[0].textContent, 'anthropic/claude-opus-5');
   assert.equal(row.children[0].children[1].textContent, '→ claude-opus-5');
+  f.form.syncSettings();
+  assert.equal(f.get('List').children[0], row, 'an unrelated settings update preserves the row menu');
+  f.get('AddButton').click();
+  assert.equal(f.get('AddButton')['aria-expanded'], 'true');
+  f.get('AddButton').click();
+  assert.equal(f.get('Form').inert, true);
+  assert.equal(f.get('AddButton')['aria-expanded'], 'false');
   row.children[0].click();
+  assert.equal(row.children[0]['aria-expanded'], 'true');
+  assert.equal(f.get('AddButton')['aria-expanded'], 'false');
   f.manual('Canonical', 'opus');
   await f.get('SaveButton').click();
   assert.deepEqual(f.aliases(), { 'anthropic/claude-opus-5': 'opus' });
-  await f.get('List').children[0].children[1].click();
+  assert.equal(f.get('List').children[0].children[0]['aria-expanded'], 'false');
+  const [, menu] = f.get('List').children[0].children[1].children;
+  await menu.children[1].click();
   assert.deepEqual(f.aliases(), {});
+});
+
+test('canceling alias edits returns focus to the row or the Add button', () => {
+  const f = fixture(null, { aliases: { first: 'model-a' } });
+  const rowButton = f.get('List').children[0].children[0];
+  const cancel = f.get('CancelButton');
+  f.get('Form').append(cancel);
+
+  rowButton.click();
+  cancel.focus();
+  cancel.click();
+  assert.equal(f.focused(), rowButton);
+  assert.equal(rowButton['aria-expanded'], 'false');
+
+  f.get('AddButton').click();
+  cancel.focus();
+  cancel.click();
+  assert.equal(f.focused(), f.get('AddButton'));
 });
 
 test('alias edit buttons keep distinct alias and target names with a localized action description', () => {
   const f = fixture(null, { aliases: { first: 'model-a', second: 'model-b' }, locale: 'zh-TW' });
   f.form.syncSettings();
-  const buttons = f.get('List').children.map(row => row.children[0]);
+  const rows = f.get('List').children;
+  const buttons = rows.map(row => row.children[0]);
   assert.equal(buttons.length, 2);
   for (const button of buttons) {
     assert.equal(button['aria-label'], undefined);
     assert.equal(button['aria-description'], i18n.translate('zh-TW', 'settings.modelAliases.edit'));
     assert.equal(button.title, undefined);
+    assert.equal(button.children.length, 2);
   }
-  assert.deepEqual(buttons.map(button => button.children.map(child => child.textContent).join(' ')), [
+  for (const [index, model] of ['first', 'second'].entries()) {
+    const [trigger, menu] = rows[index].children[1].children;
+    assert.equal(trigger['aria-label'], i18n.translate('zh-TW', 'settings.collection.modelActions', { model }));
+    assert.equal(menu.children[0].role, 'menuitem');
+    assert.equal(menu.children[0].textContent, i18n.translate('zh-TW', 'settings.common.edit'));
+  }
+  assert.deepEqual(buttons.map(button => button.children.slice(0, 2).map(child => child.textContent).join(' ')), [
     'first → model-a', 'second → model-b'
   ]);
 });
@@ -108,7 +152,7 @@ test('app setup supplies custom pricing config IDs absent from raw usage to both
   const state = { stats: { modelAliasSourceIds: ['usage-only'] },
     settings: { modelAliases: {}, customModelPricing: [{ modelId: 'config-only', inputPerM: 1 }] } };
   const context = { document, state, customPricingFormApi: pricingApi, t: key => key, setAccountGroupExpanded() {},
-    window: { TokenMonitorModelAliasForm: { createModelAliasForm } }, syncContentForm: null, saveSettings: async () => {} };
+    window: { TokenMonitorModelAliasForm: { createModelAliasForm }, TokenMonitorHelpPopover: helpApi }, syncContentForm: null, saveSettings: async () => {} };
   const app = fs.readFileSync(require.resolve('../../src/electron/renderer/app.js'), 'utf8');
   const start = app.indexOf('function setupModelAliasesUI(');
   const end = app.indexOf('\nfunction customPricingMeta(', start);

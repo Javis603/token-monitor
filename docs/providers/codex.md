@@ -108,3 +108,7 @@ Run the Codex session, limits, login and account-switching tests when changing t
 ```bash
 node --test tests/shared/codex*.test.js tests/shared/limitCollector.codex*.test.js tests/shared/sessionContext.test.js tests/electron/codex*.test.js
 ```
+
+## Collection sources
+
+Collection tries OAuth first and falls back to the app-server RPC (desktop app or CLI) where the OAuth failure allows it. Each RPC process uses the same isolated CODEX_HOME as its account. Readings report the RPC lane in `sourceDetail` (`app` or `cli`). Reset-credit enrichment remains independent.

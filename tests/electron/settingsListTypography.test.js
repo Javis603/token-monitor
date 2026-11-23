@@ -36,6 +36,7 @@ test('the limit provider disclosure button does not re-declare the type size', (
   const css = readRendererFile('styles.css');
   assert.doesNotMatch(cssRule(css, '.limit-provider-main'), /font-size/);
   const app = readRendererFile('app.js');
-  assert.match(app, /const hasOptions = Boolean\(pluginModule\?\.credentials \|\| pluginModule\?\.settingsView \|\| accountGroup \|\| settings \|\| connectionDetailKey \|\| usageItems\.length\);/);
-  assert.match(app, /\} else \{\n\s*row\.append\(wrap, copy, actions\);/);
+  assert.match(app, /const hasOptions = Boolean\(pluginModule\?\.credentials \|\| pluginModule\?\.settingsView \|\| accountGroup \|\| settings \|\| sources\.length \|\| usageItems\.length\);/);
+  // Providers without options get a plain span in the button's place.
+  assert.match(app, /if \(!main\) \{\n\s*main = document\.createElement\('span'\);\n\s*main\.className = 'limit-provider-main';/);
 });

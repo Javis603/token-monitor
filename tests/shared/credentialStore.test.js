@@ -130,7 +130,8 @@ test('renderer redaction defaults new credential fields to hidden with explicit 
   assert.equal(redacted.claudeWebCookie, '');
   assert.equal(redacted.deepseekApiKey, '');
   assert.equal(redacted.opencodeProfiles, '');
-  assert.equal(redacted.openrouterProfiles, '');
+  assert.equal(redacted.openrouterProfiles, undefined);
+  assert.equal(redacted.openrouterApiKey, '');
   assert.equal(redacted.thirdPartyProfiles, '');
   assert.equal(redacted.kimiApiKey, '');
   assert.equal(redacted.kimiWebAccessToken, '');

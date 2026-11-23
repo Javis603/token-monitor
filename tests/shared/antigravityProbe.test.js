@@ -1,6 +1,9 @@
 'use strict';
 
 const assert = require('node:assert/strict');
+const fs = require('node:fs/promises');
+const os = require('node:os');
+const path = require('node:path');
 const test = require('node:test');
 
 const probe = require('../../src/shared/providers/antigravity/probe');
@@ -138,6 +141,117 @@ function fakeSpawn(stdout, { exitCode = 0, stderr = '' } = {}) {
     return child;
   };
 }
+
+test('desktop daemon discovery matches the live process and only uses its declared HTTP listener', async (t) => {
+  const homeDir = await fs.mkdtemp(path.join(os.tmpdir(), 'antigravity-daemon-'));
+  t.after(() => fs.rm(homeDir, { recursive: true, force: true }));
+  const dir = path.join(homeDir, '.gemini', 'antigravity', 'daemon');
+  await fs.mkdir(dir, { recursive: true });
+  const csrfToken = 'ea1dbb2a-65a8-4766-a155-8e70f032f4ac';
+  await fs.writeFile(path.join(dir, 'hub_4242.json'), JSON.stringify({ pid: 123, httpPort: 4242, csrfToken }));
+  await fs.writeFile(path.join(dir, 'hub_4243.json'), JSON.stringify({ pid: 456, httpPort: 4244, csrfToken }));
+  const command = '/Applications/Antigravity.app/Contents/Resources/bin/language_server --app_data_dir antigravity --read_host_bridge_token_from_stdin';
+  const infos = await probe.detectProcessInfos({
+    platform: 'darwin',
+    homeDir,
+    spawn: fakeSpawn(`123 ${command}\n456 ${command}\n789 ${command}`)
+  });
+  assert.deepEqual(infos.map(({ pid }) => pid), [123]);
+  assert.deepEqual(probe._endpointCandidates(infos[0], [4242, 9000]), [{ scheme: 'http', port: 4242, csrfToken, desktopPid: 123 }]);
+  assert.deepEqual(probe._endpointCandidates(infos[0], [9000]), []);
+});
+
+for (const platform of ['darwin', 'win32']) {
+  test(`desktop RPC retries the same socket and sends credentials after verification (${platform})`, async (t) => {
+    const http = require('node:http');
+    const { once } = require('node:events');
+    const pid = process.pid;
+    let checks = 0;
+    let peer;
+    let connections = 0;
+    let received = 0;
+    let token;
+    const server = http.createServer((req, res) => {
+      token = req.headers['x-codeium-csrf-token'];
+      req.resume();
+      res.end('{"verified":true}');
+    });
+    t.after(() => new Promise((resolve) => server.close(resolve)));
+    server.on('connection', (socket) => {
+      peer = socket;
+      connections++;
+      socket.on('data', (chunk) => { received += chunk.length; });
+    });
+    server.listen(0, '127.0.0.1');
+    await once(server, 'listening');
+    const port = server.address().port;
+    const result = await probe.callLs({
+      scheme: 'http', port, desktopPid: pid, csrfToken: 'fixture-token',
+      method: 'Heartbeat', timeoutMs: 3000
+    }, {
+      platform,
+      spawn(command, args) {
+        assert.equal(received, 0);
+        checks++;
+        if (platform === 'win32') {
+          assert.equal(command, 'powershell');
+          assert.match(args.at(-1), new RegExp(`-OwningProcess ${pid} .*-LocalPort ${port} `));
+          if (checks === 1) return fakeSpawn('')();
+          assert.match(args.at(-1), new RegExp(`-RemotePort ${peer.remotePort} `));
+          return fakeSpawn(`${pid}\r\n`)();
+        }
+        assert.equal(command, 'lsof');
+        assert.ok(args.includes(String(pid)));
+        if (checks === 1) return fakeSpawn('', { exitCode: 1 })();
+        return fakeSpawn(`n127.0.0.1:${port}->127.0.0.1:${peer.remotePort}\n`)();
+      }
+    });
+    assert.deepEqual(result, { verified: true });
+    assert.equal(token, 'fixture-token');
+    assert.equal(checks, 2);
+    assert.equal(connections, 1);
+  });
+}
+
+test('desktop RPC sends no bytes when the connected peer does not belong to the descriptor PID', async (t) => {
+  const net = require('node:net');
+  const { once } = require('node:events');
+  let received = 0;
+  let closePeer;
+  const closed = new Promise((resolve) => { closePeer = resolve; });
+  const server = net.createServer((socket) => {
+    socket.on('data', (chunk) => { received += chunk.length; });
+    socket.once('close', closePeer);
+  });
+  t.after(() => new Promise((resolve) => server.close(resolve)));
+  server.listen(0, '127.0.0.1');
+  await once(server, 'listening');
+  await assert.rejects(probe.callLs({
+    scheme: 'http',
+    port: server.address().port,
+    desktopPid: 2147483647,
+    csrfToken: 'fixture-token',
+    method: 'Heartbeat',
+    timeoutMs: 3000
+  }));
+  await closed;
+  assert.equal(received, 0);
+});
+
+test('desktop daemon port discovery requires an exact TCP IPv4 loopback listener', async () => {
+  const stdout = [
+    'server 123 user 3u IPv6 TCP [::1]:4242 (LISTEN)',
+    'server 123 user 4u IPv4 TCP 192.0.2.1:4242 (LISTEN)',
+    'server 123 user 5u IPv4 TCP 127.0.0.1:4321 (LISTEN)',
+    'server 123 user 6u IPv4 TCP 127.0.0.1:4300->127.0.0.1:4242 (ESTABLISHED)'
+  ].join('\n');
+  const ports = await probe.listeningPorts(123, {
+    platform: 'darwin',
+    ipv4LoopbackOnly: true,
+    spawn: fakeSpawn(stdout)
+  });
+  assert.deepEqual(ports, [4321]);
+});
 
 test('detectProcessInfo (posix) returns the highest-priority Antigravity source', async () => {
   const stdout = [
@@ -351,19 +465,6 @@ test('callLs falls back to statusFromHttpCode when a non-200 body does not menti
   }
 });
 
-test('_modelsFromConfigs filters blacklist and entries without quotaInfo', () => {
-  const configs = [
-    { label: 'Gemini 3 Pro (High)',  modelOrAlias: { model: 'MODEL_GEMINI_3_PRO_HIGH' },  quotaInfo: { remainingFraction: 0.7, resetTime: '2026-06-03T03:00:00Z' } },
-    { label: 'Blacklisted',          modelOrAlias: { model: 'MODEL_PLACEHOLDER_M9' },     quotaInfo: { remainingFraction: 1.0, resetTime: '2026-06-03T03:00:00Z' } },
-    { label: 'Missing quota',        modelOrAlias: { model: 'MODEL_NO_QUOTA' } },
-    { label: 'GPT-OSS 120B (Medium)', modelOrAlias: { model: 'MODEL_OPENAI_GPT_OSS_120B_MEDIUM' }, quotaInfo: { remainingFraction: 0.9, resetTime: null } }
-  ];
-  const out = probe._modelsFromConfigs(configs);
-  assert.equal(out.length, 2);
-  assert.equal(out[0].modelId, 'MODEL_GEMINI_3_PRO_HIGH');
-  assert.equal(out[1].modelId, 'MODEL_OPENAI_GPT_OSS_120B_MEDIUM');
-});
-
 test('_collapsePools maps Gemini Pro / Gemini Flash / Claude pools by lowest remainingFraction', () => {
   const models = [
     { label: 'Gemini 3 Pro (High)',   modelId: 'X', remainingFraction: 0.8, resetTime: '2026-06-03T03:00:00Z' },
@@ -550,7 +651,31 @@ test('parent cancellation during optional grouped identity lookup rejects the pr
   await assert.rejects(pending, /grouped lookup cancelled/);
 });
 
-test('probe checks every endpoint for grouped quota before accepting a legacy response', async () => {
+test('probe keeps quota when optional identity lookup reaches the internal deadline', async (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout', 'Date'] });
+  const probeTimeoutMs = 100;
+  const result = await probe.probe({
+    probeTimeoutMs,
+    detectProcessInfo: async () => ({ pid: 1, csrfToken: 'csrf', desktopRpcPort: 54733 }),
+    listeningPorts: async () => [54733],
+    callLs: async ({ method }) => {
+      if (method === 'RetrieveUserQuotaSummary') {
+        const buckets = [{ window: 'weekly', remainingFraction: 0.6 }];
+        return { groups: [{ displayName: 'Gemini Models', buckets }] };
+      }
+      if (method === 'GetUserStatus') {
+        t.mock.timers.tick(probeTimeoutMs);
+        return new Promise(() => {});
+      }
+      return {};
+    }
+  });
+
+  assert.equal(result.accountEmail, null);
+  assert.equal(result.windows[0].remainingFraction, 0.6);
+});
+
+test('probe tries the next endpoint when a grouped response is unusable', async () => {
   const calls = [];
   const result = await probe.probe({
     detectProcessInfo: async () => ({ pid: 1, csrfToken: 'csrf', extensionPort: null }),
@@ -569,15 +694,7 @@ test('probe checks every endpoint for grouped quota before accepting a legacy re
       if (scheme === 'http' && method === 'GetUserStatus') {
         return { userStatus: { email: 'rich@example.com', planStatus: { planInfo: { planName: 'Pro' } } } };
       }
-      return {
-        userStatus: {
-          cascadeModelConfigData: {
-            clientModelConfigs: [
-              { label: 'Gemini 3 Pro', modelOrAlias: { model: 'MA' }, quotaInfo: { remainingFraction: 0.9 } }
-            ]
-          }
-        }
-      };
+      return {};
     }
   });
 
@@ -603,7 +720,11 @@ test('probe follows app, CLI, then IDE source priority and stops after success',
     listeningPorts: async (pid) => [pid],
     callLs: async ({ port, method }) => {
       calls.push(`${port}:${method}`);
-      if (port === 10) throw probe._errorWithStatus('unavailable', 'app unavailable');
+      if (port === 10 && method === 'RetrieveUserQuotaSummary') {
+        return { groups: [{ displayName: 'Gemini Models', buckets: [
+          { window: 'weekly', remainingFraction: 0.5, disabled: true }
+        ] }] };
+      }
       if (port === 20 && method === 'RetrieveUserQuotaSummary') {
         return {
           groups: [{
@@ -620,43 +741,11 @@ test('probe follows app, CLI, then IDE source priority and stops after success',
   assert.equal(result.accountEmail, 'cli@example.com');
   assert.ok(calls.some((call) => call.startsWith('10:')));
   assert.ok(calls.some((call) => call.startsWith('20:')));
+  assert.ok(!calls.includes('10:GetUserStatus'));
   assert.ok(calls.every((call) => !call.startsWith('30:')));
 });
 
-test('probe accepts a valid app legacy response before lower-priority grouped sources', async () => {
-  const calledPorts = [];
-  const result = await probe.probe({
-    detectProcessInfos: async () => [
-      { pid: 20, kind: 'cli', csrfToken: '' },
-      { pid: 10, kind: 'app', csrfToken: 'app' }
-    ],
-    listeningPorts: async (pid) => [pid],
-    callLs: async ({ port, method }) => {
-      calledPorts.push(port);
-      if (port === 10 && method === 'RetrieveUserQuotaSummary') return { groups: [] };
-      if (port === 10 && method === 'GetUserStatus') {
-        return {
-          userStatus: {
-            email: 'app@example.com',
-            cascadeModelConfigData: {
-              clientModelConfigs: [
-                { label: 'Gemini 3 Pro', modelOrAlias: { model: 'APP' }, quotaInfo: { remainingFraction: 0.5 } }
-              ]
-            }
-          }
-        };
-      }
-      throw new Error('lower-priority CLI should not be called');
-    }
-  });
-
-  assert.equal(result.sourceDetail, 'app');
-  assert.equal(result.accountEmail, 'app@example.com');
-  assert.deepEqual(result.pools.map((pool) => pool.name), ['Gemini Pro']);
-  assert.ok(calledPorts.every((port) => port === 10));
-});
-
-test('probe exhausts grouped quota across same-source processes before legacy fallback', async () => {
+test('probe tries grouped quota across same-source processes', async () => {
   const calls = [];
   const result = await probe.probe({
     detectProcessInfos: async () => [
@@ -804,91 +893,21 @@ test('probe selects a reachable endpoint before requesting quota', async () => {
   assert.equal(result.accountEmail, 'resolved@example.com');
 });
 
-test('probe returns plan + 3 pools when GetUserStatus succeeds', async () => {
-  const result = await probe.probe({
-    detectProcessInfo: async () => ({ pid: 1, csrfToken: 'csrf', extensionPort: null }),
-    listeningPorts: async () => [54733],
-    callLs: async ({ method }) => {
-      assert.equal(method, 'GetUserStatus');
-      return {
-        userStatus: {
-          planStatus: { planInfo: { planName: 'Pro' } },
-          cascadeModelConfigData: {
-            clientModelConfigs: [
-              { label: 'Gemini 3 Pro (High)',   modelOrAlias: { model: 'MA' }, quotaInfo: { remainingFraction: 0.5, resetTime: '2026-06-03T02:00:00Z' } },
-              { label: 'Gemini 3 Flash',        modelOrAlias: { model: 'MB' }, quotaInfo: { remainingFraction: 0.9, resetTime: '2026-06-03T01:00:00Z' } },
-              { label: 'Claude Opus',           modelOrAlias: { model: 'MC' }, quotaInfo: { remainingFraction: 0.7, resetTime: '2026-06-03T04:00:00Z' } }
-            ]
-          }
-        }
-      };
-    }
-  });
-  assert.equal(result.accountPlan, 'Pro');
-  assert.deepEqual(result.pools.map((p) => p.name), ['Gemini Pro', 'Gemini Flash', 'Claude']);
-});
-
 test('probe prefers userTier name and richer planInfo display fields', async () => {
-  const withUserTier = await probe.probe({
-    detectProcessInfo: async () => ({ pid: 1, csrfToken: 'csrf', extensionPort: null }),
-    listeningPorts: async () => [54733],
-    callLs: async () => ({
-      userStatus: {
-        userTier: { name: 'Google AI Ultra' },
-        planStatus: { planInfo: { planDisplayName: 'Google AI Pro', planName: 'Pro' } },
-        cascadeModelConfigData: {
-          clientModelConfigs: [
-            { label: 'Gemini 3 Pro', modelOrAlias: { model: 'MA' }, quotaInfo: { remainingFraction: 0.5, resetTime: null } }
-          ]
+  const planStatus = { planInfo: { planDisplayName: 'Google AI Pro', planName: 'Pro' } };
+  for (const [userTier, expectedPlan] of [[{ name: 'Google AI Ultra' }, 'Google AI Ultra'], [undefined, 'Google AI Pro']]) {
+    const result = await probe.probe({
+      detectProcessInfo: async () => ({ pid: 1, csrfToken: 'csrf', extensionPort: null }),
+      listeningPorts: async () => [54733],
+      callLs: async ({ method }) => {
+        if (method === 'RetrieveUserQuotaSummary') {
+          return { groups: [{ displayName: 'Gemini Models', buckets: [{ window: 'weekly', remainingFraction: 0.5 }] }] };
         }
+        return method === 'GetUserStatus' ? { userStatus: { userTier, planStatus } } : {};
       }
-    })
-  });
-  assert.equal(withUserTier.accountPlan, 'Google AI Ultra');
-
-  const withPlanInfoDisplay = await probe.probe({
-    detectProcessInfo: async () => ({ pid: 1, csrfToken: 'csrf', extensionPort: null }),
-    listeningPorts: async () => [54733],
-    callLs: async () => ({
-      userStatus: {
-        planStatus: { planInfo: { planDisplayName: 'Google AI Pro', planName: 'Pro' } },
-        cascadeModelConfigData: {
-          clientModelConfigs: [
-            { label: 'Gemini 3 Pro', modelOrAlias: { model: 'MA' }, quotaInfo: { remainingFraction: 0.5, resetTime: null } }
-          ]
-        }
-      }
-    })
-  });
-  assert.equal(withPlanInfoDisplay.accountPlan, 'Google AI Pro');
-});
-
-test('probe falls back to GetCommandModelConfigs when GetUserStatus has no userStatus', async () => {
-  const methods = [];
-  const result = await probe.probe({
-    detectProcessInfo: async () => ({ pid: 1, csrfToken: 'csrf', extensionPort: null }),
-    listeningPorts: async () => [54733],
-    callLs: async ({ method }) => {
-      methods.push(method);
-      if (method === 'GetUserStatus') return { code: 7 };
-      if (method === 'GetUnleashData') return { ok: true };
-      return {
-        clientModelConfigs: [
-          { label: 'Claude Sonnet', modelOrAlias: { model: 'MX' }, quotaInfo: { remainingFraction: 0.3, resetTime: '2026-06-03T05:00:00Z' } }
-        ]
-      };
-    }
-  });
-  assert.deepEqual(methods, [
-    'GetUnleashData',
-    'RetrieveUserQuotaSummary',
-    'RetrieveUserQuotaSummary',
-    'GetUserStatus',
-    'GetUserStatus',
-    'GetCommandModelConfigs'
-  ]);
-  assert.equal(result.accountPlan, null);
-  assert.deepEqual(result.pools.map((p) => p.name), ['Claude']);
+    });
+    assert.equal(result.accountPlan, expectedPlan);
+  }
 });
 
 test('probe rethrows the last error when every endpoint fails', async () => {

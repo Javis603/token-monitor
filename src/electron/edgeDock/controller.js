@@ -1244,7 +1244,9 @@ function createEdgeDockController(deps) {
           hideBubble();
         }
         const input = {
-          inTrigger: rectContains(current.trigger, point),
+          // The trigger strip also keeps an open rail visible across work-area
+          // insets. Limit only the reveal from the collapsed state.
+          inTrigger: (revealed || settings().edgeDockTriggerRange !== 'handle') && rectContains(current.trigger, point),
           inPeek: !revealed && rectContains(current.restingHandle, point),
           // Only with the button known to be up: a held one is a scrollbar or a
           // selection being dragged past the handle, not a reach for it, and an

@@ -261,10 +261,10 @@ test('appearance settings expose a Settings/Refresh swap wired to the legacy pre
   const html = readRendererFile('index.html');
   const app = readRendererFile('app.js');
 
-  const groupStart = html.indexOf('<div class="settings-subgroup settings-appearance-group">');
-  const groupEnd = html.indexOf('<div class="settings-subgroup settings-theme-group">', groupStart);
+  const groupStart = html.indexOf('<div id="appearanceLegacyDetails"');
+  const groupEnd = html.indexOf('<div class="settings-group settings-collapsible-group settings-tools-group">', groupStart);
   const group = groupStart >= 0 && groupEnd > groupStart ? html.slice(groupStart, groupEnd) : '';
-  assert.match(group, /id="swapSettingsRefreshInput"/, 'checkbox lives in the appearance group');
+  assert.match(group, /id="swapSettingsRefreshInput"/, 'checkbox lives in Appearance advanced settings');
   assert.match(group, /data-i18n="settings\.appearance\.swapSettingsRefresh"/, 'checkbox uses the swap label');
 
   assert.match(app, /swapSettingsRefreshInput: document\.getElementById\('swapSettingsRefreshInput'\)/, 'els maps the input');

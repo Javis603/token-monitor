@@ -3,10 +3,19 @@
 const { abortError } = require('../../probeDeadline');
 
 const { spawn } = require('node:child_process');
+const fs = require('node:fs/promises');
+const { once } = require('node:events');
+const { setTimeout: delay } = require('node:timers/promises');
+const net = require('node:net');
+const os = require('node:os');
+const path = require('node:path');
 const https = require('node:https');
 const http = require('node:http');
 const { appVersion } = require('../../appVersion');
+const { hashKey } = require('../../hashKey');
+const { limitStage } = require('../../limits/failureDetail');
 const { errorWithStatus } = require('../../limits/providerHelpers');
+const { quotaGroupRank } = require('./corePolicy');
 
 const DEFAULT_PROBE_TIMEOUT_MS = 8000;
 const DEFAULT_RPC_TIMEOUT_MS = 12000;
@@ -167,7 +176,41 @@ function commandForMatching(command) {
   return command.replace(/^"([^"]+)"(?=\s|$)/, '$1').toLowerCase();
 }
 
-function parseProcessLine(line) {
+function isDesktopHubCommand(command) {
+  return /(?:^|\s)--read_host_bridge_token_from_stdin(?:\s|$)/.test(command)
+    && extractFlag('--app_data_dir', command) === 'antigravity';
+}
+
+async function readDesktopHubs(homeDir) {
+  const directory = path.join(homeDir, '.gemini', 'antigravity', 'daemon');
+  const hubs = new Map();
+  let entries;
+  try {
+    entries = await fs.readdir(directory, { withFileTypes: true });
+  } catch {
+    return hubs;
+  }
+  for (const entry of entries) {
+    const port = Number(/^hub_(\d+)\.json$/.exec(entry.name)?.[1]);
+    if (!entry.isFile() || !(port > 0 && port < 65536)) continue;
+    const file = path.join(directory, entry.name);
+    try {
+      const stat = await fs.lstat(file);
+      if (!stat.isFile() || stat.size > 4096) continue;
+      const { pid, httpPort, csrfToken } = JSON.parse(await fs.readFile(file, 'utf8'));
+      if (!Number.isSafeInteger(pid) || pid <= 0 || httpPort !== port
+          || typeof csrfToken !== 'string' || !/^[a-f0-9-]{32,}$/i.test(csrfToken)) continue;
+      if (!hubs.has(pid) || stat.mtimeMs > hubs.get(pid).modifiedAt) {
+        hubs.set(pid, { httpPort, csrfToken, modifiedAt: stat.mtimeMs });
+      }
+    } catch {
+      // The service can replace or remove its descriptor during discovery.
+    }
+  }
+  return hubs;
+}
+
+function parseProcessLine(line, desktopHubs) {
   const trimmed = String(line || '').trim();
   if (!trimmed) return null;
   const split = trimmed.indexOf(' ');
@@ -180,18 +223,21 @@ function parseProcessLine(line) {
   const kind = antigravityProcessKind(lower);
   if (!kind) return null;
   const csrfToken = extractFlag('--csrf_token', command);
+  const desktopHub = !csrfToken && kind === 'app' && isDesktopHubCommand(lower)
+    ? desktopHubs?.get(pid)
+    : null;
   const isHubMode = isHubModeCommand(command);
   const hubPort = extractPortFlag('--hub-port', command);
-  // Desktop app/IDE language servers authenticate local requests with
-  // `--csrf_token`; tokenless matches are skipped so a later valid process can
-  // still be used. The CLI language server exposes no token flag and needs none,
+  // Desktop app/IDE language servers require a credential; newer desktop
+  // builds supply it in their hub descriptor. The CLI generally needs none,
   // EXCEPT when running in hub mode (--hub flag), which acts as a network-facing
   // RPC service and requires CSRF protection like app/IDE.
-  if ((kind !== 'cli' || isHubMode) && !csrfToken) return null;
+  if ((kind !== 'cli' || isHubMode) && !csrfToken && !desktopHub) return null;
   return {
     pid,
     kind,
-    csrfToken: csrfToken || '',
+    csrfToken: csrfToken || desktopHub?.csrfToken || '',
+    ...(desktopHub ? { desktopRpcPort: desktopHub.httpPort } : {}),
     extensionPort: extractPortFlag('--extension_server_port', command),
     extensionCsrfToken: extractFlag('--extension_server_csrf_token', command),
     hubPort: hubPort,
@@ -199,7 +245,7 @@ function parseProcessLine(line) {
   };
 }
 
-function runProcessText(cmd, args, { timeoutMs = 10000, deps = {} } = {}) {
+function runProcessText(cmd, args, { timeoutMs = 10000, deps = {}, emptyOnExitOne = false } = {}) {
   const spawnFn = deps.spawn || spawn;
   return new Promise((resolve, reject) => {
     const child = spawnFn(cmd, args, { windowsHide: true });
@@ -226,7 +272,9 @@ function runProcessText(cmd, args, { timeoutMs = 10000, deps = {} } = {}) {
     child.stderr.on('data', (chunk) => { stderr += chunk.toString(); });
     child.on('error', (err) => finish(reject, err));
     child.on('close', (code) => {
-      if (code !== 0) {
+      if (emptyOnExitOne && code === 1 && !stderr.trim()) {
+        finish(resolve, '');
+      } else if (code !== 0) {
         finish(reject, errorWithStatus('unavailable', stderr.trim() || `${cmd} exited ${code}`));
       } else {
         finish(resolve, stdout);
@@ -236,13 +284,13 @@ function runProcessText(cmd, args, { timeoutMs = 10000, deps = {} } = {}) {
   });
 }
 
-function processInfosFromText(stdout) {
+function processInfosFromText(stdout, desktopHubs) {
   const infos = [];
   let sawTokenlessCsrfClient = false;
   for (const line of String(stdout || '').split(/\r?\n/)) {
     const trimmed = line.trim();
     if (!trimmed) continue;
-    const info = parseProcessLine(trimmed);
+    const info = parseProcessLine(trimmed, desktopHubs);
     if (info) {
       infos.push(info);
       continue;
@@ -260,8 +308,11 @@ function processInfosFromText(stdout) {
   return { infos: sortProcessInfos(infos), sawTokenlessCsrfClient };
 }
 
-function requireDetectedProcessInfos(stdout) {
-  const { infos, sawTokenlessCsrfClient } = processInfosFromText(stdout);
+async function requireDetectedProcessInfos(stdout, deps) {
+  const desktopHubs = stdout.includes('--read_host_bridge_token_from_stdin')
+    ? await readDesktopHubs(deps.homeDir || os.homedir())
+    : undefined;
+  const { infos, sawTokenlessCsrfClient } = processInfosFromText(stdout, desktopHubs);
   if (infos.length > 0) return infos;
   if (sawTokenlessCsrfClient) throw errorWithStatus('unavailable', 'Antigravity LS missing --csrf_token');
   throw errorWithStatus('notConfigured', 'Antigravity language server not running');
@@ -272,7 +323,7 @@ async function detectProcessInfosPosix(deps = {}) {
     deps,
     timeoutMs: Math.min(8000, Number(deps.timeoutMs) || 8000)
   });
-  return requireDetectedProcessInfos(stdout);
+  return requireDetectedProcessInfos(stdout, deps);
 }
 
 async function detectProcessInfosWin32(deps = {}) {
@@ -284,7 +335,7 @@ async function detectProcessInfosWin32(deps = {}) {
     deps,
     timeoutMs: Math.min(10000, Number(deps.timeoutMs) || 10000)
   });
-  return requireDetectedProcessInfos(stdout);
+  return requireDetectedProcessInfos(stdout, deps);
 }
 
 async function detectProcessInfos(deps = {}) {
@@ -301,7 +352,8 @@ async function detectProcessInfo(deps = {}) {
 async function listeningPortsPosix(pid, deps = {}) {
   let stdout;
   try {
-    stdout = await runProcessText('lsof', ['-nP', '-iTCP', '-sTCP:LISTEN', '-a', '-p', String(pid)], {
+    const sockets = deps.ipv4LoopbackOnly ? '-i4TCP' : '-iTCP';
+    stdout = await runProcessText('lsof', ['-nP', sockets, '-sTCP:LISTEN', '-a', '-p', String(pid)], {
       deps,
       timeoutMs: Math.min(6000, Number(deps.timeoutMs) || 6000)
     });
@@ -309,7 +361,7 @@ async function listeningPortsPosix(pid, deps = {}) {
     throw errorWithStatus('unavailable', `lsof failed: ${err.message}`);
   }
   const ports = new Set();
-  const re = /:(\d+)\s+\(LISTEN\)/g;
+  const re = deps.ipv4LoopbackOnly ? /\s127\.0\.0\.1:(\d+)\s+\(LISTEN\)/g : /:(\d+)\s+\(LISTEN\)/g;
   let match;
   while ((match = re.exec(stdout)) !== null) {
     const n = Number(match[1]);
@@ -320,7 +372,8 @@ async function listeningPortsPosix(pid, deps = {}) {
 }
 
 async function listeningPortsWin32(pid, deps = {}) {
-  const script = `Get-NetTCPConnection -OwningProcess ${pid} -State Listen -ErrorAction SilentlyContinue | Select-Object -ExpandProperty LocalPort`;
+  const loopbackFilter = deps.ipv4LoopbackOnly ? " | Where-Object LocalAddress -eq '127.0.0.1'" : '';
+  const script = `Get-NetTCPConnection -OwningProcess ${pid} -State Listen -ErrorAction SilentlyContinue${loopbackFilter} | Select-Object -ExpandProperty LocalPort`;
   const stdout = await runProcessText('powershell', ['-NoProfile', '-NonInteractive', '-Command', script], {
     deps,
     timeoutMs: Math.min(6000, Number(deps.timeoutMs) || 6000)
@@ -350,22 +403,73 @@ function statusFromHttpCode(code) {
   return 'unavailable';
 }
 
+async function desktopSocketOwned(port, pid, localPort, timeoutMs, deps) {
+  if ((deps.platform || process.platform) === 'win32') {
+    const script = `Get-NetTCPConnection -OwningProcess ${pid} -State Established -LocalAddress 127.0.0.1 -LocalPort ${port} -RemoteAddress 127.0.0.1 -RemotePort ${localPort} -ErrorAction SilentlyContinue | Select-Object -ExpandProperty OwningProcess`;
+    const output = await runProcessText('powershell', ['-NoProfile', '-NonInteractive', '-Command', script], { timeoutMs, deps });
+    return output.split(/\r?\n/).some((line) => line.trim() === String(pid));
+  }
+  const output = await runProcessText('lsof', ['-nP', '-a', '-p', String(pid), '-i4TCP', '-sTCP:ESTABLISHED', '-Fn'], { timeoutMs, deps, emptyOnExitOne: true });
+  return output.split(/\r?\n/).includes(`n127.0.0.1:${port}->127.0.0.1:${localPort}`);
+}
+
+async function connectVerifiedDesktopSocket(port, pid, timeoutMs, parentSignal, deps) {
+  const timeout = AbortSignal.timeout(timeoutMs);
+  const signal = parentSignal ? AbortSignal.any([timeout, parentSignal]) : timeout;
+  const socket = net.createConnection({ host: '127.0.0.1', port, signal });
+  // The HTTP client has not attached its socket listeners yet.
+  const ignoreSocketError = () => {};
+  socket.on('error', ignoreSocketError);
+  try {
+    await once(socket, 'connect', { signal });
+    const localPort = socket.localPort;
+    const ownershipDeps = { ...deps, signal };
+    let owned = await desktopSocketOwned(port, pid, localPort, timeoutMs, ownershipDeps);
+    throwIfAborted(signal);
+    if (!owned && !socket.destroyed) {
+      // The handshake can finish before the server accepts the connection.
+      await delay(20, undefined, { signal });
+      if (!socket.destroyed) {
+        owned = await desktopSocketOwned(port, pid, localPort, timeoutMs, ownershipDeps);
+      }
+    }
+    throwIfAborted(signal);
+    if (!owned || socket.destroyed) throw errorWithStatus('unavailable', 'Antigravity no longer owns the connected RPC socket');
+    return socket;
+  } catch (error) {
+    socket.destroy();
+    throw error;
+  }
+}
+
 function callLs({
   scheme,
   port,
   csrfToken,
+  desktopPid,
   method,
   body,
   host = '127.0.0.1',
   timeoutMs = DEFAULT_RPC_TIMEOUT_MS,
   signal
-}) {
+}, deps = {}) {
+  if (desktopPid && (scheme !== 'http' || host !== '127.0.0.1' || !Number.isSafeInteger(desktopPid) || desktopPid <= 0)) {
+    return Promise.reject(errorWithStatus('unavailable', 'Invalid Antigravity desktop RPC endpoint'));
+  }
   const transport = scheme === 'https' ? https : http;
   const payload = Buffer.from(JSON.stringify(body || {}));
   return new Promise((resolve, reject) => {
     const req = transport.request({
       host,
       port,
+      ...(desktopPid ? {
+        // Supplying createConnection without an agent keeps the request buffered
+        // until the callback hands it the verified socket.
+        createConnection: (_options, done) => {
+          void connectVerifiedDesktopSocket(port, desktopPid, timeoutMs, signal, deps)
+            .then((socket) => done(null, socket), done);
+        }
+      } : {}),
       method: 'POST',
       path: `/${LS_SERVICE}/${method}`,
       headers: {
@@ -415,20 +519,6 @@ function callLs({
   });
 }
 
-// Copied verbatim from openusage/codexbar: placeholder / internal model IDs that
-// must be ignored when reading clientModelConfigs.
-const CC_MODEL_BLACKLIST = new Set([
-  'MODEL_CHAT_20706',
-  'MODEL_CHAT_23310',
-  'MODEL_GOOGLE_GEMINI_2_5_FLASH',
-  'MODEL_GOOGLE_GEMINI_2_5_FLASH_THINKING',
-  'MODEL_GOOGLE_GEMINI_2_5_FLASH_LITE',
-  'MODEL_GOOGLE_GEMINI_2_5_PRO',
-  'MODEL_PLACEHOLDER_M19',
-  'MODEL_PLACEHOLDER_M9',
-  'MODEL_PLACEHOLDER_M12'
-]);
-
 function poolForModel(label, modelId) {
   const lc = `${label || ''} ${modelId || ''}`.toLowerCase();
   if (lc.includes('argon')) return 'Gemini 4 Argon';
@@ -457,11 +547,19 @@ function quotaRemainingFraction(bucket) {
 }
 
 function quotaGroupName(displayName) {
-  const name = String(displayName || '').trim();
+  const name = typeof displayName === 'string' ? displayName.trim().replace(/\s+/g, ' ') : '';
   const lower = name.toLowerCase();
   if (/^gemini(?:\s+models)?$/.test(lower)) return 'Gemini';
-  if (lower.includes('claude') || lower.includes('gpt')) return 'Claude/GPT';
-  return name || 'Quota';
+  if (/^claude\s*(?:and|&|\/)\s*gpt(?:\s+models)?$/.test(lower)) return 'Claude/GPT';
+  if (lower === 'gemini 4 argon') return 'Gemini 4 Argon';
+  if (!name) return 'Quota';
+  // RPC and OAuth can report different subsets. Derive the same shortened
+  // name from the full name, with room for the period within the Hub limit.
+  const maxNameLength = 32 - ' 5-hour'.length;
+  const clean = name.replace(/[^a-z0-9 +._/-]/gi, '').replace(/ +/g, ' ').trim();
+  if (clean === name && clean.length <= maxNameLength) return clean;
+  const suffix = `-${hashKey('antigravity-quota-group', lower).slice(-8)}`;
+  return `${(clean || 'Quota').slice(0, maxNameLength - suffix.length).trimEnd()}${suffix}`;
 }
 
 function quotaBucketKind(bucket) {
@@ -483,51 +581,30 @@ function quotaBucketKind(bucket) {
 function quotaSummaryWindows(payload) {
   const summary = payload?.response || payload?.summary || payload;
   const groups = Array.isArray(summary?.groups) ? summary.groups : [];
+  const namedGroups = groups
+    .map((group) => ({ name: quotaGroupName(group?.displayName), buckets: group?.buckets }))
+    .sort((a, b) => quotaGroupRank(a.name) - quotaGroupRank(b.name));
   const windows = [];
-  for (const group of groups) {
-    const groupName = quotaGroupName(group?.displayName);
-    for (const bucket of Array.isArray(group?.buckets) ? group.buckets : []) {
+  for (const { name, buckets } of namedGroups) {
+    const session = [];
+    const weekly = [];
+    for (const bucket of Array.isArray(buckets) ? buckets : []) {
       const kind = quotaBucketKind(bucket);
       if (!kind) continue;
       const remainingFraction = quotaRemainingFraction(bucket);
       const disabled = bucket?.disabled === true;
-      windows.push({
+      (kind === 'session' ? session : weekly).push({
         kind,
-        name: `${groupName} ${kind === 'session' ? '5-hour' : 'weekly'}`,
+        name: `${name} ${kind === 'session' ? '5-hour' : 'weekly'}`,
         remainingFraction: disabled ? null : remainingFraction,
         resetTime: parseResetTime(bucket?.resetTime),
         resetDescription: typeof bucket?.description === 'string' ? bucket.description : '',
         showMeter: !disabled && remainingFraction !== null
       });
     }
+    windows.push(...session, ...weekly);
   }
-  const groupRank = (name) => {
-    const lower = name.toLowerCase();
-    if (lower.includes('argon')) return 1;
-    if (lower.startsWith('gemini ')) return 0;
-    if (lower.startsWith('claude/gpt ')) return 2;
-    return 3;
-  };
-  const kindRank = (kind) => kind === 'session' ? 0 : 1;
-  return windows.sort((a, b) => groupRank(a.name) - groupRank(b.name) || kindRank(a.kind) - kindRank(b.kind));
-}
-
-function modelsFromConfigs(configs) {
-  return (Array.isArray(configs) ? configs : [])
-    .map((cfg) => {
-      const modelId = cfg?.modelOrAlias?.model;
-      if (!modelId || CC_MODEL_BLACKLIST.has(modelId)) return null;
-      const quota = cfg?.quotaInfo;
-      if (!quota || typeof quota.remainingFraction !== 'number') return null;
-      const label = (typeof cfg?.label === 'string' && cfg.label.trim()) || modelId;
-      return {
-        label,
-        modelId,
-        remainingFraction: quota.remainingFraction,
-        resetTime: parseResetTime(quota.resetTime)
-      };
-    })
-    .filter(Boolean);
+  return windows;
 }
 
 function collapsePools(models) {
@@ -549,6 +626,11 @@ function collapsePools(models) {
 }
 
 function endpointCandidates(processInfo, listenPorts) {
+  if (processInfo.desktopRpcPort) {
+    const port = processInfo.desktopRpcPort;
+    // Require the port to still belong to the matching process before sending its token.
+    return listenPorts.includes(port) ? [{ scheme: 'http', port, csrfToken: processInfo.csrfToken, desktopPid: processInfo.pid }] : [];
+  }
   const candidates = [];
   // Try explicit hub port first if available (most authoritative and fastest).
   if (processInfo.hubPort) {
@@ -605,13 +687,15 @@ function prioritizeCandidate(resolved, candidates) {
     candidate.scheme !== resolved.scheme
     || candidate.port !== resolved.port
     || candidate.csrfToken !== resolved.csrfToken
+    || candidate.desktopPid !== resolved.desktopPid
   ))];
 }
 
 function sameEndpoint(left, right) {
   return left.scheme === right.scheme
     && left.port === right.port
-    && left.csrfToken === right.csrfToken;
+    && left.csrfToken === right.csrfToken
+    && left.desktopPid === right.desktopPid;
 }
 
 function dedupeCandidates(candidates) {
@@ -679,12 +763,19 @@ async function resolveWorkingEndpoint(candidates, call, deadlineMs, signal) {
   return { candidates, lastError };
 }
 
+function preferQuotaFailure(previous, next) {
+  return previous?.status === 'unauthorized' ? previous : next || previous;
+}
+
 async function groupedQuotaFromCandidates(candidates, call, {
+  previousError,
+  csrfToken,
+  sourceKey,
   summaryDeadlineMs,
   probeDeadlineMs,
   signal
 }) {
-  let lastError = errorWithStatus('unavailable', 'no endpoint candidates');
+  let lastError = previousError || errorWithStatus('unavailable', 'no endpoint candidates');
   for (const candidate of candidates) {
     try {
       const summary = await callBeforeDeadline(call, {
@@ -692,7 +783,7 @@ async function groupedQuotaFromCandidates(candidates, call, {
         method: 'RetrieveUserQuotaSummary',
         body: { forceRefresh: true },
         signal
-      }, summaryDeadlineMs);
+      }, summaryDeadlineMs).catch(limitStage('grouped-quota'));
       const windows = quotaSummaryWindows(summary);
       if (windows.some((window) => window.remainingFraction !== null)) {
         let accountPlan = null;
@@ -709,72 +800,21 @@ async function groupedQuotaFromCandidates(candidates, call, {
             || preferredPlanInfoName(identity?.userStatus?.planStatus?.planInfo)
             || null;
           accountEmail = identity?.userStatus?.email?.trim?.() || null;
-        } catch (_) {
-          throwIfAborted(signal);
-        }
-        throwIfAborted(signal);
-        return { snapshot: { accountPlan, accountEmail, windows }, lastError };
+        } catch (_) { /* An account lookup can fail after a usable quota response. */ }
+        return {
+          snapshot: { accountPlan, accountEmail, windows, sourceKey: candidate.csrfToken === csrfToken ? sourceKey : null },
+          lastError
+        };
       }
-      lastError = errorWithStatus('unavailable', 'empty quota summary');
+      lastError = preferQuotaFailure(lastError, errorWithStatus('unavailable', 'empty quota summary'));
     } catch (err) {
-      throwIfAborted(signal);
-      lastError = err;
-      if (remainingMs(summaryDeadlineMs) <= 0) break;
+      // An alternate extension credential cannot invalidate the process login.
+      const failure = err?.status === 'unauthorized' && candidate.csrfToken !== csrfToken
+        ? Object.assign(errorWithStatus('unavailable', 'alternate RPC credential rejected'), { cause: err })
+        : err;
+      lastError = preferQuotaFailure(lastError, failure);
     }
-  }
-  return { snapshot: null, lastError };
-}
-
-async function legacyQuotaFromCandidates(candidates, call, { probeDeadlineMs, signal }) {
-  let lastError = errorWithStatus('unavailable', 'no endpoint candidates');
-  const userStatusDeadlineMs = Date.now() + Math.max(1, Math.floor(remainingMs(probeDeadlineMs) / 2));
-  for (const candidate of candidates) {
-    try {
-      const data = await callBeforeDeadline(call, {
-        ...candidate,
-        method: 'GetUserStatus',
-        body: { metadata: PROBE_METADATA },
-        signal
-      }, userStatusDeadlineMs);
-      if (data?.userStatus) {
-        const configs = data.userStatus.cascadeModelConfigData?.clientModelConfigs;
-        const accountPlan =
-          firstTrimmedString(data.userStatus.userTier?.name)
-          || preferredPlanInfoName(data.userStatus.planStatus?.planInfo)
-          || null;
-        const accountEmail = data.userStatus.email?.trim?.() || null;
-        const models = modelsFromConfigs(configs);
-        if (models.length > 0) {
-          throwIfAborted(signal);
-          return { snapshot: { accountPlan, accountEmail, pools: collapsePools(models) }, lastError };
-        }
-      }
-      lastError = errorWithStatus('unavailable', 'empty user status');
-    } catch (err) {
-      throwIfAborted(signal);
-      lastError = err;
-      if (remainingMs(userStatusDeadlineMs) <= 0) break;
-    }
-  }
-  for (const candidate of candidates) {
-    try {
-      const fallback = await callBeforeDeadline(call, {
-        ...candidate,
-        method: 'GetCommandModelConfigs',
-        body: { metadata: PROBE_METADATA },
-        signal
-      }, probeDeadlineMs);
-      const models = modelsFromConfigs(fallback?.clientModelConfigs);
-      if (models.length > 0) {
-        throwIfAborted(signal);
-        return { snapshot: { accountPlan: null, accountEmail: null, pools: collapsePools(models) }, lastError };
-      }
-      lastError = errorWithStatus('unavailable', 'empty model configs');
-    } catch (err) {
-      throwIfAborted(signal);
-      lastError = err;
-      if (remainingMs(probeDeadlineMs) <= 0) break;
-    }
+    if (signal.aborted || remainingMs(summaryDeadlineMs) <= 0) break;
   }
   return { snapshot: null, lastError };
 }
@@ -805,6 +845,7 @@ async function probe(deps = {}) {
   const runtimeDeps = { ...deps, signal };
   const listPorts = deps.listeningPorts || listeningPorts;
   const call = deps.callLs || callLs;
+  const sourceFailures = new Map();
   let lastError = errorWithStatus('notConfigured', 'Antigravity language server not running');
 
   try {
@@ -817,13 +858,14 @@ async function probe(deps = {}) {
 
     // Probe scheduling contract:
     // - source priority is independent of ps/PID order;
-    // - same-source processes run concurrently, with grouped quota before legacy;
+    // - same-source processes try grouped quota concurrently;
     // - each endpoint is preflighted at most once;
     // - a reachable explicit hub starts quota without awaiting discovery;
     // - preflight failure lowers priority but never drops a quota candidate; and
     // - discovery keeps the full provider deadline when no explicit hub competes.
     for (const kind of PROCESS_KIND_ORDER) {
       const sourceInfos = infos.filter((info) => info.kind === kind);
+      const sourceKeys = sourceInfos.map(({ pid, csrfToken }) => hashKey('antigravity-rpc', kind, pid, csrfToken));
       const halfDeadlineMs = () => (
         Date.now() + Math.max(1, Math.floor(remainingMs(probeDeadlineMs) / 2))
       );
@@ -838,7 +880,7 @@ async function probe(deps = {}) {
           const discovery = (async () => {
             try {
               const ports = await promiseBeforeDeadline(
-                (timeoutMs) => listPorts(info.pid, { ...runtimeDeps, timeoutMs }),
+                (timeoutMs) => listPorts(info.pid, { ...runtimeDeps, timeoutMs, ipv4LoopbackOnly: Boolean(info.desktopRpcPort) }),
                 discoveryBudgetMs,
                 DEFAULT_RPC_TIMEOUT_MS,
                 signal
@@ -871,7 +913,6 @@ async function probe(deps = {}) {
               resolved = { candidates: discovered, lastError: error };
             }
             return {
-              info,
               candidates: dedupeCandidates([...resolved.candidates, ...failedHub]),
               error: resolved.lastError || discoveryError
             };
@@ -896,7 +937,6 @@ async function probe(deps = {}) {
             // await discovery only if those quota calls fail.
             if (resolvedHub.lastError === null) {
               return {
-                info,
                 candidates: resolvedHub.candidates,
                 fallbackCandidates: resolveDiscoveredCandidates,
                 error: null
@@ -904,77 +944,60 @@ async function probe(deps = {}) {
             }
             // A failed lightweight preflight lowers the hub's priority but does
             // not remove it: older servers can still implement the quota RPCs.
-            return resolveDiscoveredCandidates(explicitHub);
+            return await resolveDiscoveredCandidates(explicitHub);
           }
 
-          return resolveDiscoveredCandidates();
+          return await resolveDiscoveredCandidates();
         } catch (error) {
-          return { info, candidates: [], error };
+          return { candidates: [], error };
         }
       });
 
-      const groupedTasks = candidateStates.map(async (state) => {
+      const groupedTasks = candidateStates.map(async (state, index) => {
         const entry = await state;
         if (entry.candidates.length === 0) {
-          return { ...entry, snapshot: null, lastError: entry.error };
+          return { snapshot: null, lastError: entry.error };
         }
 
-        let candidates = entry.candidates;
-        let grouped = await groupedQuotaFromCandidates(candidates, call, {
-          summaryDeadlineMs: halfDeadlineMs(),
+        const groupOptions = {
           probeDeadlineMs,
-          signal
-        });
-        let groupedError = grouped.lastError || entry.error;
-
-        if (!grouped.snapshot && entry.fallbackCandidates) {
-          let fallback;
-          try {
-            fallback = await entry.fallbackCandidates();
-          } catch (error) {
-            fallback = { candidates: [], error };
-          }
-          groupedError = fallback.error || groupedError;
-          if (fallback.candidates.length > 0) {
-            candidates = dedupeCandidates([...candidates, ...fallback.candidates]);
-            grouped = await groupedQuotaFromCandidates(fallback.candidates, call, {
-              summaryDeadlineMs: halfDeadlineMs(),
-              probeDeadlineMs,
-              signal
-            });
-            groupedError = grouped.lastError || groupedError;
-          }
-        }
-
-        return {
-          info: entry.info,
-          candidates,
-          snapshot: grouped.snapshot,
-          lastError: groupedError
+          signal,
+          csrfToken: sourceInfos[index].csrfToken,
+          sourceKey: sourceKeys[index]
         };
+        const grouped = await groupedQuotaFromCandidates(entry.candidates, call, {
+          ...groupOptions,
+          summaryDeadlineMs: halfDeadlineMs(),
+          previousError: entry.error
+        });
+        if (grouped.snapshot || signal.aborted || !entry.fallbackCandidates) return grouped;
+
+        const fallback = await entry.fallbackCandidates().catch(error => ({ candidates: [], error }));
+        const previousError = preferQuotaFailure(grouped.lastError, fallback.error);
+        if (fallback.candidates.length === 0 || signal.aborted) {
+          return { snapshot: null, lastError: previousError };
+        }
+        return groupedQuotaFromCandidates(fallback.candidates, call, {
+          ...groupOptions,
+          summaryDeadlineMs: halfDeadlineMs(),
+          previousError
+        });
       });
       // Kind ordering is semantic; PID ordering within one kind is only stable
       // enumeration. A valid grouped snapshot can therefore finish the kind
-      // immediately, while every grouped task must fail before legacy begins.
+      // immediately. Try the next source kind once every grouped task fails.
       const groupedOutcome = await firstSnapshotOrAll(groupedTasks);
-      throwIfAborted(signal);
+      throwIfAborted(deps.signal);
       if (groupedOutcome.snapshot) return { ...groupedOutcome.snapshot, sourceDetail: kind };
-      const groupedResults = groupedOutcome.results;
-      for (const result of groupedResults) lastError = result.lastError || lastError;
-
-      const candidatesByProcess = groupedResults.filter((entry) => entry.candidates.length > 0);
-      if (candidatesByProcess.length === 0) continue;
-
-      const legacyResults = await Promise.all(candidatesByProcess.map((entry) => (
-        legacyQuotaFromCandidates(entry.candidates, call, {
-          probeDeadlineMs,
-          signal
-        })
-      )));
-      throwIfAborted(signal);
-      const legacy = legacyResults.find((result) => result.snapshot);
-      if (legacy?.snapshot) return { ...legacy.snapshot, sourceDetail: kind };
-      for (const result of legacyResults) lastError = result.lastError || lastError;
+      for (const [index, { lastError: error }] of groupedOutcome.results.entries()) {
+        if (!error) continue;
+        lastError = error;
+        sourceFailures.set(sourceKeys[index], { source: kind, error });
+      }
+      if (signal.aborted) break;
+    }
+    if (sourceFailures.size) {
+      throw Object.assign(errorWithStatus(lastError.status, lastError.message), { cause: lastError, sourceFailures });
     }
     throw lastError;
   } finally {
@@ -996,7 +1019,6 @@ module.exports = {
   _sortProcessInfos: sortProcessInfos,
   _extractFlag: extractFlag,
   _errorWithStatus: errorWithStatus,
-  _modelsFromConfigs: modelsFromConfigs,
   _collapsePools: collapsePools,
   _poolForModel: poolForModel,
   _quotaSummaryWindows: quotaSummaryWindows,

@@ -146,12 +146,15 @@ test('tool preference controls place compact actions beside the note without dup
   const css = readRendererFile('styles.css');
   assert.match(cssRule(css, '.settings-note-row'), /grid-template-columns:\s*minmax\(0,\s*1fr\) auto/);
   assert.match(cssRule(css, '.settings-note-row'), /align-items:\s*center/);
-  // The track checkbox gets its own leading cell; visibility and pin stay on the right.
-  assert.match(cssRule(css, '.tool-preference-row'), /grid-template-columns:\s*22px minmax\(0,\s*1fr\) repeat\(2,\s*22px\)/);
+  // The name area leads; visibility, pin, status and the track switch sit on
+  // the right, with the status against the switch.
+  assert.match(cssRule(css, '.tool-preference-row'), /grid-template-columns:\s*minmax\(0,\s*1fr\) auto/);
+  // Other preference lists keep their grid cells; only this row flexes.
   assert.match(cssRule(css, '.tool-preference-actions'), /display:\s*contents/);
-  assert.match(body, /actions\.append\(visibility, pin\);/);
-  assert.match(body, /row\.append\(track, labelGroup, actions(?:, panel)?\);/);
-  assert.doesNotMatch(body, /actions\.append\(track/);
+  assert.match(cssRule(css, '.tool-preference-row > .tool-preference-actions'), /display:\s*flex/);
+  assert.match(body, /actions\.append\(visibility, pin\);\n\s*if \(statusTag\) actions\.append\(statusTag\);\n\s*actions\.append\(track\);/);
+  assert.match(body, /row\.append\(main, actions(?:, panel)?\);/);
+  assert.match(body, /main\.append\(disclosure, labelGroup\);/);
   assert.doesNotMatch(css, /\.tool-preference-head/);
   assert.doesNotMatch(css, /\.tool-preference-legend-/);
 });
@@ -192,7 +195,7 @@ test('the tool list skips unchanged row renders and refreshes only open health d
   assert.match(defer, /return preserveSettingsPanelScroll\(renderToolPreferencesNow\);/);
 
   const signature = functionBody(app, 'toolPreferenceRenderSignature', 'renderToolPreferencesNow');
-  assert.match(signature, /\[\.\.\.enabledClientSet\(\)\]\.sort\(\)/);
+  assert.match(signature, /String\(pendingTrackedClients\(\) \|\| ''\)\.split\(','\)[^\n]*\.sort\(\)/);
   assert.match(signature, /state\.settings\?\.customScanPaths/);
   assert.doesNotMatch(signature, /trackedClients/);
   assert.match(signature, /healthRows: KNOWN_CLIENTS\.map/);
@@ -222,7 +225,7 @@ test('the tool list skips unchanged row renders and refreshes only open health d
   assert.match(body, /visibility\.id = `toolVisibility-\$\{id\}`/);
   assert.match(body, /pin\.id = `toolPin-\$\{id\}`/);
   assert.match(body, /const focusedId = document\.activeElement\?\.id \|\| ''/);
-  assert.match(body, /document\.getElementById\(focusedId\)\?\.focus/);
+  assert.match(body, /restoreSettingsListFocus\(focusedId\);/);
   assert.match(body, /return;/);
   assert.doesNotMatch(body, /replaceChildren/);
   assert.match(
@@ -267,7 +270,8 @@ test('a press on the tool row own controls never arms a drag', () => {
   // The pin/order decision is made once, by the shared module, and travels from
   // the mirror to the save; onPreferenceOrderCommit would compare against the
   // value the mirror just wrote and drop it.
-  assert.match(wiring, /qoderDisplayApi\.orderCommit\(order, KNOWN_CLIENTS, state\.settings\?\.clientDisplayOrder, state\.settings\?\.pinnedClients, id\)/);
+  assert.match(wiring, /const merged = settingsListFilterApi\.mergeSubsetOrder\(full, order\);/);
+  assert.match(wiring, /qoderDisplayApi\.orderCommit\(merged, KNOWN_CLIENTS, state\.settings\?\.clientDisplayOrder, state\.settings\?\.pinnedClients, id\)/);
   assert.match(wiring, /persistOrder: \(_order, _id, patch\) => void saveSettings\(patch\)/);
   assert.doesNotMatch(wiring, /onPreferenceOrderCommit\(/);
 });
@@ -282,7 +286,7 @@ test('all four Main Screen lists use the shared controller from their handles', 
   assert.match(wiring, /persistOrder:[\s\S]*?saveSettings\(\{ \[settingKey\]: value \}\)/);
 
   for (const [controller, renderer, id] of [
-    ['viewPreferenceRowDrag', 'renderViewPreferences', 'view'],
+    ['viewPreferenceRowDrag', 'createMainViewRow', 'view'],
     ['homeModulePreferenceRowDrag', 'renderHomeSettingsList', 'homeModule'],
     ['homeLimitProviderRowDrag', 'renderHomeLimitProviderList', 'homeLimitProvider'],
     ['statusProviderRowDrag', 'renderServiceProviderList', 'statusProvider']
@@ -294,6 +298,9 @@ test('all four Main Screen lists use the shared controller from their handles', 
     assert.match(body, new RegExp(`createPreferenceOrderHandle\\(\\{ kind: '${id}'`));
   }
 
+  // Hidden views are not rendered in the ordered list; the drop keeps their slots.
+  assert.match(wiring, /if \(kind === 'view'\) \{[\s\S]*?settingsListFilterApi\.mergeSubsetOrder\(/);
+
   assert.match(app, /const MAIN_PREFERENCE_DRAG_EXCLUDED = 'button:not\(\.preference-order-handle\), input, select, textarea, a, label, \.accordion-animated-container';/);
   assert.match(app, /if \(deferMainPreferenceRender\(\)\) return;/);
 });
@@ -301,37 +308,128 @@ test('all four Main Screen lists use the shared controller from their handles', 
 test('Main Screen drag keeps expandable rows and their panels together', () => {
   const app = readRendererFile('app.js');
   const apply = functionBody(app, 'applyPreferenceOrder', 'createPreferenceOrderHandle');
-  assert.match(apply, /home: 'homeSettingsContainer'/);
-  assert.match(apply, /status: 'serviceProvidersContainer'/);
+  assert.doesNotMatch(apply, /homeSettingsContainer/, 'views no longer carry panels in the nav');
   assert.match(apply, /HOME_MODULE_SUBGROUPS\[id\]\?\.\[1\]/);
   assert.match(apply, /if \(companion\) list\.appendChild\(companion\)/);
 
   const expand = functionBody(app, 'setPreferenceSubgroupsExpanded', 'togglePreferenceSubgroup');
   assert.match(expand, /state\[stateKey\] = open/);
   assert.match(expand, /classList\.toggle\('hidden', !open\)/);
-  assert.match(app, /getExpanded: \(\) => expandedPreferenceSubgroups\(VIEW_PREFERENCE_SUBGROUPS\)/);
   assert.match(app, /getExpanded: \(\) => expandedPreferenceSubgroups\(HOME_MODULE_SUBGROUPS\)/);
 });
 
-test('view preferences place compact actions beside the note without duplicate headers', () => {
+test('Main Screen pairs the switcher views with the selected view settings', () => {
   const html = readRendererFile('index.html');
-  const group = html.match(/<div class="settings-subgroup settings-main-screen-group">[\s\S]*?<div id="viewDisplayList"/)?.[0] || '';
+  const group = html.match(/<div class="settings-subgroup settings-main-screen-group">[\s\S]*?<div class="settings-subgroup main-numbers-group">/)?.[0] || '';
   assert.match(html, /<div class="settings-group settings-collapsible-group settings-main-group"/);
-  assert.match(group, /<div class="settings-note-row">/);
-  assert.match(group, /<p class="settings-note" data-i18n="settings\.views\.note">[\s\S]*?<div class="tool-header-actions">/);
-  assert.match(group, /<div class="tool-header-actions">/);
+  assert.match(group, /<nav class="main-view-nav"[^>]*>\s*<div id="viewDisplayList" class="main-view-list"><\/div>/);
+  assert.match(group, /<div id="hiddenViewGroup" class="main-view-hidden-group" hidden>[\s\S]*?<div id="hiddenViewList" class="main-view-list"><\/div>/);
   assert.match(group, /id="resetViewDisplayOrderButton"/);
-  assert.match(group, /id="showAllViewsButton"/);
-  assert.doesNotMatch(group, /settings-views-header/);
-  assert.doesNotMatch(group, /settings\.views\.title/);
-  assert.doesNotMatch(group, /viewsSettingsSummary/);
-  assert.doesNotMatch(group, /class="view-preference-head"/);
+  assert.match(group, /<div id="mainViewInspector" class="main-view-inspector"><\/div>/);
+  assert.doesNotMatch(group, /id="showAllViewsButton"/);
 
-  const body = functionBody(readRendererFile('app.js'), 'renderViewPreferences', 'renderToolPreferences');
-  assert.match(body, /view-preference-row/);
-  assert.match(body, /settings\.views\.hideView/);
-  assert.match(body, /settings\.views\.showView/);
-  assert.match(body, /createPreferenceOrderHandle\(\{ kind: 'view'/);
+  const app = readRendererFile('app.js');
+  const render = functionBody(app, 'renderViewPreferences', 'renderMainViewInspector');
+  // Only the switcher's own views are ordered; hidden and disabled ones sit below.
+  assert.match(render, /const shownIds = new Set\(shownViewDisplayOrder\(\).shown\)/);
+  assert.match(render, /els\.viewDisplayList\.replaceChildren\(\.\.\.shown\.map\(\(view\) => row\(view, true\)\)\)/);
+  assert.match(render, /els\.hiddenViewList\?\.replaceChildren\(\.\.\.off\.map\(\(view\) => row\(view, false\)\)\)/);
+  assert.match(render, /if \(!views\.some\(\(\{ id \}\) => id === state\.mainSettingsView\)\) state\.mainSettingsView = 'home'/);
+  const row = functionBody(app, 'createMainViewRow', 'renderViewPreferences');
+  assert.match(row, /tab\.setAttribute\('aria-controls', 'mainViewInspector'\)/);
+  assert.match(row, /if \(selected\) tab\.setAttribute\('aria-current', 'true'\)/);
+  assert.match(row, /createPreferenceOrderHandle\(\{ kind: 'view'/);
+  assert.match(row, /settings\.views\.showView/);
+  const inspector = functionBody(app, 'renderMainViewInspector', 'homeLimitProviders');
+  // The switch lives in the header; its subtitle names its state or why it is locked.
+  assert.match(inspector, /visibilityInput\.setAttribute\('aria-label', t\('settings\.views\.showInSwitcher'\)\)/);
+  assert.match(inspector, /header\.append\(badge, heading, visibilityInput\)/);
+  assert.match(inspector, /visibilityInput\.setAttribute\('aria-describedby', subtitle\.id\)/);
+  // The last visible view cannot be switched off.
+  assert.match(inspector, /visibilityInput\.disabled = lastVisible \|\| unavailable/);
+  assert.match(inspector, /settings\.views\.lastVisible/);
+  assert.match(inspector, /settings\.views\.limitsUnavailable/);
+  assert.match(inspector, /const settings = MAIN_VIEW_SETTINGS\[view\.id\]/);
+  // Each visit starts on Home.
+  assert.match(functionBody(app, 'openSettingsPanel', 'openViewFromTray'), /resetMainViewSettings\(\)/);
+  assert.match(functionBody(app, 'resetMainViewSettings', 'openSettingsPanel'), /state\.mainSettingsView = 'home';/);
+});
+
+test('unavailable Limits does not let the last visible view be hidden', () => {
+  const app = readRendererFile('app.js');
+  const disabled = functionBody(app, 'disabledViewIds', 'hiddenHomeModuleSet');
+  const render = functionBody(app, 'renderViewPreferences', 'renderMainViewInspector');
+  const order = app.slice(app.indexOf('function shownViewDisplayOrder('), app.indexOf('async function onViewDisplayMove('));
+  const shown = [];
+  const hidden = [];
+  const inspectors = [];
+  const context = {
+    VIEW_DISPLAY_OPTIONS: ['home', 'limits', 'status'].map((id) => ({ id })),
+    viewDisplayPreferencesApi: require('../../src/electron/renderer/viewDisplayPreferences'),
+    state: { mainSettingsView: 'home', settings: { hiddenViews: 'status' } },
+    document: { activeElement: null },
+    els: {
+      viewDisplayList: { replaceChildren: (...rows) => shown.push(rows) },
+      hiddenViewList: { replaceChildren: (...rows) => hidden.push(rows) }
+    },
+    deferMainPreferenceRender: () => false,
+    effectiveViewDisplayOrderValue: () => 'home,limits,status',
+    hiddenViewSet: () => new Set(['status']),
+    limitViewAvailable: () => false,
+    createMainViewRow: ({ id }) => id,
+    renderMainViewInspector: ({ id }, flags) => inspectors.push([id, flags.lastVisible, flags.unavailable])
+  };
+  vm.runInNewContext(`${disabled}\n${order}\n${render}\nrenderViewPreferences(); state.mainSettingsView = 'limits'; renderViewPreferences();`, context);
+  assert.deepEqual(shown.at(-1), ['home']);
+  assert.deepEqual(hidden.at(-1), ['limits', 'status']);
+  assert.deepEqual(inspectors, [['home', true, false], ['limits', false, true]]);
+  assert.equal(context.state.settings.hiddenViews, 'status');
+  context.state.settings.hiddenViews = 'home,status';
+  context.state.mainSettingsView = 'home';
+  vm.runInNewContext('renderViewPreferences();', context);
+  assert.deepEqual(shown.at(-1), ['home'], 'the runtime fallback stays in the shown list');
+  assert.deepEqual(inspectors.at(-1), ['home', true, false]);
+  assert.equal(context.state.settings.hiddenViews, 'home,status', 'fallback does not rewrite preferences');
+});
+
+test('keyboard reordering moves a view among the shown views and keeps hidden slots', async () => {
+  const app = readRendererFile('app.js');
+  const source = app.slice(app.indexOf('// Settings reorder only the views in the switcher'), app.indexOf('async function onHomeModuleVisibilityToggle('));
+  const saves = [];
+  const context = {
+    VIEW_DISPLAY_OPTIONS: ['home', 'limits', 'tool', 'status', 'model'].map((id) => ({ id })),
+    viewDisplayPreferencesApi: require('../../src/electron/renderer/viewDisplayPreferences'),
+    settingsListFilterApi: require('../../src/electron/renderer/settingsListFilter'),
+    effectiveViewDisplayOrderValue: () => saves.at(-1)?.viewDisplayOrder || 'home,limits,tool,status,model',
+    state: { settings: { hiddenViews: 'status' } },
+    disabledViewIds: () => [],
+    saveSettings: async (patch) => { saves.push(patch); }
+  };
+  vm.runInNewContext(`${source}\nthis.move = onViewDisplayMove; this.reorder = onViewDisplayReorder;`, context);
+  await context.move('model', 'up');
+  assert.equal(saves.at(-1).viewDisplayOrder, 'home,limits,model,status,tool', 'model swaps with tool, status stays in its slot');
+  await context.reorder('home', Number.MAX_SAFE_INTEGER);
+  assert.equal(saves.at(-1).viewDisplayOrder, 'limits,model,tool,status,home');
+  const count = saves.length;
+  await context.move('limits', 'up');
+  await context.reorder('status', 0);
+  assert.equal(saves.length, count, 'a move to the same slot or of a hidden view writes nothing');
+});
+
+test('a view that becomes unavailable during a drag keeps its saved slot', () => {
+  const app = readRendererFile('app.js');
+  const source = app.slice(app.indexOf('function createMainPreferenceRowDrag('), app.indexOf('const viewPreferenceRowDrag ='));
+  const context = {
+    rowDragControllerApi: { createRowDragController: (options) => options },
+    verticalDragSortApi: {},
+    MAIN_PREFERENCE_DRAG_EXCLUDED: '',
+    preserveSettingsPanelScroll: () => {},
+    shownViewDisplayOrder: () => ({ order: ['home', 'limits', 'tool'], shown: ['home', 'tool'] }),
+    settingsListFilterApi: require('../../src/electron/renderer/settingsListFilter'),
+    state: { settings: {} }
+  };
+  assert.equal(vm.runInNewContext(`${source}\ncreateMainPreferenceRowDrag({ kind: 'view', settingKey: 'viewDisplayOrder' }).mirrorOrder(['tool', 'home', 'limits']);`, context),
+    'tool,limits,home');
 });
 
 test('settings page uses collapsible icon sections with summaries', () => {
@@ -395,7 +493,7 @@ test('main section holds views; appearance is its own section; window holds beha
   );
   assert.notEqual(main, '', 'main section should exist');
   assert.ok(main.indexOf('settings-main-screen-group') >= 0, 'main screen group should be first-class');
-  assert.doesNotMatch(main, /settings-appearance-group/, 'appearance moved out of main');
+  assert.doesNotMatch(main, /settings-appearance-type/, 'appearance moved out of main');
   assert.match(main, /id="viewDisplayList"/);
   assert.match(main, /id="currencyInput"/);
   assert.doesNotMatch(main, /id="historyEnabledInput"/);
@@ -422,14 +520,28 @@ test('main section holds views; appearance is its own section; window holds beha
   assert.match(appearance, /id="themeVendorToggle"[^>]*aria-controls="themeVendorDetails"/);
   assert.match(appearance, /id="themeVendorDetails" class="cursor-settings-details hidden" inert/);
 
-  const vendorGroupIndex = appearance.indexOf('id="themeVendorGroup"');
-  assert.ok(vendorGroupIndex > appearance.indexOf('id="themeAdvancedGroup"'), 'vendor colours should follow advanced customization');
-  const advancedGroup = appearance.slice(appearance.indexOf('id="themeAdvancedGroup"'), vendorGroupIndex);
-  const vendorGroup = appearance.slice(vendorGroupIndex);
-  assert.match(advancedGroup, /id="themeColorGrid"/);
-  assert.doesNotMatch(advancedGroup, /id="vendorColorList"/);
-  assert.match(vendorGroup, /id="resetVendorColorsButton"/);
+  const groupOrder = ['settings-theme-group', 'settings-appearance-material', 'settings-appearance-type',
+    'settings-appearance-usage', 'settings-appearance-motion',
+    'settings-appearance-vendors', 'appearanceLegacyGroup'];
+  let previousGroup = -1;
+  for (const name of groupOrder) {
+    const index = appearance.indexOf(name);
+    assert.ok(index > previousGroup, `${name} should follow the previous group`);
+    previousGroup = index;
+  }
+  const palette = appearance.slice(appearance.indexOf('id="themeAdvancedDetails"'), appearance.indexOf('settings-appearance-material'));
+  assert.match(palette, /id="themeColorGrid"/);
+  assert.match(palette, /id="themeCodeInput"/);
+  const vendorGroup = appearance.slice(appearance.indexOf('id="themeVendorGroup"'), previousGroup);
+  assert.match(vendorGroup, /id="themeVendorDetails"[\s\S]*id="resetVendorColorsButton"/);
   assert.match(vendorGroup, /id="vendorColorList"/);
+  const legacy = appearance.slice(previousGroup);
+  assert.match(legacy, /id="appearanceLegacyToggle"[^>]*aria-controls="appearanceLegacyDetails"/);
+  assert.match(legacy, /id="appearanceLegacyDetails" class="cursor-settings-details hidden" inert/);
+  for (const id of ['swapSettingsRefreshInput', 'liveDotInput', 'toolIconsInput', 'titleIconInput']) {
+    assert.ok(legacy.includes(`id="${id}"`));
+    assert.ok(!appearance.slice(0, previousGroup).includes(`id="${id}"`));
+  }
 
   const windowSection = html.slice(
     html.indexOf('<div id="windowSettingsDetails"'),
@@ -444,6 +556,7 @@ test('main section holds views; appearance is its own section; window holds beha
   const windowGroup = windowSection.match(/<div class="settings-subgroup settings-window-group">[\s\S]*?<div class="settings-subgroup settings-presence-group">/)?.[0] || '';
   assert.match(windowGroup, /id="windowBehaviorInput"/);
   assert.match(windowGroup, /id="windowToggleShortcutValue"/);
+  assert.doesNotMatch(windowGroup, /id="windowToggleShortcutNote"[^>]*data-i18n=/, 'shortcut feedback is translated by its state renderer');
   assert.doesNotMatch(windowGroup, /settings\.display\.windowTitle/);
   assert.doesNotMatch(windowGroup, /<div class="settings-group-header"><span data-i18n="settings\.display\.windowTitle">/);
   assert.doesNotMatch(windowGroup, /id="floatingBubbleInput"/);
@@ -502,12 +615,12 @@ test('settings mode choices use inline options and compact home limit rows', () 
   const html = readRendererFile('index.html');
   // Each mode choice is a labelled radiogroup, not a bare cluster of inputs.
   assert.match(html, /<div id="floatingBubbleTriggerRow" class="settings-item">/);
-  assert.match(html, /<span id="floatingBubbleTriggerLabel" class="settings-item-text">/);
+  assert.match(html, /<span id="floatingBubbleTriggerLabel" class="settings-item-title"/);
   assert.match(html, /role="radiogroup" aria-labelledby="floatingBubbleTriggerLabel"/);
   for (const value of ['click', 'hover']) {
     assert.match(html, new RegExp(`<input type="radio" name="floatingBubbleTrigger" value="${value}"`));
   }
-  assert.match(html, /<span id="showLimitUsedLabel" class="settings-item-text">/);
+  assert.match(html, /<span id="showLimitUsedLabel" class="settings-item-title"/);
   assert.match(html, /role="radiogroup" aria-labelledby="showLimitUsedLabel"/);
   for (const value of ['remaining', 'used']) {
     assert.match(html, new RegExp(`<input type="radio" name="showLimitUsed" value="${value}"`));
@@ -606,18 +719,17 @@ test('settings accordions share accessible collapsed-state handling', () => {
   assert.match(setup, /group\.classList\.toggle\('expanded', open\)/);
   assert.match(app, /setupSettingsAccordion\(els\.appUpdateNotes, els\.appUpdateNotesToggle, els\.appUpdateNotesDetails\)/);
   assert.match(app, /setupSettingsAccordion\(els\.advancedSettingsGroup, els\.advancedSettingsToggle, els\.advancedSettingsDetails\)/);
-  assert.match(app, /setupSettingsAccordion\(els\.themeAdvancedGroup, els\.themeAdvancedToggle, els\.themeAdvancedDetails\)/);
-  assert.match(app, /setupSettingsAccordion\(els\.themeVendorGroup, els\.themeVendorToggle, els\.themeVendorDetails\)/);
+  assert.match(app, /setupSettingsAccordion\(els\.themeAdvancedGroup, els\.themeAdvancedToggle, els\.themeAdvancedDetails, closeAppearanceColorPickerOnCollapse\)/);
+  assert.match(app, /setupSettingsAccordion\(els\.themeVendorGroup, els\.themeVendorToggle, els\.themeVendorDetails, closeAppearanceColorPickerOnCollapse\)/);
 });
 
 test('Trends has a master toggle separate from main-screen visibility', () => {
   const app = readRendererFile('app.js');
   const css = readRendererFile('styles.css');
   assert.match(app, /id === 'trends'/);
-  assert.match(app, /trendSettingsExpanded/);
+  assert.match(app, /trends: renderTrendSettingsList/);
   assert.match(app, /function renderTrendSettingsList/);
   assert.match(app, /id = 'trendSettingsList'|id: 'trendSettingsList'|'trendSettingsList'/);
-  assert.match(app, /settings\.views\.configureTrend/);
   assert.match(app, /settings\.views\.enableTrend/);
   assert.match(app, /function setTrendEnabled/);
   assert.match(app, /historyEnabled:\s*enabled/);
@@ -642,7 +754,7 @@ test('session archive retention has its own setting separate from Trends', () =>
   assert.match(html, /id="clearSessionUsageArchiveButton" class="session-archive-clear"/);
   assert.match(app, /sessionUsageArchiveEnabled:\s*els\.sessionUsageArchiveInput\.checked/);
   assert.doesNotMatch(app, /sessionUsageArchiveCount/);
-  assert.match(app, /sessionRowsApi\.archivedSessionCount\(state\.stats\)/);
+  assert.match(app, /window\.tokenMonitor\.getArchivedSessionCount\(\)/);
   assert.match(app, /sessionUsageArchiveEnabled === false[\s\S]{0,160}sessionArchivePaused/);
   assert.match(css, /\.session-archive-clear\s*\{[\s\S]*?width:\s*auto;[\s\S]*?font-size:\s*0\.625rem;/);
   assert.match(main, /sessionUsageArchiveEnabled:\s*parseBoolean\(process\.env\.TOKEN_MONITOR_SESSION_USAGE_ARCHIVE_ENABLED,\s*true\)/);
@@ -675,8 +787,9 @@ test('general section owns app-level preferences before startup and updates', ()
     html.indexOf('<div id="generalSettingsDetails"'),
     html.indexOf('<div class="settings-group settings-collapsible-group settings-main-group"')
   );
-  assert.match(generalSection, /settings-language-group/);
-  assert.ok(generalSection.indexOf('settings-language-group') < generalSection.indexOf('id="startupGroup"'));
+  assert.match(generalSection, /settings-general-preferences/);
+  assert.ok(generalSection.indexOf('id="languageInput"') < generalSection.indexOf('id="startupGroup"'));
+  assert.ok(generalSection.indexOf('id="startupGroup"') < generalSection.indexOf('settings.appUpdate.title'));
   assert.match(generalSection, /id="languageInput"/);
   assert.doesNotMatch(generalSection, /settings\.language\.title/);
   assert.doesNotMatch(generalSection, /id="currencyInput"/);
@@ -695,7 +808,7 @@ test('sync section icon uses a local sync asset instead of a hand-drawn refresh 
 
 test('startup setting stays visible when login items are unsupported', () => {
   const html = readRendererFile('index.html');
-  const startupGroup = html.match(/<div id="startupGroup"[\s\S]*?id="startupNote"[\s\S]*?<\/label>/)?.[0] || '';
+  const startupGroup = html.match(/<div id="startupGroup"[\s\S]*?id="startupNote"[\s\S]*?<\/div>/)?.[0] || '';
   assert.match(startupGroup, /id="startAtLoginInput"/);
 
   const app = readRendererFile('app.js');
@@ -703,8 +816,6 @@ test('startup setting stays visible when login items are unsupported', () => {
   assert.doesNotMatch(syncBody, /startupGroup\?\.[\s\S]*classList\.toggle\(['"]hidden['"]/);
   assert.match(syncBody, /startAtLoginInput[\s\S]*\.disabled\s*=\s*!state\.appInfo\?\.loginItemSupported/);
 
-  const summaryBody = functionBody(app, 'settingsSectionSummary', 'renderSettingsSummaries');
-  assert.match(summaryBody, /settings\.summary\.unavailable/);
 });
 
 test('expanded settings sections keep content full width', () => {
@@ -746,18 +857,12 @@ test('the session context gauge has its own setting, separate from AI Tool Limit
   const gaugeBody = functionBody(app, 'updateRowContext', 'updateRowLive');
   assert.doesNotMatch(gaugeBody, /showLimitUsed/);
   assert.match(gaugeBody, /sessionContextMetric/);
-  // Sessions owns a Main-screen subgroup, following the project/trends pattern.
-  assert.match(app, /session: \['sessionSettingsExpanded', 'sessionSettingsContainer'\]/);
-  assert.match(app, /inner\.appendChild\(renderSessionSettingsList\(\)\)/);
-  assert.match(app, /id = 'sessionSettingsContainer'/);
+  // Sessions owns its Main-screen settings, following the project/trends pattern.
+  assert.match(app, /session: renderSessionSettingsList/);
   assert.match(app, /name = 'sessionContextMetric'/);
-  assert.match(app, /settings\.views\.configureSession/);
-  // The row must be a plain .settings-item. `.home-activity-settings` carries
-  // its own indent rule for the Home modules list, so reusing it inside the
-  // nested list paints a second line beside the list's own.
+  // The row must be a plain .settings-item inside the nested list.
   const sessionList = functionBody(app, 'renderSessionSettingsList', 'renderServiceProviderList');
   assert.match(sessionList, /row\.className = 'settings-item'/);
-  assert.doesNotMatch(sessionList, /className = 'home-activity-settings'/);
   // The preference has to invalidate the painted rows, the way showLimitUsed does.
   assert.match(app, /sessionContextMetric: state\.settings\?\.sessionContextMetric === 'remaining' \? 'remaining' : 'used'/);
 });
@@ -785,8 +890,11 @@ test('client keyboard moves keep pinned groups inside the pinned block', () => {
   const app = readRendererFile('app.js');
   const saves = [];
   const state = { settings: { pinnedClients: 'codex,claude', clientDisplayOrder: '' } };
+  let tracked = new Set(['codex', 'claude', 'qoder']);
   const context = vm.createContext({
     state, KNOWN_CLIENTS: ['codex','claude','qoder','qodercn'].map(id => ({ id })),
+    settingsListFilterApi: require('../../src/electron/renderer/settingsListFilter'),
+    clientRowTracked: id => tracked.has(id),
     clientDisplayPreferencesApi: require('../../src/electron/renderer/clientDisplayPreferences'),
     qoderDisplayApi: require('../../src/electron/renderer/qoderDisplay'),
     pinnedClientSet: () => new Set(state.settings.pinnedClients.split(',')),
@@ -804,4 +912,11 @@ test('client keyboard moves keep pinned groups inside the pinned block', () => {
   state.settings.clientDisplayOrder = 'codex,claude,qoder,qodercn';
   move('codex', 'End');
   assert.deepEqual(saves.pop(), { clientDisplayOrder: 'claude,qoder,qodercn,codex', pinnedClients: '' });
+  // Untracked tools sit in their own group: keys skip them, they keep their
+  // slot, and their own rows cannot be moved.
+  tracked = new Set(['codex', 'qoder']);
+  move('codex', 'ArrowDown');
+  assert.deepEqual(saves.pop(), { clientDisplayOrder: 'qoder,qodercn,claude,codex', pinnedClients: '' });
+  move('claude', 'ArrowUp');
+  assert.equal(saves.length, 0);
 });

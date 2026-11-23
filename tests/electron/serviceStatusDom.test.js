@@ -105,20 +105,12 @@ test('statusProvider drag kind is wired into the preference helpers', () => {
   assert.match(html, /<script src="serviceStatusProviderPreferences\.js"><\/script>/);
 });
 
-test('the 狀態 view row is expandable and renders a nested provider sub-list', () => {
+test('the 狀態 view settings render the provider sub-list', () => {
   const app = readRendererFile('app.js');
-  const css = readRendererFile('styles.css');
-  assert.match(app, /serviceProvidersExpanded/);
+  assert.match(app, /status: renderServiceProviderList/);
   assert.match(app, /id = 'serviceProviderList'|id: 'serviceProviderList'|'serviceProviderList'/);
   assert.match(app, /status-provider-row/);
   assert.match(app, /function renderServiceProviderList/);
-  // The chevron adds a third trailing control, so the status row needs an
-  // extra grid column or its drag handle wraps to a new line.
-  assert.match(app, /has-subgroup/);
-  assert.match(css, /\.view-preference-row\.has-subgroup/);
-  // The "show all" header uses the same CSS outline eye as the other lists,
-  // not the filled visibilityIcon SVG (which renders as a solid blob here).
-  assert.match(app, /tool-header-eye/);
 });
 
 test('view drag query does not select the nested status-provider rows', () => {
@@ -229,7 +221,7 @@ test('Home limit provider settings stay compact and list only enabled providers'
   const i18n = readRendererFile('i18n.js');
   const homeLimitRows = functionBody(app, 'homeLimitRows', 'homeLimitWindowLabel');
   const renderHomeLimitProviderList = functionBody(app, 'renderHomeLimitProviderList', 'renderHomeSettingsList');
-  const resetHomeLimitProviderOrder = functionBody(app, 'resetHomeLimitProviderOrder', 'showAllHomeLimitProviders');
+  const resetHomeLimitProviderOrder = functionBody(app, 'resetHomeLimitProviderOrder', 'resetServiceProviderOrder');
   assert.match(homeLimitRows, /const hasConfiguredOrder = Boolean\(state\.settings\?\.homeLimitProviderOrder\)/);
   assert.doesNotMatch(homeLimitRows, /normalizeLimitProviderOrder\(state\.settings\?\.limitProviderOrder, LIMIT_PROVIDERS\)\.join\(','\) !== DEFAULT_LIMIT_PROVIDER_ORDER/);
   assert.match(homeLimitRows, /sort: hasConfiguredOrder \? 'configured' : 'remaining'/);
@@ -257,7 +249,9 @@ test('Home limit provider settings expand with the shared accordion transition',
   assert.match(renderHomeSettingsList, /accordion-animation-inner/);
   assert.match(renderHomeSettingsList, /togglePreferenceSubgroup\(HOME_MODULE_SUBGROUPS, '\.home-module-preference-row', id\)/);
   const sharedExpansion = functionBody(app, 'setPreferenceSubgroupsExpanded', 'togglePreferenceSubgroup');
-  assert.match(sharedExpansion, /document\.getElementById\(containerId\)\?\.classList\.toggle\('hidden', !open\)/);
+  assert.match(sharedExpansion, /container\.classList\.toggle\('hidden', !open\)/);
+  assert.match(sharedExpansion, /container\.inert = !open/);
+  assert.match(renderHomeSettingsList, /listContainer\.inert = !state\[subgroup\[0\]\]/);
   assert.doesNotMatch(renderHomeSettingsList, /if \(id === 'limits' && state\.homeLimitSettingsExpanded\) wrap\.append\(renderHomeLimitProviderList\(\)\)/);
   assert.match(css, /\.tool-preference-list,\s*\.settings-nested-list,\s*\.cursor-settings-details-inner/);
   assert.match(css, /\.tool-preference-list > \* \+ \*,\s*\.settings-nested-list > \* \+ \*/);
@@ -302,7 +296,7 @@ test('view switcher preserves click-to-cycle and direct selection without crowdi
   assert.match(cssRule(css, '.view-switcher-menu'), /transition:[\s\S]*opacity 190ms/);
   assert.match(cssRule(css, '.view-switcher-menu'), /visibility 0s linear 0s/);
   assert.doesNotMatch(cssRule(css, '.view-switcher-menu'), /width:\s*154px/);
-  const menuSurface = cssRule(css, '.view-switcher-menu,\n.select-control-popup,\n.sync-content-dialog,\n.plugin-catalog-dialog,\n.settings-help-popover,\n.app-update-popover');
+  const menuSurface = cssRule(css, '.view-switcher-menu,\n.select-control-popup,\n.appearance-color-picker,\n.sync-content-dialog,\n.plugin-catalog-dialog,\n.settings-help-popover,\n.app-update-popover');
   assert.match(menuSurface, /background:[\s\S]*var\(--glass-rgb\)/);
   assert.doesNotMatch(menuSurface, /var\(--panel-rgb\)/);
   assert.doesNotMatch(cssRule(css, '.view-switcher-menu.hidden'), /display:\s*none/);
@@ -358,9 +352,8 @@ test('Home-launched secondary views expose an accessible return action', () => {
 
 test('Projects view separates visibility from metadata collection', () => {
   const app = readRendererFile('app.js');
-  assert.match(app, /state\.projectSettingsExpanded = false/);
   assert.match(app, /projectsEnabled === false\) ids\.push\('project'\)/);
-  assert.match(app, /projectSettingsContainer/);
+  assert.match(app, /project: renderProjectSettingsList/);
   assert.match(app, /function renderProjectSettingsList/);
   assert.match(app, /settings\.views\.enableProjects/);
   assert.match(app, /function setProjectsEnabled/);

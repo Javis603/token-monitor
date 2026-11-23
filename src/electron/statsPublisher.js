@@ -122,8 +122,8 @@ function rendererStats(stats) {
 // most recently stamped snapshots stay addressable: the renderer only ever
 // pulls for the one it holds, and a newer push brings a newer id. Stamping an
 // older snapshot again (a presentation refresh re-sends `latestStats`) makes it
-// recent again under its original id and source, so the id handed out always
-// resolves.
+// recent again under its original source. A replacement presentation gets a
+// new id so a missed presentation push cannot be mistaken for a delta base.
 function createRendererSnapshots(options = {}) {
   const source = options.source;
   if (typeof source !== 'function') throw new TypeError('source must be a function');
@@ -133,16 +133,18 @@ function createRendererSnapshots(options = {}) {
   // still resolve while newer pushes arrive, without retaining eight trees.
   const limit = Math.max(1, Number(options.limit) || 3);
   const tags = new WeakMap();
+  const projections = new WeakMap();
   const byId = new Map();
   let nextId = 1;
 
-  function register(stats) {
+  function register(stats, projection) {
     let tag = tags.get(stats);
-    if (!tag) {
-      tag = { id: nextId, source: source() };
+    if (!tag || (projection && projections.has(tag) && projections.get(tag) !== projection)) {
+      tag = { id: nextId, source: tag?.source ?? source() };
       nextId += 1;
       tags.set(stats, tag);
     }
+    if (projection) projections.set(tag, projection);
     byId.delete(tag.id);
     byId.set(tag.id, stats);
     if (byId.size > limit) byId.delete(byId.keys().next().value);
@@ -156,9 +158,9 @@ function createRendererSnapshots(options = {}) {
       byId.set(tag.id, next);
       return { ...tag };
     },
-    stamp(stats, copy) {
+    stamp(stats, copy, projection) {
       if (!stats || typeof stats !== 'object' || !copy || typeof copy !== 'object') return copy;
-      return { ...copy, snapshot: { ...register(stats) } };
+      return { ...copy, snapshot: { ...register(stats, projection) } };
     },
     get(id) {
       return byId.get(id) || null;

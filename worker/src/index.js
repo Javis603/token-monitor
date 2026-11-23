@@ -503,7 +503,7 @@ export class HubDO {
     if ((request.method === 'GET' || request.method === 'HEAD') && url.pathname === '/api/sync/content') {
       return jsonResponse(200, syncContent.syncContentCapability(this.syncSessionTitles));
     }
-    const settingsMatch = url.pathname.match(/^\/api\/sync\/settings\/(modelAliases|customPricing)$/);
+    const settingsMatch = url.pathname.match(/^\/api\/sync\/settings\/(modelAliases|customPricing|limitAccountPresentation)$/);
     if (settingsMatch && (request.method === 'GET' || request.method === 'HEAD')) {
       return jsonResponse(200, { ok: true, ...(await this.getSyncSettings(settingsMatch[1])) });
     }

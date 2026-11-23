@@ -30,19 +30,19 @@
     return current;
   }
 
-  function popupPosition(rect, viewport, { width = rect.width, height = 320, align = 'start', heightLimit = 320 } = {}) {
+  function popupPosition(rect, viewport, { width = rect.width, height = 320, align = 'start', heightLimit = 320, preferAbove = false } = {}) {
     const gutter = 8;
     const gap = 4;
     const popupWidth = Math.max(0, Math.min(Math.max(rect.width, width), viewport.width - gutter * 2));
     const below = Math.max(0, viewport.height - rect.bottom - gap - gutter);
     const above = Math.max(0, rect.top - gap - gutter);
-    const opensAbove = height > below && above > below;
+    const opensAbove = (preferAbove && above >= Math.min(height, heightLimit)) || (height > below && above > below);
     const maxHeight = Math.min(heightLimit, opensAbove ? above : below);
     const actualHeight = Math.min(height, maxHeight);
-    const left = Math.max(gutter, Math.min(
-      align === 'end' ? rect.right - popupWidth : rect.left,
-      viewport.width - popupWidth - gutter
-    ));
+    let anchorLeft = rect.left;
+    if (align === 'end') anchorLeft = rect.right - popupWidth;
+    else if (align === 'center') anchorLeft += (rect.width - popupWidth) / 2;
+    const left = Math.max(gutter, Math.min(anchorLeft, viewport.width - popupWidth - gutter));
     return { left, top: opensAbove ? rect.top - gap - actualHeight : rect.bottom + gap, width: popupWidth, maxHeight, opensAbove };
   }
 
@@ -69,7 +69,7 @@
     const id = `select-control-${++nextId}`;
     const trigger = document.createElement('button');
     trigger.type = 'button';
-    trigger.id = `${id}-trigger`;
+    trigger.id = `${select.id || id}-trigger`;
     trigger.className = 'select-control-trigger';
     trigger.setAttribute('role', 'combobox');
     trigger.setAttribute('aria-haspopup', 'listbox');

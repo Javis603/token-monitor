@@ -10,8 +10,8 @@ const { LIMIT_PROVIDER_IDS } = require('../../src/shared/limits/providers');
 const expectedCounts = {
   claude: 2, codex: 2, opencode: 2, cursor: 2, antigravity: 2,
   cline: 2, factory: 2, kimi: 1, grok: 1, copilot: 2, zed: 1,
-  commandcode: 1, mimo: 2, muse: 2, zai: 1, zaiteam: 1, kiro: 1,
-  workbuddy: 2, qoder: 1, deepseek: 2, devin: 1, minimax: 2,
+  commandcode: 1, mimo: 2, muse: 2, zai: 1, zaiteam: 2, kiro: 1,
+  workbuddy: 2, qoder: 2, deepseek: 2, devin: 1, minimax: 2,
   mistral: 1, typesafe: 1, openrouter: 2, volcengine: 2, ollama: 1,
   trae: 1, alibaba: 2, stepfun: 1, notion: 2, manus: 2, hark: 2,
   opendesign: 2, thirdparty: 2

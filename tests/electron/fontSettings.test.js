@@ -113,41 +113,93 @@ test('follow interface resolves against each renderer effective default', () => 
   );
 });
 
-test('font controls live inside Appearance advanced customization', () => {
-  const html = readProjectFile('src', 'electron', 'renderer', 'index.html');
-  const advancedStart = html.indexOf('id="themeAdvancedDetails"');
-  const colorGrid = html.indexOf('id="themeColorGrid"');
-  const vendorGroup = html.indexOf('id="themeVendorGroup"', advancedStart);
-  assert.ok(advancedStart >= 0);
-  assert.ok(colorGrid > advancedStart);
-  assert.ok(vendorGroup > colorGrid);
-  const advanced = html.slice(advancedStart, vendorGroup);
-  assert.ok(advanced.indexOf('id="themeColorGrid"') < advanced.indexOf('class="settings-font-controls"'));
-  assert.doesNotMatch(advanced, /data-i18n="settings\.appearance\.fonts"/);
-  assert.match(advanced, /id="textSizeInput" aria-labelledby="textSizeLabel" aria-describedby="textSizeNote"/);
-  assert.match(advanced, /<span id="textSizeLabel"[^>]*>Text size<\/span>/);
-  assert.ok(advanced.indexOf('id="textSizeInput"') < advanced.indexOf('id="interfaceFontPreset"'));
-  assert.match(advanced, /id="interfaceFontPreset"/);
-  assert.match(advanced, /value="app" data-i18n="settings\.appearance\.fontPresetApp"/);
-  assert.match(advanced, /value="system" data-i18n="settings\.appearance\.fontPresetSystem"/);
-  assert.doesNotMatch(advanced, /fontPresetSans/);
-  assert.match(advanced, /id="interfaceFontInput"/);
-  assert.match(advanced, /id="interfaceFontPreview"/);
-  assert.match(advanced, /id="displayFontPreset"/);
-  assert.match(advanced, /value="follow" data-i18n="settings\.appearance\.fontPresetFollow"/);
-  assert.match(advanced, /id="displayFontInput"/);
-  assert.match(advanced, /id="displayFontPreview"/);
-  assert.match(advanced, /id="interfaceFontCustomRow"/);
-  assert.match(advanced, /id="displayFontCustomRow"/);
-  assert.match(advanced, /data-i18n="settings\.appearance\.fontDisplay">Display font<\/label>/);
-  for (const preset of ['App', 'System', 'Mono', 'Follow', 'Custom']) {
-    assert.ok(advanced.includes(`data-select-description="settings.appearance.fontPreset${preset}Desc"`));
+test('Windows Simplified Chinese adds Han fallback only to app font defaults', () => {
+  const options = { platform: 'win32', locale: 'zh-CN' };
+  const prefix = '"Token Monitor Noto Sans SC", "Token Monitor YaHei UI", ';
+  assert.deepEqual(fontSettings.resolveEffectiveFontSettings({
+    displayFontFamily: fontSettings.DEFAULT_DISPLAY_FONT
+  }, options), {
+    interfaceFont: prefix + fontSettings.DEFAULT_INTERFACE_FONT,
+    displayFont: prefix + fontSettings.DEFAULT_DISPLAY_FONT
+  });
+  assert.deepEqual(fontSettings.resolveEffectiveFontSettings({}, options), {
+    interfaceFont: prefix + fontSettings.DEFAULT_INTERFACE_FONT,
+    displayFont: prefix + fontSettings.DEFAULT_INTERFACE_FONT
+  });
+  assert.deepEqual(fontSettings.resolveEffectiveFontSettings({
+    interfaceFontFamily: 'Consolas', displayFontFamily: ''
+  }, options), { interfaceFont: 'Consolas', displayFont: 'Consolas' });
+  assert.equal(fontSettings.resolveEffectiveFontSettings({
+    displayFontFamily: 'Custom Display'
+  }, options).displayFont, 'Custom Display');
+  for (const other of [
+    { platform: 'win32', locale: 'en' },
+    { platform: 'darwin', locale: 'zh-TW' },
+    { platform: 'darwin', locale: 'zh-CN' },
+    { platform: 'linux', locale: 'zh-CN' }
+  ]) {
+    assert.deepEqual(fontSettings.resolveEffectiveFontSettings({}, other),
+      fontSettings.resolveEffectiveFontSettings());
   }
-  assert.doesNotMatch(advanced, /fontSettingsNote/);
+});
+
+test('Windows Traditional Chinese preserves the first preferred regional glyph variant', () => {
+  for (const [preferredLanguages, variant] of [
+    [['en-HK', 'zh-Hant-HK', 'zh-TW'], 'HK'],
+    [['zh-Hans-HK', 'zh-TW', 'zh-HK'], 'TC'],
+    [['zh-Hant', 'ZH-hk'], 'HK'],
+    [['en-HK', 'zh-Hant'], 'TC'],
+    [undefined, 'TC']
+  ]) {
+    const options = { platform: 'win32', locale: 'zh-TW', preferredLanguages };
+    const prefix = `"Token Monitor Noto Sans ${variant}", "Token Monitor JhengHei UI", `;
+    assert.deepEqual(fontSettings.resolveEffectiveFontSettings({
+      displayFontFamily: fontSettings.DEFAULT_DISPLAY_FONT
+    }, options), {
+      interfaceFont: prefix + fontSettings.DEFAULT_INTERFACE_FONT,
+      displayFont: prefix + fontSettings.DEFAULT_DISPLAY_FONT
+    });
+    assert.deepEqual(fontSettings.resolveEffectiveFontSettings({
+      interfaceFontFamily: fontSettings.SYSTEM_UI_FONT, displayFontFamily: ''
+    }, options), {
+      interfaceFont: fontSettings.SYSTEM_UI_FONT,
+      displayFont: fontSettings.SYSTEM_UI_FONT
+    });
+  }
+});
+
+test('font controls and zoom share a visible Appearance group', () => {
+  const html = readProjectFile('src', 'electron', 'renderer', 'index.html');
+  const start = html.indexOf('settings-subgroup settings-appearance-type');
+  const end = html.indexOf('settings-subgroup settings-appearance-usage', start);
+  assert.ok(start >= 0 && end > start);
+  const typography = html.slice(start, end);
+  assert.match(typography, /id="zoomInput"/);
+  assert.match(typography, /id="textSizeInput" aria-labelledby="textSizeLabel" aria-describedby="textSizeNote"/);
+  assert.match(typography, /<span id="textSizeLabel"[^>]*>Text size<\/span>/);
+  assert.ok(typography.indexOf('id="textSizeInput"') < typography.indexOf('id="interfaceFontPreset"'));
+  assert.match(typography, /id="interfaceFontPreset"/);
+  assert.match(typography, /value="app" data-i18n="settings\.appearance\.fontPresetApp"/);
+  assert.match(typography, /value="system" data-i18n="settings\.appearance\.fontPresetSystem"/);
+  assert.doesNotMatch(typography, /fontPresetSans/);
+  assert.match(typography, /id="interfaceFontInput"/);
+  assert.match(typography, /id="interfaceFontPreview"/);
+  assert.match(typography, /id="displayFontPreset"/);
+  assert.match(typography, /value="follow" data-i18n="settings\.appearance\.fontPresetFollow"/);
+  assert.match(typography, /id="displayFontInput"/);
+  assert.match(typography, /id="displayFontPreview"/);
+  assert.match(typography, /id="interfaceFontCustomRow"/);
+  assert.match(typography, /id="displayFontCustomRow"/);
+  assert.match(typography, /data-i18n="settings\.appearance\.fontDisplay">Display font<\/label>/);
+  for (const preset of ['App', 'System', 'Mono', 'Follow', 'Custom']) {
+    assert.ok(typography.includes(`data-select-description="settings.appearance.fontPreset${preset}Desc"`));
+  }
+  assert.doesNotMatch(typography, /fontSettingsNote/);
 });
 
 test('font settings wiring keeps renderer defaults concrete and technical monospace roles intact', () => {
   const app = readProjectFile('src', 'electron', 'renderer', 'app.js');
+  const html = readProjectFile('src', 'electron', 'renderer', 'index.html');
   const dashboard = readProjectFile('src', 'electron', 'renderer', 'dashboard.js');
   const styles = readProjectFile('src', 'electron', 'renderer', 'styles.css');
   const dashboardStyles = readProjectFile('src', 'electron', 'renderer', 'dashboard.css');
@@ -155,7 +207,7 @@ test('font settings wiring keeps renderer defaults concrete and technical monosp
 
   assert.match(main, /interfaceFontFamily/);
   assert.match(main, /displayFontFamily/);
-  assert.match(app, /resolveEffectiveFontSettings\(source\)/);
+  assert.match(app, /resolveMainWindowFonts\(source\)/);
   assert.match(dashboard, /resolveEffectiveFontSettings\(settings, \{/);
   assert.doesNotMatch(`${app}\n${dashboard}`, /setProperty\('--display-font', 'var\(--ui-font\)'/);
   assert.match(styles, /font-family: var\(--ui-font,/);
@@ -164,8 +216,9 @@ test('font settings wiring keeps renderer defaults concrete and technical monosp
   const fontInputRowCss = styles.match(/\.settings-font-input-row \{([\s\S]*?)\}/)?.[1] || '';
   assert.match(fontControlsCss, /border-top: 1px solid var\(--line\)/);
   assert.doesNotMatch(fontControlsCss, /border-bottom/);
-  assert.match(fontInputRowCss, /grid-template-columns: minmax\(0, 1fr\) 18px/);
-  assert.match(fontInputRowCss, /gap: 8px/);
+  assert.match(fontInputRowCss, /grid-template-columns: minmax\(0, 1fr\);/);
+  assert.match(html, /<span class="settings-reset-heading"><label[^>]*for="interfaceFontPreset"[^>]*>[^<]*<\/label><button id="resetInterfaceFontButton"/);
+  assert.match(html, /<span class="settings-reset-heading"><label[^>]*for="displayFontPreset"[^>]*>[^<]*<\/label><button id="resetDisplayFontButton"/);
   assert.match(styles, /settings-font-preview/);
   assert.match(dashboardStyles, /font-family: var\(--ui-font,/);
   assert.match(dashboardStyles, /font-family: var\(--display-font, inherit\)/);

@@ -12,6 +12,7 @@ const { exchangeRows, formatToolList } = require('../../src/electron/renderer/se
 const { translate } = require('../../src/electron/renderer/i18n');
 
 const rendererSource = fs.readFileSync(path.join(__dirname, '../../src/electron/renderer/app.js'), 'utf8');
+const backArrowSource = rendererSource.slice(rendererSource.indexOf('function sessionDetailBackArrow('), rendererSource.indexOf('function sessionDetailBack('));
 
 function deferred() {
   let resolve;
@@ -93,7 +94,7 @@ test('session detail renders its heading before loading, errors and empty result
     prefersReducedMotion: context.prefersReducedMotion
   });
   context.bindHoverMarquee = overflowText.bind;
-  vm.runInNewContext(`${rendererSource.slice(start, end)}\nglobalThis.render = renderSessionDetail;`, context);
+  vm.runInNewContext(`${backArrowSource}${rendererSource.slice(start, end)}\nglobalThis.render = renderSessionDetail;`, context);
   render = context.render;
   for (const [options, expected] of [
     [{ error: true }, 'Could not read the transcript. Please try again.'],
@@ -116,8 +117,8 @@ test('session detail renders its heading before loading, errors and empty result
       assert.equal(back.className, 'detail-back detail-back-titled');
       assert.equal(back.type, 'button');
       assert.equal(back.title, undefined, 'the parent button does not reintroduce a native tooltip');
-      assert.equal(back.textContent, `‹${title}`);
-      assert.equal(back.querySelector('.detail-back-arrow').textContent, '‹');
+      assert.equal(back.textContent, title);
+      assert.equal(back.querySelector('.detail-back-arrow').textContent, '', 'the chevron is drawn, not a glyph');
       assert.equal(back.querySelector('.detail-back-arrow').attributes['aria-hidden'], 'true');
       assert.equal(heading.parentElement, back);
       assert.equal(back.attributes['aria-label'], `${title} — Back to sessions`);
@@ -279,7 +280,7 @@ test('session detail renders its heading before loading, errors and empty result
   assert.match(els.sessionDetailHead.children[0].attributes['aria-label'], /Back to Parent title/);
   context.setSettings({ sessionTitlesEnabled: false });
   assert.equal(els.sessionDetailHead.querySelector('.detail-heading'), null, 'the child title hides with titles');
-  assert.equal(els.sessionDetailHead.children[0].textContent, '‹ Codex · gpt-5');
+  assert.equal(els.sessionDetailHead.children[0].textContent, 'Codex · gpt-5');
   assert.doesNotMatch(JSON.stringify(els.sessionDetailHead.children[0].attributes), /Parent title|Child title/);
   assert.equal(subagentGroup.summary.name, 'Codex · gpt-5', 'returning to the group shows the titleless parent name');
   await childOpening;
@@ -320,10 +321,10 @@ test('session detail renders its heading before loading, errors and empty result
     assert.doesNotMatch(`${back.textContent} ${JSON.stringify(back.attributes)}`, /Parent title|Child title|Other parent/);
     if (regrouped) {
       assert.equal(state.openSession.returnTo.summary.key, newGroup.key, 'Back returns to the group that holds the session now');
-      assert.equal(back.textContent, '‹ Codex · gpt-5.6');
+      assert.equal(back.textContent, 'Codex · gpt-5.6');
     } else {
       assert.equal(state.openSession.returnTo, null, 'with no group left, Back returns to Sessions');
-      assert.equal(back.textContent, '‹ sessions');
+      assert.equal(back.textContent, 'sessions');
     }
     assert.doesNotMatch(JSON.stringify(state.openSession.returnTo || {}), /Parent title|Child title/,
       'no cached member keeps the old titles');
@@ -369,7 +370,7 @@ test('session detail renders its heading before loading, errors and empty result
   render({ loading: true });
   assert.equal(els.sessionDetail.children[0].className, undefined, 'no id, no line');
   assert.equal(els.sessionDetailHead.querySelector('.detail-heading'), null);
-  assert.equal(els.sessionDetailHead.children[0].textContent, '‹ sessions');
+  assert.equal(els.sessionDetailHead.children[0].textContent, 'sessions');
   assert.equal(els.sessionDetailHead.children[0].attributes['aria-label'], 'Back to sessions');
   state.openSession = { title: 'gpt-5.6-sol · 12:34', returnTo: { kind: 'session-group' } };
   render({ loading: true });
@@ -377,10 +378,10 @@ test('session detail renders its heading before loading, errors and empty result
   context.closeSessionDetail = () => { state.backClicked = true; };
   const groupStart = rendererSource.indexOf('function renderSessionGroupDetail(');
   const groupEnd = rendererSource.indexOf('function detailNote(', groupStart);
-  vm.runInNewContext(`${rendererSource.slice(groupStart, groupEnd)}\nglobalThis.renderGroup = renderSessionGroupDetail;`, context);
+  vm.runInNewContext(`${backArrowSource}${rendererSource.slice(groupStart, groupEnd)}\nglobalThis.renderGroup = renderSessionGroupDetail;`, context);
   context.renderGroup({ summary: { groupRows: [] } });
   const groupBack = els.sessionDetailHead.children[0];
-  assert.equal(groupBack.textContent, '‹Codex Auto Review');
+  assert.equal(groupBack.textContent, 'Codex Auto Review');
   assert.equal(groupBack.attributes['aria-label'], 'Codex Auto Review — Back to sessions');
   const groupHeading = els.sessionDetailHead.querySelector('.detail-heading');
   assert.equal(groupHeading.textContent, 'Codex Auto Review');
@@ -844,7 +845,7 @@ test('live detail anchors the visible turn across growth and exchange reordering
   };
   const start = rendererSource.indexOf('function renderSessionDetail(');
   const end = rendererSource.indexOf('function sessionDetailTitle(', start);
-  vm.runInNewContext(`${rendererSource.slice(start, end)}\nglobalThis.render = renderSessionDetail;`, context);
+  vm.runInNewContext(`${backArrowSource}${rendererSource.slice(start, end)}\nglobalThis.render = renderSessionDetail;`, context);
   const active = { key: 'active', startTime: 111, value: 100, turnHeights: Array(10).fill(40) };
   const older = { key: 'older', startTime: 100, value: 10, turnHeights: [] };
   container.children = [exchangeNode(active, 100, true), exchangeNode(older, 100, false)];

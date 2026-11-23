@@ -106,3 +106,18 @@ test('SQLite self-scan filtering keeps real data, unrelated files and other clie
     assert.equal(isSelfWatchSqliteSidecarEvent(path.join(root, `${name}-shm`), { codex: [root] }), false);
   }
 });
+
+test('a custom MiniMax Code data dir drops only runtime-state.sqlite-shm', () => {
+  const root = path.resolve('/mcode-custom-data');
+  const roots = { mcode: [root] };
+  const db = path.join(root, 'v2', 'sqlite', 'runtime-state.sqlite');
+  const session = path.join(root, 'v2', 'sessions', 'a.jsonl');
+  assert.equal(isSelfWatchSqliteSidecarEvent(`${db}-shm`, roots), true);
+  assert.equal(isSelfWatchSqliteSidecarEvent(db, roots), false);
+  assert.equal(isSelfWatchSqliteSidecarEvent(`${db}-wal`, roots), false);
+  assert.equal(isSelfWatchSqliteSidecarEvent(session, roots), false);
+  assert.equal(
+    isSelfWatchSqliteSidecarEvent(`${db}-shm`, { mcode: [path.join(root, 'v2', 'sessions')] }),
+    false
+  );
+});

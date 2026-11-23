@@ -6,13 +6,37 @@ Sources:
   - actions/search.svg: search
   - actions/settings.svg: settings
   - actions/pencil-line.svg: pencil-line
+  - actions/key.svg: key
+  - actions/clock.svg: clock
+  - actions/circle-minus.svg: circle-minus
+  - actions/circle-exclamation-point.svg: circle-exclamation-point
+    (clock, circle-minus and circle-exclamation-point copied from upstream commit `149eba0aea48178a5ab1efe2c701de1da94f4be8`)
+  - actions/pause.svg: pause
+  - actions/play.svg: play
+    (key, pause and play copied from upstream commit `f8feea7a02ea461c9f2a4b4d851512aae6ec933f`)
+  - actions/eye.svg: eye
+  - actions/eye-off.svg: eye-off
+  - actions/pin.svg: pin
+    (eye, eye-off and pin copied from upstream commit `149eba0aea48178a5ab1efe2c701de1da94f4be8`)
   - actions/trash.svg: trash
   - actions/download.svg: download
   - actions/rotate-cw.svg: rotate-cw
+  - actions/undo-2.svg: undo-2
   - actions/external-link.svg: external-link
+  - actions/chevron-down.svg: chevron-down
   - actions/ellipsis.svg: ellipsis
   - actions/shield-check.svg: shield-check
   - actions/check.svg: check (stroke widened to 3 for legibility as a small badge)
+  - sources/terminal.svg: terminal
+  - sources/monitor.svg: monitor
+  - sources/globe.svg: globe
+  - sources/lock.svg: lock
+  - sources/file.svg: file
+  - sources/variable.svg: variable
+    (sources/* copied from lucide-static v0.460.0)
+  - actions/bug.svg: bug
+  - actions/stethoscope.svg: stethoscope
+    (bug and stethoscope copied from lucide-static v0.460.0)
   - settings/general.svg: sliders-horizontal
   - settings/main.svg: panels-top-left
   - settings/collection.svg: database
@@ -33,6 +57,8 @@ Sources:
     (modified with a subtle outline for small-size legibility)
 - Tabler Icons: https://github.com/tabler/tabler-icons
   - settings/window.svg: app-window
+- GitHub Octicons: https://github.com/primer/octicons
+  - brands/github.svg: mark-github (16px, copied from @primer/octicons v19.15.0)
 - T3 Code: https://github.com/pingdotgg/t3code
   - devices/mini.svg: custom Mini PC glyph
   - devices/workstation.svg: custom Workstation glyph
@@ -118,6 +144,30 @@ T3 Code icons license:
 MIT License
 
 Copyright (c) 2026 T3 Tools Inc.
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+
+GitHub Octicons license:
+
+MIT License
+
+Copyright (c) 2025 GitHub Inc.
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal

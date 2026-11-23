@@ -129,3 +129,9 @@ array is not decoded for droid, so title and project attribution remain resolver
 Session Details column says `—`, matching kimi's tier: session rows carry titles, times and
 projects, but a per-turn timeline would need a droid transcript parser first (the JSONL is a
 request/event stream, not the Claude shape).
+
+## Limits account list
+
+Saved Factory API keys, the environment key and Droid’s `~/.factory/.env` key are independent account rows. Pasting a key no longer hides the locally discovered account. The discovered row can be renamed, paused and reordered; remove its credential in Droid to remove that row. Discovery never copies the key into saved slots. Identity returned by Factory deduplicates matching accounts.
+
+Factory source metadata describes independent credential locations, not exclusive quota transports: saved keys, the environment key and the Droid file all call the same API. Use the individual account toggles to choose which identities to report; a provider-wide API/file selector would hide independent accounts.

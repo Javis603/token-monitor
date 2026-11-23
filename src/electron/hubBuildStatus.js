@@ -18,12 +18,15 @@ async function probeHubBuild(hubUrl, options = {}) {
     if (!response.ok) return { status: 'unavailable', runtime: '', hubUrl: base };
     const payload = await response.json();
     if (payload?.role !== 'hub') return { status: 'unavailable', runtime: '', hubUrl: base };
-    const runtime = healthRuntime(payload);
     const compared = compareHubBuild(payload?.hubBuild);
-    if (compared.status === 'legacy') {
-      return { ...compared, runtime, hubUrl: base };
-    }
-    return { ...compared, hubUrl: base };
+    const runtime = compared.status === 'legacy' ? healthRuntime(payload) : compared.runtime;
+    const deployment = payload.deployment;
+    return {
+      ...compared,
+      runtime,
+      ...(runtime === 'node-hub' && (deployment === 'app' || deployment === 'standalone') ? { deployment } : {}),
+      hubUrl: base
+    };
   } catch (_) {
     return { status: 'unavailable', runtime: '', hubUrl: base };
   }

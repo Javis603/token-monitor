@@ -25,6 +25,8 @@ Only accounts added manually by Token Monitor may be removed from its UI. Deskto
 
 A desktop-detected account follows the Cursor desktop sign-in. It leaves the current account list once Cursor rejects its token, the desktop app is signed out, or the desktop app is signed in as a different user. Its credentials and synced usage history stay intact, so it comes back if the desktop signs in to it again. A network failure or an unreadable desktop state keeps it listed. Manually added accounts are not affected and keep their remove action.
 
+Desktop-owned and manually added accounts are collected together; pausing an account is how to stop collecting one. Both lanes read the same Web API, so readings cannot tell them apart; the account rows name each account's lane from ownership (`sourceId`), and the connection card lights the lanes those rows report. Tokscale usage sync remains independent of quota collection.
+
 The desktop's quota cards follow the same current-account rules as its settings list. Headless collection without desktop account-ownership metadata continues to monitor its saved accounts independently of the Cursor app's sign-in.
 
 ## Self-sync and sessions
@@ -52,6 +54,8 @@ For known usage conversations, the same read joins `cursorDiskKV`'s `composerDat
 ## Limits
 
 Every enabled saved account is probed independently. Stable identity prefers the canonical API subject; opaque local fallback ids remain distinct rather than merging unrelated accounts. API email is presentation metadata, not the only identity key.
+
+Successful dashboard identity reads with a canonical subject are cached in memory for up to one hour per session token. Quota and legacy request usage are still fetched on each refresh. A rejected quota credential clears its cached identity.
 
 The dashboard mapping preserves separate official model pools, legacy request plans, enterprise/team pooled usage, optional Grok Bot allowance and on-demand spend. Never synthesize an overall total by summing model pools. Grok Bot is best effort and must not fail the main account row. A zero uncapped spend is hidden; positive uncapped spend remains visible.
 

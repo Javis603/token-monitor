@@ -2,7 +2,7 @@
 summary: "Grok Build session metadata fallbacks, disjoint reasoning accounting and request throughput."
 ids: [grok]
 read_when:
-  - Changing what a grok session's title, timestamps or project come from
+  - Changing what a grok session's title, timestamps, project or context usage come from
   - Debugging a missing or mislabelled Grok session list
   - Changing Grok token accounting or throughput
   - Changing Grok quota account identity or history persistence
@@ -30,11 +30,15 @@ Grok writes nanosecond ISO strings (`2026-08-19T07:53:22.948065400Z`). V8 trunca
 
 `generated_title`, whitespace-collapsed and capped at 96 code points — the same cap claude, codex and kimi each carry locally (there is no shared cleaner). Grok titles are the writer's own prompt text and run to ~173 code points, so the cap is load-bearing. A blank title yields no `title` field at all rather than an empty one, and the row still resolves on its timestamps.
 
+## Live context usage
+
+For recent sessions, the meter uses the newest usage sample in a bounded tail of `updates.jsonl`. A successful compaction supplies `tokens_after` until a later usage sample arrives. For a transcript reading, capacity comes from `summary.json` or, if absent, `signals.json`. When the transcript has no sample, a valid usage and capacity pair from `signals.json` can supply the meter. Signals can lag compaction, so an available transcript reading takes precedence.
+
 ## Scope
 
 A scoped home is a WSL distro, so host `GROK_HOME` and extra scan roots are ignored there — a host root must never answer a distro's session. `chat_history.jsonl` is never read: it carries no timestamp on any line, so it cannot establish a session's span.
 
-There is no cross-tick cache. The registry rebuilds its map every tick, and a full sweep of ~100 summaries costs single-digit milliseconds.
+Summary metadata is rebuilt each tick, and a full sweep of ~100 summaries costs single-digit milliseconds. The context reader caches unchanged transcript tails.
 
 Roughly 45% of the session directories on a busy machine are subagent sessions, and each resolves to its own row once this adapter lands, so the Sessions list reads busier than the chat sessions alone would suggest.
 
@@ -47,3 +51,7 @@ node --test tests/shared/grokLimits.test.js tests/shared/grokSessionMetadata.tes
 ## Quota account identity
 
 Grok quota history keys xAI OIDC credentials by the `https://auth.x.ai` issuer and non-empty `sub`, so token refreshes retain the same account history. Email is display metadata only: different subjects remain separate even if their emails match. When `GROK_AUTH` overrides the CLI login, quota lookup uses web billing with the resolved credential so its account identity matches the authenticated request. Opaque tokens, unknown issuers and malformed identities retain token-based keys. Existing token-keyed history is not migrated or merged automatically.
+
+## Collection sources
+
+Collection tries CLI RPC first and falls back to Web billing when an `auth.json` credential is available and RPC fails for a reason other than authorization. RPC remains unavailable for an environment credential or WSL credential where the CLI cannot authenticate the resolved account. Both paths retain the existing subject-based identity rule.

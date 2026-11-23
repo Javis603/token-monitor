@@ -101,3 +101,15 @@ test('payload opt-in sanitizes every compatibility field and keeps generation th
   assert.ok(bodies.every((body) => body.sessionTitleSyncGeneration === 7 && body.today.sessions.a.title));
   assert.equal(Object.hasOwn(bodies[1].allTime, 'projects'), false);
 });
+
+
+test('account presentation whitespace labels normalize to explicit clears through CAS', () => {
+  for (const label of ['', '   ', '\t\n', '\u00a0\u3000']) {
+    const value = { deepseek: { labels: { a: label }, order: ['a'] } };
+    const written = nextSharedSyncDocument('limitAccountPresentation', emptySharedSyncDocument(), { baseRevision: 0, value });
+    assert.deepEqual(written.value.deepseek.labels, { a: '' });
+  }
+  for (const label of ['!!!', ' user@example.com ', ' https://example.com ']) {
+    assert.throws(() => normalizeSharedSyncValue('limitAccountPresentation', { deepseek: { labels: { a: label }, order: [] } }), { code: 'bad_request' });
+  }
+});

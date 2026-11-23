@@ -15,9 +15,9 @@ const renderEnd = app.indexOf('function renderHubAddresses(');
 assert.ok(renderStart >= 0 && renderEnd > renderStart, 'Hub build renderer source markers should be present and ordered');
 const renderSource = app.slice(renderStart, renderEnd);
 
-function renderer({ status = 'current', runtime = 'cloudflare-worker', hubMode = 'client', locale = 'en' } = {}) {
+function renderer({ status = 'current', runtime = 'cloudflare-worker', deployment, hubMode = 'client', locale = 'en' } = {}) {
   const context = vm.createContext({
-    state: { settings: { hubMode }, hubBuildStatus: { status, runtime } },
+    state: { settings: { hubMode }, hubBuildStatus: { status, runtime, deployment } },
     els: { syncPanelBuild: {}, hubBuildStatus: {} },
     hubBuildPresentationApi: { presentation },
     t: (key, params) => i18n.translate(locale, key, params)
@@ -59,6 +59,19 @@ test('matching Hub builds show only the confirmed backend in every locale', () =
       assert.equal(els.hubBuildStatus.textContent, '');
     }
     assert.equal(Object.hasOwn(i18n.MESSAGES[locale], 'settings.sync.panel.buildCurrent'), false);
+  }
+});
+
+test('Node deployment labels appear in both the connection and version notice in every locale', () => {
+  for (const locale of Object.keys(i18n.MESSAGES)) {
+    for (const [deployment, suffix] of [['app', 'targetAppHosted'], ['standalone', 'targetStandalone'], ['unknown', 'targetNode']]) {
+      const { els } = renderer({ status: 'updateAvailable', runtime: 'node-hub', deployment, locale });
+      const targetKey = `settings.sync.hubBuild.${suffix}`;
+      assert.ok(Object.hasOwn(i18n.MESSAGES[locale], targetKey));
+      const target = i18n.MESSAGES[locale][targetKey];
+      assert.equal(els.syncPanelBuild.textContent, target);
+      assert.equal(els.hubBuildStatus.textContent, i18n.translate(locale, 'settings.sync.hubBuild.updateAvailable', { target }));
+    }
   }
 });
 

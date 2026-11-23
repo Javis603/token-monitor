@@ -1,7 +1,7 @@
 'use strict';
 
 const fs = require('node:fs');
-const { execFileSync } = require('node:child_process');
+const { execFile, execFileSync } = require('node:child_process');
 const { throwIfAborted } = require('./abortSignal');
 const { emptyPeriod, extractUsageFromTokscale, mergePeriods } = require('./usage');
 const { REASONIX_CLIENT } = require('./providers/reasonix/paths');
@@ -181,10 +181,102 @@ async function collectWslUsage(options = {}, deps = {}) {
   return { bundle, detected: [...detected] };
 }
 
+function defaultExecAsync(cmd, args) {
+  const isWsl = /wsl(\.exe)?$/i.test(cmd);
+  return new Promise((resolve, reject) => {
+    const child = execFile(cmd, args, {
+      timeout: 5000,
+      windowsHide: true,
+      encoding: 'buffer'
+    }, (error, stdout) => {
+      if (error) reject(error);
+      else resolve(Buffer.from(stdout).toString(isWsl ? 'utf16le' : 'utf8'));
+    });
+    child.stdin?.end();
+  });
+}
+
+async function pathExistsAsync(target) {
+  try {
+    await fs.promises.access(target);
+    return true;
+  } catch (_) {
+    return false;
+  }
+}
+
+async function detectWslClientsAsync(deps = {}) {
+  const platform = deps.platform || process.platform;
+  if (platform !== 'win32') return [];
+  const target = deps.clients ? new Set([...deps.clients].map((c) => String(c || '').trim().toLowerCase()).filter(Boolean)) : null;
+  if (target && target.size === 0) return [];
+  const exec = deps.exec || defaultExecAsync;
+  const exists = deps.exists || pathExistsAsync;
+  const readdir = deps.readdir || fs.promises.readdir;
+  try {
+    await exec('reg', ['query', LXSS_KEY]);
+  } catch (_) {
+    return [];
+  }
+  let out;
+  try {
+    out = await exec('wsl.exe', ['--list', '--quiet', '--running']);
+  } catch (_) {
+    return [];
+  }
+  const distros = String(out)
+    .split(/\r?\n/)
+    .map((line) => line.replace(/\u0000/g, '').trim())
+    .filter(Boolean);
+  const ids = new Set();
+  const wants = (client) => Boolean(client) && !ids.has(client) && (!target || target.has(client));
+  for (const distro of distros) {
+    const candidates = [];
+    const homeRoot = `\\\\wsl$\\${distro}\\home`;
+    try {
+      for (const user of await readdir(homeRoot)) {
+        candidates.push(`${homeRoot}\\${user}`);
+      }
+    } catch (_) { /* distro has no /home or it is unreadable */ }
+    candidates.push(`\\\\wsl$\\${distro}\\root`);
+    for (const home of candidates) {
+      for (const rel of WSL_DATA_MARKERS) {
+        const client = MARKER_CLIENTS[rel];
+        if (!wants(client)) continue;
+        if (await exists(wslHomePath(home, rel))) ids.add(client);
+      }
+      if (wants('copilot')) {
+        const workspaceRoot = wslHomePath(home, '.config/Code/User/workspaceStorage');
+        try {
+          for (const workspace of await readdir(workspaceRoot)) {
+            if (await exists(`${workspaceRoot}\\${workspace}\\chatSessions`)) {
+              ids.add('copilot');
+              break;
+            }
+          }
+        } catch (_) { /* workspaceStorage missing or unreadable */ }
+      }
+      if (wants('mcode')) {
+        try {
+          for (const name of await readdir(home)) {
+            if (isMcodeProfileDir(name) && await exists(wslHomePath(home, `${name}/v2/sessions`))) {
+              ids.add('mcode');
+              break;
+            }
+          }
+        } catch (_) { /* home unreadable */ }
+      }
+      if (target && ids.size === target.size) return [...ids];
+    }
+  }
+  return [...ids];
+}
+
 module.exports = {
   WSL_DATA_MARKERS,
   MARKER_CLIENTS,
   collectWslUsage,
+  detectWslClientsAsync,
   emptyWslBundle,
   homeHasData,
   isWslInstalled,

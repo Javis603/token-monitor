@@ -134,7 +134,7 @@ function createHarness() {
   const context = {
     document,
     state: { mode: 'sync', settings: { showToolIcons: false, hubMode: 'client' } },
-    els: { syncPanelCount: {}, syncPanelOpenDevices: {} },
+    els: { syncPanelCount: {} },
     syncDevicePanelApi: require('../../src/electron/renderer/syncDevicePanel'),
     deviceIconsApi: require('../../src/electron/renderer/deviceIcons'),
     currentLocale: () => 'en',

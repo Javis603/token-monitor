@@ -2,6 +2,8 @@
 
 const fs = require('node:fs');
 const path = require('node:path');
+const { shouldReadSessionContext } = require('../../sessionContext');
+const { readGrokSessionContext } = require('./sessionContext');
 
 // Grok keeps one directory per session under `~/.grok/sessions/<url-encoded
 // cwd>/<session uuid>/`, and tokscale joins on that bare uuid: its entry
@@ -180,11 +182,22 @@ function resolveSessionMetadata(sessionIds, context) {
     if (used) meta.lastUsedAt = used;
     const title = cleanTitle(summary.generated_title);
     if (title) meta.title = title;
+    const latestModel = typeof summary.current_model_id === 'string' ? summary.current_model_id.trim() : '';
+    if (latestModel) meta.latestModel = latestModel;
     if (resolveProjects && projectFor) {
       const source = typeof summary.source_workspace_dir === 'string' ? summary.source_workspace_dir.trim() : '';
       const identity = projectFor(source || summary?.info?.cwd || '');
       if (identity?.projectId) meta.projectId = identity.projectId;
       if (identity?.projectLabel) meta.projectLabel = identity.projectLabel;
+    }
+    const key = `grok:${sessionId}`;
+    const live = shouldReadSessionContext(used, context.now)
+      || Object.values(context.periods || {}).some((period) => (
+        shouldReadSessionContext(period?.sessions?.[key]?.lastUsedAt || period?.sessions?.[key]?.startedAt, context.now)
+      ));
+    if (live) {
+      const sessionContext = readGrokSessionContext(path.dirname(candidates[0].summaryPath), summary.context_window, deps);
+      if (sessionContext) Object.assign(meta, sessionContext);
     }
     // A session with only a title is still worth recording: the applier writes
     // each field it is given, so dropping the row here would lose the name even

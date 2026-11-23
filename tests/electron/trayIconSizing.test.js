@@ -258,6 +258,9 @@ test('Windows leaves the window icon to the executable that already carries an I
   const main = fs.readFileSync(path.join(__dirname, '../../src/electron/main.js'), 'utf8');
   assert.doesNotMatch(main, /\n\s*icon: APP_ICON_PATH,/, 'no window names the icon directly');
   assert.match(main, /function appWindowIcon\(\) \{[\s\S]*?return app\.isPackaged \? \{\} : \{ icon: WINDOWS_APP_ICON_PATH \};[\s\S]*?\}/);
-  // app.dock.setIcon is darwin-only and keeps the macOS-grid artwork.
-  assert.match(main, /process\.platform === 'darwin' && app\.dock\) app\.dock\.setIcon\(APP_ICON_PATH\)/);
+  // app.dock.setIcon is darwin-only and keeps the macOS-grid artwork, but it
+  // loads the 1024px icon, so accessory mode (Dock hidden) must not touch it.
+  const policy = main.slice(main.indexOf('function applyMacActivationPolicy'), main.indexOf('function applyMacSpaceBehavior'));
+  assert.match(policy, /mode === 'accessory'\) \{\s*app\.dock\.hide\(\);\s*return;/);
+  assert.match(policy, /if \(!macDockIconApplied\) \{\s*app\.dock\.setIcon\(APP_ICON_PATH\);/);
 });

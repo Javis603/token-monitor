@@ -109,7 +109,16 @@ async function fetchZaiTeamLimits(options = {}, deps = {}) {
   }
 }
 
+// The organization/project pair selects the quota pool; rotating its API key
+// keeps that identity, while changing either selector names another account.
+function isZaiTeamServerAccountKey(key, values) {
+  const organization = zaiTeamOrganizationId(values, {});
+  const project = zaiTeamProjectId(values, {});
+  return Boolean(organization && project && key === hashKey('zaiteam', organization, project));
+}
+
 module.exports = {
+  isZaiTeamServerAccountKey,
   ZAI_TEAM_FETCH_TIMEOUT_MS,
   ZAI_TEAM_QUOTA_URL,
   zaiTeamToken,

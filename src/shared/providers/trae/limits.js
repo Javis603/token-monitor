@@ -229,7 +229,8 @@ async function fetchTraeLimits(options = {}, deps = {}) {
     return normalizeLimitProvider({
       provider: 'trae',
       accountKey: hashKey('trae', cookie || accessToken),
-      source: 'api',
+      sourceDetail: cookie ? 'managed' : 'ide',
+      source: cookie ? 'web' : 'api',
       status: 'ok',
       updatedAt,
       windows: [window],
@@ -242,7 +243,8 @@ async function fetchTraeLimits(options = {}, deps = {}) {
   } catch (error) {
     return normalizeLimitProvider({
       provider: 'trae',
-      source: 'api',
+      source: cookie ? 'web' : 'api',
+      sourceDetail: cookie ? 'managed' : 'ide',
       status: error?.status === 'timeout' ? 'unavailable' : error?.status || 'unavailable',
       updatedAt,
       windows: [],

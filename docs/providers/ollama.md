@@ -42,10 +42,16 @@ Cookie markup follows the sanitized shapes in CodexBar's [parser tests](https://
 
 `/api/balance` carries no identity, so API mode calls `POST https://ollama.com/api/me` (undocumented) for the account email and plan. Its fields are read case-insensitively (`Email`/`email`, `Plan`/`plan`). The email is hashed like the cookie lane's identity, so an account keeps the same `accountKey` across lanes and devices; a successful lookup is cached for six hours. If `/api/me` is unavailable, a key-derived identity keeps the reading usable and the failure is not retried for five minutes. Identity removals compare against the runtime's accepted `previousLimits` rows, not a fetcher-side record of emitted identities. A changed identity emits a `{ provider: "ollama", accountKey: <previous>, removed: true }` control row until the runtime accepts the replacement, so a superseded lookup cannot consume the removal and leave both rows behind. A save probe checks only `/api/balance`; identity resolution belongs to the poll that follows, and the probe leaves no cache behind.
 
+Saved accounts use the shared account-slot panel, with one credential lane per account. Identity retirement in a slot is owned by the shared adapter, which isolates previous readings before calling the provider; the fixed single-account path retains its existing replacement behavior.
+
 ## Rate limit
 
 `/api/balance` allows 10 requests per minute per account, shared across API keys and devices. The app polls every 5 minutes.
 
 ## Verification
 
-Run `node --test tests/shared/ollamaLimits.test.js tests/shared/ollamaCookieCredits.test.js tests/shared/limitBalanceDisplay.test.js tests/electron/edgeDockLimitCard.test.js tests/electron/homeOverview.test.js`.
+Run `node --test tests/shared/ollamaLimits.test.js tests/shared/ollamaCookieCredits.test.js tests/shared/limitBalanceDisplay.test.js tests/electron/edgeDockLimitCard.test.js tests/electron/homeOverview.test.js tests/electron/accountSlotsBatch.test.js`.
+
+## Collection sources
+
+An API key takes precedence over the Web Cookie; a rejected API key never falls back to the Cookie. Save validation checks only the submitted credential type.

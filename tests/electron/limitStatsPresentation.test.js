@@ -507,9 +507,10 @@ test('Electron routes cached stats through the presentation projection', () => {
     main,
     /const visibleStats = electronPresentationStats\(latestStats\);[\s\S]*scheduleMacWidgetSnapshot\(visibleStats, options\.widgetProducerOwner\)/
   );
-  assert.match(main, /function updateTrayDisplay\(\)[\s\S]*formatTrayText\(visibleStats, mode/);
-  assert.match(main, /function refreshLimitStatsPresentation\(\)[\s\S]*reason: 'presentation'/);
-  assert.match(main, /ipcMain\.handle\('stats:get'[\s\S]*return rendererSnapshots\.stamp\(stats, rendererStats\(electronPresentationStats\(stats\)\)\)/);
+  assert.match(main, /function updateTrayDisplay\([^)]*\)[\s\S]*formatTrayText\(visibleStats, mode/);
+  assert.match(main, /function sendStatsPresentationToRenderer\([^)]*\)[\s\S]*reason: 'presentation'/);
+  assert.match(main, /function refreshLimitStatsPresentation\(\)[\s\S]*sendStatsPresentationToRenderer\(\);/);
+  assert.match(main, /ipcMain\.handle\('stats:get'[\s\S]*const copy = rendererSnapshots\.stamp\(stats, rendererStats\(visibleStats\), visibleStats\);[\s\S]*return copy;/);
   assert.doesNotMatch(renderer, /function displayLimitProvider\(/);
   assert.match(renderer, /!\['local', 'presentation', 'read'\]\.includes\(payload\.data\?\.reason\)/);
 });

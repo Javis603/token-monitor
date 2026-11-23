@@ -47,14 +47,20 @@ function resolveFactoryAutomaticApiKey(options = {}, deps = {}) {
       'Factory environment file',
       deps
     );
-    for (const line of source.split(/\r?\n/u)) {
-      const match = line.match(/^\s*(?:export\s+)?FACTORY_API_KEY\s*=\s*(.*?)\s*$/u);
-      if (!match) continue;
-      const value = cleanSecret(match[1].replace(/\s+#.*$/u, ''));
-      if (value) return { apiKey: value, source: 'droid-env' };
-    }
+    const apiKey = parseFactoryApiKey(source);
+    if (apiKey) return { apiKey, source: 'droid-env' };
   } catch (_) {}
   return { apiKey: '', source: '' };
+}
+
+function parseFactoryApiKey(source) {
+  for (const line of source.split(/\r?\n/u)) {
+    const match = line.match(/^\s*(?:export\s+)?FACTORY_API_KEY\s*=\s*(.*?)\s*$/u);
+    if (!match) continue;
+    const value = cleanSecret(match[1].replace(/\s+#.*$/u, ''));
+    if (value) return value;
+  }
+  return '';
 }
 
 function factoryEnvApiKey(options = {}, deps = {}) {
@@ -270,7 +276,8 @@ async function fetchFactoryWithToken(token, source, deps = {}) {
 }
 
 async function fetchFactoryLimits(options = {}, deps = {}) {
-  const key = factoryEnvApiKey(options, deps);
+  // A draft probe cannot be authenticated by the environment or Droid file.
+  const key = deps.probe ? cleanSecret(options.factoryApiKey) : factoryEnvApiKey(options, deps);
   if (key) return fetchFactoryWithToken(key, 'api', deps);
   return normalizeLimitProvider({
     provider: 'factory',
@@ -281,7 +288,26 @@ async function fetchFactoryLimits(options = {}, deps = {}) {
   });
 }
 
+function factoryAccountEnvKey(env = process.env) {
+  return FACTORY_API_KEY_NAMES.map(name => cleanSecret(env[name])).find(Boolean) || '';
+}
+function discoverAccountSlots(deps = {}) {
+  // A missing file means no Droid sign-in; any other read failure is not a
+  // sign-out, so it propagates and the discovered account stays unavailable.
+  let source;
+  try {
+    source = readFactoryFile(path.join(factoryProfileDir({}, deps), '.env'), 'Factory environment file', deps);
+  } catch (error) {
+    if (error?.code !== 'ENOENT') throw error;
+    return [];
+  }
+  const apiKey = parseFactoryApiKey(source);
+  return apiKey ? [{ values: { factoryApiKey: apiKey }, accountKey: hashKey('factory', apiKey), sourceName: 'Droid' }] : [];
+}
+
 module.exports = {
+  discoverAccountSlots,
+  factoryAccountEnvKey,
   FACTORY_API_BASE_URL,
   FACTORY_APP_BASE_URL,
   factoryEnvApiKey,

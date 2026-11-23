@@ -8,13 +8,15 @@ const api = require('../../src/electron/renderer/syncContentForm');
 const i18n = require('../../src/electron/renderer/i18n');
 const aliasApi = require('../../src/electron/renderer/modelAliasForm');
 const pricingApi = require('../../src/electron/renderer/customPricingForm');
+const accountShellApi = require('../../src/electron/renderer/limits/accountShell');
+const helpApi = require('../../src/electron/renderer/helpPopover');
 
 function dom() {
   const nodes = new Map();
   const document = {
     activeElement: null,
     querySelectorAll: () => [],
-    createElement: () => node(),
+    createElement: tagName => Object.assign(node(), { tagName }),
     getElementById: id => { if (!nodes.has(id)) nodes.set(id, node(id)); return nodes.get(id); }
   };
   function node(id = '') {
@@ -50,6 +52,7 @@ function dom() {
       showPopover() { this.popoverOpen = true; }, hidePopover() { this.popoverOpen = false; },
       contains(other) { return this === other || this.children.includes(other); },
       setAttribute(name, value) { this[name] = value; },
+      hasAttribute(name) { return Object.hasOwn(this, name); },
       closest(selector) {
         // The real alias setup captures row clicks on its list ancestor.
         if (selector !== '.custom-pricing-edit') return null;
@@ -102,6 +105,18 @@ test('the form initializes before the asynchronous settings query has returned',
   assert.equal(document.getElementById('syncContentOptions').hidden, true);
   assert.equal(document.getElementById('syncContentsessionTitles').disabled, true);
   form.dispose();
+});
+
+test('the collapsed row counts the optional kinds this device shares', async () => {
+  const f = fixture();
+  assert.equal(f.get('Summary').hidden, true);
+  await f.form.refresh();
+  assert.equal(f.get('Summary').hidden, false);
+  assert.equal(f.get('Summary').textContent, '0/3 on');
+  f.push(status({ enabled: { sessionTitles: true, modelAliases: false, customPricing: true } }));
+  assert.equal(f.get('Summary').textContent, '2/3 on');
+  f.settings({ hubMode: 'local' });
+  assert.equal(f.get('Summary').hidden, true);
 });
 
 test('all optional checkboxes default off and stay disabled until a supported status arrives', async () => {
@@ -341,7 +356,7 @@ test('alias batch editor keeps selected and manual drafts and base when a newer 
   const writes = [];
   const context = { document, state, structuredClone, queueMicrotask, customPricingFormApi: pricingApi,
     t: key => key, setAccountGroupExpanded() {},
-    window: { TokenMonitorModelAliasForm: aliasApi, TokenMonitorSyncContentForm: api },
+    window: { TokenMonitorModelAliasForm: aliasApi, TokenMonitorSyncContentForm: api, TokenMonitorHelpPopover: helpApi },
     syncContentForm: { base: () => api.snapshotBase(current) },
     saveSettings: async (patch, base) => {
       writes.push(api.decorateSettingsPatch(patch, current, base));
@@ -385,14 +400,14 @@ test('pricing editor pins its whole collection and revision until the user close
   let current = status({ enabled: { customPricing: true } });
   const state = { stats: {}, settings: { customModelPricing: [{ modelId: 'existing', inputPerM: 1 }] } };
   const writes = [];
-  const context = { document, state, structuredClone, customPricingFormApi: pricingApi,
+  const context = { document, state, structuredClone, accountShellApi, customPricingFormApi: pricingApi,
     t: key => key, formatCost: value => String(value), setAccountGroupExpanded() {}, renderCustomPricing() {},
-    window: { tokenMonitor: {}, TokenMonitorSyncContentForm: api },
+    window: { tokenMonitor: {}, TokenMonitorModelAliasForm: aliasApi, TokenMonitorSyncContentForm: api, TokenMonitorHelpPopover: helpApi },
     syncContentForm: { base: () => api.snapshotBase(current) },
     saveSettings: async (patch, base) => { writes.push(api.decorateSettingsPatch(patch, current, base)); throw Error('CAS 409 conflict'); }
   };
   vm.createContext(context);
-  vm.runInContext(`let openCustomPricingForm = null; ${functionSource('setupCustomPricingUI', 'setupCursorAccountUI')} setupCustomPricingUI(); openCustomPricingForm();`, context);
+  vm.runInContext(`let openCustomPricingForm = null, customPricingDisclosure; ${functionSource('setupCustomPricingUI', 'setupCursorAccountUI')} setupCustomPricingUI(); openCustomPricingForm();`, context);
   document.getElementById('customPricingModelSelect').value = '__manual__';
   document.getElementById('customPricingModelInput').value = 'new-model';
   document.getElementById('customPricingInput').value = '2';
@@ -513,7 +528,7 @@ for (const action of ['edit', 'remove']) test(`alias ${action} uses the displaye
   const writes = [];
   const context = { document, state, structuredClone, queueMicrotask, customPricingFormApi: pricingApi,
     t: key => key, setAccountGroupExpanded() {},
-    window: { TokenMonitorModelAliasForm: aliasApi, TokenMonitorSyncContentForm: api },
+    window: { TokenMonitorModelAliasForm: aliasApi, TokenMonitorSyncContentForm: api, TokenMonitorHelpPopover: helpApi },
     syncContentForm: { base: () => api.snapshotBase(current) },
     saveSettings: async (patch, base) => {
       writes.push(api.decorateSettingsPatch(patch, current, base));
@@ -527,7 +542,7 @@ for (const action of ['edit', 'remove']) test(`alias ${action} uses the displaye
   // must not pair its old map with revision 3, which CAS would otherwise admit.
   current = status({ enabled: { modelAliases: true }, revisions: { modelAliases: 3, customPricing: 4 } });
   const row = document.getElementById('modelAliasesList').children[0];
-  if (action === 'remove') await row.children[1].click();
+  if (action === 'remove') await row.children[1].children[1].children[1].click();
   else {
     await row.children[0].click();
     const targetSelect = document.getElementById('modelAliasesCanonicalSelect');
@@ -609,7 +624,7 @@ for (const source of ['catch-up', 'server-adoption']) test(`alias ${source} pair
   const form = api.createSyncContentForm({ document, bridge: { onSyncContentPush: callback => { push = callback; } },
     t: key => key, saveSettings: async () => {}, getSettings: () => state.settings });
   context = { document, state, structuredClone, customPricingFormApi: pricingApi, t: key => key, setAccountGroupExpanded() {},
-    window: { TokenMonitorModelAliasForm: aliasApi, TokenMonitorSyncContentForm: api }, syncContentForm: form,
+    window: { TokenMonitorModelAliasForm: aliasApi, TokenMonitorSyncContentForm: api, TokenMonitorHelpPopover: helpApi }, syncContentForm: form,
     saveSettings: async (patch, base) => {
       await runtime.publishPatch(patch, base);
       state.settings = { ...state.settings, ...patch };
@@ -628,7 +643,7 @@ for (const source of ['catch-up', 'server-adoption']) test(`alias ${source} pair
   }
   assert.equal(form.base().revisions.modelAliases, 3);
   assert.deepEqual(state.settings.modelAliases, { a: 'remote', c: 'new' });
-  await document.getElementById('modelAliasesList').children[0].children[1].click();
+  await document.getElementById('modelAliasesList').children[0].children[1].children[1].children[1].click();
   assert.equal(writes.at(-1).baseRevision, 3);
   assert.deepEqual(writes.at(-1).value.modelAliases, { c: 'new' });
   assert.equal(document.getElementById('modelAliasesError').textContent, '');

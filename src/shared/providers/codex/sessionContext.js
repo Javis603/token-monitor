@@ -28,6 +28,10 @@ const TAIL_READ_BUDGETS = [256 * 1024, 1024 * 1024];
 const TURN_READ_MAX_BYTES = 8 * 1024 * 1024;
 const MAX_METADATA_LINE_BYTES = 64 * 1024;
 const MAX_PENDING_INPUT_CALLS = 32;
+// Append-only reads run for every active rollout on every watch tick. The
+// consumed bytes are never retained (trailing state is copied), so one shared
+// 256 KiB chunk avoids a constant buffer stream in the usage worker.
+const APPEND_READ_BUFFER = Buffer.alloc(TAIL_READ_BUDGETS[0]);
 const stateCache = new Map();
 
 function contextFromInfo(info) {
@@ -162,10 +166,9 @@ function readCodexSessionState(filePath, deps = {}) {
     if (appendOnly) {
       while (position < stat.size) {
         const length = Math.min(TAIL_READ_BUDGETS[0], stat.size - position);
-        const bytes = Buffer.alloc(length);
-        const read = fsApi.readSync(fd, bytes, 0, length, position);
+        const read = fsApi.readSync(fd, APPEND_READ_BUFFER, 0, length, position);
         if (read !== length) throw new Error('Incomplete transcript read');
-        consumeBytes(state, bytes, position, contextStart);
+        consumeBytes(state, APPEND_READ_BUFFER.subarray(0, read), position, contextStart);
         position += length;
       }
     } else {

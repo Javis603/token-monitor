@@ -1028,3 +1028,33 @@ test('a credit that cannot be read leaves the plan reading alone', async (t) => 
     assert.deepEqual(result.windows.map((w) => w.kind), ['weekly']);
   }
 });
+
+
+test('Cline discovery resolves a single file snapshot even if the next read would fail', (t) => {
+  let reads = 0;
+  t.mock.method(fs, 'readFileSync', () => {
+    reads += 1;
+    if (reads > 1) throw Object.assign(new Error('external rewrite'), { code: 'EACCES' });
+    return JSON.stringify({ providers: { cline: clineAuth() } });
+  });
+  const [row] = require('../../src/shared/providers/cline/limits').discoverAccountSlots({ env: {} });
+  assert.equal(row?.values.clineApiKey, 'workos:token-1');
+  assert.equal(row?.fetchDeps.clineCredential.accountId, 'usr-1');
+  assert.equal(reads, 1);
+});
+
+test('Cline discovery distinguishes unavailable snapshots from sign-out without changing legacy reads', (t) => {
+  const { discoverAccountSlots } = require('../../src/shared/providers/cline/limits');
+  for (const source of [new Error('denied'), '{']) {
+    const mock = t.mock.method(fs, 'readFileSync', () => {
+      if (source instanceof Error) throw source;
+      return source;
+    });
+    assert.throws(() => discoverAccountSlots({ env: {} }), { status: 'unavailable' });
+    assert.throws(() => readClineSession({}), { status: 'notConfigured' });
+    mock.mock.restore();
+  }
+  t.mock.method(fs, 'readFileSync', () => '{}');
+  assert.deepEqual(discoverAccountSlots({ env: {} }), []);
+  assert.throws(() => readClineSession({}), { status: 'unauthorized' });
+});

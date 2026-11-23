@@ -152,7 +152,7 @@ test('credential saves and clears wait for persistence and propagate storage fai
         let settled = false;
         const result = operation === 'save'
           ? api.saveCredential('deepseek', { deepseekApiKey: 'sk-draft' })
-          : api.clearCredential('kimi');
+          : api.clearCredential('claude');
         void result.then(() => { settled = true; }, () => { settled = true; });
         await entered.promise;
         await new Promise((resolve) => setImmediate(resolve));
@@ -218,9 +218,9 @@ test('a stale probe that was rejected still reports superseded, not invalid', as
 
 test('clearing removes the form credential through the same settings write', async () => {
   const { api, patches } = commands();
-  assert.deepEqual(await api.clearCredential('minimax'), { cleared: false, errorCode: 'customForm' });
+  assert.deepEqual(await api.clearCredential('minimax'), { cleared: false, errorCode: 'accountSlotRequired' });
   assert.deepEqual(patches, []);
-  assert.equal((await api.clearCredential('kimi')).cleared, true);
+  assert.equal((await api.clearCredential('claude')).cleared, true);
   assert.equal(patches.length, 1);
   assert.deepEqual(await api.clearCredential('codex'), { cleared: false });
 });
@@ -606,7 +606,7 @@ test('Trae Cookie save probes the two-hop web route, replaces the legacy token, 
   assert.deepEqual(expired.patches, []);
 });
 
-test('OpenDesign cookie saves probe the workspace and quota, reject expired sessions and clear through the shared path', async () => {
+test('OpenDesign cookie saves probe the workspace and quota, reject expired sessions and require slot commands to clear', async () => {
   const calls = [];
   const { api, patches } = commands({ answer: (url, init) => {
     calls.push({ url, init });
@@ -623,8 +623,8 @@ test('OpenDesign cookie saves probe the workspace and quota, reject expired sess
   assert.equal(calls.length, 2);
   assert.ok(calls.every(({ init }) => init.headers.Cookie === 'session=test-only'));
   assert.ok(!JSON.stringify(result).includes('test-only'));
-  assert.equal((await api.clearCredential('opendesign')).cleared, true);
-  assert.equal(patches[1].opendesignCookie, '');
+  assert.deepEqual(await api.clearCredential('opendesign'), { cleared: false, errorCode: 'accountSlotRequired' });
+  assert.equal(patches.length, 1);
 
   for (const [code, saved, verdict] of [[401, false, 'invalid'], [403, true, 'indeterminate'], [429, true, 'indeterminate']]) {
     const c = commands({ answer: () => response(code) });
@@ -637,8 +637,17 @@ test('OpenDesign cookie saves probe the workspace and quota, reject expired sess
   assert.deepEqual(c.patches, []);
 });
 
-for (const id of ['qoder', 'deepseek']) test(`legacy clear refuses ${id} account slots without a settings write`, async () => {
+for (const { id } of LIMIT_PROVIDER_REGISTRY.filter(entry => entry.accountSlots && entry.id !== 'claude')) test(`legacy clear refuses ${id} account slots without a settings write`, async () => {
   const { api, patches } = commands({ settings: { [`${id}AccountSlots`]: [{ id: 'migrated', values: {} }] } });
   assert.deepEqual(await api.clearCredential(id), { cleared: false, errorCode: 'accountSlotRequired' });
   assert.deepEqual(patches, []);
+});
+
+
+test('Claude legacy clearing preserves owner-backed saved slots and their credentials', async () => {
+  const saved = [{ id: 'saved', owner: { metadata: { organizationId: 'saved-org' }, credential: 'saved-cookie' } }];
+  const { api, patches } = commands({ settings: { claudeAccountSlots: saved, claudeWebCookie: 'sessionKey=sk-ant-old', claudeWebOrganizationId: 'legacy-org' } });
+  assert.equal((await api.clearCredential('claude')).cleared, true);
+  assert.deepEqual(patches, [{ claudeWebCookie: '', claudeWebOrganizationId: '' }]);
+  assert.equal(saved[0].owner.credential, 'saved-cookie');
 });

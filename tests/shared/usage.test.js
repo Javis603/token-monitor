@@ -1192,6 +1192,24 @@ test('extractUsageBundleFromTokscale partitions every aggregate field exactly by
   );
 });
 
+test('extractUsageBundleFromTokscale can skip partitions without changing the aggregate', () => {
+  const json = {
+    entries: [
+      { client: 'Claude', sessionId: 'c1', model: 'shared', totalTokens: 10, cacheRead: 4, cacheWrite: 2, output: 3, costUsd: 0.1 },
+      { client: 'Codex', sessionId: 'x1', model: 'shared', totalTokens: 20, cacheRead: 8, cacheWrite: 1, output: 5, costUsd: 0.2 },
+      { model: 'unknown', totalTokens: 7, costUsd: 0.07 }
+    ]
+  };
+  const full = extractUsageBundleFromTokscale(json);
+  const lean = extractUsageBundleFromTokscale(json, { partitions: false });
+  assert.equal(lean.byClient, undefined);
+  assert.deepEqual(lean.period, full.period);
+  assert.deepEqual(
+    extractUsageBundleFromTokscale({}, { partitions: false }).period,
+    extractUsageBundleFromTokscale({}).period
+  );
+});
+
 test('extractUsageBundleFromTokscale isolates rows without a client for safe fallback', () => {
   const bundle = extractUsageBundleFromTokscale({
     entries: [{ model: 'unknown', totalTokens: 7, costUsd: 0.07 }]

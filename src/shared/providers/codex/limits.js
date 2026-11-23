@@ -922,6 +922,8 @@ function codexCommandSourceDetail(command, platform = process.platform) {
   if (platform === 'win32') {
     if (
       normalized.includes('/programs/codex/') ||
+      normalized.includes('/program files/codex/') ||
+      normalized.includes('/program files (x86)/codex/') ||
       normalized.includes('/openai/codex/bin/') ||
       normalized.includes('/packages/openai.codex_') ||
       normalized.includes('/windowsapps/openai.codex_') ||

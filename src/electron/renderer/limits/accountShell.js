@@ -24,11 +24,34 @@
     }
   }
 
+  function setDisclosureBody(toggle, details, open) {
+    if (!open && details.contains(details.ownerDocument?.activeElement)) toggle?.focus({ preventScroll: true });
+    details.inert = !open;
+    details.classList.toggle('hidden', !open);
+  }
+
+  function focusDisclosureControl(details, control) {
+    control.focus({ preventScroll: true });
+    const document = details.ownerDocument;
+    const focused = document?.activeElement;
+    document?.defaultView?.requestAnimationFrame(() => {
+      const animations = details.getAnimations();
+      void Promise.allSettled(animations.map(animation => animation.finished)).then(() => {
+        if (details.inert || document.activeElement !== focused || !details.contains(focused)) return;
+        const panel = details.closest('.settings-panel')?.getBoundingClientRect();
+        const field = focused.getBoundingClientRect();
+        if (panel && (field.top < panel.top || field.bottom > panel.bottom)) {
+          focused.scrollIntoView({ block: 'nearest' });
+        }
+      });
+    });
+  }
+
   function setExpanded({ toggle, details, group, expanded, onChange }) {
     if (!toggle || !details) return;
     const open = Boolean(expanded);
     toggle.setAttribute('aria-expanded', String(open));
-    details.classList.toggle('hidden', !open);
+    setDisclosureBody(toggle, details, open);
     group?.classList.toggle('expanded', open);
     onChange?.(open);
   }
@@ -64,5 +87,5 @@
     };
   }
 
-  return { render, setExpanded, createBusyGuard, createRequestGuard };
+  return { render, setDisclosureBody, focusDisclosureControl, setExpanded, createBusyGuard, createRequestGuard };
 });

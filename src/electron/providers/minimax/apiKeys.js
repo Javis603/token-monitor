@@ -5,16 +5,38 @@ const limits = require('../../../shared/providers/minimax/limits');
 const { hashKey } = require('../../../shared/hashKey');
 const { createCredentialCommands, providerSelectionIncluding } = require('../../limits/credentialCommands');
 
-function createMinimaxApiKeys({ getSettings, saveSettings, probeDeps, changed, env = process.env }) {
+function createMinimaxApiKeys({ getSettings, saveSettings, probeDeps, changed, slotPersistence, env = process.env }) {
   const profiles = () => limits.minimaxApiProfiles(getSettings());
-  function commit(next, key, reason) {
+  async function commit(next, key, reason, removedId) {
     const settings = getSettings();
     const before = new Set(limits.configuredMinimaxAccounts(settings, { env }).map(account => account.apiKey));
-    settings.minimaxApiProfiles = next;
-    // The legacy field stays for downgrades until its own key is removed.
-    if (reason === 'key-remove' && limits.minimaxToken({}, settings.minimaxApiKey) === key) settings.minimaxApiKey = '';
-    saveSettings({ throwOnError: true });
-    const after = limits.configuredMinimaxAccounts(settings, { env });
+    const preferences = () => {
+      const current = getSettings();
+      if (reason === 'key-save') return { limitsEnabled: true, limitProviders: providerSelectionIncluding(current.limitProviders, 'minimax') };
+      // The legacy field stays for downgrades until its own key is removed.
+      return limits.minimaxToken({}, current.minimaxApiKey) === key ? { minimaxApiKey: '' } : {};
+    };
+    if (slotPersistence) {
+      await slotPersistence.commit(Object.entries(next).map(([id, profile]) => ({ id,
+        accountKey: hashKey('minimax', profile.apiKey), enabled: profile.enabled,
+        billingMode: profile.billingMode, apiRegion: profile.apiRegion
+      })), [...Object.entries(next).map(([id, profile]) => ({ id, credential: profile.apiKey })),
+        ...(removedId ? [{ id: removedId, credential: null }] : [])], undefined, preferences);
+    } else {
+      const patch = { ...preferences(), minimaxApiProfiles: next };
+      const previous = { ...settings };
+      try {
+        Object.assign(settings, patch);
+        saveSettings({ throwOnError: true });
+      } catch (error) {
+        for (const key of Object.keys(patch)) {
+          if (Object.hasOwn(previous, key)) settings[key] = previous[key];
+          else delete settings[key];
+        }
+        throw error;
+      }
+    }
+    const after = limits.configuredMinimaxAccounts(getSettings(), { env });
     for (const previous of before) {
       if (!after.some(account => account.apiKey === previous)) changed(hashKey('minimax', previous), false, reason);
     }
@@ -25,15 +47,12 @@ function createMinimaxApiKeys({ getSettings, saveSettings, probeDeps, changed, e
   const commands = createCredentialCommands({
     getSettings, env: {},
     probeDeps: () => ({ ...probeDeps(), probe: true, providerRuntimeState: new Map() }),
-    commitCredential: ({ candidate }) => {
+    commitCredential: async ({ candidate }) => {
       const next = profiles();
       const key = candidate.minimaxApiKey;
       const id = Object.keys(next).find(id => next[id].apiKey === key) || randomUUID();
       next[id] = { apiKey: key, enabled: true, billingMode: candidate.minimaxBillingMode, apiRegion: candidate.minimaxApiRegion };
-      const settings = getSettings();
-      settings.limitProviders = providerSelectionIncluding(settings.limitProviders, 'minimax');
-      settings.limitsEnabled = true;
-      commit(next, key, 'key-save');
+      await commit(next, key, 'key-save');
     }
   });
   return {
@@ -57,8 +76,8 @@ function createMinimaxApiKeys({ getSettings, saveSettings, probeDeps, changed, e
       commands.noteSettingsPatch({ minimaxApiKey: '' });
       const key = next[id].apiKey;
       delete next[id];
-      commit(next, key, 'key-remove');
-      return { ok: true };
+      const task = commit(next, key, 'key-remove', id);
+      return slotPersistence ? task.then(() => ({ ok: true })) : { ok: true };
     },
     noteSettingsPatch(patch) {
       commands.noteSettingsPatch(Object.hasOwn(patch, 'minimaxApiProfiles') ? { minimaxApiKey: '' } : patch);
