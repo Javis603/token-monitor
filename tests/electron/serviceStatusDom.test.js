@@ -212,8 +212,7 @@ test('Home limit rows share one column grid across accounts', () => {
   assert.match(rows, /grid-template-columns:\s*subgrid/);
   assert.match(cssRule(css, '.home-limit-window > .home-limit-reading-wide'), /grid-column:\s*4 \/ 6/);
   assert.match(cssRule(css, '.home-limit-reset'), /grid-column:\s*3;[^}]*justify-self:\s*end/s);
-  // Hover reveals: every share index Home can render has a partner rule, and no fade replays on refresh.
-  for (let index = 0; index < 50; index++) assert.ok(css.includes(`.home-share-scope:has([data-share-index="${index}"]:hover) [data-share-index="${index}"]`), `partner rule ${index}`);
+  // Hover reveal: a monochrome account shows its vendor colour.
   assert.match(css, /\.home-limit-account:hover \.home-limit-window:not\(\.is-low, \.is-exhausted\) \.home-limit-track\s*\{[^}]*--home-limit-bar:\s*var\(--home-vendor-color\)/s);
   // Accounts are set apart by the Limits page's feathered hairline, softer than the module rules.
   const divider = cssRule(css, '.home-module-limits:not(.home-module-limits-classic) .home-limit-account + .home-limit-account::before,\n.home-session-row.starts-recent::after');

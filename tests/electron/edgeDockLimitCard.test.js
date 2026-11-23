@@ -1258,7 +1258,7 @@ test('Ollama hides spending details when that usage item is disabled and keeps s
 
 function renderHomeLimitFixture(rows) {
   const source = fs.readFileSync(path.join(root, 'src/electron/renderer/app.js'), 'utf8');
-  const functions = ['homeModuleShell', 'homeVendorColorsEnabled', 'homeShareInkColor', 'homeShareVendorColor', 'homeLimitWindowLabel', 'homeLimitResetText', 'formatHomeLimitWindowValue', 'renderHomeLimitModule'].map((name) => {
+  const functions = ['homeModuleShell', 'homeVendorColorsEnabled', 'homeNearBlackColor', 'homeVendorRevealColor', 'homeLimitWindowLabel', 'homeLimitResetText', 'formatHomeLimitWindowValue', 'renderHomeLimitModule'].map((name) => {
     const start = source.indexOf(`function ${name}(`);
     return source.slice(start, source.indexOf('\n}\n', start) + 2);
   }).join('\n');

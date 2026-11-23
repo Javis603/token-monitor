@@ -7235,7 +7235,7 @@ function renderHomeLimitModule() {
     item.className = 'home-limit-account';
     item.dataset.key = row.key;
     // Monochrome meters reveal the account's colour while it is hovered.
-    item.style.setProperty('--home-vendor-color', homeShareVendorColor(row.color));
+    item.style.setProperty('--home-vendor-color', homeVendorRevealColor(row.color));
     const account = document.createElement('div');
     account.className = 'home-limit-account-head';
     const mark = document.createElement('span');
@@ -7509,71 +7509,52 @@ function renderClassicHomeLimits(module, body, rows, showBars) {
   return module;
 }
 
-// One stacked bar for a module's split. Rows past the module's count (and
-// any unattributed remainder) fold into a neutral tail, so the visible
-// segments keep their true share of the period total.
-function homeShareBar(rows, colors = rows.map((row) => row.color)) {
-  const bar = document.createElement('div');
-  bar.className = 'home-share-bar';
-  bar.setAttribute('aria-hidden', 'true');
-  let shown = 0;
-  rows.forEach((row, index) => {
-    if (!(row.share > 0)) return;
-    const segment = document.createElement('span');
-    // Segments and list rows share an index, so hovering either lights its partner.
-    segment.dataset.key = row.key;
-    segment.dataset.shareIndex = String(index);
-    segment.style.setProperty('--home-vendor-color', homeShareVendorColor(row.color));
-    segment.style.flexGrow = String(row.share);
-    // Near-black brand colours (Grok, Copilot) read as a gap on a dark panel;
-    // those take the theme's ink instead.
-    if (homeShareInkColor(colors[index])) segment.className = 'home-share-ink';
-    else segment.style.background = colors[index];
-    bar.append(segment);
-    shown += row.share;
-  });
-  if (1 - shown > 0.005) {
-    const rest = document.createElement('span');
-    rest.className = 'home-share-rest';
-    rest.style.flexGrow = String(1 - shown);
-    bar.append(rest);
-  }
-  return bar;
-}
-
-function homeShareInkColor(color) {
+function homeNearBlackColor(color) {
   const raw = String(color || '').replace('#', '');
   if (!/^[0-9a-f]{6}$/i.test(raw)) return false;
   const [r, g, b] = [0, 2, 4].map((i) => parseInt(raw.slice(i, i + 2), 16) / 255);
   return 0.2126 * r + 0.7152 * g + 0.0722 * b < 0.12;
 }
 
-// Home is monochrome unless vendor colours are switched on: splits step down
-// from the text colour by rank, limit meters share one neutral ink, and
-// colour is left to status (exhausted, nearly out).
+// Home is monochrome unless vendor colours are switched on: list marks and
+// limit meters share one neutral ink, and colour is left to status
+// (exhausted, nearly out).
 function homeVendorColorsEnabled() {
   return state.settings?.homeVendorColors === true;
 }
 
-// The colour a split reveals on hover in monochrome (and already shows with
-// vendor colours on). Near-black brand colours take the theme ink here too.
-function homeShareVendorColor(color) {
-  return homeShareInkColor(color) ? 'rgba(var(--overlay-rgb), 0.55)' : color;
+// The colour a limit account reveals on hover in monochrome (and already shows
+// with vendor colours on). Near-black brand colours (Grok, Copilot) read as a
+// gap on a dark panel, so they take the theme ink instead.
+function homeVendorRevealColor(color) {
+  return homeNearBlackColor(color) ? 'rgba(var(--overlay-rgb), 0.55)' : color;
 }
 
-function homeShareColors(rows) {
-  if (homeVendorColorsEnabled()) return rows.map((row) => row.color);
-  const alphas = [0.9, 0.5, 0.34, 0.24, 0.18, 0.14];
-  return rows.map((_row, index) => `rgba(var(--overlay-rgb), ${alphas[Math.min(index, alphas.length - 1)]})`);
+// A list mark without an icon: the vendor colour when vendor colours are on,
+// otherwise ink, so monochrome Home keeps colour for status alone.
+function homeListMarkColor(color) {
+  return homeVendorColorsEnabled() ? color : 'rgba(var(--overlay-rgb), 0.5)';
 }
 
-// With tool icons off, a row's mark is a swatch of its segment's colour so the
-// list reads against the bar; with icons on, the shared icon path wins.
-function applyHomeShareMark(mark, iconKind, color) {
-  const swatch = iconKind?.kind !== 'icon';
-  // A swatch matches its segment, which swaps near-black vendor colours for ink.
-  applyHomeListMark(mark, iconKind, swatch ? homeShareVendorColor(color) : color);
-  if (swatch) mark.classList.add('home-share-swatch');
+// Tools and Models list their split as aligned rows; the share column carries
+// the proportion, so Home keeps horizontal bars for limits alone.
+function homeSplitRow(className, row, iconKind) {
+  const item = document.createElement('div');
+  item.className = `home-list-row ${className}`;
+  item.dataset.key = row.key;
+  const mark = document.createElement('span');
+  applyHomeListMark(mark, iconKind, homeListMarkColor(row.color));
+  const name = document.createElement('span');
+  name.className = 'home-list-name';
+  name.textContent = row.name;
+  const value = document.createElement('span');
+  value.className = 'home-list-value';
+  value.textContent = formatCompact(row.value);
+  const share = document.createElement('span');
+  share.className = 'home-list-aux';
+  share.textContent = formatPercent(row.share * 100);
+  item.append(mark, name, value, share);
+  return item;
 }
 
 function renderHomeModelModule(period) {
@@ -7586,29 +7567,9 @@ function renderHomeModelModule(period) {
     body.append(empty);
     return module;
   }
-  const colors = homeShareColors(rows);
-  body.classList.add('home-share-scope');
-  body.append(homeShareBar(rows, colors));
-  rows.forEach((row, index) => {
-    const item = document.createElement('div');
-    item.className = 'home-list-row home-model-row';
-    item.dataset.key = row.key;
-    item.dataset.shareIndex = String(index);
-    item.style.setProperty('--home-vendor-color', homeShareVendorColor(row.color));
-    const mark = document.createElement('span');
-    applyHomeShareMark(mark, iconKindFor({ key: row.key || row.name, modelSource: row.modelSource }, 'model'), colors[index]);
-    const name = document.createElement('span');
-    name.className = 'home-list-name';
-    name.textContent = row.name;
-    const value = document.createElement('span');
-    value.className = 'home-list-value';
-    value.textContent = formatCompact(row.value);
-    const share = document.createElement('span');
-    share.className = 'home-list-aux';
-    share.textContent = formatPercent(row.share * 100);
-    item.append(mark, name, value, share);
-    body.append(item);
-  });
+  for (const row of rows) {
+    body.append(homeSplitRow('home-model-row', row, iconKindFor({ key: row.key || row.name, modelSource: row.modelSource }, 'model')));
+  }
   return module;
 }
 
@@ -7631,34 +7592,9 @@ function renderHomeToolModule(period) {
     body.append(empty);
     return module;
   }
-  // Tools are few, so one bar and a single line of labels (amount and share)
-  // carry the module without a second list.
-  const colors = homeShareColors(rows);
-  body.classList.add('home-share-scope');
-  body.append(homeShareBar(rows, colors));
-  const legend = document.createElement('div');
-  legend.className = 'home-share-legend';
-  rows.forEach((row, index) => {
-    const item = document.createElement('span');
-    item.className = 'home-share-chip home-tool-row';
-    item.dataset.key = row.key;
-    item.dataset.shareIndex = String(index);
-    item.style.setProperty('--home-vendor-color', homeShareVendorColor(row.color));
-    const mark = document.createElement('span');
-    applyHomeShareMark(mark, iconKindFor({ key: row.key }, 'tool'), colors[index]);
-    const name = document.createElement('span');
-    name.className = 'home-list-name';
-    name.textContent = row.name;
-    const value = document.createElement('span');
-    value.className = 'home-list-value';
-    value.textContent = formatCompact(row.value);
-    const share = document.createElement('span');
-    share.className = 'home-list-aux';
-    share.textContent = formatPercent(row.share * 100);
-    item.append(mark, name, value, share);
-    legend.append(item);
-  });
-  body.append(legend);
+  for (const row of rows) {
+    body.append(homeSplitRow('home-tool-row', row, iconKindFor({ key: row.key }, 'tool')));
+  }
   return module;
 }
 
@@ -7835,7 +7771,7 @@ function renderHomeSessionModule(rows) {
 
 function renderHomeDeviceModule() {
   const { module, body } = homeModuleShell('device', t('home.devices'), 'device');
-  // Shares are of every device's usage; the count setting only caps the tiles.
+  // Shares are of every device's usage; the count setting only caps the rows.
   const allRows = homeOverviewApi.homeDeviceRows(fixedPeriodDevices(), {
     localDeviceId: state.settings?.deviceId || '',
     period: state.period,
@@ -7849,50 +7785,46 @@ function renderHomeDeviceModule() {
     body.append(empty);
     return module;
   }
-  // Devices are few and differ by identity (this machine, offline) more
-  // than by split, so each gets a small tile instead of another list.
+  // Devices take the same rows as Tools and Models, with the local device
+  // badged and offline ones muted. A lone device owns 100%, which says
+  // nothing, so a share column appears only beside another device.
   const total = allRows.reduce((sum, row) => sum + row.value, 0);
-  const grid = document.createElement('div');
-  grid.className = 'home-device-grid';
-  // The count picks balanced columns in CSS, so 2 or 4 devices never leave a gap.
-  grid.dataset.count = String(rows.length);
   for (const row of rows) {
     const item = document.createElement('div');
-    item.className = 'home-device-tile';
+    item.className = 'home-list-row home-device-row';
     item.dataset.key = row.key;
-    item.style.setProperty('--home-device-color', !homeVendorColorsEnabled() ? 'rgba(var(--overlay-rgb), 0.5)' : row.isStale ? deviceStaleColor : deviceAccent);
-    item.style.setProperty('--home-vendor-color', row.isStale ? deviceStaleColor : deviceAccent);
-    if (row.isLocal) item.classList.add('is-local');
+    if (allRows.length > 1) item.classList.add('has-share');
     if (row.isStale) {
       item.classList.add('is-stale');
       item.setAttribute('aria-description', t('home.staleDevice'));
     }
-    const head = document.createElement('span');
-    head.className = 'home-device-tile-head';
     const mark = document.createElement('span');
-    applyHomeListMark(mark, iconKindFor({ platform: row.platform }, 'device'), row.isStale ? deviceStaleColor : deviceAccent);
+    const color = row.isStale ? deviceStaleColor : deviceAccent;
+    applyHomeListMark(mark, iconKindFor({ platform: row.platform }, 'device'), homeListMarkColor(color));
+    const label = document.createElement('span');
+    label.className = 'home-list-name home-device-label';
     const name = document.createElement('span');
-    name.className = 'home-list-name home-device-name';
+    name.className = 'home-device-name';
     name.textContent = row.name;
-    head.append(mark, name);
-    const value = document.createElement('span');
-    value.className = 'home-list-value home-device-tile-value';
-    value.textContent = formatCompact(row.value);
-    const foot = document.createElement('span');
-    foot.className = 'home-device-tile-sub';
-    // A lone device owns 100%, which says nothing; its tile becomes one line.
-    if (allRows.length > 1) foot.textContent = formatPercent(total > 0 ? (row.value / total) * 100 : 0);
-    // The badge sits on the share line so it never truncates the device name.
+    label.append(name);
     if (row.isLocal) {
       const badge = document.createElement('span');
       badge.className = 'home-device-badge';
       badge.textContent = 'you';
-      foot.append(badge);
+      label.append(badge);
     }
-    item.append(head, value, foot);
-    grid.append(item);
+    const value = document.createElement('span');
+    value.className = 'home-list-value';
+    value.textContent = formatCompact(row.value);
+    item.append(mark, label, value);
+    if (allRows.length > 1) {
+      const share = document.createElement('span');
+      share.className = 'home-list-aux';
+      share.textContent = formatPercent(total > 0 ? (row.value / total) * 100 : 0);
+      item.append(share);
+    }
+    body.append(item);
   }
-  body.append(grid);
   return module;
 }
 
@@ -11973,21 +11905,26 @@ function renderHomeSettingsList() {
     }
   }
   // Home is monochrome by default; this brings back each provider's colour.
-  const vendorColors = document.createElement('label');
-  vendorColors.className = 'checkbox-label settings-item home-vendor-colors-setting';
-  const vendorColorsText = document.createElement('span');
-  vendorColorsText.className = 'settings-item-text';
-  const vendorColorsTitle = document.createElement('span');
-  vendorColorsTitle.className = 'settings-item-title';
-  vendorColorsTitle.textContent = t('settings.home.vendorColors');
-  vendorColorsText.append(vendorColorsTitle);
-  const vendorColorsInput = document.createElement('input');
-  vendorColorsInput.id = 'homeVendorColorsInput';
-  vendorColorsInput.type = 'checkbox';
-  vendorColorsInput.checked = homeVendorColorsEnabled();
-  vendorColorsInput.addEventListener('change', () => void saveSettings({ homeVendorColors: vendorColorsInput.checked }));
-  vendorColors.append(vendorColorsText, vendorColorsInput);
-  wrap.append(vendorColors);
+  const appearanceToggle = (key, titleKey, inputId, checked) => {
+    const row = document.createElement('div');
+    row.className = 'checkbox-label settings-item home-appearance-setting';
+    const input = document.createElement('input');
+    input.id = inputId;
+    input.type = 'checkbox';
+    input.checked = checked;
+    input.addEventListener('change', () => void saveSettings({ [key]: input.checked }));
+    const text = document.createElement('span');
+    text.className = 'settings-item-text';
+    const title = document.createElement('label');
+    title.className = 'settings-item-title';
+    title.htmlFor = inputId;
+    title.textContent = t(titleKey);
+    text.append(title);
+    row.append(text, input);
+    addRenderedSettingReset(row, text, title, key);
+    wrap.append(row);
+  };
+  appearanceToggle('homeVendorColors', 'settings.home.vendorColors', 'homeVendorColorsInput', homeVendorColorsEnabled());
   return wrap;
 }
 

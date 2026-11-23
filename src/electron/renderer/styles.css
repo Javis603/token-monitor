@@ -4549,6 +4549,24 @@ html.is-windows .settings-panel select option {
   scrollbar-width: none;
 }
 .home-panel::-webkit-scrollbar { width: 0; height: 0; }
+/* Content scrolled under the hero fades out instead of being cut mid-line.
+   The fade grows with the first few pixels of scroll, so the page at rest
+   keeps its first heading fully drawn. */
+@property --home-scroll-fade {
+  syntax: '<length>';
+  inherits: false;
+  initial-value: 0px;
+}
+@keyframes home-scroll-fade {
+  to { --home-scroll-fade: 14px; }
+}
+.home-panel {
+  -webkit-mask-image: linear-gradient(to bottom, transparent, #000 var(--home-scroll-fade));
+  mask-image: linear-gradient(to bottom, transparent, #000 var(--home-scroll-fade));
+  animation: home-scroll-fade linear both;
+  animation-timeline: scroll(self);
+  animation-range: 0 24px;
+}
 .home-module {
   display: grid;
   width: 100%;
@@ -4731,56 +4749,15 @@ html.is-windows .settings-panel select option {
   grid-template-columns: 10px minmax(0, 1fr) minmax(42px, auto);
   column-gap: 8px;
 }
-/* One stacked bar per split module: rounded segments, with a floor so a 3%
-   share still reads as a pill rather than a sliver. */
-/* One capsule cut into parts, as in the Notch breakdown: the bar rounds its
-   ends and clips; segments stay square with hairline cuts, so the split reads
-   as one whole rather than a row of beads, and a small share keeps its true
-   width. Same weight as the limit meters above. */
-.home-share-bar {
-  display: flex;
-  min-width: 0;
-  height: 5px;
-  gap: 2px;
-  margin-bottom: 2px;
-  overflow: hidden;
-  border-radius: 2.5px;
+.home-device-row.has-share {
+  grid-template-columns: 10px minmax(0, 1fr) minmax(42px, auto) minmax(31px, auto);
 }
-.home-share-bar > span {
-  min-width: 2px;
-  flex-basis: 0;
-  opacity: 0.85;
+.home-device-row .home-list-aux {
+  text-align: right;
 }
-.home-share-bar > .home-share-ink {
-  background: rgba(var(--overlay-rgb), 0.55);
-}
-.home-share-bar > .home-share-rest {
-  background: rgba(var(--overlay-rgb), 0.1);
-  opacity: 1;
-}
-.home-share-legend {
-  display: flex;
-  min-width: 0;
-  flex-wrap: wrap;
-}
-.home-share-chip {
-  display: inline-flex;
-  min-width: 0;
-  max-width: 100%;
-  align-items: center;
-  gap: 5px;
-}
-.home-share-chip .home-list-mark { flex: 0 0 auto; }
-.home-list-mark.home-share-swatch {
-  width: 8px;
-  height: 8px;
-  border-radius: 2px;
-  box-shadow: none;
-}
-/* Hover reveals: a monochrome account, split or device strip shows its vendor
-   colour while hovered, and status colour still wins. With vendor colours on
-   these resolve to the colours already shown. No transition: a refresh
-   rebuilds the rows, and a fade would replay on every push. */
+/* Hover reveal: a monochrome limit account shows its vendor colour while
+   hovered, and status colour still wins. With vendor colours on this
+   resolves to the colour already shown. */
 .home-limit-track {
   transition: --home-limit-bar 200ms ease, --home-limit-tail 200ms ease;
 }
@@ -4794,208 +4771,15 @@ html.is-windows .settings-panel select option {
   --home-limit-bar: var(--home-vendor-color);
   --home-limit-tail: var(--home-vendor-color);
 }
-.home-share-scope:hover .home-share-bar > span[data-share-index] {
-  background: var(--home-vendor-color) !important;
-}
-.home-share-scope:hover [data-share-index] > .home-share-swatch {
-  background: var(--home-vendor-color) !important;
-}
-.home-module-device:hover .home-device-tile::before {
-  /* The tile sets its own colour inline, so hover paints the edge directly. */
-  background: var(--home-vendor-color);
-}
-/* Continuous hover targets, so a pointer moving through a list never drops
-   into a gap where nothing is hovered (which flashed every row back on): rows
-   and label chips space themselves with padding instead of gaps, and each
-   segment's hit area reaches over the bar's gaps and above and below it. */
-.home-module-body.home-share-scope {
-  row-gap: 0;
-}
-.home-share-scope > .home-share-bar {
-  margin-bottom: 6px;
-}
-.home-share-scope > .home-list-row {
-  padding: 3px 0;
-}
-.home-share-chip {
-  padding: 2px 14px 2px 0;
-}
-/* As in the Notch breakdown: only the list is a hover target and the bar
-   answers it, so a pointer passing over the bar changes nothing. A hovered
-   row lights its segment; the rest step back with a short fade. */
-.home-share-bar > span[data-share-index] {
-  pointer-events: none;
-  transition: opacity 250ms ease, filter 250ms ease, background-color 200ms ease;
-}
-.home-share-scope > .home-list-row[data-share-index],
-.home-share-legend > [data-share-index] {
-  transition: opacity 200ms ease;
-}
-.home-share-scope:has([data-share-index]:hover) > .home-list-row[data-share-index],
-.home-share-scope:has([data-share-index]:hover) .home-share-legend > [data-share-index] {
-  opacity: 0.45;
-}
-.home-share-scope:has([data-share-index]:hover) .home-share-bar > span[data-share-index] {
-  opacity: 0.28;
-}
-.home-share-scope:has([data-share-index="0"]:hover) [data-share-index="0"],
-.home-share-scope:has([data-share-index="1"]:hover) [data-share-index="1"],
-.home-share-scope:has([data-share-index="2"]:hover) [data-share-index="2"],
-.home-share-scope:has([data-share-index="3"]:hover) [data-share-index="3"],
-.home-share-scope:has([data-share-index="4"]:hover) [data-share-index="4"],
-.home-share-scope:has([data-share-index="5"]:hover) [data-share-index="5"],
-.home-share-scope:has([data-share-index="6"]:hover) [data-share-index="6"],
-.home-share-scope:has([data-share-index="7"]:hover) [data-share-index="7"],
-.home-share-scope:has([data-share-index="8"]:hover) [data-share-index="8"],
-.home-share-scope:has([data-share-index="9"]:hover) [data-share-index="9"],
-.home-share-scope:has([data-share-index="10"]:hover) [data-share-index="10"],
-.home-share-scope:has([data-share-index="11"]:hover) [data-share-index="11"],
-.home-share-scope:has([data-share-index="12"]:hover) [data-share-index="12"],
-.home-share-scope:has([data-share-index="13"]:hover) [data-share-index="13"],
-.home-share-scope:has([data-share-index="14"]:hover) [data-share-index="14"],
-.home-share-scope:has([data-share-index="15"]:hover) [data-share-index="15"],
-.home-share-scope:has([data-share-index="16"]:hover) [data-share-index="16"],
-.home-share-scope:has([data-share-index="17"]:hover) [data-share-index="17"],
-.home-share-scope:has([data-share-index="18"]:hover) [data-share-index="18"],
-.home-share-scope:has([data-share-index="19"]:hover) [data-share-index="19"],
-.home-share-scope:has([data-share-index="20"]:hover) [data-share-index="20"],
-.home-share-scope:has([data-share-index="21"]:hover) [data-share-index="21"],
-.home-share-scope:has([data-share-index="22"]:hover) [data-share-index="22"],
-.home-share-scope:has([data-share-index="23"]:hover) [data-share-index="23"],
-.home-share-scope:has([data-share-index="24"]:hover) [data-share-index="24"],
-.home-share-scope:has([data-share-index="25"]:hover) [data-share-index="25"],
-.home-share-scope:has([data-share-index="26"]:hover) [data-share-index="26"],
-.home-share-scope:has([data-share-index="27"]:hover) [data-share-index="27"],
-.home-share-scope:has([data-share-index="28"]:hover) [data-share-index="28"],
-.home-share-scope:has([data-share-index="29"]:hover) [data-share-index="29"],
-.home-share-scope:has([data-share-index="30"]:hover) [data-share-index="30"],
-.home-share-scope:has([data-share-index="31"]:hover) [data-share-index="31"],
-.home-share-scope:has([data-share-index="32"]:hover) [data-share-index="32"],
-.home-share-scope:has([data-share-index="33"]:hover) [data-share-index="33"],
-.home-share-scope:has([data-share-index="34"]:hover) [data-share-index="34"],
-.home-share-scope:has([data-share-index="35"]:hover) [data-share-index="35"],
-.home-share-scope:has([data-share-index="36"]:hover) [data-share-index="36"],
-.home-share-scope:has([data-share-index="37"]:hover) [data-share-index="37"],
-.home-share-scope:has([data-share-index="38"]:hover) [data-share-index="38"],
-.home-share-scope:has([data-share-index="39"]:hover) [data-share-index="39"],
-.home-share-scope:has([data-share-index="40"]:hover) [data-share-index="40"],
-.home-share-scope:has([data-share-index="41"]:hover) [data-share-index="41"],
-.home-share-scope:has([data-share-index="42"]:hover) [data-share-index="42"],
-.home-share-scope:has([data-share-index="43"]:hover) [data-share-index="43"],
-.home-share-scope:has([data-share-index="44"]:hover) [data-share-index="44"],
-.home-share-scope:has([data-share-index="45"]:hover) [data-share-index="45"],
-.home-share-scope:has([data-share-index="46"]:hover) [data-share-index="46"],
-.home-share-scope:has([data-share-index="47"]:hover) [data-share-index="47"],
-.home-share-scope:has([data-share-index="48"]:hover) [data-share-index="48"],
-.home-share-scope:has([data-share-index="49"]:hover) [data-share-index="49"] {
-  /* Outranks the more specific step-back rules above for the lit pair. */
-  opacity: 1 !important;
-}
-
-:root[data-reduce-motion="on"] .home-share-scope [data-share-index],
 :root[data-reduce-motion="on"] .home-limit-track,
 :root[data-reduce-motion="on"] .home-limit-meter {
   transition: none;
 }
 @media (prefers-reduced-motion: reduce) {
-  :root:not([data-reduce-motion="off"]) .home-share-scope [data-share-index],
   :root:not([data-reduce-motion="off"]) .home-limit-track,
   :root:not([data-reduce-motion="off"]) .home-limit-meter {
     transition: none;
   }
-}
-.home-module-device .home-module-body { container-type: inline-size; }
-/* Balanced rows: never a lone tile beside empty slots. Four sit 2×2 until the
-   widget is wide enough for one row of four. */
-.home-device-grid {
-  --home-device-columns: 3;
-  display: grid;
-  min-width: 0;
-  grid-template-columns: repeat(var(--home-device-columns), minmax(0, 1fr));
-  gap: 6px;
-}
-.home-device-grid[data-count="1"] { --home-device-columns: 1; }
-.home-device-grid[data-count="1"] .home-device-tile {
-  /* The name gives way first, so a long one never pushes the amount out. */
-  grid-template-columns: minmax(0, 1fr) auto auto;
-  align-items: center;
-  gap: 8px;
-}
-.home-device-grid[data-count="1"] .home-device-tile-sub { order: 1; }
-.home-device-grid[data-count="1"] .home-device-tile-value {
-  order: 2;
-  font-size: 0.6875rem;
-  text-align: right;
-}
-/* One line reads as a list row, so it takes list-row type, not tile type. */
-.home-device-grid[data-count="1"] .home-device-tile-head .home-list-name {
-  color: var(--text);
-  font-size: 0.6875rem;
-}
-.home-device-grid[data-count="1"] .home-device-tile-sub:empty { display: none; }
-.home-device-grid[data-count="1"] .home-device-tile-head { min-width: 0; }
-.home-device-grid[data-count="2"],
-.home-device-grid[data-count="4"] { --home-device-columns: 2; }
-@container (min-width: 400px) {
-  .home-device-grid[data-count="4"],
-  .home-device-grid[data-count="7"],
-  .home-device-grid[data-count="8"] { --home-device-columns: 4; }
-}
-.home-device-tile {
-  position: relative;
-  display: grid;
-  min-width: 0;
-  gap: 5px;
-  padding: 9px 9px 8px;
-  overflow: hidden;
-  border: 1px solid rgba(var(--line-rgb), 0.08);
-  border-radius: 8px;
-  background: rgba(var(--overlay-rgb), 0.025);
-}
-.home-device-tile::before {
-  position: absolute;
-  top: 0;
-  right: 0;
-  left: 0;
-  height: 2px;
-  background: var(--home-device-color);
-  content: '';
-  opacity: 0.85;
-}
-.home-device-tile.is-local {
-  border-color: rgba(var(--line-rgb), 0.16);
-}
-.home-device-tile.is-stale .home-device-tile-value,
-.home-device-tile.is-stale .home-list-name {
-  color: var(--readable-muted);
-}
-.home-device-tile-head {
-  display: flex;
-  min-width: 0;
-  align-items: center;
-  gap: 6px;
-}
-.home-device-tile-head .home-list-mark { flex: 0 0 auto; }
-.home-device-tile-head .home-list-name {
-  min-width: 0;
-  color: var(--readable-muted);
-  font-size: 0.625rem;
-}
-.home-device-tile .home-device-tile-value {
-  font-size: 0.875rem;
-  text-align: left;
-}
-.home-device-tile-sub {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 6px;
-  overflow: hidden;
-  color: var(--readable-muted);
-  font-size: 0.5625rem;
-  font-variant-numeric: tabular-nums;
-  text-overflow: ellipsis;
-  white-space: nowrap;
 }
 .home-session-row {
   grid-template-columns: 10px 10px minmax(0, 1fr) minmax(42px, auto);
@@ -5355,7 +5139,7 @@ html.is-windows .settings-panel select option {
   gap: 6px;
 }
 .home-limit-window.is-untouched .home-limit-track {
-  opacity: 0.45;
+  opacity: 0.72;
 }
 .home-limit-window.is-untouched > .home-list-value {
   color: var(--readable-muted);

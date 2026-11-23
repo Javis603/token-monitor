@@ -171,8 +171,8 @@ test('Home device rows keep only the local badge and mute stale devices without 
   assert.match(match[1], /badge\.textContent = 'you'/);
   assert.match(match[1], /if \(row\.isLocal\)/);
   assert.match(match[1], /item\.classList\.add\('is-stale'\)/);
-  assert.match(match[1], /foot\.append\(badge\)/);
-  assert.match(match[1], /item\.append\(head, value, foot\)/);
+  assert.match(match[1], /label\.append\(badge\)/);
+  assert.match(match[1], /if \(allRows\.length > 1\) \{[\s\S]*?item\.append\(share\)/, 'a share column appears only beside another device');
   assert.doesNotMatch(match[1], /textContent = t\('home\.staleDevice'\)/, 'a stale tile is muted, never labelled');
   assert.doesNotMatch(match[1], /t\('home\.localDevice'\)/);
   assert.doesNotMatch(match[1], /badge\.textContent = row\.isLocal \? t\('home\.localDevice'\) : t\('home\.staleDevice'\)/);

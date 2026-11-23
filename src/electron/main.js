@@ -823,6 +823,7 @@ function resettableSettingsDefaults() {
     'language', 'startAtLogin', 'automaticAppUpdates', 'discordRpcEnabled',
     'periodMonthMode', 'currency', 'heatmapMetric', 'homeActiveDaysWindow', 'showExactHomeTrendTokens',
     'homeModuleCounts', 'homeLimitDisplayMode', 'showHomeLimitBars', 'showHomeLimitProviderNames', 'homeLimitAccountCount',
+    'homeVendorColors',
     'historyIntervalMs', 'sessionContextMetric', 'limitsHistoryOpenMode', 'modelRankingMetric', 'serviceStatusRefreshMs',
     'windowBehavior', 'keepAboveTaskbar', 'floatingBubbleTrigger', 'floatingBubbleContent',
     'hideAppIcon', 'trayContent', 'showTrayProviderBadge',
