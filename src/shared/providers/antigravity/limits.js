@@ -171,7 +171,7 @@ async function fetchAntigravityLimits(options = {}, deps = {}) {
 
   if (localEnabled && accounts.length === 0 && !scope) {
     try {
-      const reading = mapAntigravitySnapshot(await probeFn(deps), { nowMs, source: 'rpc' });
+      const reading = mapAntigravitySnapshot(await probeFn({ ...deps, probeTimeoutMs: 20000 }), { nowMs, source: 'rpc' });
       const removal = anonymousRpcRemoval(reading, options, deps);
       return removal ? [reading, removal] : reading;
     } catch (error) {
