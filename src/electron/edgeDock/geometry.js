@@ -580,11 +580,15 @@ function edgeDockPlacementForDrop({ workArea, pointer, metrics = EDGE_DOCK_METRI
   const edgeSnap = 24;
   const toTop = pointer.y - workArea.y;
   const toBottom = workArea.y + workArea.height - pointer.y;
-  // Reaching a side edge still turns the bar back into a side rail: only a drag
-  // that stays away from all three other edges holds the horizontal pose.
+  // A bar that is already horizontal keeps its orientation for the whole drag:
+  // approaching a side edge does not re-orient it mid-drag. Only releasing inside
+  // the side release band turns it back into a side rail, and only when the drop
+  // is not itself near the top or bottom edges, which keep their glue priority.
   const toLeft = pointer.x - workArea.x;
   const toRight = workArea.x + workArea.width - pointer.x;
-  const nearSideEdge = toLeft <= edgeSnap || toRight <= edgeSnap;
+  const nearSideEdge = horizontalNow
+    ? final && toTop > edgeSnap && toBottom > edgeSnap && (toLeft <= edgeSnap || toRight <= edgeSnap)
+    : toLeft <= edgeSnap || toRight <= edgeSnap;
   // Where the grab point puts the bar's left edge, for a row of the given padding.
   const rowOffset = (pad) => {
     const width = edgeDockRowBounds(workArea, cellKindsFrom(cellKinds, cellCount), metrics, pad, 0.5).width;
@@ -598,7 +602,7 @@ function edgeDockPlacementForDrop({ workArea, pointer, metrics = EDGE_DOCK_METRI
   // the hand. Only on release does a bar that ended up near an edge snap onto it,
   // which is what keeps a sideways slide from silently turning into a detach.
   const glueBand = Math.max(edgeSnap, Math.round(metrics.topThickness * 1.5));
-  if (horizontalNow && !nearSideEdge) {
+  if (horizontalNow && (!nearSideEdge || !final)) {
     // Against an edge it glues there; anywhere else it floats at the pointer's
     // height, still horizontal, so a drag up or down actually moves the bar.
     if (toTop <= edgeSnap) return { side: 'top', offset: rowOffset(shoulder), floatingX: null, floatingY: null };

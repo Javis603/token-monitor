@@ -137,6 +137,30 @@ test('dropping a glued bar keeps it glued while it slides along the edge', () =>
   assert.equal(slide({ x: 700, y: 690 }, true).side, 'bottom');
 });
 
+test('a horizontal bar dragged near a side edge keeps its orientation until release', () => {
+  const drop = (pointer, final) => edgeDockPlacementForDrop({
+    workArea, pointer, metrics: EDGE_DOCK_METRICS, grabOffsetX: 200, grabOffsetY: 40,
+    cellKinds: kinds(6), currentSide: 'top', final
+  });
+  // Mid-drag near the left or right edge the bar stays horizontal and floating.
+  for (const final of [false]) {
+    const nearLeft = drop({ x: 6, y: 300 }, final);
+    assert.equal(nearLeft.side, 'top');
+    assert.notEqual(nearLeft.floatingY, null);
+    const nearRight = drop({ x: workArea.x + workArea.width - 6, y: 300 }, final);
+    assert.equal(nearRight.side, 'top');
+    assert.notEqual(nearRight.floatingY, null);
+  }
+  // Released inside the side band away from the horizontal edges it docks as a rail.
+  const parkedLeft = drop({ x: 8, y: 300 }, true);
+  assert.equal(parkedLeft.side, 'left');
+  const parkedRight = drop({ x: workArea.x + workArea.width - 8, y: 300 }, true);
+  assert.equal(parkedRight.side, 'right');
+  // A corner drop keeps the horizontal glue: top/bottom edges win over the side band.
+  const corner = drop({ x: 6, y: 8 }, true);
+  assert.equal(corner.side, 'top');
+});
+
 test('a dragged side rail turns into a bar when it reaches the top or bottom edge', () => {
   const drop = (pointer) => edgeDockPlacementForDrop({
     workArea, pointer, metrics: EDGE_DOCK_METRICS, grabOffsetX: 30, grabOffsetY: 30,
