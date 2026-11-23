@@ -3423,6 +3423,15 @@ button.tool-preference-main:focus-visible {
   font-weight: 600;
   line-height: 1;
 }
+/* A plugin's own mark: the slot keeps the shared size, the mark draws itself. */
+.settings-panel .settings-list-plugin-icon {
+  display: inline-flex;
+  background: none;
+}
+.settings-panel .settings-list-plugin-icon img {
+  width: 100%;
+  height: 100%;
+}
 /* Enabled rows above, the rest in a collapsed group (see
    renderSettingsListGroups in app.js). */
 .settings-list-group-label {
