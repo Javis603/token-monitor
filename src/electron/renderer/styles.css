@@ -4419,6 +4419,9 @@ html.is-windows .settings-panel select option {
   margin-inline-end: -4px;
   padding: 0;
 }
+.session-sort-toggle:not(.hidden) + .session-search-toggle {
+  margin-inline-start: -4px;
+}
 .session-sort-toggle:hover,
 .session-sort-toggle:active,
 .session-search-toggle:hover,
