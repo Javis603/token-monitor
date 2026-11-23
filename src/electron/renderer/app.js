@@ -10618,7 +10618,7 @@ function setupSettingResets() {
   for (const heading of els.settingsPanel.querySelectorAll('[data-reset-setting]')) {
     const key = heading.dataset.resetSetting;
     if (defaults[key] === undefined) continue;
-    const row = heading.closest('.settings-item, .display-settings-hero');
+    const row = heading.closest('.settings-item');
     const title = heading.querySelector('.settings-item-title');
     let read = () => state.settings[key];
     let save = value => saveSettings({ [key]: value });

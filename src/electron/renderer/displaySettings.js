@@ -255,12 +255,6 @@
       heroText.append(heroTitleRow, heroSub);
 
       const originalRow = input.closest('.settings-item') || input.closest('label');
-      const resetHeading = originalRow?.querySelector('[data-reset-setting]');
-      if (resetHeading) {
-        heroTitleRow.dataset.resetSetting = resetHeading.dataset.resetSetting;
-        heroTitle.classList.add('settings-item-title');
-        delete resetHeading.dataset.resetSetting;
-      }
       const switchLabel = make('label', 'checkbox-label display-settings-hero-switch');
       switchLabel.append(input);
       if (originalRow) originalRow.hidden = true;

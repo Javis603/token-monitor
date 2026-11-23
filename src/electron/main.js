@@ -817,18 +817,18 @@ function resettableSettingsDefaults() {
     'periodMonthMode', 'currency', 'heatmapMetric', 'homeActiveDaysWindow', 'showExactHomeTrendTokens',
     'homeModuleCounts', 'homeLimitDisplayMode', 'showHomeLimitBars', 'showHomeLimitProviderNames', 'homeLimitAccountCount',
     'historyIntervalMs', 'sessionContextMetric', 'limitsHistoryOpenMode', 'modelRankingMetric', 'serviceStatusRefreshMs',
-    'windowBehavior', 'keepAboveTaskbar', 'floatingBubbleEnabled', 'floatingBubbleTrigger', 'floatingBubbleContent',
-    'showTrayIcon', 'trayMode', 'hideAppIcon', 'trayContent', 'showTrayProviderBadge',
-    'edgeDockEnabled', 'edgeDockMode', 'edgeDockTriggerRange', 'edgeDockSide', 'edgeDockSize', 'edgeDockCustomScale',
+    'windowBehavior', 'keepAboveTaskbar', 'floatingBubbleTrigger', 'floatingBubbleContent',
+    'hideAppIcon', 'trayContent', 'showTrayProviderBadge',
+    'edgeDockMode', 'edgeDockTriggerRange', 'edgeDockSide', 'edgeDockSize', 'edgeDockCustomScale',
     'edgeDockBubbleSize', 'edgeDockBubbleCustomScale', 'edgeDockMacBackdrop', 'edgeDockWindowsBackdrop',
     'edgeDockRunningIndicatorEnabled', 'edgeDockWarnColors', 'edgeDockHaptic',
-    'notchEnabled', 'notchHoverAction', 'notchShape', 'notchSize', 'notchCustomScale',
+    'notchHoverAction', 'notchShape', 'notchSize', 'notchCustomScale',
     'notchStyle', 'notchProgressiveBlur', 'notchSummaryEnabled', 'notchSummaryMode',
     'notchHideSummaryInFullScreen', 'notchRunningIndicatorEnabled', 'notchWarnColors', 'notchHaptic', 'notchSwipeGestures',
     'systemGlass', 'windowsBackdrop', 'macBackdrop', 'textSize', 'reduceMotion', 'tokenNumberAnimation',
     'showCompactTotalTokens', 'compactTokenUnits', 'showLiveTokenRate', 'liveTokenRateScope',
     'settingsInTitlebar', 'showLiveDot', 'showToolIcons', 'titleIconOnly',
-    'collectionMode', 'wslScanEnabled', 'exportAutoEnabled', 'exportIntervalMs',
+    'collectionMode', 'exportIntervalMs',
     'showLimitSource', 'showLimitUsed', 'workbuddyQuotaTotalEnabled', 'syncUploadIntervalMs'
   ];
   return {

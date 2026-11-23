@@ -826,8 +826,6 @@ body.is-windows.floating-bubble-collapsed-right .floating-bubble-tab {
   gap: 2px;
 }
 .settings-panel :is([data-reset-setting], [data-inspector-reset]) > label.settings-item-title { color: var(--text); }
-.settings-item-heading[data-reset-setting] > .settings-reset-button { order: 1; }
-#exportAutoStatus { order: 2; }
 .settings-panel .settings-reset-button {
   display: grid;
   place-items: center;
