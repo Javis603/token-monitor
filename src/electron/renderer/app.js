@@ -2365,9 +2365,8 @@ function animateBreakdownFrom(snapshot, { duration = 420, synchronized = false }
   }
   let enteringIndex = 0;
   for (const row of motionRows) {
-    // An unavailable native session value must stay a semantic label. The
-    // ordinary row-number tween formats its zero placeholder as "0", which
-    // would turn unknown data into a false numeric reading after every render.
+    // Show the zero placeholder immediately. Tweening from a previous reading
+    // would briefly show token values we don't have for this session.
     if (row.dataset.tokenDataUnavailable === 'true') {
       cancelRowNumberAnimation(row.querySelector('.row-value'));
       continue;
@@ -3068,26 +3067,26 @@ function updateRow(row, { name, subtitle, subtitleIdentity, subagentCountLabel, 
   setHoverMarqueeText(detailEl, shownDetail);
   detailEl.classList.toggle('hidden', !shownDetail);
   const valueEl = row.querySelector('.row-value');
+  const tokenLabel = formatNumber(value);
   if (tokenDataUnavailable === true) {
     row.dataset.tokenDataUnavailable = 'true';
     cancelRowNumberAnimation(valueEl);
-    valueEl.textContent = t('detailTokenUnavailable') || 'Unavailable';
+    valueEl.textContent = tokenLabel;
   } else {
     delete row.dataset.tokenDataUnavailable;
     // Metadata-only updates must not replace the glyphs of a matching roll.
     // Changed readings are restarted from the captured visual value below.
     if (rowNumberAnimations.get(valueEl)?.target !== Number(value)) {
       cancelRowNumberAnimation(valueEl);
-      valueEl.textContent = formatNumber(value);
+      valueEl.textContent = tokenLabel;
     }
   }
   valueEl.dataset.motionValue = String(Number(value) || 0);
   row.dataset.motionValue = String(Number(value) || 0);
   const costEl = row.querySelector('.row-cost');
   const costLabelText = formatCost(cost || 0, unpricedTokens);
-  costEl.textContent = tokenDataUnavailable === true ? ''
-    : unpricedTokens > 0 ? (cost > 0 ? `${formatCost(cost)} + ?` : '—') : costLabelText;
-  costEl.setAttribute('aria-label', tokenDataUnavailable === true ? '' : costLabelText);
+  costEl.textContent = unpricedTokens > 0 ? (cost > 0 ? `${formatCost(cost)} + ?` : '—') : costLabelText;
+  costEl.setAttribute('aria-label', costLabelText);
   // The row builder already applied the shared gate (recent enough to have a
   // reading), so this draws whatever arrived rather than re-deciding from
   // `running` - that second gate is exactly what made the dock card and this
@@ -3159,10 +3158,7 @@ function updateRow(row, { name, subtitle, subtitleIdentity, subagentCountLabel, 
   }
   const rowHead = row.querySelector('.row-head');
   const hasAccordion = row.classList.contains('has-accordion');
-  const tokenLabel = tokenDataUnavailable === true
-    ? (t('detailTokenUnavailable') || 'Unavailable')
-    : formatNumber(value);
-  const costLabel = tokenDataUnavailable === true ? '' : `, ${t('dashboard.stat.totalCost')}: ${formatCost(cost || 0, unpricedTokens)}`;
+  const costLabel = `, ${t('dashboard.stat.totalCost')}: ${costLabelText}`;
   sessionRowsApi.applyBreakdownRowSemantics(row, rowHead, {
     interactive,
     hasAccordion,
