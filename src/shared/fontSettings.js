@@ -9,6 +9,7 @@
   const DEFAULT_DASHBOARD_INTERFACE_FONT = '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif';
   const DEFAULT_DISPLAY_FONT = '-apple-system, BlinkMacSystemFont, "SF Pro Display", "Segoe UI", sans-serif';
   const SYSTEM_UI_FONT = 'system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif';
+  const WINDOWS_SIMPLIFIED_HAN_FONTS = '"Token Monitor Noto Sans SC", "Token Monitor YaHei UI"';
   const FONT_PRESETS = Object.freeze({
     app: '',
     system: SYSTEM_UI_FONT,
@@ -38,11 +39,26 @@
     return normalized;
   }
 
+  function windowsHanFontPrefix({ platform, locale, preferredLanguages }) {
+    if (platform !== 'win32') return '';
+    if (locale === 'zh-CN') return `${WINDOWS_SIMPLIFIED_HAN_FONTS}, `;
+    if (locale !== 'zh-TW') return '';
+    // The translation key is shared by Hong Kong and Taiwan. Preserve the
+    // first explicit Traditional Chinese region from the system's preferences.
+    const region = preferredLanguages?.find(tag => /^zh(?:-hant)?-(hk|tw)(?:-|$)/i.test(tag));
+    const variant = /^zh(?:-hant)?-hk(?:-|$)/i.test(region) ? 'HK' : 'TC';
+    return `"Token Monitor Noto Sans ${variant}", "Token Monitor JhengHei UI", `;
+  }
+
   function resolveEffectiveFontSettings(settings = {}, options = {}) {
     const source = settings && typeof settings === 'object' ? settings : {};
     const interfaceDefault = normalizeFontFamily(options.interfaceDefault) || DEFAULT_INTERFACE_FONT;
-    const interfaceFont = normalizeFontFamily(source.interfaceFontFamily) || interfaceDefault;
-    const displayFont = normalizeFontFamily(source.displayFontFamily) || interfaceFont;
+    const hanPrefix = windowsHanFontPrefix(options);
+    const interfaceFont = normalizeFontFamily(source.interfaceFontFamily) || hanPrefix + interfaceDefault;
+    const displayPreference = normalizeFontFamily(source.displayFontFamily);
+    const displayFont = displayPreference === DEFAULT_DISPLAY_FONT
+      ? hanPrefix + DEFAULT_DISPLAY_FONT
+      : displayPreference || interfaceFont;
     return { interfaceFont, displayFont };
   }
 

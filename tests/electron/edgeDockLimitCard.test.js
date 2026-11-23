@@ -636,6 +636,34 @@ test('Notion rolling and monthly allowances render in both display modes and hid
   assert.equal(JSON.stringify(provider), before);
 });
 
+test('Notion personal credit pools show their own amounts, percentages and resets', () => {
+  const now = Date.now();
+  const provider = normalizeLimitProvider({
+    provider: 'notion', status: 'ok', source: 'web',
+    windows: [
+      { kind: 'billing', label: 'Standard', used: 150.25, limit: 1500, usedPercent: 150.25 / 1500 * 100,
+        resetsAt: new Date(now + 86400000).toISOString() },
+      { kind: 'billing', label: 'Select', used: 0, limit: 500, usedPercent: 0,
+        resetsAt: new Date(now + 2 * 86400000).toISOString() }
+    ]
+  });
+  const usedView = dockView({ showLimitUsed: true });
+  const usedCard = usedView.renderProviderWindows(provider, '#888888');
+  assert.deepEqual(windowTitles(usedCard), ['Standard', 'Select']);
+  assert.deepEqual(usedCard.children.map((row) => row.find('limit-detail')?.textContent), ['150.25/1500', '0/500']);
+  assert.match(usedCard.children[0].text, /10% used/);
+  assert.match(usedCard.children[1].text, /0% used/);
+  assert.deepEqual(usedCard.children.map((row) => row.dataset.limitResetAt), provider.windows.map((window) => window.resetsAt));
+  assert.ok(usedCard.children.every((row) => row.find('limit-reset').text));
+
+  const remainingCard = dockView().renderProviderWindows(provider, '#888888');
+  assert.deepEqual(remainingCard.children.map((row) => row.find('limit-detail')?.textContent), ['1349.75/1500', '500/500']);
+  const select = usedView.limitProviderUsageItems([provider]).find((item) => item.label === 'Select');
+  assert.ok(select);
+  const filteredView = dockView({ limitProviderHiddenItems: { notion: [select.id] } });
+  assert.deepEqual(windowTitles(filteredView.renderProviderWindows(provider, '#888888')), ['Standard']);
+});
+
 test('Qoder personal and team credits render as independent, hideable windows', () => {
   const now = Date.now();
   const provider = normalizeLimitProvider({

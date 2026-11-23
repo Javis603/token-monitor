@@ -163,7 +163,7 @@ test('the signal keeps a healthy keyless reading from a separate source lane', (
 });
 
 // No device advertises multiAccountProviders: each has only one credential.
-for (const provider of ['deepseek', 'factory']) {
+for (const provider of ['deepseek', 'factory', 'zaiteam']) {
   const portableRow = (key, extra = {}) => row(key, { provider, ...extra });
   test(`portable accounts: ${provider} keeps distinct single-account devices and drops a keyless hint`, () => {
     const result = aggregateLimits([

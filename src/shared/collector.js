@@ -738,6 +738,7 @@ function propagateTodayProjects(today, periods, titleMetadata = {}) {
       // old name until the hourly full scan. An authoritative removal clears
       // the anchor; a metadata miss or transient reader failure keeps it.
       if (session.title) target.title = session.title;
+      else if (titleMetadata.scanTitleClears?.has(key)) delete target.title;
       else if (titleMetadata.invalidatedTitleKeys?.has(key) && target.title === titleMetadata.t3Titles?.[key]) delete target.title;
       if (session.sessionKind && !target.sessionKind) target.sessionKind = session.sessionKind;
       // Parent links are resolved per period: a parent's first rollout can fall
@@ -1018,6 +1019,7 @@ async function collectUsageOnce(options) {
     terminationOptions: options.subprocessTerminationOptions,
     onTerminationUnconfirmed: () => reportTerminationUnconfirmed('tokscale-scan')
   }));
+  const scanTitleClears = new Set();
   const runTokscaleFn = async (input) => {
     const includesCursor = cursorSnapshot && !input.flags.includes('--home')
       && normalizeClientsCsv(input.clients).split(',').includes('cursor');
@@ -1026,6 +1028,13 @@ async function collectUsageOnce(options) {
     const json = scanInput.clients ? await runTokscaleScan({ ...scanInput, timeZone: periodWindows.timeZone }) : { entries: [] };
     assertCollectionCalendar();
     applyTokscaleSessionMetadata(json, { resolveProjects: projectsEnabled });
+    if (input.flags.includes('--today')) {
+      for (const session of Array.isArray(json?.sessions) ? json.sessions : []) {
+        if (session?.client === 'pi' && session.sessionId && session.title === '') {
+          scanTitleClears.add(`pi:${session.sessionId}`);
+        }
+      }
+    }
     if (!includesCursor) return json;
     const period = input.flags.includes('--today') ? 'today' : input.flags.includes('--month') ? 'month' : 'allTime';
     const combined = { native: json };
@@ -1245,7 +1254,7 @@ async function collectUsageOnce(options) {
       if (upgradeIdentities) {
         applySessionIdentities({ month, allTime }, options.homeDir || os.homedir(), { ...localSessionMetadataDeps, deferT3SessionParents: true });
       }
-      propagateTodayProjects(today, { month, allTime }, { ...localSessionMetadataDeps, t3Titles: anchor.t3Titles });
+      propagateTodayProjects(today, { month, allTime }, { ...localSessionMetadataDeps, t3Titles: anchor.t3Titles, scanTitleClears });
       // A delegated child may be new today while its idle parent exists only in
       // the broader anchor. Resolve app links without re-reading transcripts.
       const targets = upgradeIdentities

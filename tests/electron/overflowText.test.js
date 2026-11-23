@@ -577,9 +577,17 @@ test('actual shared row rendering keeps group availability and binds Auto Review
   const [unavailable] = rowsApi.groupSessionRows(rowsApi.sessionRowsForPeriod({ sessions: {} }, {
     now, nativeSessions: { new: native, other: { ...native, sessionId: 'other' } }
   }));
+  const pendingRow = makeRow();
+  context.update(pendingRow, unavailable.groupRows[0]);
+  assert.equal(pendingRow.querySelector('.row-value').textContent, '0');
+  assert.equal(pendingRow.querySelector('.row-cost').textContent, '0');
   context.update(row, unavailable);
   assert.equal(row.dataset.tokenDataUnavailable, 'true');
-  assert.equal(row.querySelector('.row-cost').textContent, '');
+  assert.equal(row.querySelector('.row-value').textContent, '0');
+  assert.equal(row.querySelector('.row-cost').textContent, '0');
+  context.update(row, group);
+  assert.equal(row.querySelector('.row-value').textContent, '500');
+  assert.equal(row.querySelector('.row-cost').textContent, '2');
   for (const titled of [true, false]) {
     const [review] = rowsApi.sessionRowsForPeriod({ sessions: { review: { ...accounting,
       sessionId: 'review', sessionKind: 'background-review', title: titled ? 'Review' : '', models: { a: 300, b: 200 }

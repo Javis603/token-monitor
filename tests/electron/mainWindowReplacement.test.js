@@ -35,6 +35,7 @@ function fixture(state = {}) {
     process: { platform: 'win32' }, mainWindow: old, settings: {}, floatingBubbleState: { collapsed: false }, creations,
     mainWindowChrome: { collapsedFloatingBubble: false }, mainWindowReplacementEpoch: 0,
     mainWindowReplacementTask: Promise.resolve(),
+    screenUiSuspended: false,
     captureRetainedWindowState: async () => {}, restoreRetainedWindowState: async () => {},
     windowsBackdropFallback: () => false,
     stopFloatingBubbleAutoCollapseTimer() {}, displayForBounds: () => null,

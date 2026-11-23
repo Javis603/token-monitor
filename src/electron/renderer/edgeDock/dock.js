@@ -230,7 +230,7 @@ function applyAppearance(payload) {
   }
   const vendors = themePresetsApi.mergeVendorColors(BRAND_VENDOR_COLORS, appearance.vendorColors);
   window.TokenMonitorUsageCharts.applyVendorColors(vendors);
-  const { interfaceFont, displayFont } = fontSettingsApi.resolveEffectiveFontSettings(appearance);
+  const { interfaceFont, displayFont } = fontSettingsApi.resolveEffectiveFontSettings(appearance, appearance.fontContext);
   style.setProperty('--ui-font', interfaceFont);
   style.setProperty('--display-font', displayFont);
 
@@ -244,7 +244,7 @@ function applyAppearance(payload) {
   if (reduceMotion) settleDockMotions();
   pluginHost?.refreshMotion();
 
-  state.locale = i18n.resolveLocale(appearance.language, navigator.languages);
+  state.locale = appearance.fontContext?.locale || i18n.resolveLocale(appearance.language, navigator.languages);
   docEl.lang = state.locale;
   if (appearance.currencyRatesEffective) currencyApi.configureRates(appearance.currencyRatesEffective);
 }
@@ -727,7 +727,7 @@ function ringNode(remainingPercent, color, mark) {
   // Chromium interpolates color-mix() filter colours near black. Supply legacy
   // RGBA so the hover shadow keeps the ring's colour throughout the transition.
   const glowColor = color === 'var(--text)' ? getComputedStyle(document.documentElement).getPropertyValue('--text') : color;
-  ring.style.setProperty('--ring-glow-color', colorWithAlpha(glowColor, 0.55));
+  ring.style.setProperty('--mark-glow-color', colorWithAlpha(glowColor, 0.55));
   const svg = document.createElementNS(SVG_NS, 'svg');
   svg.setAttribute('viewBox', '0 0 42 42');
   svg.setAttribute('aria-hidden', 'true');
@@ -2351,7 +2351,6 @@ let selfRepaintTimer = null;
 function scheduleSelfRepaint() {
   if (selfRepaintTimer) clearTimeout(selfRepaintTimer);
   selfRepaintTimer = null;
-  if (bridge.isSettingsPreview) return;
   const delay = selfRepaintDelayMs();
   // 0 means this surface has nothing to wake for: a rail with no sessions expiry, or
   // the peek handle. Leaving the timer unarmed is what keeps the rail push-driven.

@@ -24,8 +24,7 @@
     return String(value || '').trim().toLowerCase();
   }
 
-  // Returns { key, tone } for a tag, or null when no tag should render
-  // (untracked clients, or an unknown status).
+  // Returns { key, tone } for a tracked client's collection status.
   function clientStatusTag(clientId, status) {
     if (status === 'missing') {
       return MISSING_LABELS[normalizeId(clientId)] || MISSING_DEFAULT;

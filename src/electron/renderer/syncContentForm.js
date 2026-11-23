@@ -75,6 +75,11 @@
         inputs[kind].disabled = busy || !status?.identity || (!inputs[kind].checked && (!available()
           || (kind === 'sessionTitles' && (!status.serverTitlesEnabled || status.pendingTitleCleanup))));
       }
+      // The collapsed row says how many optional kinds this device shares, once
+      // the Hub has reported them; local mode has nothing to count.
+      const enabledCount = shared && status ? KINDS.filter(kind => status.enabled?.[kind] === true).length : null;
+      el('Summary').hidden = enabledCount === null;
+      el('Summary').textContent = enabledCount === null ? '' : text('enabledCount', { count: enabledCount, total: KINDS.length });
       el('TitleUnavailable').hidden = !shared || !status || status.serverTitlesEnabled || !status.supported;
       el('TitleNote').hidden = !el('TitleUnavailable').hidden;
       el('TitleHelp').hidden = el('TitleUnavailable').hidden;
