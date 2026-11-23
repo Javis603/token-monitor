@@ -11,6 +11,7 @@ const CODINGPASS_ORIGIN = 'https://codingpass.ai';
 const STATE_URL = `${CODINGPASS_ORIGIN}/api/auth/state`;
 const USAGE_URL = `${CODINGPASS_ORIGIN}/api/app/usage`;
 const WALLET_URL = `${CODINGPASS_ORIGIN}/api/app/wallet`;
+const WALLET_TIMEOUT_MS = 4_000;
 // Every amount the console API returns is USD micro-units.
 const MICRO = 1_000_000;
 
@@ -66,13 +67,15 @@ function parseCodingpassUsage(usage) {
   if (!usage || typeof usage !== 'object') throw invalidResponse();
   const quota = usage.quota && typeof usage.quota === 'object' ? usage.quota : null;
   const live = usage.live && typeof usage.live === 'object' ? usage.live : null;
-  const layers = Array.isArray(live?.global) ? live.global : [];
-  const layer = (name) => layers.find((entry) => entry?.layer === name) || null;
+  const layers = Array.isArray(live?.global) ? live.global : null;
+  const models = Array.isArray(live?.models) ? live.models : null;
+  const layer = (name) => layers?.find((entry) => entry?.layer === name) || null;
   const specs = [
     { kind: 'session', layer: layer('global_5h'), used: quota?.used5hMicro, limit: quota?.limit5hMicro, windowMinutes: 5 * 60 },
     { kind: 'weekly', layer: layer('global_week'), used: quota?.usedWeekMicro, limit: quota?.limitWeekMicro, windowMinutes: 7 * 24 * 60 },
     { kind: 'billing', layer: layer('global_month'), used: quota?.usedMicro, limit: quota?.limitMicro, fallbackReset: quota?.monthEnd }
   ];
+  if (!layers && !models && !specs.some(({ limit }) => limit !== undefined)) throw invalidResponse();
   const windows = [];
   // Micro-units left in each plan window, for the per-model comparison below.
   const planRemaining = new Map();
@@ -103,7 +106,7 @@ function parseCodingpassUsage(usage) {
   // row is shown only while that model would run out before the plan window it
   // belongs to, which is when it is the limit the user actually hits.
   const modelLayers = { model_5h: specs[0], model_week: specs[1], model_month: specs[2] };
-  for (const model of Array.isArray(live?.models) ? live.models : []) {
+  for (const model of models || []) {
     const modelKey = typeof model?.modelKey === 'string' ? model.modelKey.trim() : '';
     if (!modelKey || modelKey.length > 96) continue;
     const label = typeof model.label === 'string' && model.label.trim() ? model.label.trim() : modelKey;
@@ -150,22 +153,23 @@ async function fetchCodingpassLimits(options = {}, deps = {}) {
   if (!cookie) return normalizeLimitProvider({ ...base, status: 'unavailable' });
   let identity = {};
   try {
-    const reading = await runWithProbeDeadline(async ({ signal }) => {
-      const call = async (url, init = {}) => {
-        if (signal.aborted) throw invalidResponse();
+    const reading = await runWithProbeDeadline(async ({ signal, deadlineMs }) => {
+      const startedAt = performance.now();
+      const call = async (url, body, requestSignal = signal) => {
+        requestSignal.throwIfAborted();
         const response = await (deps.fetch || fetch)(url, {
-          method: init.body === undefined ? 'GET' : 'POST',
+          method: body === undefined ? 'GET' : 'POST',
           credentials: 'omit',
           redirect: 'error',
-          signal,
+          signal: requestSignal,
           headers: {
             Accept: 'application/json',
             Cookie: cookie,
-            ...(init.body === undefined ? {} : { 'Content-Type': 'application/json', Origin: CODINGPASS_ORIGIN })
+            ...(body === undefined ? {} : { 'Content-Type': 'application/json', Origin: CODINGPASS_ORIGIN })
           },
-          ...(init.body === undefined ? {} : { body: init.body })
+          ...(body === undefined ? {} : { body })
         });
-        if (signal.aborted) throw invalidResponse();
+        requestSignal.throwIfAborted();
         if (response.status !== 200) {
           throw errorWithStatus(response.status === 401 ? 'unauthorized'
             : response.status === 429 ? 'sourceRateLimited' : 'unavailable', `CodingPass returned ${response.status}`);
@@ -178,10 +182,15 @@ async function fetchCodingpassLimits(options = {}, deps = {}) {
       const userId = typeof state?.userId === 'string' ? state.userId.trim() : '';
       if (!userId || userId.length > 128) throw errorWithStatus('unauthorized', 'CodingPass session expired');
       identity = { accountKey: hashKey('codingpass', userId) };
+      // End the optional wallet wait before the probe deadline even after a slow session check.
+      const remainingMs = deadlineMs - (performance.now() - startedAt);
+      const walletDeadlineMs = Math.min(WALLET_TIMEOUT_MS, Math.floor(remainingMs / 2));
       const [usage, wallet] = await Promise.all([
-        call(USAGE_URL, { body: JSON.stringify({ json: {} }) }),
-        // The wallet is optional detail; it never fails the reading.
-        call(WALLET_URL, { body: '{}' }).catch(() => null)
+        call(USAGE_URL, JSON.stringify({ json: {} })),
+        walletDeadlineMs > 0
+          ? runWithProbeDeadline(({ signal: walletSignal }) => call(WALLET_URL, '{}', walletSignal),
+            { signal, deadlineMs: walletDeadlineMs }).catch(() => null)
+          : null
       ]);
       const parsed = parseCodingpassUsage(unwrapRpc(usage));
       let balance;

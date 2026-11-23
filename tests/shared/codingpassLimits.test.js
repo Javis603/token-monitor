@@ -124,6 +124,70 @@ test('CodingPass converts the wallet by the console rate and survives a failed w
   }
 });
 
+test('CodingPass keeps fresh quota when the optional wallet body stalls', async (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  const d = deps();
+  const fetch = d.fetch;
+  const walletStarted = Promise.withResolvers();
+  d.fetch = (url, init) => {
+    if (!url.endsWith('/wallet')) return fetch(url, init);
+    return Promise.resolve({ status: 200, json: async () => {
+      walletStarted.resolve(init.signal);
+      return new Promise(() => {});
+    } });
+  };
+
+  const pending = fetchCodingpassLimits(options, d);
+  const walletSignal = await walletStarted.promise;
+  t.mock.timers.tick(4_000);
+  assert.equal(walletSignal.aborted, true);
+  const result = await pending;
+  assert.equal(result.status, 'ok');
+  assert.deepEqual(result.windows.map((w) => w.kind), ['session', 'weekly', 'billing']);
+  assert.equal(result.balance, null);
+  assert.equal(d.calls.find((c) => c.url.endsWith('/usage')).init.signal.aborted, false);
+});
+
+test('CodingPass respects caller cancellation while the optional wallet is pending', async () => {
+  const controller = new AbortController();
+  const d = deps();
+  const fetch = d.fetch;
+  const walletStarted = Promise.withResolvers();
+  d.fetch = async (url, init) => {
+    if (!url.endsWith('/wallet')) return fetch(url, init);
+    walletStarted.resolve(init.signal);
+    return new Promise(() => {});
+  };
+
+  const pending = fetchCodingpassLimits(options, { ...d, signal: controller.signal });
+  const walletSignal = await walletStarted.promise;
+  controller.abort();
+  const result = await pending;
+  assert.equal(walletSignal.aborted, true);
+  assert.equal(result.status, 'unavailable');
+  assert.deepEqual(result.windows, []);
+});
+
+test('CodingPass rejects usage without recognizable quota or live counters', async () => {
+  for (const json of [{}, { subscription: { planName: 'Plus' } }, { quota: [], live: [] }, { quota: {}, live: {} }]) {
+    const result = await fetchCodingpassLimits(options, deps({ usage: { json } }));
+    assert.equal(result.status, 'unavailable', JSON.stringify(json));
+    assert.deepEqual(result.windows, []);
+  }
+});
+
+test('CodingPass accepts quota-only or live-only usage with explicitly uncapped windows', async () => {
+  const uncappedUsage = [
+    { quota: { limit5hMicro: null, limitWeekMicro: 0 } },
+    { live: { global: [{ layer: 'global_5h', limitMicro: null }, { layer: 'global_week', limitMicro: 0 }] } }
+  ];
+  for (const json of uncappedUsage) {
+    const result = await fetchCodingpassLimits(options, deps({ usage: { json }, wallet: 500 }));
+    assert.equal(result.status, 'ok');
+    assert.deepEqual(result.windows, []);
+  }
+});
+
 test('CodingPass maps a logged-out session, auth failures and throttling without a false expiry', async () => {
   assert.equal((await fetchCodingpassLimits(options, deps({ state: { userId: null } }))).status, 'unauthorized');
   assert.equal((await fetchCodingpassLimits(options, deps({ state: 401 }))).status, 'unauthorized');
