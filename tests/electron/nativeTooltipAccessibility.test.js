@@ -237,7 +237,8 @@ test('Home sessions lead with live work, label both groups and keep finished one
   };
   const rows = render(['idle', 'running', 'ended', 'waiting']);
   assert.deepEqual(rows.map(row => row.dataset.key), ['running', 'waiting', 'idle', 'ended'], 'live sessions lead, each group keeps its order');
-  assert.deepEqual(rows.map(row => row.dataset.groupLabel), [t('session.running'), undefined, t('session.recent'), undefined]);
+  // Only the recent group is headed; live rows show their state, and the module heading counts the running ones.
+  assert.deepEqual(rows.map(row => row.dataset.groupLabel), [undefined, undefined, t('session.recent'), undefined]);
   for (const row of rows.slice(0, 2)) {
     assert.ok(!row.className.includes('is-compact'));
     assert.ok(row.children.some(child => child.className === 'home-session-meta'), 'live rows keep their details');

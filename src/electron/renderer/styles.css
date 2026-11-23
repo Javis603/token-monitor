@@ -4788,9 +4788,9 @@ html.is-windows .settings-panel select option {
   align-items: start;
 }
 .home-session-row .home-list-mark { margin-top: 1px; }
-/* Sessions group live work first. A group's first row carries its heading
-   (drawn here so rows stay the module's only children); the recent group
-   opens with the same feathered hairline that separates limit accounts. */
+/* Sessions list live work first. The recent group opens with its heading
+   (drawn here so rows stay the module's only children) under the same
+   feathered hairline that separates limit accounts. */
 .home-session-row[data-group-label]::before {
   grid-column: 1 / -1;
   margin-bottom: 2px;

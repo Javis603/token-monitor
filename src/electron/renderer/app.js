@@ -7684,9 +7684,10 @@ function renderHomeSessionModule(rows) {
     return module;
   }
   // Live sessions (running, waiting) lead with their full details; the rest
-  // close the list one line each. When both are present, the first row of each
-  // group carries its heading, drawn by CSS so the rows stay the module's only
-  // children.
+  // close the list one line each. When both are present, the first quiet row
+  // carries the Recent heading, drawn by CSS so the rows stay the module's only
+  // children. Live rows need none: their state marks say so, the module heading
+  // counts the running ones, and a "Running" heading would mislabel waiting rows.
   const isLive = (activityState) => activityState === 'running' || activityState === 'waiting';
   const entries = rows.map((row) => ({ row, activityState: window.TokenMonitorEdgeDockPresentation.sessionActivityState(row) }));
   const ordered = [...entries.filter((entry) => isLive(entry.activityState)), ...entries.filter((entry) => !isLive(entry.activityState))];
@@ -7696,9 +7697,9 @@ function renderHomeSessionModule(rows) {
     const item = document.createElement('div');
     item.className = live ? 'home-list-row home-session-row' : 'home-list-row home-session-row is-compact';
     item.dataset.key = row.key;
-    if (grouped && (index === 0 || live !== isLive(ordered[index - 1].activityState))) {
-      item.dataset.groupLabel = t(live ? 'session.running' : 'session.recent');
-      if (!live) item.classList.add('starts-recent');
+    if (grouped && !live && isLive(ordered[index - 1].activityState)) {
+      item.dataset.groupLabel = t('session.recent');
+      item.classList.add('starts-recent');
     }
     const mark = document.createElement('span');
     applyHomeListMark(mark, iconKindFor({ client: row.client }, 'session'), clientColors[row.client] || stableColor(row.key, fallbackModelColors));
