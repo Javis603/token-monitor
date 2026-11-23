@@ -5027,7 +5027,7 @@ html.is-windows .settings-panel select option {
   position: relative;
   grid-column: 4;
   min-width: 0;
-  height: 5px;
+  height: 4px;
 }
 .home-limit-window.is-low .home-limit-track {
   --home-limit-bar: var(--yellow);
@@ -5041,7 +5041,7 @@ html.is-windows .settings-panel select option {
 .home-limit-meter {
   position: absolute;
   inset: 0;
-  border-radius: 2.5px;
+  border-radius: 2px;
   background: rgba(var(--overlay-rgb), 0.085);
   box-shadow: inset 0 1px 0 light-dark(rgba(0, 0, 0, 0.05), rgba(0, 0, 0, 0.45));
 }
@@ -5058,7 +5058,7 @@ html.is-windows .settings-panel select option {
   top: 0;
   bottom: 0;
   left: 0;
-  border-radius: 2.5px;
+  border-radius: 2px;
 }
 .home-limit-ghost {
   width: 0;
@@ -5089,7 +5089,7 @@ html.is-windows .settings-panel select option {
   right: calc(100% - var(--home-limit-fill));
   width: min(14px, var(--home-limit-fill));
   height: 100%;
-  border-radius: 2.5px;
+  border-radius: 2px;
   pointer-events: none;
   box-shadow: 5px 0 9px -2px var(--home-limit-glow);
 }
