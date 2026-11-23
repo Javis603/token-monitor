@@ -1189,43 +1189,80 @@ for (const style of ['frosted', 'regular', 'clear']) {
   });
 }
 
-test('an open left dock survives a pointer overshoot onto the display beside it', (t) => {
-  const advance = mockDockClock(t);
-  const fixture = createFixture({
-    settings: { edgeDockMode: 'autoHide', edgeDockSide: 'left' },
-    primaryButtonDown: () => false,
-    displays: [{
-      id: 1,
-      scaleFactor: 1,
-      bounds: { x: 0, y: 0, width: 1200, height: 900 },
-      workArea: { x: 0, y: 0, width: 1200, height: 860 }
-    }, {
-      id: 2,
-      scaleFactor: 1,
-      bounds: { x: -1536, y: 0, width: 1536, height: 900 },
-      workArea: { x: -1536, y: 0, width: 1536, height: 860 }
-    }]
+for (const mode of ['autoHide', 'alwaysExceptFullScreen']) {
+  test(`an open left dock survives a pointer overshoot onto the display beside it (${mode})`, (t) => {
+    const advance = mockDockClock(t);
+    const fixture = createFixture({
+      settings: { edgeDockMode: mode, edgeDockSide: 'left' },
+      isFullScreen: () => true,
+      primaryButtonDown: () => false,
+      displays: [{
+        id: 1,
+        scaleFactor: 1,
+        bounds: { x: 0, y: 0, width: 1200, height: 900 },
+        workArea: { x: 0, y: 0, width: 1200, height: 860 }
+      }, {
+        id: 2,
+        scaleFactor: 1,
+        bounds: { x: -1536, y: 0, width: 1536, height: 900 },
+        workArea: { x: -1536, y: 0, width: 1536, height: 860 }
+      }]
+    });
+    t.after(() => fixture.controller.stop());
+    const rail = fixture.windowFor('rail');
+    const besideRail = (x) => ({ x, y: rail.bounds.y + 4 });
+
+    fixture.screen.point = besideRail(-1);
+    advance(500);
+    assert.equal(rail.opacity, 0, 'the neighbouring display never reveals the dock');
+
+    fixture.screen.point = besideRail(0);
+    advance(500);
+    assert.equal(rail.opacity, 1);
+
+    fixture.screen.point = besideRail(-EDGE_DOCK_METRICS.overshootDepth);
+    advance(600);
+    assert.equal(rail.opacity, 1, 'a small overshoot past the shared edge keeps the dock open');
+
+    fixture.screen.point = besideRail(-EDGE_DOCK_METRICS.overshootDepth - 1);
+    advance(600);
+    assert.equal(rail.opacity, 0, 'moving further onto the other display still retracts it');
   });
-  t.after(() => fixture.controller.stop());
-  const rail = fixture.windowFor('rail');
-  const besideRail = (x) => ({ x, y: rail.bounds.y + 4 });
+}
 
-  fixture.screen.point = besideRail(-1);
-  advance(500);
-  assert.equal(rail.opacity, 0, 'the neighbouring display never reveals the dock');
+for (const mode of ['always', 'alwaysExceptFullScreen']) {
+  test(`a visible dock dismisses its detail card after a pointer overshoot (${mode} on desktop)`, (t) => {
+    const advance = mockDockClock(t);
+    const displayWidth = 1200;
+    const fixture = createFixture({
+      settings: { edgeDockMode: mode, edgeDockSide: 'right' },
+      isFullScreen: () => false,
+      displays: [{
+        id: 1,
+        scaleFactor: 1,
+        bounds: { x: 0, y: 0, width: displayWidth, height: 900 },
+        workArea: { x: 0, y: 0, width: displayWidth, height: 860 }
+      }, {
+        id: 2,
+        scaleFactor: 1,
+        bounds: { x: displayWidth, y: 0, width: 1536, height: 900 },
+        workArea: { x: displayWidth, y: 0, width: 1536, height: 860 }
+      }]
+    });
+    t.after(() => fixture.controller.stop());
+    const rail = fixture.windowFor('rail');
+    const card = fixture.windowFor('bubble');
 
-  fixture.screen.point = besideRail(0);
-  advance(500);
-  assert.equal(rail.opacity, 1);
+    fixture.ipcMain.emit('edgeDock:click', { sender: rail.webContents }, { cellIndex: 1 });
+    fixture.ipcMain.emit('edgeDock:bubbleSize', { sender: card.webContents }, { cellId: 'codex', height: 180 });
+    assert.equal(card.opacity, 1, 'the quota detail card is open');
 
-  fixture.screen.point = besideRail(-EDGE_DOCK_METRICS.overshootDepth);
-  advance(600);
-  assert.equal(rail.opacity, 1, 'a small overshoot past the shared edge keeps the dock open');
-
-  fixture.screen.point = besideRail(-EDGE_DOCK_METRICS.overshootDepth - 1);
-  advance(600);
-  assert.equal(rail.opacity, 0, 'moving further onto the other display still retracts it');
-});
+    fixture.screen.point = { x: displayWidth + 1, y: rail.bounds.y + 4 };
+    advance(600);
+    assert.equal(rail.opacity, 1, 'the rail stays visible');
+    assert.equal(card.opacity, 0, 'the card closes when the pointer leaves for the neighbouring display');
+  });
+}
 
 test('auto-hide can limit hover reveal to the handle without changing the open dock hover area', (t) => {
   const advance = mockDockClock(t);

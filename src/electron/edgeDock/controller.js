@@ -1234,7 +1234,9 @@ function createEdgeDockController(deps) {
           showPeek();
           render('rail');
         }
-        const revealed = intent.snapshot().revealed;
+        const { revealed, always, pinned } = intent.snapshot();
+        // Extend the strip only while it can keep the rail itself from retracting.
+        const trigger = revealed && !always && !pinned ? current.overshoot : current.trigger;
         const bubbleRect = bubbleVisible ? bubbleFrame : null;
         const inRefresh = refreshVisible && rectContains(current.refresh, point);
         const inRefreshCorridor = refreshVisible && rectContains(edgeDockRefreshCorridor(current.rail, current.refresh), point);
@@ -1248,9 +1250,7 @@ function createEdgeDockController(deps) {
         const input = {
           // The trigger strip also keeps an open rail visible across work-area
           // insets. Limit only the reveal from the collapsed state.
-          inTrigger: revealed
-            ? rectContains(current.overshoot, point)
-            : settings().edgeDockTriggerRange !== 'handle' && rectContains(current.trigger, point),
+          inTrigger: (revealed || settings().edgeDockTriggerRange !== 'handle') && rectContains(trigger, point),
           inPeek: !revealed && rectContains(current.restingHandle, point),
           // Only with the button known to be up: a held one is a scrollbar or a
           // selection being dragged past the handle, not a reach for it, and an
