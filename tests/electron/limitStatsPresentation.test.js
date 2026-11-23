@@ -80,6 +80,30 @@ function statsWithDevices(devices) {
   };
 }
 
+test('disabling Antigravity RPC hides cached local rows and preserves remote RPC and OAuth', () => {
+  const row = (source, accountKey, accountEmail = '') => ({
+    provider: 'antigravity', source, accountKey, accountEmail, updatedAt, status: 'ok',
+    windows: [{ kind: 'weekly', usedPercent: 25 }]
+  });
+  const localRpc = row('rpc', 'local');
+  const oauth = row('oauth', 'saved', 'oauth@example.com');
+  const remoteRpc = row('rpc', 'remote');
+  const stats = statsWithDevices([
+    deviceWithProviders('local-device', [localRpc, oauth]),
+    deviceWithProviders('remote-device', [remoteRpc])
+  ]);
+  const options = { localDeviceId: 'local-device', syncActive: true, antigravityLocalLimitsEnabled: false };
+  assert.equal(projectLimitStatsForDisplay(stats, { ...options, antigravityLocalLimitsEnabled: true }), stats);
+  const visible = projectLimitStatsForDisplay(stats, options);
+  assert.deepEqual(visible.devices[0].limits.providers, [oauth]);
+  assert.equal(visible.devices[1], stats.devices[1]);
+  assert.deepEqual(visible.limits.providers.map(provider => provider.accountKey).sort(), ['remote', 'saved']);
+  const cachedAggregate = { ...stats, devices: visible.devices };
+  assert.deepEqual(projectLimitStatsForDisplay(cachedAggregate, options).limits.providers, visible.limits.providers);
+  const aggregateOnly = { limits: stats.limits };
+  assert.deepEqual(projectLimitStatsForDisplay(aggregateOnly, options).limits.providers, visible.limits.providers);
+});
+
 // Snapshot of the limits fields retained by Hubs before component provenance
 // was added. Collector output is already normalized, so this executable
 // round-trip models the legacy schema boundary that stripped only the new
