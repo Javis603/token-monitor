@@ -1098,8 +1098,11 @@ function createLimitsRuntime(initialOptions = {}, deps = {}) {
       for (const [key, state] of antigravity.identities) {
         if ((state.lastGood || state.lastAttempt?.row)?.source !== 'rpc') continue;
         const oauth = state.antigravityOAuthLastGood;
-        if (oauth) applyAttempt(antigravity, key, oauth, 'ok', oauth.updatedAt);
-        else antigravity.identities.delete(key);
+        if (oauth) {
+          state.lastGood = oauth;
+          // Preserve the cached timestamp and freshness until OAuth answers again.
+          state.lastAttempt = { row: oauth, status: 'unavailable', at: oauth.updatedAt };
+        } else antigravity.identities.delete(key);
       }
     }
     const alibaba = LIMIT_PROVIDER_REGISTRY.find(entry => entry.id === 'alibaba');

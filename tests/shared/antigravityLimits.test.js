@@ -397,6 +397,7 @@ test('Antigravity local detection can be disabled without clearing saved OAuth q
   runtime.reconfigure({ antigravityLocalLimitsEnabled: false });
   assert.deepEqual(sources(), ['oauth']);
   const lastGoodOAuth = rows()[0];
+  assert.equal(lastGoodOAuth.status, 'unavailable');
   assert.ok(lastGoodOAuth.windows.length > 1);
   oauthAvailable = false;
   await refresh();
