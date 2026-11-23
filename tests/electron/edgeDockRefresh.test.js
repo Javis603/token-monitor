@@ -696,13 +696,18 @@ test('an explicit paint cancels a queued live snapshot', () => {
 });
 
 test('a settled explicit refresh flushes a queued publication', () => {
-  const { context } = fixture({ realCoalescer: true });
+  const { context, advance } = fixture({ realCoalescer: true });
   const a = { historyRevision: '1', devices: [{ today: 'a' }] };
   const b = { historyRevision: '2', devices: [{ today: 'b' }] };
   context.latestStats = a;
   context.sendPush({ event: 'stats', data: { stats: a, reason: 'local' } });
+
+  const request = context.beginEdgeDockExplicitRefresh(0);
   context.sendPush({ event: 'stats', data: { stats: b, reason: 'local' } });
-  assert.equal(context.dockStats, a, 'b waits behind the floor');
-  context.edgeDockCellCoalescer.flushNow();
+  assert.equal(context.dockStats, a, 'the expired window lets b wait behind the floor');
+
+  context.settleEdgeDockExplicitRefresh(request, true);
   assert.equal(context.dockStats, b, 'settlement paints the queued snapshot');
+  advance(5000);
+  assert.equal(context.dockStats, b, 'nothing replays after settlement');
 });
