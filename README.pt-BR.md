@@ -165,15 +165,19 @@ Abra o app para começar a acompanhar o uso local deste dispositivo, sem configu
 - **Rastreamento de tokens ao vivo** — Claude Code, Codex, Cursor, GitHub Copilot, Antigravity, OpenCode e 44+ ferramentas de IA, com a interface atualizando poucos segundos após cada turno (lista completa na tabela acima)
 - **Taxa de tokens ao vivo** — uma leitura opcional da velocidade de geração em `tok/s` ou do consumo total em `tok/min`
 - **Detalhes por sessão** — abra uma sessão para ver os tokens por prompt, expansível até a divisão exata de tokens de cada resposta e as ferramentas usadas (lido sob demanda de transcrições ou bancos locais, nunca sincronizado)
+- **Busca e filtros de sessões** — busque sessões por título, ferramenta, modelo ou ID, filtre por ferramenta e veja de qual dispositivo veio uma sessão sincronizada
 - **Estatísticas de acerto de cache** — clique em qualquer ferramenta ou modelo para expandir um detalhamento completo dos tokens de entrada (acerto no cache vs. fora do cache), tokens de saída e as porcentagens de acerto
 - **Custo e moeda** — o custo ao lado das contagens de tokens, exibido em USD, CNY, TWD, HKD, KRW, JPY, BRL e outras moedas suportadas; as taxas de câmbio são atualizadas automaticamente todos os dias e podem ser alteradas manualmente nas Configurações
+- **Apelidos de modelo e preços personalizados** — mostre nomes diferentes do mesmo modelo em uma só linha e substitua o preço de qualquer modelo
 - **Caminhos de verificação personalizados** — aponte uma ferramenta para pastas de sessões extras quando as suas estiverem fora dos locais padrão
-- **WSL (Windows)** — o uso baseado em arquivos de distros WSL em execução é mesclado a cada 5 minutos; ferramentas com backend SQLite, como OpenCode e Hermes, podem exigir um [agente headless dentro do WSL](docs/wsl-sqlite-setup.md)
+- **WSL (Windows)** — desativado por padrão; o uso baseado em arquivos de distros WSL em execução é mesclado a cada 5 minutos; ferramentas com backend SQLite, como OpenCode e Hermes, podem exigir um [agente headless dentro do WSL](docs/wsl-sqlite-setup.md)
 
 ### Limites, tendências e exportação
 
 - **Detecção de Limites de Ferramentas de IA** — janelas de sessão, diária, semanal, de cobrança e de créditos específicas de cada provedor para Claude Code, Codex, Cursor, OpenRouter, APIs de terceiros, GLM, Kimi e 34+ provedores, incluindo vários perfis do OpenRouter/de terceiros e contas no estilo de saldo (créditos do Claude, saldo pré-pago e histórico de gastos do DeepSeek, saldos de terceiros)
 - **Várias contas e troca do Codex** — acompanhe várias contas por provedor, cada uma com seus próprios limites; uma conta do Codex acompanhada pode ser definida como a conta local ativa com um clique, sem precisar autenticar de novo
+- **Histórico de cotas** — passe o mouse ou clique em uma conta na tela de Limites para ver a tendência do ciclo atual e o uso medido nos últimos 14 dias; o histórico fica só no computador e nunca é enviado
+- **Proxy de rede** — envie as solicitações de Limites de Ferramentas de IA e de contas por um proxy definido em Configurações → Geral
 - **Previsão de reset do Codex** — uma previsão opcional de terceiros abaixo dos limites do Codex, mostrando o horário previsto do reset, o tipo de reset (Regular ou Acumulado) e quando a janela fez o último reset
 - **Preservar o uso de sessões excluídas** — muitas ferramentas eliminam sessões antigas (o Claude Code descarta transcrições após 30 dias por padrão), perdendo esse histórico. Quando ativado, o Token Monitor arquiva localmente o uso diário observado por ferramenta/modelo para que o mapa de calor e as tendências sobrevivam mesmo depois que os arquivos de origem sumirem (veja [Retenção de dados de sessão](#retenção-de-dados-de-sessão) abaixo)
 - **Tendências de Uso e Painel** — um mapa de calor de atividade na tela inicial e um gráfico de tendências, além de uma janela de painel dedicada com sequências e histórico empilhado por ferramenta/modelo (visualizações em barra e linha K) em todos os seus dispositivos
@@ -200,7 +204,7 @@ Abra o app para começar a acompanhar o uso local deste dispositivo, sem configu
 - **Modo Bolha Flutuante** — reduz o widget a uma mini-janela arrastável com prévia ao clicar ou passar o mouse e conteúdo no estilo da bandeja
 - **Widgets nativos do macOS** — veja uso de tokens e custo, tendências, cota restante das ferramentas de IA e horários de reset, mapas de calor de atividade e detalhamentos por ferramenta ou modelo nos layouts Pequeno, Médio e Grande no macOS 14+
 - **Telas de detalhamento** — agrupadas por ferramenta, dispositivo, modelo, sessão, projeto ou limites da conta
-- **Controles de aparência** — troca do tema da interface (inclusive um modo claro), cores por fornecedor de ferramenta, opacidade do vidro, desfoque, modo de janela transparente e fontes personalizadas
+- **Controles de aparência** — temas da interface (inclusive um modo claro) com cores personalizadas, cores por fornecedor de ferramenta, estilos de vidro nativos no macOS e no Windows, imagem de fundo, tamanho do texto e fontes
 - **Lista de ferramentas personalizável** — oculte, fixe e reordene ferramentas no painel principal sem alterar o que é acompanhado
 - **Atalho global gravável** — mostre ou oculte a janela de qualquer lugar
 - **Discord Rich Presence** — transmita os tokens de hoje, o custo e o cliente principal (opcional)
@@ -463,7 +467,7 @@ Este arquivo cobre apenas os dias que o Token Monitor já observou; dados exclu�
 
 Há dois lugares para configurar o Token Monitor; o uso no dia a dia precisa apenas do primeiro:
 
-- **Widget (interface gráfica)** — clique no botão `⚙` no canto inferior direito. Seções, na ordem: Geral (idioma, iniciar ao entrar no sistema, atualizações), Principal (módulos da Home e moeda de exibição), Janela (comportamento da janela, layout da barra de menus e da bolha flutuante, modo de bandeja, atalho), Aparência (tema e cores dos fornecedores), Coleta (ferramentas acompanhadas, frequência de coleta, Preservar o uso de sessões excluídas, exportação de dados), Limites de Ferramentas de IA (seleção de provedores, limites e credenciais), Assinaturas (o que você paga por conta) e Sincronização multidispositivo. O botão `⇧` na barra de título alterna o comportamento da janela.
+- **Widget (interface gráfica)** — clique no botão `⚙` no canto inferior direito. Seções, na ordem: Geral (idioma, iniciar ao entrar no sistema, atualizações, proxy de rede), Principal (ordem das telas, módulos da Home, período de uso padrão e moeda de exibição), Janela (comportamento da janela, layout da barra de menus e da bolha flutuante, modo de bandeja, Edge Dock e painel do notch, atalho), Aparência (tema, vidro, tamanho do texto e cores), Coleta (ferramentas acompanhadas, frequência de coleta, Preservar o uso de sessões excluídas, verificação do WSL, exportação de dados, apelidos de modelo e preços), Limites de Ferramentas de IA (seleção de provedores, limites e credenciais), Assinaturas (o que você paga por conta), Sincronização multidispositivo (método de sincronização e Hubs salvos) e Plugins (experimental). O botão `⇧` na barra de título alterna o comportamento da janela.
 - **Agente headless e hub** — sem interface; configurados por um arquivo `.env` na raiz do projeto (copie de `.env.example`), com precedência: flag de CLI → variável de ambiente → padrão interno. Veja [docs/configuration.md](docs/configuration.md#headless-agent--hub-env).
 
 Consulte a [referência de configuração](docs/configuration.md) para ver todas as configurações e todas as variáveis de ambiente.
