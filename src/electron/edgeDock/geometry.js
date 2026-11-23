@@ -76,8 +76,12 @@ const EDGE_DOCK_TIMING = Object.freeze({
   bubbleDelayMs: 70
 });
 
-function edgeDockPollDelay({ drag, revealed, near }) {
-  return drag ? 16 : (revealed || near ? 40 : 90);
+// `active` is the pointer actually on (or approaching) a surface. A rail left
+// revealed by `always` used to read as active forever through `revealed`, so the
+// cursor was polled at 25 Hz while the pointer sat on another display. The notch
+// still passes only `revealed`, which stays its active signal via the default.
+function edgeDockPollDelay({ drag, revealed, near, active = revealed }) {
+  return drag ? 16 : (active || near ? 40 : 90);
 }
 
 // `alwaysExceptFullScreen` behaves as `always` on the desktop and as

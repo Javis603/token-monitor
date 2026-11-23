@@ -374,6 +374,7 @@ const { withoutSessionTitleStats, withoutSessionTitles } = require('./sessionTit
 const { createSseBlockReader, parseSseBlock } = require('./sseEventReader');
 const { createSyncUploadScheduler, normalizeSyncUploadIntervalMs } = require('./syncUploadScheduler');
 const { createLatestWinsReconciler } = require('./latestWinsReconciler');
+const { createLatestCoalescer } = require('./latestCoalescer');
 const { createIcloudSyncStore } = require('./icloudSync');
 const { createIcloudSyncRuntime } = require('./icloudSyncRuntime');
 
@@ -4621,7 +4622,7 @@ function publishLocalSessionActivity(patch) {
   presentationCache.updateActivity(previous, latestStats, (stats) => applyActivityPatch(stats, visiblePatch));
   const activityStats = electronPresentationStats(latestStats);
   pluginRuntime?.publishStats(activityStats, latestStats);
-  updateEdgeDockCells(activityStats);
+  updateEdgeDockCellsLive(activityStats);
   sendPush({ event: 'session-activity', data: { patch: visiblePatch, snapshot } });
 }
 
@@ -4688,7 +4689,7 @@ function sendPush(payload, options = {}) {
     }
     scheduleMacWidgetSnapshot(visibleStats, options.widgetProducerOwner);
     pluginRuntime?.publishStats(visibleStats, latestStats);
-    updateEdgeDockCells(visibleStats);
+    updateEdgeDockCellsLive(visibleStats);
     syncCodexPresentationActiveAccount();
     updateTrayDisplay();
     if (!options.skipExport && settings.exportAutoEnabled && settings.exportDir && Date.now() - lastExportAt >= exportIntervalMs()) {
@@ -5808,9 +5809,23 @@ function edgeDockCellsFor(visibleStats, items = settings?.edgeDockItems, options
   });
 }
 
+// Live statistics and session activity arrive far faster than a glanceable
+// rail can use them: with an agent streaming, the activity scheduler can hand
+// over a patch twice a second, and every hand-off rebuilds all of the rail's
+// cells in the renderer. The rail's own updates are promised at 3-5s, so this
+// floor collapses the activity storm onto that cadence. Only the dock's cells
+// are coalesced; the notch and every explicit repaint keep the immediate path.
+const EDGE_DOCK_CELL_PUSH_INTERVAL_MS = 5 * 1000;
+
 function updateEdgeDockCells(visibleStats) {
   if ((!edgeDockController?.isRunning() && !notchController?.isRunning()) || !visibleStats) return;
   if (edgeDockController?.isRunning()) pushEdgeDockCells(edgeDockCellsFor(visibleStats));
+  if (notchController?.isRunning()) pushNotchCells(visibleStats);
+}
+
+function updateEdgeDockCellsLive(visibleStats) {
+  if ((!edgeDockController?.isRunning() && !notchController?.isRunning()) || !visibleStats) return;
+  if (edgeDockController?.isRunning()) edgeDockCellCoalescer?.enqueue(visibleStats);
   if (notchController?.isRunning()) pushNotchCells(visibleStats);
 }
 
@@ -5818,11 +5833,24 @@ function updateEdgeDockCells(visibleStats) {
 // the guard above because the settings path calls it before the controller is
 // running: `setCells` stores the list regardless, and `sync()` starts the windows
 // afterwards, so the timer is armed there once the surface actually exists.
+let edgeDockCellCoalescer = null;
+
 function pushEdgeDockCells(cells) {
+  // An explicit repaint outranks a queued live read, which may already be older
+  // than the snapshot this push carries.
+  edgeDockCellCoalescer?.cancel();
   edgeDockLastCells = cells;
   edgeDockController?.setCells(cells);
   scheduleSessionExpiry();
 }
+
+edgeDockCellCoalescer = createLatestCoalescer({
+  intervalMs: EDGE_DOCK_CELL_PUSH_INTERVAL_MS,
+  flush: (visibleStats) => {
+    if (!edgeDockController?.isRunning()) return;
+    pushEdgeDockCells(edgeDockCellsFor(visibleStats));
+  }
+});
 
 // Running is a function of time: a session crosses the ten-minute window with no
 // new data at all, so the cells pushed at the last tick go stale on their own. The

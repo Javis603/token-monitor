@@ -86,3 +86,19 @@ test('the edge dock arms a re-projection for the moment its running reading expi
   const repaintPath = main.slice(main.indexOf('function repaintDockSurfaces('), main.indexOf('function edgeDockDerivedSelections('));
   assert.match(repaintPath, /updateEdgeDockCells\(electronPresentationStats\(stats\)\)/);
 });
+
+test('live activity reaches the rail on its own cadence without delaying the notch', () => {
+  // Session activity can hand over a patch twice a second while an agent streams,
+  // and every hand-over rebuilt all of the rail's cells. The two high-frequency
+  // producers take the coalesced lane; the notch and explicit repaints stay direct.
+  const livePath = main.slice(main.indexOf('function updateEdgeDockCellsLive('), main.indexOf('// Hand cells to the controller'));
+  assert.match(livePath, /edgeDockCellCoalescer\?\.enqueue\(visibleStats\);/);
+  assert.match(livePath, /pushNotchCells\(visibleStats\);/);
+  const activityPath = main.slice(main.indexOf('function publishLocalSessionActivity('), main.indexOf('function sendPush('));
+  assert.match(activityPath, /updateEdgeDockCellsLive\(activityStats\);/);
+  const pushPath = main.slice(main.indexOf('function sendPush('), main.indexOf('function statsHistoryRevision('));
+  assert.match(pushPath, /updateEdgeDockCellsLive\(visibleStats\);/);
+  const repaintPath = main.slice(main.indexOf('function repaintDockSurfaces('), main.indexOf('function edgeDockDerivedSelections('));
+  assert.match(repaintPath, /updateEdgeDockCells\(electronPresentationStats\(stats\)\)/);
+  assert.match(main, /const EDGE_DOCK_CELL_PUSH_INTERVAL_MS = 5 \* 1000;/);
+});

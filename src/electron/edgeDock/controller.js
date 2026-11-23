@@ -1208,13 +1208,23 @@ function createEdgeDockController(deps) {
     }
   }
 
+  // What the next poll has to be fast for: the pointer is on a surface (or the
+  // card it opened), or it is in the handle's approach zone. An always-visible
+  // rail is revealed whether or not anyone is near it, so `revealed` alone is
+  // not that signal; polling at the active rate on it woke the main process
+  // ~25 times a second with the pointer elsewhere on the desk. A rail revealed
+  // by the pointer in an auto-hide mode keeps the active rate until it retracts.
+  function pointerActiveForPoll() {
+    return Boolean(pointerOnRail || pointerOnHandle || peekNear || refreshHovered || bubbleVisible || railMotion
+      || (railVisible && !alwaysVisible()));
+  }
+
   function schedulePoll() {
     if (!running) return;
     clearTimeout(pollTimer);
-    const snapshot = intent.snapshot();
     // The approach zone is on the way to the handle, and only the poll lets the
     // handle take the pointer, so it runs at the active rate from there on.
-    const delay = edgeDockPollDelay({ drag, revealed: snapshot.revealed, near: peekNear });
+    const delay = edgeDockPollDelay({ drag, near: peekNear, active: pointerActiveForPoll() });
     pollTimer = setTimeout(poll, delay);
   }
 

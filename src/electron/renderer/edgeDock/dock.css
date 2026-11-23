@@ -210,6 +210,13 @@ html.edge-dock-reduced-motion .edge-dock-refresh[data-state="busy"] .edge-dock-r
 }
 .edge-dock-cell[data-running="yes"]:not([data-waiting="yes"]) .edge-dock-ring-spinner {
   opacity: 1;
+}
+/* Rotating this arc redraws the whole masked dock at the display rate: measured
+   on an M1 at ~5.5% renderer + ~2.7% GPU with it running, 60 fps against ~8 fps
+   idle with the same cells. The motion is an affordance, so it belongs to the
+   pointer being on the rail; a still arc already says "running" at a glance,
+   and the one-shot session flare still reports writes on its own. */
+.edge-dock-root:hover .edge-dock-cell[data-running="yes"]:not([data-waiting="yes"]) .edge-dock-ring-spinner {
   animation: edge-dock-running-spin 1400ms linear infinite;
 }
 @keyframes edge-dock-running-spin {
@@ -226,9 +233,13 @@ html.edge-dock-reduced-motion .edge-dock-refresh[data-state="busy"] .edge-dock-r
   stroke-width: 1.5;
 }
 /* Waiting takes priority over work in another session. A gentle pulse remains
-   visible throughout the wait; reduced motion keeps the complete ring still. */
+   visible throughout the wait; reduced motion keeps the complete ring still.
+   Like the running arc, the pulse follows the pointer rather than running at
+   display rate behind every glance at the rail. */
 .edge-dock-cell[data-waiting="yes"] .edge-dock-ring-waiting {
   opacity: 1;
+}
+.edge-dock-root:hover .edge-dock-cell[data-waiting="yes"] .edge-dock-ring-waiting {
   animation: edge-dock-waiting-pulse 2400ms ease-in-out infinite;
 }
 @keyframes edge-dock-waiting-pulse {

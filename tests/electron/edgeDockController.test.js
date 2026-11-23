@@ -592,7 +592,9 @@ test('rail haptics once whenever the pointer enters an item', async (t) => {
   fixture.screen.point = { x: rail.bounds.x - 20, y: rail.bounds.y + 40 };
   await new Promise((resolve) => setTimeout(resolve, 55));
   fixture.screen.point = { x: centerX, y: rail.bounds.y + 40 };
-  await new Promise((resolve) => setTimeout(resolve, 55));
+  // Leaving the rail drops the poll to its idle cadence, so re-entry is noticed
+  // on that cadence rather than the active one.
+  await new Promise((resolve) => setTimeout(resolve, 130));
   assert.deepEqual(fixture.haptics, ['alignment', 'alignment', 'alignment']);
 });
 

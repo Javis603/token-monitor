@@ -45,6 +45,13 @@ function fixture() {
     edgeDockController: { isRunning: () => true },
     notchController: null,
     pushEdgeDockCells: (cells) => { context.dockStats = cells.stats; context.dockPeriods = cells.derivedPeriods; },
+    // The live lane coalesces dock cells; these tests exercise the explicit
+    // repaint paths, so the queue hands each value straight through with the
+    // same projection the immediate path uses.
+    edgeDockCellCoalescer: {
+      enqueue: (stats) => context.pushEdgeDockCells(context.edgeDockCellsFor(stats)),
+      cancel() {}
+    },
     buildEdgeDockCells: (stats, options) => ({ stats, derivedPeriods: options.derivedPeriods }),
     EDGE_DOCK_DERIVED_PERIODS: ['week', 'last7', 'last30'],
     fixedPeriodRangesApi: {
