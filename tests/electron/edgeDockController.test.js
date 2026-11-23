@@ -1262,6 +1262,36 @@ for (const mode of ['always', 'alwaysExceptFullScreen']) {
     assert.equal(rail.opacity, 1, 'the rail stays visible');
     assert.equal(card.opacity, 0, 'the card closes when the pointer leaves for the neighbouring display');
   });
+
+  test(`a visible dock dismisses its detail card in the side work-area inset (${mode} on desktop)`, (t) => {
+    const advance = mockDockClock(t);
+    const workAreaWidth = 1160;
+    const fixture = createFixture({
+      platform: 'darwin',
+      settings: { edgeDockMode: mode, edgeDockSide: 'right' },
+      isFullScreen: () => false,
+      displays: [{
+        id: 1,
+        scaleFactor: 2,
+        bounds: { x: 0, y: 0, width: 1200, height: 900 },
+        workArea: { x: 0, y: 30, width: workAreaWidth, height: 870 }
+      }]
+    });
+    t.after(() => fixture.controller.stop());
+    const rail = fixture.windowFor('rail');
+    const card = fixture.windowFor('bubble');
+    const y = rail.bounds.y + 4;
+
+    fixture.screen.point = { x: workAreaWidth - 4, y };
+    fixture.ipcMain.emit('edgeDock:click', { sender: rail.webContents }, { cellIndex: 1 });
+    fixture.ipcMain.emit('edgeDock:bubbleSize', { sender: card.webContents }, { cellId: 'codex', height: 180 });
+    assert.equal(card.opacity, 1, 'the quota detail card is open');
+
+    fixture.screen.point = { x: workAreaWidth + 1, y };
+    advance(600);
+    assert.equal(rail.opacity, 1, 'the rail stays visible');
+    assert.equal(card.opacity, 0, 'the card closes in the system-reserved strip beside the rail');
+  });
 }
 
 test('auto-hide can limit hover reveal to the handle without changing the open dock hover area', (t) => {
