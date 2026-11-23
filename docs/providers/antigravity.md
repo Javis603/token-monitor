@@ -81,7 +81,7 @@ Local RPC probes try the running sources in this order. A desktop installation c
 
 When managed OAuth accounts exist, Token Monitor fetches enabled OAuth accounts and the local RPC snapshot concurrently. A successful local snapshot with a trusted email replaces the remote result for the matching account. When both sources return grouped windows for that account, groups present only in OAuth (such as `Gemini 4 Argon` when the local language server predates Hub 2.16.0) are retained alongside the live local groups.
 
-An account-scoped manual refresh fetches only the requested OAuth account. With no managed accounts, normal collection remains local-RPC-only.
+An account-scoped manual refresh fetches only the requested OAuth account. With no managed accounts, normal collection uses local RPC when enabled. Under **Settings → AI Tool Limits → Antigravity**, **Automatically detect local Antigravity accounts** is on by default. Turning it off stops local RPC quota collection on this device and removes its cached RPC quota rows. Saved OAuth accounts continue to refresh according to their enabled state.
 
 ### Local RPC
 

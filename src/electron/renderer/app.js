@@ -13842,6 +13842,12 @@ const LIMIT_PROVIDER_SETTINGS = {
     descKey: 'settings.limits.claudeCliFallbackDesc',
     defaultValue: true
   }],
+  antigravity: [{
+    key: 'antigravityLocalLimitsEnabled',
+    titleKey: 'settings.limits.antigravityLocalLimits',
+    descKey: 'settings.limits.antigravityLocalLimitsDesc',
+    defaultValue: true
+  }],
   codex: [{
     key: 'codexResetForecastEnabled',
     titleKey: 'settings.limits.codexResetForecast',

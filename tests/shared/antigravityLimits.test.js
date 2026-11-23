@@ -327,6 +327,95 @@ test('Antigravity retires anonymous quota when the same RPC source recovers its 
   assert.deepEqual((await refresh()).map(row => [row.source, row.accountEmail]), [['rpc', accountEmail]]);
 });
 
+test('Antigravity local detection can be disabled without clearing saved OAuth quota', async (t) => {
+  let rpcCalls = 0;
+  let rpcStarted;
+  let pendingRpc;
+  let oauthAvailable = true;
+  let localEmail = '';
+  const options = {
+    limitProviders: ['antigravity'],
+    antigravityManagedAccounts: [{
+      id: 'managed', accountEmail: 'oauth@example.com', credentials: { accessToken: 'fixture', projectId: 'fixture' }
+    }]
+  };
+  const localSnapshot = {
+    sourceDetail: 'app', sourceKey: 'local',
+    windows: [{ name: 'Gemini weekly', kind: 'weekly', remainingFraction: 0.7 }]
+  };
+  const deps = {
+    autoStart: false, autoRetry: false,
+    antigravityProbe: async () => {
+      rpcCalls++;
+      rpcStarted?.();
+      return pendingRpc || { ...localSnapshot, accountEmail: localEmail };
+    },
+    fetch: async (url) => {
+      if (url.endsWith(':loadCodeAssist')) return Response.json({});
+      assert.ok(url.endsWith(':retrieveUserQuotaSummary'), url);
+      if (!oauthAvailable) throw Object.assign(new Error('offline'), { status: 'unavailable' });
+      return Response.json(quotaSummary);
+    }
+  };
+  const runtime = createLimitsRuntime(options, deps);
+  t.after(() => runtime.stop());
+  const refresh = () => runtime.refresh({ provider: 'antigravity' }, 'settings-change');
+  const rows = () => runtime.getSnapshot().providers;
+  const sources = () => rows().map(row => row.source).sort();
+
+  await refresh();
+  assert.deepEqual(sources(), ['oauth', 'rpc']);
+  const previousLimits = runtime.getSnapshot();
+
+  const started = new Promise(resolve => { rpcStarted = resolve; });
+  let finishRpc;
+  pendingRpc = new Promise(resolve => { finishRpc = resolve; });
+  const inFlight = refresh();
+  await started;
+  runtime.reconfigure({ antigravityLocalLimitsEnabled: false });
+  assert.deepEqual(sources(), ['oauth']);
+  assert.equal((await inFlight).superseded, true);
+  finishRpc(localSnapshot);
+  pendingRpc = null;
+  rpcStarted = null;
+
+  oauthAvailable = false;
+  await refresh();
+  assert.equal(rpcCalls, 2);
+  assert.deepEqual(sources(), ['oauth']);
+  assert.ok(rows()[0].windows.length > 0);
+
+  oauthAvailable = true;
+  runtime.reconfigure({ antigravityLocalLimitsEnabled: true });
+  await refresh();
+  assert.equal(rpcCalls, 3);
+  assert.deepEqual(sources(), ['oauth', 'rpc']);
+
+  localEmail = 'oauth@example.com';
+  await refresh();
+  assert.deepEqual(sources(), ['rpc']);
+  runtime.reconfigure({ antigravityLocalLimitsEnabled: false });
+  assert.deepEqual(sources(), ['oauth']);
+  const lastGoodOAuth = rows()[0];
+  assert.ok(lastGoodOAuth.windows.length > 1);
+  oauthAvailable = false;
+  await refresh();
+  assert.deepEqual(rows()[0].windows, lastGoodOAuth.windows);
+
+  const restarted = createLimitsRuntime({ ...options, previousLimits, antigravityLocalLimitsEnabled: false }, deps);
+  t.after(() => restarted.stop());
+  assert.deepEqual(restarted.getSnapshot().providers.map(row => row.source), ['oauth']);
+});
+
+test('Antigravity skips local RPC with detection off and no saved OAuth accounts', async () => {
+  let rpcCalls = 0;
+  const result = await fetchAntigravityLimits({ antigravityLocalLimitsEnabled: false }, {
+    antigravityProbe: async () => { rpcCalls++; }
+  });
+  assert.equal(rpcCalls, 0);
+  assert.deepEqual(result, []);
+});
+
 test('Antigravity keeps the previous account read when a process switches accounts', async () => {
   let suffix = '';
   let rpcStatus = 200;

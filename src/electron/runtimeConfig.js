@@ -67,7 +67,8 @@ const LIMITS_RECONFIGURE_KEYS = Object.freeze([
   'cursorDisabledAccountIds',
   'cursorManualAccountIds',
   'opencodeLocalLimitsEnabled',
-  'claudeCliFallbackEnabled'
+  'claudeCliFallbackEnabled',
+  'antigravityLocalLimitsEnabled'
 ]);
 const SINK_STRUCTURAL_KEYS = Object.freeze(['syncUploadIntervalMs']);
 // Derived from the account declarations: every watched field plus a
@@ -145,6 +146,7 @@ function limitsConfigFromSettings(settings = {}, context = {}) {
     limitsRefreshMs: normalizeLimitsRefreshMs(settings.limitsRefreshMs),
     claudePrepaidBalanceEnabled: settings.claudePrepaidBalanceEnabled !== false,
     claudeCliFallbackEnabled: settings.claudeCliFallbackEnabled !== false,
+    antigravityLocalLimitsEnabled: settings.antigravityLocalLimitsEnabled !== false,
     opencodeLocalLimitsEnabled: settings.opencodeLocalLimitsEnabled === true,
     opencodeAmbientEnabled: settings.opencodeAmbientEnabled !== false,
     // Every declared account field: settings lane, declared env fallbacks,
@@ -234,10 +236,12 @@ function classifySettingsChange(previous = {}, next = {}) {
   const limitScopes = [];
   for (const [provider, keys] of Object.entries(LIMIT_PROVIDER_SETTING_KEYS)) {
     if (!changedAny(previous, next, keys)) continue;
-    // A fallback preference does not change account identity. Keep last-good
-    // readings if the ensuing OAuth-only refresh fails transiently.
-    const preserveReadings = provider === 'claude'
-      && !changedAny(previous, next, keys.filter((key) => key !== 'claudeCliFallbackEnabled'));
+    // A source preference does not change OAuth account identity. Antigravity
+    // separately retires its local RPC rows when detection is turned off.
+    const sourcePreference = provider === 'claude' ? 'claudeCliFallbackEnabled'
+      : provider === 'antigravity' ? 'antigravityLocalLimitsEnabled' : '';
+    const preserveReadings = sourcePreference
+      && !changedAny(previous, next, keys.filter((key) => key !== sourcePreference));
     limitScopes.push({ provider, ...(preserveReadings ? { preserveReadings: true } : {}) });
   }
   return {

@@ -158,6 +158,7 @@ async function fetchAntigravityLimits(options = {}, deps = {}) {
   if (options.antigravityAccountSlots?.length) options = { ...options, antigravityManagedAccounts: mergedOwnerAccounts(options, 'antigravity', options.antigravityManagedAccounts || []).map(account => ({ ...account, credentials: account.credentials })) };
   const nowMs = (deps.now || Date.now)();
   const probeFn = deps.antigravityProbe || antigravityProbe.probe;
+  const localEnabled = options.antigravityLocalLimitsEnabled !== false;
   const scope = options.limitRefreshScope?.provider === 'antigravity' ? options.limitRefreshScope : null;
   const accounts = antigravityOAuth.normalizeManagedAccounts(
     options.antigravityManagedAccounts || deps.antigravityManagedAccounts,
@@ -168,7 +169,7 @@ async function fetchAntigravityLimits(options = {}, deps = {}) {
       || (!scope.accountKey || scope.accountKey === account.accountKey)
       && (!scope.accountEmail || scope.accountEmail === account.accountEmail));
 
-  if (accounts.length === 0 && !scope) {
+  if (localEnabled && accounts.length === 0 && !scope) {
     try {
       const reading = mapAntigravitySnapshot(await probeFn(deps), { nowMs, source: 'rpc' });
       const removal = anonymousRpcRemoval(reading, options, deps);
@@ -201,7 +202,7 @@ async function fetchAntigravityLimits(options = {}, deps = {}) {
     }
   }
 
-  const localPromise = scope
+  const localPromise = scope || !localEnabled
     ? Promise.resolve(null)
     : probeFn(deps).then(
         (snapshot) => mapAntigravitySnapshot(snapshot, { nowMs, source: 'rpc' }),
@@ -229,7 +230,8 @@ async function fetchAntigravityLimits(options = {}, deps = {}) {
     if (duplicateIndex < 0) {
       providers.unshift(local);
     } else if (local.status === 'ok') {
-      providers[duplicateIndex] = mergeMissingOAuthGroups(local, providers[duplicateIndex]);
+      const oauthReading = providers[duplicateIndex];
+      providers[duplicateIndex] = { ...mergeMissingOAuthGroups(local, oauthReading), oauthReading };
     }
   }
   const removal = anonymousRpcRemoval(local, options, deps);
