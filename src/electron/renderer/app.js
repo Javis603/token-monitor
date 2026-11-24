@@ -3722,7 +3722,12 @@ function loadReasonixSessionList() {
   }
   // The list belongs to this visit. Stats pushes only repaint it.
   if (state.period && fixedPeriodRangesApi.isDerived(state.period)) return;
-  const key = JSON.stringify([state.settings?.sessionTitlesEnabled !== false, state.settings?.modelAliases, state.settings?.modelAliasGrouping]);
+  const key = JSON.stringify([
+    state.settings?.sessionTitlesEnabled !== false,
+    state.settings?.modelAliases,
+    state.settings?.modelAliasGrouping,
+    state.settings?.allTimeSince
+  ]);
   if (state.openSession || reasonixSessionList?.key === key
     || !window.tokenMonitor.listReasonixSessions) return;
   const request = { key, titlesEnabled: state.settings?.sessionTitlesEnabled !== false, periods: {} };

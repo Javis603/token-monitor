@@ -534,15 +534,17 @@
     const parentSessionId = textValue(session?.parentSessionId);
     const subagent = Boolean(parentSessionId) && (parentClient !== client || parentSessionId !== session.sessionId)
       && !isBackgroundReviewSession(session);
+    const sessionTitle = client === 'reasonix' ? sessionTitleForDisplay(session) : '';
     return {
       key: `session:${key}`,
       kind: 'session',
-      name: titleParts.join(' · '),
+      name: sessionTitle || titleParts.join(' · '),
       modelLabel,
       modelTooltipEntries: sessionModelTooltipEntries(session, {
         unattributedLabel: options.unattributedLabel, latestModelLabel: options.latestModelLabel
       }),
-      subtitle: subtitleParts.join(' · '),
+      subtitle: (sessionTitle ? titleParts : subtitleParts).join(' · '),
+      activity: sessionTitle ? subtitleParts.join(' · ') : undefined,
       activitySummary: subtitleParts.join(' · '),
       activityTime,
       usageMetrics,

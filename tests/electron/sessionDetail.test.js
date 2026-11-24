@@ -657,7 +657,7 @@ test('a confirmed remote session never opens a local transcript with the same ID
 test('Reasonix loads on a Sessions visit and ignores ordinary stats repaints', async () => {
   const source = rendererSource.slice(rendererSource.indexOf('let reasonixSessionList = null;'),
     rendererSource.indexOf('function sessionRowsForPeriod('));
-  const state = { breakdown: 'home', settings: { sessionTitlesEnabled: true } };
+  const state = { breakdown: 'home', settings: { sessionTitlesEnabled: true, allTimeSince: '2024-01-01' } };
   let calls = 0;
   let renders = 0;
   const context = {
@@ -674,11 +674,14 @@ test('Reasonix loads on a Sessions visit and ignores ordinary stats repaints', a
   await Promise.resolve();
   assert.equal(calls, 1);
   assert.equal(renders, 1);
+  state.settings.allTimeSince = '2025-01-01';
+  context.loadReasonixSessionList();
+  assert.equal(calls, 2);
   state.breakdown = 'home';
   context.loadReasonixSessionList();
   state.breakdown = 'session';
   context.loadReasonixSessionList();
-  assert.equal(calls, 2);
+  assert.equal(calls, 3);
 });
 
 test('Reasonix detail stays on demand even if ordinary stats contain a matching row', async () => {

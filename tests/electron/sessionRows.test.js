@@ -1263,3 +1263,14 @@ test('group sections keep main continuations above children without changing usa
   assert.deepEqual(content.filter(item => item.row).map(item => item.row), rows, 'review/bot groups keep their order');
   assert.equal(content.filter(item => item.className === 'session-group-section-heading').length, 0);
 });
+
+
+test('on-demand Reasonix rows show a session title or the client/model fallback', () => {
+  const session = { client: 'reasonix', sessionId: 'reasonix:fixture', model: 'reasonix-test-model', totalTokens: 5 };
+  const rows = (extra) => sessionRowsForPeriod({}, {
+    clientLabels: { reasonix: 'Reasonix' },
+    reasonixSessions: { 'reasonix:fixture': { ...session, ...extra } }
+  });
+  assert.equal(rows({ title: 'A local session' })[0].name, 'A local session');
+  assert.equal(rows({})[0].name, 'Reasonix · reasonix-test-model');
+});
