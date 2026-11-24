@@ -7,6 +7,7 @@ const path = require('node:path');
 const test = require('node:test');
 
 const { runSessionDetailWorker } = require('../../src/shared/sessionDetailResolver');
+const { readReasonixNativeSession } = require('../../src/shared/providers/reasonix/sessions');
 const { readSessionDetail } = require('../../src/shared/sessionDetail');
 const { REASONIX_META_MAX_BYTES } = require('../../src/shared/providers/reasonix/fileIo');
 const {
@@ -537,5 +538,22 @@ test('the on-demand worker lists local sessions and reads only the requested det
     if (previousHome === undefined) delete process.env.REASONIX_STATE_HOME;
     else process.env.REASONIX_STATE_HOME = previousHome;
     fs.rmSync(stateHome, { recursive: true, force: true });
+  }
+});
+
+test('Reasonix keeps an explicit zero cache miss and only derives missing counts', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'reasonix-cache-miss-'));
+  try {
+    const meta = path.join(root, 'branch.jsonl.meta');
+    const telemetry = path.join(root, 'branch.jsonl.telemetry.json');
+    writeJson(meta, { id: 'branch' });
+    for (const [counts, expected] of [[{ cacheMissTokens: 0 }, 0], [{}, 100]]) {
+      writeJson(telemetry, { usage: { totalTokens: 1000, promptTokens: 1000, cacheHitTokens: 900, ...counts } });
+      const row = readReasonixNativeSession(meta, telemetry);
+      assert.equal(row.inputTokens, expected);
+      assert.equal(row.cacheReadTokens, 900);
+    }
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
   }
 });

@@ -243,7 +243,9 @@ function readReasonixNativeSession(metaPath, telemetryPath, options = {}) {
   const promptTokens = integerValue(firstNumber(usage, ['promptTokens', 'prompt_tokens']));
   const cacheReadTokens = integerValue(firstNumber(usage, ['cacheHitTokens', 'cache_hit_tokens']));
   const explicitCacheMisses = firstValue(usage, ['cacheMissTokens', 'cache_miss_tokens']);
-  const inputTokens = nonNegativeNumber(explicitCacheMisses) || Math.max(0, promptTokens - cacheReadTokens);
+  const inputTokens = hasFiniteNumber(explicitCacheMisses)
+    ? nonNegativeNumber(explicitCacheMisses)
+    : Math.max(0, promptTokens - cacheReadTokens);
   const createdAt = firstTimestamp(meta, ['created_at', 'createdAt']);
   const updatedAt = firstTimestamp(meta, ['updated_at', 'updatedAt']);
   const topicId = textValue(firstValue(meta, ['topic_id', 'topicId']), 256);
