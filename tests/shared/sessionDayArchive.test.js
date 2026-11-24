@@ -181,3 +181,42 @@ test('the SQLite store keeps the days and the transform publishes no past-day in
     fs.rmSync(dir, { recursive: true, force: true });
   }
 });
+
+test('a Today that ends becomes a retained day, so a session deleted that day stays in the ranges', () => {
+  let archive = capture(normalizeSessionUsageArchive({}), {
+    updatedAt: NOW.toISOString(), sessionUsageArchiveFullScan: false,
+    today: period(row('same-day', 10)), month: period(row('same-day', 10)), allTime: period(row('same-day', 10))
+  });
+  const tomorrow = new Date(2026, 10, 25, 12, 0, 0);
+  archive = updateSessionUsageArchive(archive, null, tomorrow).archive;
+  assert.equal(archive.sessions['claude:same-day'].periods.today, undefined);
+  const summary = {
+    nativeRanges: { last7: period() },
+    nativeRangeWindows: { last7: { start: dayKey(6, '2026-11-25'), end: '2026-11-25' } }
+  };
+  assert.equal(applySessionDayArchive(summary, archive, { now: tomorrow }).nativeRanges.last7.sessions['claude:same-day'].totalTokens, 10);
+});
+
+test('a restored range row takes the decorated title and project of All Time', () => {
+  const archive = capture(normalizeSessionUsageArchive({}), fullTick({
+    allTime: period(row('renamed', 50, { title: 'Renamed in T3', projectId: 'p1', projectLabel: 'Right project' })),
+    days: { [dayKey(1)]: period(row('renamed', 50, { title: 'Transcript title', projectId: 'p0', projectLabel: 'Raw project' })) }
+  }));
+  const restored = applySessionDayArchive(last7(), archive, { now: NOW }).nativeRanges.last7.sessions['claude:renamed'];
+  assert.equal(restored.title, 'Renamed in T3');
+  assert.equal(restored.projectId, 'p1');
+  assert.equal(restored.projectLabel, 'Right project');
+});
+
+test('a merged-id copy of a split session is not added twice', () => {
+  const today = (client) => ({
+    client, sessionId: 'shared', day: TODAY, month: TODAY.slice(0, 7), capturedAt: NOW.toISOString(),
+    periodWindows: { today: { capturedAt: NOW.toISOString(), day: TODAY } },
+    periods: { today: { client, sessionId: 'shared', totalTokens: 10, costUsd: 0, models: { m: 10 } } }
+  });
+  // The legacy merged row comes first, as insertion order puts it.
+  const archive = normalizeSessionUsageArchive({ sessions: { 'pi:shared': today('pi'), 'omp:shared': today('omp') } });
+  const range = applySessionDayArchive(last7(), archive, { now: NOW }).nativeRanges.last7;
+  assert.equal(Object.keys(range.sessions).length, 1);
+  assert.equal(range.totalTokens, 10);
+});

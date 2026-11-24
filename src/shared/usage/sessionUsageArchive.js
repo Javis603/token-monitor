@@ -219,6 +219,16 @@ function pruneExpiredSessionUsagePeriods(archive, capturedAt, changedKeys) {
     const todayWindow = entry.periodWindows?.today;
     const retainedDay = todayWindow?.day || entry.day;
     if (pruneDay && entry.periods?.today && (!retainedDay || retainedDay < day)) {
+      // An ended Today becomes that session's retained day, so a session whose
+      // source was deleted the day it was used stays in the native ranges.
+      // A later full tick's scan of that day still replaces or drops it.
+      if (retainedDay && retainedDay >= oldestDay && hasSessionUsage(entry.periods.today)) {
+        const observedAt = todayWindow?.capturedAt || entry.capturedAt;
+        const kept = entry.days?.[retainedDay];
+        if (!kept || Date.parse(kept.capturedAt) < Date.parse(observedAt)) {
+          (entry.days ||= {})[retainedDay] = { capturedAt: observedAt, session: entry.periods.today };
+        }
+      }
       delete entry.periods.today;
       delete entry.periodWindows.today;
       changed = true;
@@ -651,6 +661,11 @@ function applySessionUsageArchive(summary, archive, options = {}) {
   return next;
 }
 
+// The decorated identity of a session: titles, projects and links resolved by
+// the full scan. Raw day rows carry only the transcript's own metadata.
+const RANGE_IDENTITY_FIELDS = Object.freeze(['title', 'sessionKind', 'nativeSessionId', 't3ThreadId', 'parentSessionId', 'parentClient']);
+const RANGE_PROJECT_FIELDS = Object.freeze(['projectId', 'projectLabel']);
+
 // An archived session's usage in a native range is the sum of its retained
 // days in that range, plus its retained Today when the range ends today. Its
 // title, project and links come from its All Time row; every count comes from
@@ -666,8 +681,16 @@ function sessionForRange(entry, window, today, now, key) {
   const usage = Object.values(mergePeriods(...rows.map((row) => ({ sessions: { [key]: row } }))).sessions)[0];
   if (!usage) return null;
   const session = { ...usage };
-  for (const [field, value] of Object.entries(entry.periods?.allTime || {})) {
+  const allTime = entry.periods?.allTime;
+  if (!allTime) return session;
+  for (const [field, value] of Object.entries(allTime)) {
     if ((typeof value === 'string' || typeof value === 'boolean') && (session[field] === undefined || session[field] === '')) session[field] = value;
+  }
+  for (const field of RANGE_IDENTITY_FIELDS) if (allTime[field]) session[field] = allTime[field];
+  // All Time's project is authoritative, including no project.
+  for (const field of RANGE_PROJECT_FIELDS) {
+    if (allTime[field]) session[field] = allTime[field];
+    else delete session[field];
   }
   return session;
 }
@@ -711,16 +734,27 @@ function applySessionDayArchive(summary, archive, options = {}) {
     if (!range || typeof range !== 'object' || !window?.start || !window?.end) continue;
     let target = null;
     const superseded = [];
-    for (const [key, entry] of candidates) {
-      if ((target || range).sessions?.[key]) continue;
-      const session = sessionForRange(entry, window, today, now, key);
-      if (!session || !hasSessionUsage(session) || isLiveUnderSplitId(target || range, entry, session)) continue;
+    const merged = [];
+    const add = (key, session, entry) => {
       if (entry.supersededBy) {
         superseded.push([key, session, entry.supersededBy]);
-        continue;
+        return;
       }
       target ||= writablePeriod(range);
       addArchivedSession(target, session, key);
+    };
+    for (const [key, entry] of candidates) {
+      if (range.sessions?.[key]) continue;
+      const session = sessionForRange(entry, window, today, now, key);
+      if (!session || !hasSessionUsage(session)) continue;
+      // As in applySessionUsageArchive(): a row under a merged id replays after
+      // every split-id row, so it can see the split copy of the same session.
+      if (splitClientIdFor(session.client || entry.client)) merged.push([key, session, entry]);
+      else add(key, session, entry);
+    }
+    for (const [key, session, entry] of merged) {
+      if ((target || range).sessions?.[key] || isLiveUnderSplitId(target || range, entry, session)) continue;
+      add(key, session, entry);
     }
     for (const [key, session, supersededBy] of superseded) {
       if ((target || range).sessions?.[supersededBy]) continue;
