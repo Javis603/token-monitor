@@ -130,11 +130,27 @@ function customScanPathsFingerprint(value, options = {}) {
 }
 
 function tokscaleExtraDirsEnv(value, inherited = '', options = {}) {
-  const additions = customScanPathEntries(value, options).flatMap(({ client, dir }) => (
-    suppressedCustomScanIds(client, dir, options)
-      .map((scanId) => `${scanId}:${dir}`)
-  ));
-  return [String(inherited || '').trim(), ...additions].filter(Boolean).join(',');
+  const entries = customScanPathEntries(value, options);
+  const mod = platformPath(options.platform || process.platform);
+  const acp = (options.antigravityAcpPaths || [])
+    .filter(dir => suppressedCustomScanIds('antigravity', dir, options).includes('antigravity-cli'))
+    .map(dir => ({ dir, canonical: canonicalDir(dir, options) }));
+  const automatic = acp.filter(({ canonical }) => !entries.some(({ client, dir }) => {
+    if (client !== 'antigravity') return false;
+    const root = canonicalDir(dir, options);
+    // A manually selected parent can contain other conversations as well.
+    return root !== canonical && dirContains(root, canonical, mod)
+      && suppressedCustomScanIds(client, dir, options).includes('antigravity-cli');
+  }));
+  const additions = entries.flatMap(({ client, dir }) => {
+    const ids = suppressedCustomScanIds(client, dir, options);
+    const covered = client === 'antigravity' && automatic.some(({ canonical }) => (
+      dirContains(canonical, canonicalDir(dir, options), mod)
+    ));
+    return ids.filter(id => !(covered && id === 'antigravity-cli')).map(id => `${id}:${dir}`);
+  });
+  return [String(inherited || '').trim(), ...additions, ...automatic.map(({ dir }) => `antigravity-cli:${dir}`)]
+    .filter(Boolean).join(',');
 }
 
 function platformPath(platform) {

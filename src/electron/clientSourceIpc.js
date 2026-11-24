@@ -1,5 +1,7 @@
 'use strict';
 
+const { ANTIGRAVITY_ACP_SOURCE_ID } = require('../shared/providers/antigravity/acpPaths');
+
 function normalizeClientId(value) {
   return String(value || '').trim().toLowerCase();
 }
@@ -42,7 +44,7 @@ function createClientSourceIpcHandlers(options = {}) {
     if (!canInspectClient(client)) return null;
     try {
       const seen = new Set();
-      const all = (visibleDiagnosticRoots(client)[client] || [])
+      const roots = (visibleDiagnosticRoots(client)[client] || [])
         .filter((root) => {
           const key = `${root.id}\0${root.dir}`;
           return !seen.has(key) && seen.add(key);
@@ -53,6 +55,8 @@ function createClientSourceIpcHandlers(options = {}) {
           exists: root.exists === true,
           ...(root.custom === true ? { custom: true } : {})
         }));
+      const automatic = roots.filter(root => root.id === ANTIGRAVITY_ACP_SOURCE_ID);
+      const all = automatic.length ? roots.filter(root => root.id !== ANTIGRAVITY_ACP_SOURCE_ID) : roots;
       const custom = all.filter((root) => root.custom === true).slice(0, 32);
       const sources = all.length <= 32
         ? all
@@ -60,7 +64,7 @@ function createClientSourceIpcHandlers(options = {}) {
             ...all.filter((root) => root.custom !== true).slice(0, 32 - custom.length),
             ...custom
           ];
-      return { sources, omittedCount: all.length - sources.length };
+      return { sources: [...sources, ...automatic], omittedCount: all.length - sources.length };
     } catch (_) {
       return null;
     }
