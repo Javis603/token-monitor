@@ -667,9 +667,9 @@ function isTokscaleWindowDay(value) {
 }
 
 // Native date ranges (Week, Last 7 days, Last 30 days) are Today plus the past
-// days in range. A full tick reads each of those past days as its own window in
+// days in range; Yesterday is its one past day. A full tick reads each of those past days as its own window in
 // the same scan, named `d<YYYY-MM-DD>`, enough for the longest range.
-const NATIVE_RANGE_NAMES = Object.freeze(['week', 'last7', 'last30']);
+const NATIVE_RANGE_NAMES = Object.freeze(['yesterday', 'week', 'last7', 'last30']);
 const NATIVE_RANGE_PAST_DAYS = 29;
 
 function dayKeyAddDays(key, delta) {
@@ -681,6 +681,7 @@ function dayKeyAddDays(key, delta) {
 // First day of a native range ending today. `weekStartsOn` is 0 (Sunday) to 6
 // and must match the renderer's locale week, which checks the range it gets.
 function nativeRangeStart(name, todayKey, weekStartsOn = 1) {
+  if (name === 'yesterday') return dayKeyAddDays(todayKey, -1);
   if (name === 'last7') return dayKeyAddDays(todayKey, -6);
   if (name === 'last30') return dayKeyAddDays(todayKey, -29);
   const weekday = new Date(`${todayKey}T00:00:00Z`).getUTCDay();
@@ -1645,8 +1646,10 @@ async function collectUsageOnce(options) {
     nativeRanges = {};
     nativeRangeWindows = {};
     for (const name of NATIVE_RANGE_NAMES) {
-      nativeRanges[name] = mergeNormalizedPeriods(nativePastRanges.periods[name], today);
-      nativeRangeWindows[name] = { start: nativePastRanges.starts[name], end: todayKey };
+      // Yesterday is over: it is its past day alone. Every other range ends today.
+      const end = name === 'yesterday' ? nativePastRanges.starts[name] : todayKey;
+      nativeRanges[name] = end === todayKey ? mergeNormalizedPeriods(nativePastRanges.periods[name], today) : nativePastRanges.periods[name];
+      nativeRangeWindows[name] = { start: nativePastRanges.starts[name], end };
     }
     // A session active on past days and Today takes Today's fresh title and
     // project, exactly as the delta-derived Month does on a watch tick.

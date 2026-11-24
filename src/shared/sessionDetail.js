@@ -532,7 +532,7 @@ function groupEvents(events) {
 }
 
 // `range:<YYYY-MM-DD>:<YYYY-MM-DD>` selects local days inclusively, for the
-// native Week / Last 7 days / Last 30 days a session row was opened from.
+// native Yesterday / Week / Last 7 days / Last 30 days a session row was opened from.
 const DAY_RANGE_PERIOD = /^range:(\d{4}-\d{2}-\d{2}):(\d{4}-\d{2}-\d{2})$/;
 
 function withinPeriod(timestamp, period, now) {

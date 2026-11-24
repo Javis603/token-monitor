@@ -80,10 +80,14 @@ test('a full tick composes each native range from its past days and Today', asyn
   }));
 
   assert.deepEqual(summary.nativeRangeWindows, {
+    yesterday: { start: dayKey(1), end: dayKey(1) },
     week: { start: dayKey(1), end: TODAY },
     last7: { start: dayKey(6), end: TODAY },
     last30: { start: dayKey(29), end: TODAY }
   });
+  // Yesterday is its own day alone, without Today.
+  assert.equal(summary.nativeRanges.yesterday.totalTokens, 1 + 1000);
+  assert.ok(!summary.nativeRanges.yesterday.sessions['claude:today-session']);
   // Monday through Tuesday: Today, day 1 and the spanning session's day 1.
   assert.equal(summary.nativeRanges.week.totalTokens, 100 + 1 + 1000);
   assert.equal(summary.nativeRanges.last7.totalTokens, 100 + (1 + 2 + 3 + 4 + 5 + 6) + 1000);
@@ -137,6 +141,8 @@ test('a watch tick adds the fresh Today to the anchored past days', async () => 
   assert.deepEqual(flags, [['--today']]);
   assert.equal(watch.nativeRanges.last7.totalTokens, full.nativeRanges.last7.totalTokens + 200);
   assert.equal(watch.nativeRanges.last7.sessions['claude:today-session'].totalTokens, 300);
+  // Today's growth never reaches Yesterday.
+  assert.equal(watch.nativeRanges.yesterday.totalTokens, full.nativeRanges.yesterday.totalTokens);
   assert.deepEqual(watch.nativeRangeWindows, full.nativeRangeWindows);
 });
 
@@ -263,6 +269,24 @@ test('the renderer uses a native range only for the range it would draw', () => 
   assert.equal(fixedPeriodRanges.supportsBreakdown('last7', 'session', { native: true }), true);
   assert.equal(fixedPeriodRanges.supportsBreakdown('last7', 'project', { native: true }), true);
   assert.equal(fixedPeriodRanges.supportsBreakdown('last7', 'session', {}), false);
+});
+
+test('Yesterday is a derived range for the day before today', () => {
+  assert.equal(fixedPeriodRanges.normalizeMonthMode('yesterday'), 'yesterday');
+  assert.equal(fixedPeriodRanges.slotForSelection('yesterday'), 'month');
+  assert.deepEqual(fixedPeriodRanges.rangeForSelection('yesterday', { todayKey: TODAY }), { start: dayKey(1), end: dayKey(1) });
+  const yesterday = { ...emptyPeriod(), totalTokens: 3, sessions: {} };
+  const stats = { periods: { yesterday }, nativeRangeWindows: { yesterday: { start: dayKey(1), end: dayKey(1) } } };
+  assert.equal(fixedPeriodRanges.nativeRangeSnapshot('yesterday', stats, { todayKey: TODAY }).period, yesterday);
+  // After midnight the collector's Yesterday is the day before, so it falls back.
+  assert.equal(fixedPeriodRanges.nativeRangeSnapshot('yesterday', stats, { todayKey: dayKey(-1) }), null);
+  // History draws Yesterday from its own day only, never from the live Today.
+  const history = fixedPeriodRanges.fixedPeriodSnapshot('yesterday', {
+    historyAvailable: true, todayKey: TODAY, liveTodayKey: TODAY,
+    todayPeriod: { ...emptyPeriod(), totalTokens: 100 },
+    daily: [{ date: dayKey(1), tokens: 4, cost: 0, perClient: {}, perModel: {} }, { date: TODAY, tokens: 90, cost: 0, perClient: {}, perModel: {} }]
+  });
+  assert.equal(history.period.totalTokens, 4);
 });
 
 function cursorReport(input) {

@@ -26,6 +26,7 @@
           </nav>
           <div id="monthPeriodMenu" class="view-switcher-menu period-menu hidden" popover="manual" role="menu" aria-labelledby="monthPeriodTab">
             <button class="view-switcher-menu-item" type="button" role="menuitemradio" data-fixed-period="month"><span class="view-switcher-menu-label" data-i18n="periodRange.month">This month</span></button>
+            <button class="view-switcher-menu-item" type="button" role="menuitemradio" data-fixed-period="yesterday"><span class="view-switcher-menu-label" data-i18n="periodRange.yesterday">Yesterday</span></button>
             <button class="view-switcher-menu-item" type="button" role="menuitemradio" data-fixed-period="week"><span class="view-switcher-menu-label" data-i18n="periodRange.week">This week</span></button>
             <button class="view-switcher-menu-item" type="button" role="menuitemradio" data-fixed-period="last7"><span class="view-switcher-menu-label" data-i18n="periodRange.last7">Last 7 days</span></button>
             <button class="view-switcher-menu-item" type="button" role="menuitemradio" data-fixed-period="last30"><span class="view-switcher-menu-label" data-i18n="periodRange.last30">Last 30 days</span></button>
@@ -222,6 +223,7 @@
                 </span>
                 <select id="periodMonthModeInput" aria-describedby="periodMonthModeNote">
                   <option value="month" data-i18n="periodRange.month">This month</option>
+                  <option value="yesterday" data-i18n="periodRange.yesterday">Yesterday</option>
                   <option value="week" data-i18n="periodRange.week">This week</option>
                   <option value="last7" data-i18n="periodRange.last7">Last 7 days</option>
                   <option value="last30" data-i18n="periodRange.last30">Last 30 days</option>
