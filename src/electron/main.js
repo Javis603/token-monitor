@@ -5566,7 +5566,10 @@ function syncNotch(rendererSettings) {
 // allowlisted appearance projection instead of the full renderer settings.
 function edgeDockAppearance(rendererSettings = settingsForRenderer()) {
   const source = rendererSettings || {};
+  const deviceIconScope = source.deviceIconScope || 'local';
   return {
+    deviceIconScope,
+    deviceIconOverrides: { [deviceIconScope]: source.deviceIconOverrides?.[deviceIconScope] },
     language: source.language,
     currency: source.currency,
     currencyRatesEffective: source.currencyRatesEffective,

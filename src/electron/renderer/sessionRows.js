@@ -40,6 +40,11 @@
     return [row?.modelLabel ?? sessionModelLabel(row), sessionReasoningEffortForRow(row)].filter(Boolean).join(' · ');
   }
 
+  function remoteSessionDevice(sourceDevice, localDeviceId) {
+    return localDeviceId && sourceDevice?.deviceId && sourceDevice.deviceId !== localDeviceId && sourceDevice.name
+      ? sourceDevice : null;
+  }
+
   function sessionSubtitleForDisplay(row, subtitle, { keepClient = false } = {}) {
     const text = subtitle || '';
     const client = row.clientLabel || row.client;
@@ -1007,6 +1012,7 @@
     sessionStatusNode,
     sessionReasoningEffortForRow,
     sessionModelMetadataLabel,
+    remoteSessionDevice,
     sessionSubtitleForDisplay,
     sessionModelMetadataNode,
     applyBreakdownRowSemantics,

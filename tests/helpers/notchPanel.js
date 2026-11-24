@@ -150,6 +150,7 @@ function panelFixture(t, settings = {}, { viaRenderer = false, pluginHost = null
     TokenMonitorLimitResetMotion: require('../../src/electron/renderer/limits/resetMotion'),
     TokenMonitorAccountIdentity: require('../../src/electron/renderer/accountIdentity'),
     TokenMonitorSessionRows: require('../../src/electron/renderer/sessionRows'),
+    TokenMonitorDeviceIcons: require('../../src/electron/renderer/deviceIcons'),
     TokenMonitorSessionLive: require('../../src/shared/sessionLive'),
     TokenMonitorUsageCharts: require('../../src/electron/renderer/usageCharts'),
     TokenMonitorClientCatalog: require('../../src/shared/clientCatalog'),

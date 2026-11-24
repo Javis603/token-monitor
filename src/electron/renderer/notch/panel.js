@@ -636,11 +636,8 @@
       body.append(sessionHeading(row, 'notch-now-title'));
       const meta = el('div', 'notch-now-meta');
       if (running) meta.append(wave());
-      const fullTime = !live ? relativeAgo(row.lastUsedAt, nowMs) : '';
-      const shortTime = fullTime ? sessionRows.sessionAgeShort(row.lastUsedAt, nowMs) : '';
-      const time = shortTime ? text('notch-session-age', shortTime, fullTime) : '';
-      if (time) time.setAttribute('role', 'img');
-      meta.append(sessionMetaLabel(row, { running, lead: !running && live ? t('notch.waiting') : '', time }));
+      if (!running && live) meta.append(text('notch-waiting-note', t('notch.waiting')));
+      appendSessionMetadata(meta, row, nowMs, { live, running, showCache: true });
       const extra = (running ? waitingCount : Math.max(0, waitingCount - 1));
       if (extra > 0) meta.append(text('notch-waiting-note', t('notch.moreWaiting', { count: extra })));
       body.append(meta);
@@ -1099,26 +1096,30 @@
       });
     }
 
-    // The heading mark already names the tool. This line does not wrap, so
-    // repeating the name pushes the model, effort and cache reading off the row.
-    function sessionMetaLabel(row, { running = false, lead = '', time = '' } = {}) {
-      const label = el('span');
-      const parts = [];
-      if (lead) parts.push(text('', lead));
-      if (sessionRows.sessionModelMetadataLabel(row)) parts.push(sessionModelMetadata(row));
-      const percent = row.tokenDataUnavailable ? '' : sessionRows.cacheHitLabel(row);
+    function appendSessionMetadata(meta, row, nowMs, { live = false, running = false, showCache = false } = {}) {
+      if (row.remoteDevice) meta.append(window.TokenMonitorDeviceIcons.sessionDeviceNode(document, row.remoteDevice, {
+        settings: appearance(),
+        bindOverflow: node => overflowText.bind(node)
+      }));
+      const description = el('span', 'session-compact-description');
+      const model = sessionModelMetadata(row);
+      if (model.childElementCount) description.append(model);
+      const percent = showCache && !row.tokenDataUnavailable ? sessionRows.cacheHitLabel(row) : '';
       if (percent) {
-        const reading = text('notch-session-cache-hit', `${running ? 'Cache ' : ''}${percent}`);
-        parts.push(reading);
+        if (description.childElementCount) description.append(document.createTextNode(' · '));
+        description.append(text('notch-session-cache-hit', `${running ? 'Cache ' : ''}${percent}`));
       }
-      // A caller may pass the age as a node so it can carry the full phrase as
-      // its accessible name.
-      if (time) parts.push(typeof time === 'string' ? text('', time) : time);
-      parts.forEach((part, index) => {
-        if (index) label.append(text('', ' · '));
-        label.append(part);
-      });
-      return label;
+      const shortAge = sessionRows.sessionAgeShort(row.lastUsedAt, nowMs);
+      if (shortAge && (!live || shortAge !== '<1m')) {
+        const age = text('notch-session-age', shortAge, relativeAgo(row.lastUsedAt, nowMs));
+        age.setAttribute('role', 'img');
+        if (description.childElementCount) description.append(document.createTextNode(' · '));
+        description.append(age);
+      }
+      if (description.childElementCount) {
+        overflowText.bind(description);
+        meta.append(description);
+      }
     }
 
     function activeRow(row, stateName, nowMs) {
@@ -1126,18 +1127,17 @@
       node.dataset.key = row.key || `${row.client}:${row.sessionId}`;
       node.setAttribute('role', 'listitem');
       node.style.setProperty('--notch-accent', clientColor(row.client));
-      const body = el('div', 'notch-active-body');
-      body.append(sessionHeading(row, 'notch-active-title'));
+      const head = el('div', 'notch-active-head');
+      head.append(sessionHeading(row, 'notch-active-title'), sessionTokens(row, 'notch-active-tokens', false));
       const meta = el('div', 'notch-active-meta');
       if (stateName === 'running') meta.append(wave());
       else meta.append(text('notch-pill', t('notch.waiting')));
-      meta.append(sessionMetaLabel(row, { running: stateName === 'running' }));
-      body.append(meta);
-      const value = el('div', 'notch-active-value');
-      value.append(sessionTokens(row, 'notch-active-tokens', false));
+      appendSessionMetadata(meta, row, nowMs, { live: true, running: stateName === 'running', showCache: true });
+      const reading = el('div', 'notch-active-reading');
+      reading.append(meta);
       const status = sessionStatus(row, nowMs);
-      if (status) value.append(status);
-      node.append(body, value);
+      if (status) reading.append(status);
+      node.append(head, reading);
       return node;
     }
 
@@ -1185,15 +1185,7 @@
         line.setAttribute('role', 'listitem');
         const body = el('div', 'notch-recent-body');
         const meta = el('span', 'notch-recent-meta');
-        meta.append(sessionModelMetadata(row));
-        const age = relativeAgo(row.lastUsedAt, nowMs);
-        const shortAge = age ? sessionRows.sessionAgeShort(row.lastUsedAt, nowMs) : '';
-        if (shortAge) {
-          if (sessionRows.sessionModelMetadataLabel(row)) meta.append(text('', ' · '));
-          const ageNode = text('notch-session-age', shortAge, age);
-          ageNode.setAttribute('role', 'img');
-          meta.append(ageNode);
-        }
+        appendSessionMetadata(meta, row, nowMs);
         body.append(sessionHeading(row, 'notch-recent-title'), meta);
         const value = el('div', 'notch-recent-value');
         value.append(sessionTokens(row, 'notch-recent-tokens'));

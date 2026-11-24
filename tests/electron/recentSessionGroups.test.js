@@ -275,7 +275,7 @@ test('recent groups resolve to Sessions detail with incumbent tool names, colors
   assert.notEqual(botDetail.detail, '2 activity records');
 });
 
-test('Home keeps family membership below the title and routes mouse and keyboard activation to the Sessions list', () => {
+test('Home omits family size and routes mouse and keyboard activation to the Sessions list', () => {
   const stats = fixture();
   const opts = incumbentOptions(stats);
   const group = presentation.recentSessionRows(stats, Infinity, opts)[0];
@@ -304,14 +304,9 @@ test('Home keeps family membership below the title and routes mouse and keyboard
     assert.equal(title.textContent, group.title);
     assert.equal(title.children.length, 0, 'membership never consumes title width');
     const description = meta.children[0];
-    const countIndex = description.children.findIndex(node => node.className === 'home-session-member-count');
-    const modelIndex = description.children.findIndex(node => node.className === 'session-model-metadata'
-      && node.children[0]?.textContent === rowApi.sessionModelLabel(group));
-    assert.ok(modelIndex >= 0 && countIndex > modelIndex, 'models precede membership like Sessions');
-    assert.equal(description.children[countIndex].textContent, '2 subagents');
-    // The live row's age would only say "just now", so membership ends the line.
-    assert.equal(description.children.at(-1).textContent, '2 subagents');
-    assert.equal(description.textContent.includes('just now'), false, 'a live row carries no age');
+    assert.deepEqual(description.children.map(node => node.className), ['session-model-metadata']);
+    assert.equal(description.children[0].children[0].textContent, rowApi.sessionModelLabel(group));
+    assert.equal(meta.children.length, 1, 'a fresh live group shows model information without age or member count');
     assert.equal(row.attributes.role, undefined, 'rows do not create nested navigation buttons');
     assert.equal(row.handlers.click, undefined);
     assert.equal(row.dataset.key, group.key);
@@ -330,16 +325,19 @@ test('Home keeps family membership below the title and routes mouse and keyboard
 
 test('Dock family expansion keeps real member rows and requests the existing native bubble size handshake', () => {
   const group = presentation.recentSessionRows(fixture())[0];
+  group.remoteDevice = { deviceId: 'imac', name: 'imac-m1', deviceKind: 'desktop' };
   const source = dock.slice(dock.indexOf('const expandedSessionGroups ='), dock.indexOf('function providerCard('));
   const payload = { cell: { id: 'sessions' } };
   const resized = [];
   const build = Function('document', 'presentation', 'sessionKey', 'el', 't', 'stateMark', 'overflowText',
     'clientLabel', 'sessionRowsApi', 'relativeAgo', 'limitWindowsView', 'contextNode', 'sessionLive',
-    'formatBreakdownTokens', 'state', 'surface', 'renderBubble', 'markNode', 'appearance', `${source}; return sessionsContainer;`)(
+    'formatBreakdownTokens', 'state', 'surface', 'renderBubble', 'markNode', 'appearance', 'window', `${source}; return sessionsContainer;`)(
     { createTextNode: text => new Node('text', '', text), createElement: tag => new Node(tag) }, presentation, row => row.key,
     (tag, className, text) => new Node(tag, className, text), translate, () => new Node('span'), { bind() {} },
     value => value, rowApi, () => '', { setDetailTooltip() {} }, () => null, sessionLive, String,
-    { payload }, 'bubble', value => resized.push(value), () => new Node('span'), () => ({})
+    { payload }, 'bubble', value => resized.push(value), () => new Node('span'),
+    () => ({ deviceIconScope: 'hub', deviceIconOverrides: { hub: { imac: 'laptop' } } }),
+    { TokenMonitorDeviceIcons: require('../../src/electron/renderer/deviceIcons') }
   );
   const list = build([group]);
   const family = list.children.at(-1).children[0];
@@ -349,16 +347,14 @@ test('Dock family expansion keeps real member rows and requests the existing nat
   assert.equal(summary.attributes.role, 'button');
   assert.equal(summary.attributes['aria-expanded'], 'false');
   const titleLine = summary.children[0];
-  const description = summary.children[2].children[0];
+  const meta = summary.children[2];
+  assert.equal(meta.children[0].className, 'session-source-device');
+  assert.equal(meta.children[0].children[1].textContent, 'imac-m1');
+  assert.equal(meta.children[0].children[0].className, 'device-kind-icon device-kind-laptop');
   assert.equal(titleLine.children.some(node => node.className === 'edge-dock-session-disclosure'), false,
     'group titles retain the ordinary session row layout without an extra arrow column');
-  assert.equal(titleLine.children.some(node => node.className === 'edge-dock-session-member-count'), false);
-  assert.equal(description.className, 'edge-dock-session-description');
-  const countIndex = description.children.findIndex(node => node.className === 'edge-dock-session-member-count');
-  const modelIndex = description.children.findIndex(node => node.className === 'session-model-metadata'
-    && node.children[0]?.textContent === rowApi.sessionModelLabel(group));
-  assert.ok(modelIndex >= 0 && countIndex > modelIndex, 'models precede membership like Sessions');
-  assert.equal(description.children[countIndex].textContent, '2 subagents');
+  assert.ok(meta.children.some(node => node.children[0]?.textContent === rowApi.sessionModelLabel(group)));
+  assert.ok([...titleLine.children, ...meta.children].every(node => node.textContent !== '2 subagents'));
   assert.equal(family.children[1].children.at(-1).children.length, 3, 'members retain individual navigable expansion rows');
   family.open = true;
   family.handlers.toggle();

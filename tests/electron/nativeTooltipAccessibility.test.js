@@ -29,6 +29,7 @@ class Element {
   }
   set textContent(value) { this.text = String(value); this.children = []; }
   get textContent() { return (this.text || '') + this.children.map(child => child.textContent).join(''); }
+  get childElementCount() { return this.children.length; }
   append(...children) { this.children.push(...children); }
   appendChild(child) { this.append(child); }
   replaceChildren(...children) { this.text = ''; this.children = children; }
@@ -219,6 +220,7 @@ test('Home sessions lead with live work, head only the recent group and keep fin
   const module = new Element();
   module.append(body);
   const context = {
+    deviceIconsApi: require('../../src/electron/renderer/deviceIcons'),
     document, t, els: { homePanel: { querySelector: () => null } }, state: { settings: {} },
     homeModuleShell: () => ({ module, body }), applyHomeListMark() {}, iconKindFor: () => 'codex',
     clientColors: { codex: 'blue' }, bindHoverMarquee() {}, formatCompact: String,
@@ -267,6 +269,21 @@ test('Home sessions lead with live work, head only the recent group and keep fin
     assert.equal(row.children.at(-1).className, 'home-list-value', 'the amount stays last, aligned with live rows');
   }
   assert.ok(rows[2].classes.has('starts-recent'));
+  body.children = [];
+  const remoteDevice = { deviceId: 'imac', name: 'imac-m1', deviceKind: 'desktop' };
+  context.renderHomeSessionModule([
+    { key: 'family', client: 'codex', activityState: 'running', totalTokens: 30, models: { codex: 30 },
+      lastUsedAt: new Date(Date.now() - 2 * 60_000).toISOString(), remoteDevice,
+      sessionGroup: 'subagents', subagentGroup: true, subagentCount: 2 },
+    { key: 'recent', client: 'codex', activityState: 'ended', totalTokens: 10, lastUsedAt: seenAt, remoteDevice }
+  ]);
+  const [remoteLive, remoteRecent] = body.children;
+  assert.equal(remoteLive.querySelectorAll('.home-session-meta')[0].children[0].textContent, 'imac-m1');
+  assert.equal(remoteLive.querySelectorAll('.home-session-ago-inline')[0].textContent, '2m');
+  assert.doesNotMatch(remoteLive.textContent, /subagents/);
+  assert.equal(remoteRecent.children.at(-3).textContent, 'imac-m1');
+  assert.equal(remoteRecent.children.at(-2).textContent, '20m');
+  assert.equal(remoteRecent.children.at(-1).textContent, '10');
   // A live row that has gone quiet for most of the running window keeps its
   // reading: "8m" is what separates it from one that is actively working.
   const stalledAt = new Date(Date.now() - 8 * 60_000).toISOString();

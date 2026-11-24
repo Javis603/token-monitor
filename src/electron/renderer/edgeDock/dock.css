@@ -1062,20 +1062,18 @@ html.edge-dock-reduced-motion .edge-dock-session-dot[data-state="running"] .edge
 .edge-dock-session-family > summary { cursor: pointer; list-style: none; }
 .edge-dock-session-family > summary::-webkit-details-marker { display: none; }
 .edge-dock-session-family > summary:focus-visible { outline: 1px solid var(--muted); outline-offset: 2px; }
-/* Membership is the quiet disclosure cue; the title keeps the same layout as
-   ordinary session rows, without another leading control column. */
-.edge-dock-session-member-count {
+/* A quiet disclosure cue for a group without adding a control column. */
+.edge-dock-session-family > summary .edge-dock-session-title {
   text-decoration: underline;
   text-decoration-color: rgba(var(--line-rgb), 0.3);
   text-underline-offset: 3px;
 }
-.edge-dock-session-family > summary:hover .edge-dock-session-member-count,
-.edge-dock-session-family > summary:focus-visible .edge-dock-session-member-count,
-.edge-dock-session-family[open] > summary .edge-dock-session-member-count {
+.edge-dock-session-family > summary:hover .edge-dock-session-title,
+.edge-dock-session-family > summary:focus-visible .edge-dock-session-title,
+.edge-dock-session-family[open] > summary .edge-dock-session-title {
   color: var(--text);
   text-decoration-color: currentColor;
 }
-.edge-dock-session-description { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 /* A family participates in its outer list's scrolling. A second scroller
    inside details traps wheel gestures once the card hits the work-area cap. */
 .edge-dock-session-family > .edge-dock-sessions { padding: 8px 0 0 16px; }
