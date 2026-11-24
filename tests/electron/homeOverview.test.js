@@ -1300,3 +1300,23 @@ test('homeLimitAccounts lists every window for the row layout and keeps the clas
   const classic = homeLimitAccounts([account], 3, { compact: true });
   assert.deepEqual(classic[0].windows.map((window) => window.remainingPercent), [40, 70], 'classic layouts keep the shortest two');
 });
+
+test('Home lists Antigravity disabled grouped lanes without a meter, like the Limits page', () => {
+  const lane = (kind, label, remainingPercent, extra = {}) => ({ kind, label, remainingPercent, resetsAt: '2026-10-06T00:00:00Z', ...extra });
+  const windows = [
+    lane('session', 'Gemini 5-hour', 64),
+    lane('session', 'Claude/GPT 5-hour', null, { showMeter: false }),
+    lane('weekly', 'Claude/GPT weekly', null, { showMeter: false })
+  ];
+  const [row] = homeLimitAccounts([{ providerId: 'antigravity', windows }]);
+  assert.deepEqual(row.windows.map((window) => [window.label, window.remainingPercent, window.showMeter]), [
+    ['Gemini 5-hour', 64, true],
+    ['Claude/GPT 5-hour', null, false],
+    ['Claude/GPT weekly', null, false]
+  ]);
+  // An account whose lanes are all disabled still appears.
+  assert.equal(homeLimitAccounts([{ providerId: 'antigravity', windows: windows.slice(1) }]).length, 1);
+  // The classic layouts keep their compact pick, and other providers still drop unmeasured rows.
+  assert.deepEqual(homeLimitAccounts([{ providerId: 'antigravity', windows }], 3, { compact: true })[0].windows.map((window) => window.label), ['Gemini 5-hour']);
+  assert.deepEqual(homeLimitAccounts([{ providerId: 'codex', windows }])[0].windows.map((window) => window.label), ['Gemini 5-hour']);
+});

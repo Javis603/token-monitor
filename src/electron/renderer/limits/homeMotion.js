@@ -128,7 +128,9 @@
       if (!toText || to === null || !previous?.text) return;
       if (numberMode() === 'count') {
         const from = finite(previous.percent);
-        if (from !== null && Math.round(from) !== Math.round(to)) {
+        // A count still in flight hands over even when the new reading rounds
+        // to where it stands; left running, it would finish on its old target.
+        if (from !== null && (Math.round(from) !== Math.round(to) || numbers.currentCountValue(value) != null)) {
           settleLater(numbers.beginCount(value, from, to, formatPercent, { toText }));
         }
         return;
@@ -193,7 +195,12 @@
           continue;
         }
         const motion = planMeterMotion(previous, current, resetMotion);
-        if (!motion) continue;
+        if (!motion) {
+          // A target that moved with no motion of its own (an entry growth cut
+          // short by a refresh) must not keep animating toward the old one.
+          if (finite(previous.fill) !== finite(current.fill)) for (const animation of running) animation.cancel();
+          continue;
+        }
         for (const animation of running) animation.cancel();
         motion.startedAt = now;
         meterMotions.set(track, motion);

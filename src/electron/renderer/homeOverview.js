@@ -184,6 +184,10 @@
             };
           })
           .filter((window) => window.remainingPercent != null
+            // Antigravity's disabled grouped lanes stay listed without a meter,
+            // as on the Limits page; its presentation already dropped the
+            // legacy pools that have no reading.
+            || (!compact && providerId === 'antigravity' && !window.showMeter)
             || window.planStatus === 'expired'
             || window.value
             || (window.metric === 'credits' && (window.remaining != null || window.detail)))

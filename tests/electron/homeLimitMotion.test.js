@@ -3,7 +3,7 @@
 const assert = require('node:assert/strict');
 const test = require('node:test');
 const resetMotion = require('../../src/electron/renderer/limits/resetMotion');
-const { planMeterMotion, FILL_MS } = require('../../src/electron/renderer/limits/homeMotion');
+const { createHomeLimitMotion, planMeterMotion, FILL_MS } = require('../../src/electron/renderer/limits/homeMotion');
 
 const row = (remainingPercent, fill = remainingPercent, extra = {}) => ({
   remainingPercent: String(remainingPercent), fill: String(fill), ...extra
@@ -38,4 +38,52 @@ test('Home meters stay still when nothing changed or the row is unmeasured', () 
   assert.equal(planMeterMotion(row(60, 60, { displayFill: 60.02 }), row(60.04), resetMotion), null);
   assert.equal(planMeterMotion(null, row(60), resetMotion), null);
   assert.equal(planMeterMotion(row(60), { remainingPercent: '60', fill: undefined }, resetMotion), null);
+});
+
+function motionScope({ value = null, track = null } = {}) {
+  const item = {
+    dataset: { limitMotionKey: 'row', limitRemainingPercent: track?.dataset.limitFill ?? '', limitResetAt: '' },
+    querySelector: (selector) => (selector === '.home-limit-track' ? track : selector === '[data-limit-motion-value]' ? value : null)
+  };
+  return { ownerDocument: { timeline: { currentTime: 1000 } }, querySelectorAll: () => [item] };
+}
+
+function countMotion(begun) {
+  return createHomeLimitMotion({
+    motion: resetMotion,
+    numberMode: () => 'count',
+    formatPercent: (value) => `${Math.round(value)}%`,
+    numbers: {
+      duration: 0,
+      currentCountValue: (el) => el.counting,
+      beginCount: (el, from, to) => { begun.push([from, to]); return () => {}; }
+    }
+  });
+}
+
+test('Home hands a count still in flight over to a reading it already rounds to', () => {
+  const begun = [];
+  const value = { dataset: { limitMotionText: '61%', limitMotionValue: '61' }, counting: 60.6 };
+  countMotion(begun).animate(motionScope({ value }), new Map([['row', { text: '80%', percent: 60.6 }]]));
+  assert.deepEqual(begun, [[60.6, 61]], 'left running, the old count would finish on its own target');
+  // With no count in flight, a reading that rounds the same stays put.
+  const idle = [];
+  countMotion(idle).animate(motionScope({ value: { ...value, counting: undefined } }), new Map([['row', { text: '61%', percent: 61 }]]));
+  assert.deepEqual(idle, []);
+});
+
+test('Home stops a meter animation whose target moved without motion of its own', () => {
+  const track = (fill) => {
+    const animation = { cancelled: false, cancel() { this.cancelled = true; } };
+    return { animation, dataset: { limitFill: fill }, getAnimations: () => [animation], querySelector: () => null };
+  };
+  const motion = countMotion([]);
+  // An entry growth toward 80% is cut short by a refresh to 0% while it still reads 0.
+  const moved = track('0');
+  motion.animate(motionScope({ track: moved }), new Map([['row', { fill: '80', displayFill: 0, motion: null }]]));
+  assert.equal(moved.animation.cancelled, true, 'the meter must not keep growing toward the old target');
+  // An unchanged target leaves a running animation alone.
+  const same = track('80');
+  motion.animate(motionScope({ track: same }), new Map([['row', { fill: '80', displayFill: 80, motion: null }]]));
+  assert.equal(same.animation.cancelled, false);
 });

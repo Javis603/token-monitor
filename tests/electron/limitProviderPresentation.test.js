@@ -6242,3 +6242,19 @@ test('providerReadingDeviceIds groups live local, per-device and aggregate readi
   assert.deepEqual(localOnly.get('cursor'), ['__local__']);
   assert.equal(localOnly.get('antigravity'), undefined);
 });
+
+test('Home limit readings show a dash, not 0%, for a window with no reading', () => {
+  const app = readRendererFile('app.js');
+  const context = {
+    t: (key) => key,
+    state: { settings: {} },
+    isCreditsWindow: () => false,
+    limitFillPercent: require('../../src/electron/renderer/limits/displayMode').limitFillPercent,
+    formatPercent: (value) => `${Math.round(value)}%`
+  };
+  vm.runInNewContext(`${functionBody(app, 'optionalFiniteNumber', 'formatHomeLimitWindowValue')}\n${functionBody(app, 'formatHomeLimitWindowValue')}`, context);
+  assert.equal(context.formatHomeLimitWindowValue({ remainingPercent: null, showMeter: false }, false), '—');
+  assert.equal(context.formatHomeLimitWindowValue({ remainingPercent: null, showMeter: false }, true), '—', 'used mode has no reading either');
+  assert.equal(context.formatHomeLimitWindowValue({ remainingPercent: 0 }, false), '0%', 'a real zero still reads as exhausted');
+  assert.equal(context.formatHomeLimitWindowValue({ usedPercent: 25 }, false), '75%');
+});

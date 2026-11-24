@@ -5193,6 +5193,7 @@ function formatHomeLimitWindowValue(window, showUsed) {
     }
     return formatCompactMoney(window.remaining, window.currency, state.settings?.compactTokenUnits, currentLocale());
   }
+  if (optionalFiniteNumber(window?.remainingPercent) == null && optionalFiniteNumber(window?.usedPercent) == null) return '—';
   const percent = limitFillPercent(window?.remainingPercent, window?.usedPercent, showUsed);
   // The module heading names the mode, so the reading stays a bare number.
   return formatPercent(percent);
