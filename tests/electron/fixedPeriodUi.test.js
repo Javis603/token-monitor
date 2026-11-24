@@ -109,6 +109,13 @@ test('billing cycle start day is a numeric Settings row passed to fixed ranges',
   assert.match(app, /saveSettings\(\{ billingCycleStartDay: day \}\)/);
 });
 
+test('the billing cycle setting references its localized help', () => {
+  const html = read('index.html');
+  assert.match(html, /<input id="billingCycleStartDayInput"[^>]* aria-describedby="billingCycleStartDayNote"[^>]*>/);
+  assert.match(html, /<span id="billingCycleStartDayNote"[^>]* data-i18n="periodRange\.cycleStartNote"[^>]*>[^<]+<\/span>/);
+  assert.equal((html.match(/\sid="billingCycleStartDayNote"/g) || []).length, 1);
+});
+
 test('cold-start boot restores every fixed middle-slot selection', () => {
   const boot = read('floatingBubbleBoot.js');
   for (const period of ['week', 'last7', 'last30', 'cycle']) {
