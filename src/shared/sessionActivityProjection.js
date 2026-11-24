@@ -11,7 +11,10 @@
   if (root) root.TokenMonitorSessionActivityProjection = api;
 })(typeof window !== 'undefined' ? window : null, function createApi(live, providers) {
   const indexes = new WeakMap();
-  const names = ['today', 'month', 'allTime'];
+  // Local native ranges (Week, Last 7 days, Last 30 days) list the same live
+  // sessions, so their rows take the same observations.
+  const names = ['today', 'month', 'allTime', 'week', 'last7', 'last30'];
+  const nativeSessionNames = ['today', 'month', 'allTime'];
   const LOOKUP_CACHE_LIMIT = 512;
   const clients = providers.SESSION_ACTIVITY_CLIENTS;
   const { isSessionActivityClient } = providers;
@@ -195,7 +198,7 @@
       }
     }
     const nativeSessions = {};
-    for (const name of names) nativeSessions[name] = Object.fromEntries(Object.entries(next.nativeSessions?.[name] || {})
+    for (const name of nativeSessionNames) nativeSessions[name] = Object.fromEntries(Object.entries(next.nativeSessions?.[name] || {})
       .filter(([, row]) => isSessionActivityClient(row.client)));
     return { observations: [...observations.values()], nativeSessions };
   }
@@ -224,7 +227,7 @@
     }
     if (patch.nativeSessions) {
       const nativeSessions = {};
-      for (const name of names) {
+      for (const name of nativeSessionNames) {
         const other = Object.fromEntries(Object.entries(summary.nativeSessions?.[name] || {})
           .filter(([, row]) => !isSessionActivityClient(row.client)));
         nativeSessions[name] = { ...other, ...patch.nativeSessions[name] };

@@ -389,3 +389,30 @@ test('a collector without native ranges never publishes them from a shared ancho
   }));
   assert.equal(watch.nativeRanges, undefined);
 });
+
+test('live activity observations reach the same session in the native ranges', () => {
+  const projection = require('../../src/shared/sessionActivityProjection');
+  const observedAt = new Date().toISOString();
+  const key = 'claude:live';
+  const period = () => ({ ...emptyPeriod(), totalTokens: 5, sessions: { [key]: { client: 'claude', sessionId: 'live', totalTokens: 5 } } });
+  const stats = { updatedAt: observedAt, periods: { today: period(), month: period(), allTime: period(), last7: period() } };
+  const next = projection.applyActivityPatch(stats, {
+    observations: [{ client: 'claude', sessionId: 'live', liveActivity: { state: 'waiting', observedAt } }]
+  });
+  assert.equal(next.periods.today.sessionActivity[key].state, 'waiting');
+  assert.equal(next.periods.last7.sessionActivity[key].state, 'waiting');
+});
+
+test('a Today/Month preview keeps the last native ranges until the full result', () => {
+  const { createDeviceState } = require('../../src/shared/usage/deviceState');
+  const records = [];
+  const device = createDeviceState({ envelope: { deviceId: 'd' }, onRecord: (record) => records.push(record) });
+  const last7 = { ...emptyPeriod(), totalTokens: 7 };
+  const full = (extra) => ({ today: emptyPeriod(), month: emptyPeriod(), allTime: emptyPeriod(), ...extra });
+  device.updateUsage(full({ nativeRanges: { last7 }, nativeRangeWindows: { last7: { start: dayKey(6), end: TODAY } } }));
+  device.updateUsage({ today: emptyPeriod(), month: emptyPeriod() }, 'preview');
+  assert.equal(device.getSnapshot().nativeRanges.last7.totalTokens, 7);
+  // A complete result without ranges (a fallback) drops them.
+  device.updateUsage(full({}));
+  assert.equal(device.getSnapshot().nativeRanges, undefined);
+});

@@ -5743,13 +5743,21 @@ function sessionLiveCost(entry, client) {
   return client === 'reasonix' ? Number(entry?.reportedCostUsd || 0) : Number(entry?.costUsd || 0);
 }
 
+// The dates a native-range detail reads move with the range (a new day), even
+// when the session's totals do not.
+function openSessionDetailPeriod(request) {
+  return request?.detailPeriod && request.period === state.period ? sessionDetailPeriod() : request?.detailPeriod;
+}
+
 function sessionDetailLiveSignature() {
   const entry = sessionLiveStatsEntry(state.openSession);
   if (!entry) return '';
+  const detailPeriod = openSessionDetailPeriod(state.openSession);
   return JSON.stringify([
     Number(entry.totalTokens) || 0,
     Number(entry.costUsd) || 0,
-    Number(entry.reportedCostUsd) || 0
+    Number(entry.reportedCostUsd) || 0,
+    ...(String(detailPeriod || '').startsWith('range:') ? [detailPeriod] : [])
   ]);
 }
 
@@ -5766,17 +5774,19 @@ async function refreshOpenSessionDetail() {
   const signature = sessionDetailLiveSignature();
   if (!signature || signature === request.liveSignature) return;
   const sessionCost = sessionLiveCost(sessionLiveStatsEntry(request), request.client);
+  const detailPeriod = openSessionDetailPeriod(request);
   request.detailLiveBusy = true;
   let readSucceeded = false;
   try {
     const detail = await window.tokenMonitor.getSessionDetail({
-      client: request.client, sessionId: request.sessionId, period: request.detailPeriod || request.period, sessionCost
+      client: request.client, sessionId: request.sessionId, period: detailPeriod || request.period, sessionCost
     });
     if (state.openSession !== request) return;
     // Readers resolve filesystem failures as payloads rather than rejecting.
     // Keep the last good snapshot and signature so the next tick can retry.
     if (!detail || detail.found !== true || detail.error) return;
     request.sessionCost = sessionCost;
+    request.detailPeriod = detailPeriod;
     request.detail = detail;
     request.liveSignature = signature;
     readSucceeded = true;
@@ -8551,7 +8561,12 @@ function statsWithNativeRangePeriods(stats) {
 // carry the native periods a History fallback replaced.
 function replaceDerivedStats(next) {
   const replaced = state.stats ? replacedNativeRangePeriods.get(state.stats) : null;
-  if (replaced && next && next !== state.stats) replacedNativeRangePeriods.set(next, replaced);
+  if (replaced && next && next !== state.stats) {
+    // Saved periods follow the same title policy as the stats they belong to.
+    replacedNativeRangePeriods.set(next, state.settings?.sessionTitlesEnabled === false
+      ? window.TokenMonitorSessionTitleDisplay.withoutSessionTitleStats({ periods: replaced }).periods
+      : replaced);
+  }
   state.stats = next;
 }
 
