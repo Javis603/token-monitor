@@ -1648,7 +1648,7 @@ async function collectUsageOnce(options) {
     for (const name of NATIVE_RANGE_NAMES) {
       // Yesterday is over: it is its past day alone. Every other range ends today.
       const end = name === 'yesterday' ? nativePastRanges.starts[name] : todayKey;
-      nativeRanges[name] = end === todayKey ? mergeNormalizedPeriods(nativePastRanges.periods[name], today) : nativePastRanges.periods[name];
+      nativeRanges[name] = end === todayKey ? mergeNormalizedPeriods(nativePastRanges.periods[name], today) : { ...nativePastRanges.periods[name] };
       nativeRangeWindows[name] = { start: nativePastRanges.starts[name], end };
     }
     // A session active on past days and Today takes Today's fresh title and
