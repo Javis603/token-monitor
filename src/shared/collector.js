@@ -1725,7 +1725,11 @@ async function collectUsageOnce(options) {
     month,
     allTime,
     // Local only: syncPayload keeps these off the wire.
-    ...(nativeRanges ? { nativeRanges, nativeRangeWindows } : {})
+    ...(nativeRanges ? { nativeRanges, nativeRangeWindows } : {}),
+    // A full tick's past days, for the session archive only (usageTransform).
+    ...(nativeRanges && nativeDays && !anchorUsed
+      ? { nativeRangeDays: Object.fromEntries(Object.entries(nativeDays).map(([key, period]) => [key, { sessions: period.sessions }])) }
+      : {})
   };
   // The request ledger is this source's archive. A second per-session archive
   // would resurrect its contribution after a native rollout takes precedence.
