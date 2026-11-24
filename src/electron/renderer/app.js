@@ -7605,26 +7605,14 @@ function renderHomeToolModule(period) {
   return module;
 }
 
-function homeSessionAgo(value) {
+function homeSessionAgo(value, now = Date.now()) {
   if (!Number.isFinite(value) || value <= 0) return '';
-  const minutes = Math.round(Math.max(0, Date.now() - value) / 60000);
+  const minutes = Math.round(Math.max(0, now - value) / 60000);
   if (minutes < 1) return t('edgeDock.agoNow');
   if (minutes < 60) return t('edgeDock.agoMinutes', { count: minutes });
   const hours = Math.round(minutes / 60);
   if (hours < 24) return t('edgeDock.agoHours', { count: hours });
   return t('edgeDock.agoDays', { count: Math.round(hours / 24) });
-}
-
-// The one-line form of a session's age ("28m", "3h", "2d"), in the same units
-// as the limit countdowns; the full phrase stays its accessible name.
-function homeSessionAgoShort(value) {
-  if (!Number.isFinite(value) || value <= 0) return '';
-  const minutes = Math.round(Math.max(0, Date.now() - value) / 60000);
-  if (minutes < 1) return t('edgeDock.agoNow');
-  if (minutes < 60) return `${minutes}m`;
-  const hours = Math.round(minutes / 60);
-  if (hours < 24) return `${hours}h`;
-  return `${Math.round(hours / 24)}d`;
 }
 
 function stopHomeSessionRepaint() {
@@ -7702,7 +7690,8 @@ function renderHomeSessionModule(rows) {
   const ordered = detailed ? entries
     : [...entries.filter((entry) => isLive(entry.activityState)), ...entries.filter((entry) => !isLive(entry.activityState))];
   ordered.forEach(({ row, activityState }, index) => {
-    const full = detailed || isLive(activityState);
+    const live = isLive(activityState);
+    const full = detailed || live;
     const item = document.createElement('div');
     item.className = full ? 'home-list-row home-session-row' : 'home-list-row home-session-row is-compact';
     item.dataset.key = row.key;
@@ -7734,11 +7723,18 @@ function renderHomeSessionModule(rows) {
     const value = document.createElement('span');
     value.className = 'home-list-value';
     value.textContent = formatCompact(row.totalTokens);
-    const age = homeSessionAgo(Date.parse(row.lastUsedAt || row.startedAt || ''));
+    // One age reading serves both layouts: the short form is what a row shows,
+    // the full phrase is what assistive technology hears.
+    const ageAt = Date.parse(row.lastUsedAt || row.startedAt || '');
+    // One clock reading, so the short form and the phrase it announces cannot
+    // disagree across a minute boundary.
+    const now = Date.now();
+    const age = homeSessionAgo(ageAt, now);
+    const shortAge = sessionRowsApi.sessionAgeShort(ageAt, now);
     if (!full) {
       const ago = document.createElement('span');
       ago.className = 'home-list-aux home-session-ago';
-      ago.textContent = homeSessionAgoShort(Date.parse(row.lastUsedAt || row.startedAt || ''));
+      ago.textContent = shortAge;
       if (age) {
         ago.setAttribute('role', 'img');
         ago.setAttribute('aria-label', age);
@@ -7771,7 +7767,18 @@ function renderHomeSessionModule(rows) {
       count.textContent = memberLabel;
       description.append(count);
     }
-    if (age) description.append(document.createTextNode(`${memberLabel || metadataLabel ? ' · ' : ''}${age}`));
+    // A live row keeps its age once it is a minute old: running covers up to ten
+    // minutes of quiet, so "8m" separates an active session from a stalled one
+    // where "<1m" would only repeat the state mark. Detailed rows show it always.
+    if (age && shortAge && (detailed || shortAge !== '<1m')) {
+      if (memberLabel || metadataLabel) description.append(document.createTextNode(' · '));
+      const ago = document.createElement('span');
+      ago.className = 'home-session-ago-inline';
+      ago.textContent = shortAge;
+      ago.setAttribute('role', 'img');
+      ago.setAttribute('aria-label', age);
+      description.append(ago);
+    }
     meta.append(description);
     const status = sessionRowsApi.sessionStatusNode(document, row, { prefix: 'home-session', translate: t,
       view: limitWindowsView, showUsed: state.settings?.sessionContextMetric !== 'remaining' });
