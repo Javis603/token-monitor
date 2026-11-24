@@ -229,3 +229,16 @@ test('a client that is no longer tracked does not fill the ranges from its days'
   assert.equal(applySessionDayArchive(last7(), archive, { now: NOW, activeClients: 'codex' }).nativeRanges.last7.sessions['claude:gone'], undefined);
   assert.equal(applySessionDayArchive(last7(), archive, { now: NOW, activeClients: ['claude', 'codex'] }).nativeRanges.last7.sessions['claude:gone'].totalTokens, 40);
 });
+
+test('a day the scan still reports for a source-archived session is kept', () => {
+  let archive = capture(normalizeSessionUsageArchive({}), fullTick({
+    allTime: period(row('ledger', 20)), days: { [dayKey(1)]: period(row('ledger', 20)) }
+  }));
+  const later = new Date(NOW.getTime() + 60_000);
+  archive = capture(archive, {
+    ...fullTick({ allTime: period(row('ledger', 25)), days: { [dayKey(1)]: period(row('ledger', 25)) }, updatedAt: later }),
+    codexLocalSessionKeys: ['claude:ledger']
+  }, later);
+  // Neither captured again nor dropped: the source ledger owns the session now.
+  assert.equal(archive.sessions['claude:ledger'].days[dayKey(1)].session.totalTokens, 20);
+});

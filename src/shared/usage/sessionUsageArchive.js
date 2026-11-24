@@ -397,8 +397,10 @@ function captureSessionDays(archive, deviceRecord, captureDate, { liveKeys, sour
     for (const observation of Object.values(days[day]?.sessions || {})) {
       if (isReasonixSyntheticSession(observation) || !hasSessionUsage(observation)) continue;
       const key = sessionKey(observation.client, observation.sessionId);
-      if (!key || sourceArchivedKeys.has(key)) continue;
+      if (!key) continue;
+      // The source's own ledger owns its rows; a reported day is still seen.
       seen.get(day).add(key);
+      if (sourceArchivedKeys.has(key)) continue;
       const previous = archive.sessions[key]?.days?.[day];
       if (previous && Date.parse(previous.capturedAt) > captureTime) continue;
       const session = cloneJson(observation);
