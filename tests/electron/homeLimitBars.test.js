@@ -416,6 +416,7 @@ test('Home rows put each window on one row of label, reset, meter and reading; t
   assert.equal(track.classList.contains('has-pace'), false, 'no pace notch without a window length');
   assert.equal(metric.children[1].textContent, '4h 0m', 'the reset is a countdown');
   assert.equal(metric.children[1].attributes['aria-label'], 'Reset 4h', 'the full boundary stays the accessible name');
+  assert.equal(metric.children[1].attributes.role, 'img', 'a span needs a role to carry that name');
   assert.equal(metric.legend, null, 'Home never adds a standing pace caption');
   assert.equal(homeRowParts(metric).track.attributes['aria-description'], undefined, 'no pace description without a tick');
   const expiry = renderHomeWindow({ ...window, boundaryKind: 'expiry' }, { homeLimitDisplayMode: 'rows' });

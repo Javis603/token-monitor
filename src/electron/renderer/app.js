@@ -7295,7 +7295,12 @@ function renderHomeLimitModule() {
         const resetText = document.createElement('span');
         resetText.className = 'home-limit-reset';
         resetText.textContent = reset.text;
-        if (reset.full !== reset.text) resetText.setAttribute('aria-label', reset.full);
+        if (reset.full !== reset.text) {
+          // A plain span cannot carry a name, so the shortened countdown is
+          // exposed as an image of its full wording, like the reset count.
+          resetText.setAttribute('role', 'img');
+          resetText.setAttribute('aria-label', reset.full);
+        }
         metric.append(resetText);
       }
       const value = document.createElement('span');
@@ -7730,7 +7735,10 @@ function renderHomeSessionModule(rows) {
       const ago = document.createElement('span');
       ago.className = 'home-list-aux home-session-ago';
       ago.textContent = homeSessionAgoShort(Date.parse(row.lastUsedAt || row.startedAt || ''));
-      if (age) ago.setAttribute('aria-label', age);
+      if (age) {
+        ago.setAttribute('role', 'img');
+        ago.setAttribute('aria-label', age);
+      }
       item.append(mark, stateMark, name, ago, value);
       body.append(item);
       return;

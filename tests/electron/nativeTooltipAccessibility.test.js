@@ -220,7 +220,7 @@ test('Home sessions lead with live work, head only the recent group and keep fin
   const context = {
     document, t, els: { homePanel: { querySelector: () => null } }, state: { settings: {} },
     homeModuleShell: () => ({ module, body }), applyHomeListMark() {}, iconKindFor: () => 'codex',
-    clientColors: { codex: 'blue' }, bindHoverMarquee() {}, formatCompact: String, homeSessionAgo: () => '', homeSessionAgoShort: () => '',
+    clientColors: { codex: 'blue' }, bindHoverMarquee() {}, formatCompact: String, homeSessionAgo: () => '20 minutes ago', homeSessionAgoShort: () => '20m',
     limitWindowsView: {}, sessionRowsApi: require('../../src/electron/renderer/sessionRows'),
     window: {
       TokenMonitorSessionLive: require('../../src/shared/sessionLive'),
@@ -247,6 +247,9 @@ test('Home sessions lead with live work, head only the recent group and keep fin
     assert.ok(row.className.includes('is-compact'));
     assert.equal(row.children.some(child => child.className === 'home-session-meta'), false);
     assert.equal(row.children.at(-2).className, 'home-list-aux home-session-ago', 'one line of title, age and amount');
+    assert.equal(row.children.at(-2).textContent, '20m');
+    assert.equal(row.children.at(-2).getAttribute('role'), 'img', 'a span needs a role to carry the full age as its name');
+    assert.equal(row.children.at(-2).getAttribute('aria-label'), '20 minutes ago');
     assert.equal(row.children.at(-1).className, 'home-list-value', 'the amount stays last, aligned with live rows');
   }
   assert.ok(rows[2].classes.has('starts-recent'));
