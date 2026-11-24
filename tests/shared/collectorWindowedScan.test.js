@@ -123,11 +123,15 @@ test('a full tick reads every period from one windowed scan in the captured cale
 });
 
 test('a windowed result missing a window fails the tick instead of publishing the rest', async () => {
-  const { collectUsageOnce } = freshCollector();
-  await assert.rejects(collectUsageOnce(baseOptions({
-    runTokscaleWindows: async () => ({ today: report(1), month: report(20) }),
-    runTokscale: async () => assert.fail('the serial scans must not run')
-  })), /missing the allTime window/);
+  // Absent, or present without the entries every report carries: neither may
+  // publish as zero All Time usage.
+  for (const allTime of [undefined, {}, []]) {
+    const { collectUsageOnce } = freshCollector();
+    await assert.rejects(collectUsageOnce(baseOptions({
+      runTokscaleWindows: async () => ({ today: report(1), month: report(20), ...(allTime ? { allTime } : {}) }),
+      runTokscale: async () => assert.fail('the serial scans must not run')
+    })), /missing the allTime window/);
+  }
 });
 
 test('a binary without windowed mode keeps the serial scans', async () => {

@@ -1118,9 +1118,11 @@ async function collectUsageOnce(options) {
       : Object.fromEntries(windows.map(({ name }) => [name, { entries: [] }]));
     if (!reports) return null;
     assertCollectionCalendar();
-    // A batch that drops a window must not publish its siblings.
+    // A batch that drops a window must not publish its siblings, nor turn a
+    // malformed window into zero usage. Every report, even an empty one,
+    // carries its entries array.
     for (const { name } of windows) {
-      if (!reports[name] || typeof reports[name] !== 'object') {
+      if (!Array.isArray(reports[name]?.entries)) {
         throw new Error(`tokscale --window output is missing the ${name} window`);
       }
     }
