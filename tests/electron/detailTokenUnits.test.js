@@ -128,6 +128,11 @@ class FakeElement {
   }
   matches(selector) {
     for (const part of selector.split(',').map((item) => item.trim())) {
+      const classAndData = part.match(/^\.([a-z0-9_-]+)\[data-([a-z0-9-]+)\]$/i);
+      if (classAndData) {
+        if (this.classList.contains(classAndData[1]) && this.dataset[classAndData[2]] !== undefined) return true;
+        continue;
+      }
       const attrMatch = part.match(/^\[([a-z0-9-]+)(?:="([^"]*)")?\]$/i);
       if (attrMatch) {
         const [, attr, expected] = attrMatch;
@@ -175,6 +180,14 @@ class FakeElement {
       if (child.querySelectorAll) results.push(...child.querySelectorAll(selector));
     }
     return results;
+  }
+  contains(node) {
+    let cursor = node;
+    while (cursor) {
+      if (cursor === this) return true;
+      cursor = cursor.parentElement;
+    }
+    return false;
   }
   dispatch(type, init = {}) {
     let stopped = false;
@@ -647,6 +660,182 @@ test('session detail, session group header, sessionRows tooltips, and row animat
   assert.equal(animEl.textContent, '10K');
   frames.shift()(420);
   assert.equal(animEl.textContent, '50K');
+});
+
+test('keyboard activation inside rebuilt tool, device, and project accordions preserves focus for repeated toggles', () => {
+  const api = freshDetailTokenDisplay();
+  const document = fakeDocument();
+  document.activeElement = null;
+  const origCreateElement = document.createElement;
+  document.createElement = (tag) => {
+    const el = origCreateElement(tag);
+    el.focus = (options) => {
+      el.lastFocusOptions = options;
+      document.activeElement = el;
+    };
+    return el;
+  };
+  const breakdown = document.createElement('div');
+  const sessionDetail = document.createElement('div');
+  const state = {
+    breakdown: 'tool',
+    stats: {},
+    openSession: null,
+    toolDetailMode: 'tokens',
+    settings: {
+      detailTokensUseCompactUnits: true,
+      compactTokenUnits: 'western',
+      locale: 'en',
+      showToolIcons: false
+    }
+  };
+  const formatNumber = (value) => Math.round(Number(value || 0)).toLocaleString('en-US');
+  const formatCompact = (value) => compactTokens.formatCompactTokens(value, 'western', 'en');
+  const t = (key) => i18n.translate('en', key);
+
+  const helpersStart = appSource.indexOf('function captureDetailTokenFocus(');
+  const helpersEnd = appSource.indexOf('function decorateDetailTokenElement(', helpersStart);
+  const rowTemplateStart = appSource.indexOf('function rowTemplate(');
+  const rowTemplateEnd = appSource.indexOf('const DEVICE_DELETE_CONFIRMATION_MS', rowTemplateStart);
+  const deviceAccordionStart = appSource.indexOf('function renderDeviceAccordion(');
+  const toolAccordionEnd = appSource.indexOf('function activeToolDetail(', deviceAccordionStart);
+  const updateRowStart = appSource.indexOf('function updateRow(');
+  const updateRowEnd = appSource.indexOf('function applyHomeListMark(', updateRowStart);
+
+  const rowDefs = [
+    {
+      key: 'claude',
+      name: 'Claude Code',
+      value: 500_000,
+      cost: 5,
+      max: 500_000,
+      barValue: 500_000,
+      color: '#cc7c5e',
+      cacheReadTokens: 300_000,
+      outputTokens: 80_000,
+      unclassifiedTokens: 0
+    },
+    {
+      key: 'dev:ws',
+      name: 'Workstation',
+      value: 400_000,
+      cost: 4,
+      max: 500_000,
+      barValue: 400_000,
+      color: '#6ab4f0',
+      deviceDetail: {
+        emptyText: '',
+        metaParts: [],
+        tools: [{
+          key: 'codex', client: 'codex', name: 'Codex', value: 400_000, percent: 100, color: '#6ab4f0',
+          models: [{ key: 'gpt-5', name: 'gpt-5', value: 150_000 }]
+        }]
+      }
+    },
+    {
+      key: 'proj:tm',
+      name: 'token-monitor',
+      value: 300_000,
+      cost: 3,
+      max: 500_000,
+      barValue: 300_000,
+      color: '#49a3b0',
+      accordionRows: [{ name: 'Claude Code', value: 200_000, percent: 67, color: '#cc7c5e' }]
+    }
+  ];
+
+  let rowNodes = [];
+  const context = {
+    document,
+    rendererDom,
+    els: { breakdown, sessionDetail },
+    state,
+    rowLiveMarkup: '',
+    overflowText: { update() {} },
+    bindHoverMarquee() {},
+    setHoverMarqueeText(el, text) { el.textContent = text || ''; },
+    rowWidth: () => 50,
+    iconKindFor: () => ({ kind: 'dot' }),
+    toolIconsEnabled: () => false,
+    clientsWithIcon: new Set(),
+    toolDetailData: new WeakMap(),
+    toolDetailsApi: require('../../src/electron/renderer/toolDetails'),
+    fixedPeriodRangesApi: require('../../src/electron/renderer/fixedPeriodRanges'),
+    formatNumber,
+    formatCompact,
+    formatCost: (value) => `$${Number(value || 0).toFixed(2)}`,
+    rowNumberAnimations: new Map(),
+    cancelRowNumberAnimation() {},
+    settleRowNumberAnimations() {},
+    renderSessionGroupDetail() {},
+    renderSessionDetail() {},
+    render() {
+      rowDefs.forEach((def, index) => context.updateRow(rowNodes[index], def));
+    },
+    updateRowContext() {},
+    updateRowLive() {},
+    applyBarScale() {},
+    sessionRowsApi: sessionRows,
+    t,
+    isDetailCompactEnabled: () => true,
+    formatDetailTokens: (value) => api.formatDetailTokens(value),
+    detailTokenDisplaySignature: () => api.stateSignature(),
+    decorateDetailTokenElement: (el, value, options = {}) => {
+      const exactText = options.exactText !== undefined ? String(options.exactText) : formatNumber(value);
+      api.decorateTokenElement(el, exactText, {
+        ...(options.enabled !== undefined ? { enabled: options.enabled } : {}),
+        exactHint: t('detail.tokens.clickForExact'),
+        compactHint: t('detail.tokens.clickForCompact')
+      });
+    }
+  };
+  vm.runInNewContext(`
+    ${appSource.slice(helpersStart, helpersEnd)}
+    ${appSource.slice(rowTemplateStart, rowTemplateEnd)}
+    ${appSource.slice(deviceAccordionStart, toolAccordionEnd)}
+    ${appSource.slice(updateRowStart, updateRowEnd)}
+    globalThis.rowTemplate = rowTemplate;
+    globalThis.updateRow = updateRow;
+    globalThis.refreshDetailTokenViews = refreshDetailTokenViews;
+  `, context);
+
+  api.configure({
+    isEnabled: () => true,
+    getUnitSystem: () => 'western',
+    getLocale: () => 'en',
+    formatExact: formatNumber,
+    formatCompact,
+    onToggle: () => context.refreshDetailTokenViews()
+  });
+
+  rowNodes = rowDefs.map((def) => {
+    const node = context.rowTemplate(def);
+    node.classList.add('expanded');
+    breakdown.append(node);
+    return node;
+  });
+  context.render();
+
+  for (const [rowIndex, selector, compactText, exactText] of [
+    [0, '.accordion-value', '300K', '300,000'],
+    [1, '.device-model-value', '150K', '150,000'],
+    [2, '.accordion-value', '200K', '200,000']
+  ]) {
+    const initialTarget = rowNodes[rowIndex].querySelector(selector);
+    assert.equal(initialTarget.textContent, compactText);
+    initialTarget.focus();
+
+    // First Enter switches to exact and restores focus to the rebuilt element while keeping accordion expanded.
+    document.activeElement.dispatch('keydown', { key: 'Enter' });
+    assert.equal(rowNodes[rowIndex].classList.contains('expanded'), true);
+    assert.equal(document.activeElement.textContent, exactText);
+    assert.equal(document.activeElement.lastFocusOptions?.preventScroll, true);
+
+    // Second Space immediately toggles back to compact without re-navigating focus.
+    document.activeElement.dispatch('keydown', { key: ' ' });
+    assert.equal(rowNodes[rowIndex].classList.contains('expanded'), true);
+    assert.equal(document.activeElement.textContent, compactText);
+  }
 });
 
 test('regression: Edge Dock detail cards and TOTAL TOKENS remain unaffected by detailTokensUseCompactUnits', () => {
