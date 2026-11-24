@@ -19,6 +19,7 @@ const {
 } = require('../../src/shared/collector');
 const { SYNC_SOURCE_EVENT_MIN_INTERVAL_MS } = require('../../src/shared/selfSyncThrottle');
 const { referencedTerminationOptions } = require('../helpers/referencedTerminationTimers');
+const { withoutWindowedScan } = require('../helpers/tokscaleWithoutWindows');
 
 function nextTurn() {
   return new Promise((resolve) => setImmediate(resolve));
@@ -145,7 +146,7 @@ test('usage replacement waits for an aborted tokscale child to close before spaw
   const collectorPath = require.resolve('../../src/shared/collector');
   const originalSpawn = childProcess.spawn;
   const children = [];
-  childProcess.spawn = () => {
+  childProcess.spawn = withoutWindowedScan(() => {
     const child = new EventEmitter();
     child.stdout = new EventEmitter();
     child.stderr = new EventEmitter();
@@ -159,7 +160,7 @@ test('usage replacement waits for an aborted tokscale child to close before spaw
       });
     }
     return child;
-  };
+  });
   delete require.cache[collectorPath];
 
   let runtime = null;
@@ -222,7 +223,7 @@ test('usage replacement abandons its wait for a shared capability probe without 
     return child;
   }
 
-  childProcess.spawn = (_bin, args) => {
+  childProcess.spawn = withoutWindowedScan((_bin, args) => {
     calls.push(args);
     if (args.includes('--help')) {
       helpChild = new EventEmitter();
@@ -238,7 +239,7 @@ test('usage replacement abandons its wait for a shared capability probe without 
       return closingChild(2, '', "error: invalid value 'dsh' for --client");
     }
     return closingChild(0, JSON.stringify({ entries: [] }));
-  };
+  });
   delete require.cache[collectorPath];
 
   let runtime = null;
@@ -308,7 +309,7 @@ test('timed-out tokscale remains the replacement barrier through forced terminat
   const collectorPath = require.resolve('../../src/shared/collector');
   const originalSpawn = childProcess.spawn;
   const children = [];
-  childProcess.spawn = () => {
+  childProcess.spawn = withoutWindowedScan(() => {
     const child = new EventEmitter();
     child.stdout = new EventEmitter();
     child.stderr = new EventEmitter();
@@ -323,7 +324,7 @@ test('timed-out tokscale remains the replacement barrier through forced terminat
       });
     }
     return child;
-  };
+  });
   delete require.cache[collectorPath];
 
   let runtime = null;
@@ -371,7 +372,7 @@ test('unconfirmed forced termination releases the replacement barrier with a dia
   const collectorPath = require.resolve('../../src/shared/collector');
   const originalSpawn = childProcess.spawn;
   const children = [];
-  childProcess.spawn = () => {
+  childProcess.spawn = withoutWindowedScan(() => {
     const child = new EventEmitter();
     child.stdout = new EventEmitter();
     child.stderr = new EventEmitter();
@@ -386,7 +387,7 @@ test('unconfirmed forced termination releases the replacement barrier with a dia
       });
     }
     return child;
-  };
+  });
   delete require.cache[collectorPath];
 
   const diagnostics = [];
@@ -509,7 +510,7 @@ test('native Antigravity cancellation releases the claim without publishing fail
   let syncSpawns = 0;
   let killed = 0;
   let firstSyncChild = null;
-  childProcess.spawn = (_bin, args) => {
+  childProcess.spawn = withoutWindowedScan((_bin, args) => {
     const child = new EventEmitter();
     child.pid = 42420 + syncSpawns;
     child.stdout = new EventEmitter();
@@ -522,7 +523,7 @@ test('native Antigravity cancellation releases the claim without publishing fail
       if (syncSpawns > 1) setImmediate(() => child.emit('close', 0));
     }
     return child;
-  };
+  });
   delete require.cache[collectorPath];
 
   try {
@@ -671,7 +672,7 @@ test('native Antigravity timeout remains pending until the child closes', async 
   fs.mkdirSync(path.join(home, '.gemini', 'antigravity'), { recursive: true });
   const syncLockPath = path.join(home, 'sync.lock');
   let syncChild = null;
-  childProcess.spawn = () => {
+  childProcess.spawn = withoutWindowedScan(() => {
     const child = new EventEmitter();
     child.pid = 42520;
     child.stdout = new EventEmitter();
@@ -682,7 +683,7 @@ test('native Antigravity timeout remains pending until the child closes', async 
     fs.writeFileSync(syncLockPath, `${child.pid} ${Math.floor(Date.now() / 1000)}\n`);
     syncChild = child;
     return child;
-  };
+  });
   delete require.cache[collectorPath];
 
   try {
@@ -729,7 +730,7 @@ test('native Antigravity reports and settles an unconfirmed forced termination',
   fs.mkdirSync(path.join(home, '.gemini', 'antigravity'), { recursive: true });
   const syncLockPath = path.join(home, 'sync.lock');
   let syncChild = null;
-  childProcess.spawn = () => {
+  childProcess.spawn = withoutWindowedScan(() => {
     const child = new EventEmitter();
     child.pid = 42620;
     child.stdout = new EventEmitter();
@@ -740,7 +741,7 @@ test('native Antigravity reports and settles an unconfirmed forced termination',
     fs.writeFileSync(syncLockPath, `${child.pid} ${Math.floor(Date.now() / 1000)}\n`);
     syncChild = child;
     return child;
-  };
+  });
   delete require.cache[collectorPath];
 
   try {
