@@ -14,7 +14,7 @@ function nonNegativeNumber(value) {
   return Number.isFinite(numeric) && numeric >= 0 ? numeric : null;
 }
 
-// Local mode only: this machine's native Week / Last 7 days / Last 30 days are
+// Local mode only: this machine's native Yesterday / Week / Last 7 days / Last 30 days are
 // periods of the same stats, so every presentation step and the session deltas
 // treat them like Today and Month. A Hub aggregate spans devices, so ranges
 // there keep coming from History.

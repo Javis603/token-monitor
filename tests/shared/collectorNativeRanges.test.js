@@ -80,10 +80,14 @@ test('a full tick composes each native range from its past days and Today', asyn
   }));
 
   assert.deepEqual(summary.nativeRangeWindows, {
+    yesterday: { start: dayKey(1), end: dayKey(1) },
     week: { start: dayKey(1), end: TODAY },
     last7: { start: dayKey(6), end: TODAY },
     last30: { start: dayKey(29), end: TODAY }
   });
+  // Yesterday is its own day alone, without Today.
+  assert.equal(summary.nativeRanges.yesterday.totalTokens, 1 + 1000);
+  assert.ok(!summary.nativeRanges.yesterday.sessions['claude:today-session']);
   // Monday through Tuesday: Today, day 1 and the spanning session's day 1.
   assert.equal(summary.nativeRanges.week.totalTokens, 100 + 1 + 1000);
   assert.equal(summary.nativeRanges.last7.totalTokens, 100 + (1 + 2 + 3 + 4 + 5 + 6) + 1000);
@@ -137,6 +141,12 @@ test('a watch tick adds the fresh Today to the anchored past days', async () => 
   assert.deepEqual(flags, [['--today']]);
   assert.equal(watch.nativeRanges.last7.totalTokens, full.nativeRanges.last7.totalTokens + 200);
   assert.equal(watch.nativeRanges.last7.sessions['claude:today-session'].totalTokens, 300);
+  // Today's growth never reaches Yesterday, and its published rows are not the
+  // anchor's, which Today's titles and links would otherwise rewrite.
+  assert.equal(watch.nativeRanges.yesterday.totalTokens, full.nativeRanges.yesterday.totalTokens);
+  const anchored = anchor.nativePastRanges.periods.yesterday;
+  assert.notEqual(watch.nativeRanges.yesterday.sessions, anchored.sessions);
+  assert.notEqual(watch.nativeRanges.yesterday.sessions['claude:spanning'], anchored.sessions['claude:spanning']);
   assert.deepEqual(watch.nativeRangeWindows, full.nativeRangeWindows);
 });
 
@@ -263,6 +273,24 @@ test('the renderer uses a native range only for the range it would draw', () => 
   assert.equal(fixedPeriodRanges.supportsBreakdown('last7', 'session', { native: true }), true);
   assert.equal(fixedPeriodRanges.supportsBreakdown('last7', 'project', { native: true }), true);
   assert.equal(fixedPeriodRanges.supportsBreakdown('last7', 'session', {}), false);
+});
+
+test('Yesterday is a derived range for the day before today', () => {
+  assert.equal(fixedPeriodRanges.normalizeMonthMode('yesterday'), 'yesterday');
+  assert.equal(fixedPeriodRanges.slotForSelection('yesterday'), 'month');
+  assert.deepEqual(fixedPeriodRanges.rangeForSelection('yesterday', { todayKey: TODAY }), { start: dayKey(1), end: dayKey(1) });
+  const yesterday = { ...emptyPeriod(), totalTokens: 3, sessions: {} };
+  const stats = { periods: { yesterday }, nativeRangeWindows: { yesterday: { start: dayKey(1), end: dayKey(1) } } };
+  assert.equal(fixedPeriodRanges.nativeRangeSnapshot('yesterday', stats, { todayKey: TODAY }).period, yesterday);
+  // After midnight the collector's Yesterday is the day before, so it falls back.
+  assert.equal(fixedPeriodRanges.nativeRangeSnapshot('yesterday', stats, { todayKey: dayKey(-1) }), null);
+  // History draws Yesterday from its own day only, never from the live Today.
+  const history = fixedPeriodRanges.fixedPeriodSnapshot('yesterday', {
+    historyAvailable: true, todayKey: TODAY, liveTodayKey: TODAY,
+    todayPeriod: { ...emptyPeriod(), totalTokens: 100 },
+    daily: [{ date: dayKey(1), tokens: 4, cost: 0, perClient: {}, perModel: {} }, { date: TODAY, tokens: 90, cost: 0, perClient: {}, perModel: {} }]
+  });
+  assert.equal(history.period.totalTokens, 4);
 });
 
 function cursorReport(input) {
@@ -429,4 +457,37 @@ test('device state applies live activity to sessions held in its native ranges',
   assert.equal(snapshot.today.sessions[key].liveActivity.state, 'waiting');
   assert.equal(snapshot.nativeRanges.last7.sessions[key].liveActivity.state, 'waiting');
   assert.equal(snapshot.nativeRanges.last7.sessionActivity, undefined);
+});
+
+test('Yesterday takes a resumed session\'s identity from Today, not its times', async () => {
+  const { collectUsageOnce } = freshCollector();
+  const yesterdayAt = `${dayKey(1)}T10:00:00.000Z`;
+  const todayAt = `${TODAY}T11:00:00.000Z`;
+  let captured = null;
+  await collectUsageOnce(baseOptions({
+    runTokscaleWindows: async ({ windows }) => {
+      const reports = windowReports(windows);
+      for (const entry of reports[`d${dayKey(1)}`].entries) if (entry.sessionId === 'spanning') entry.lastUsedAt = yesterdayAt;
+      return reports;
+    },
+    onAnchorComputed: (value) => { captured = value; }
+  }));
+  const anchor = {
+    dateKey: TODAY,
+    today: captured.windowsPeriods.today,
+    month: captured.windowsPeriods.month,
+    allTime: captured.windowsPeriods.allTime,
+    todayPartitions: captured.todayPartitions,
+    nativePastRanges: captured.nativePastRanges
+  };
+  const watch = await collectUsageOnce(baseOptions({
+    todayOnlyAnchor: anchor,
+    runTokscaleWindows: async () => assert.fail('a watch tick scans only Today'),
+    runTokscale: async () => ({
+      groupBy: 'client,session,model',
+      entries: [{ client: 'claude', sessionId: 'spanning', model: 'claude-sonnet-4-5', input: 5, output: 0, cost: 0, lastUsedAt: todayAt }]
+    })
+  }));
+  assert.equal(watch.nativeRanges.yesterday.sessions['claude:spanning'].lastUsedAt, yesterdayAt);
+  assert.equal(watch.nativeRanges.last7.sessions['claude:spanning'].lastUsedAt, todayAt);
 });

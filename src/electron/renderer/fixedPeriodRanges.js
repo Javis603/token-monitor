@@ -3,11 +3,12 @@
   if (typeof module === 'object' && module.exports) module.exports = api;
   if (root) root.TokenMonitorFixedPeriodRanges = api;
 })(typeof window !== 'undefined' ? window : null, function createFixedPeriodRangesApi() {
-  const MONTH_MODES = Object.freeze(['month', 'week', 'last7', 'last30']);
+  const MONTH_MODES = Object.freeze(['month', 'yesterday', 'week', 'last7', 'last30']);
   const LABELS = Object.freeze({
     today: 'DAY',
     month: 'MONTH',
     allTime: 'TOTAL',
+    yesterday: 'YDAY',
     week: 'WEEK',
     last7: '7D',
     last30: '30D'
@@ -86,7 +87,7 @@
   }
 
   function isDerived(value) {
-    return value === 'week' || value === 'last7' || value === 'last30';
+    return value === 'yesterday' || value === 'week' || value === 'last7' || value === 'last30';
   }
 
   function slotForSelection(value) {
@@ -100,6 +101,10 @@
   function rangeForSelection(selection, options = {}) {
     const todayKey = normalizeDateKey(options.todayKey) || localDayKey(options.now);
     if (!todayKey) return null;
+    if (selection === 'yesterday') {
+      const yesterday = dayKeyAddDays(todayKey, -1);
+      return { start: yesterday, end: yesterday };
+    }
     if (selection === 'week') {
       const weekday = new Date(`${todayKey}T00:00:00Z`).getUTCDay();
       const offset = (weekday - weekStartsOn(options.locale) + 7) % 7;
@@ -684,7 +689,7 @@
     };
   }
 
-  // Local mode publishes this machine's Week / Last 7 days / Last 30 days as
+  // Local mode publishes this machine's Yesterday / Week / Last 7 days / Last 30 days as
   // scanned periods with sessions and projects (collector.js). Use one only
   // for the range this calendar would draw: a locale or date the collector did
   // not compose for falls back to the History-derived snapshot.

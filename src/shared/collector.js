@@ -667,9 +667,9 @@ function isTokscaleWindowDay(value) {
 }
 
 // Native date ranges (Week, Last 7 days, Last 30 days) are Today plus the past
-// days in range. A full tick reads each of those past days as its own window in
+// days in range; Yesterday is its one past day. A full tick reads each of those past days as its own window in
 // the same scan, named `d<YYYY-MM-DD>`, enough for the longest range.
-const NATIVE_RANGE_NAMES = Object.freeze(['week', 'last7', 'last30']);
+const NATIVE_RANGE_NAMES = Object.freeze(['yesterday', 'week', 'last7', 'last30']);
 const NATIVE_RANGE_PAST_DAYS = 29;
 
 function dayKeyAddDays(key, delta) {
@@ -681,6 +681,7 @@ function dayKeyAddDays(key, delta) {
 // First day of a native range ending today. `weekStartsOn` is 0 (Sunday) to 6
 // and must match the renderer's locale week, which checks the range it gets.
 function nativeRangeStart(name, todayKey, weekStartsOn = 1) {
+  if (name === 'yesterday') return dayKeyAddDays(todayKey, -1);
   if (name === 'last7') return dayKeyAddDays(todayKey, -6);
   if (name === 'last30') return dayKeyAddDays(todayKey, -29);
   const weekday = new Date(`${todayKey}T00:00:00Z`).getUTCDay();
@@ -909,6 +910,30 @@ function propagateTodayProjects(today, periods, titleMetadata = {}) {
       }
       if (session.lastUsedAt && (!target.lastUsedAt || Date.parse(session.lastUsedAt) > Date.parse(target.lastUsedAt))) {
         target.lastUsedAt = session.lastUsedAt;
+      }
+    }
+  }
+}
+
+// Yesterday is a closed day: it takes a session's current title, project and
+// links, but its times, context and turn state stay those of that day.
+const PAST_DAY_IDENTITY_FIELDS = Object.freeze([
+  'title', 'projectId', 'projectLabel', 'sessionKind', 'nativeSessionId', 't3ThreadId', 'parentSessionId', 'parentClient'
+]);
+
+function propagateIdentity(source, periods, titleMetadata) {
+  const scratch = Object.fromEntries(Object.entries(periods).map(([name, period]) => [name, {
+    ...period,
+    sessions: Object.fromEntries(Object.entries(period?.sessions || {}).map(([key, row]) => [key, row && { ...row }]))
+  }]));
+  propagateTodayProjects(source, scratch, titleMetadata);
+  for (const [name, period] of Object.entries(periods)) {
+    for (const [key, row] of Object.entries(period?.sessions || {})) {
+      const next = scratch[name].sessions[key];
+      if (!row || !next) continue;
+      for (const field of PAST_DAY_IDENTITY_FIELDS) {
+        if (next[field] === undefined) delete row[field];
+        else row[field] = next[field];
       }
     }
   }
@@ -1491,7 +1516,9 @@ async function collectUsageOnce(options) {
     }
     // Project, title and parent links come from the decorated All Time rows,
     // so a range never reads transcripts the full scan already resolved.
-    propagateTodayProjects(allTime, periods, { ...localSessionMetadataDeps, projectsFromToday: true });
+    const { yesterday, ...current } = periods;
+    propagateTodayProjects(allTime, current, { ...localSessionMetadataDeps, projectsFromToday: true });
+    propagateIdentity(allTime, { yesterday }, { ...localSessionMetadataDeps, projectsFromToday: true });
     nativePastRanges = { todayKey, weekStartsOn, starts, periods };
   }
 
@@ -1645,12 +1672,22 @@ async function collectUsageOnce(options) {
     nativeRanges = {};
     nativeRangeWindows = {};
     for (const name of NATIVE_RANGE_NAMES) {
-      nativeRanges[name] = mergeNormalizedPeriods(nativePastRanges.periods[name], today);
-      nativeRangeWindows[name] = { start: nativePastRanges.starts[name], end: todayKey };
+      // Yesterday is over: it is its past day alone. Every other range ends today.
+      // Its rows are copied because propagateTodayProjects() below writes into
+      // published rows, and these belong to the anchor watch ticks reuse.
+      const end = name === 'yesterday' ? nativePastRanges.starts[name] : todayKey;
+      const past = nativePastRanges.periods[name];
+      nativeRanges[name] = end === todayKey
+        ? mergeNormalizedPeriods(past, today)
+        : { ...past, sessions: Object.fromEntries(Object.entries(past.sessions || {}).map(([key, row]) => [key, row && { ...row }])) };
+      nativeRangeWindows[name] = { start: nativePastRanges.starts[name], end };
     }
     // A session active on past days and Today takes Today's fresh title and
     // project, exactly as the delta-derived Month does on a watch tick.
-    propagateTodayProjects(today, nativeRanges, { ...localSessionMetadataDeps, t3Titles: anchor?.t3Titles, scanTitleClears });
+    const { yesterday, ...current } = nativeRanges;
+    const titleMetadata = { ...localSessionMetadataDeps, t3Titles: anchor?.t3Titles, scanTitleClears };
+    propagateTodayProjects(today, current, titleMetadata);
+    propagateIdentity(today, { yesterday }, titleMetadata);
   }
 
   // One filesystem probe per tick, shared by the legacy status and the health
