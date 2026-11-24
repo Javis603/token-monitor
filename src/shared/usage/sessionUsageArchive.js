@@ -697,15 +697,21 @@ function applySessionDayArchive(summary, archive, options = {}) {
   const normalizedArchive = options.canonical === true ? canonicalSessionUsageArchive(archive) : normalizeSessionUsageArchive(archive);
   const now = toDate(options.now);
   const today = localDay(now);
+  // Only entries with retained days or a retained Today can add to a range.
+  const candidates = [];
+  for (const [archiveKey, entry] of Object.entries(normalizedArchive.sessions)) {
+    if (!entry.days && !entry.periods?.today) continue;
+    if (isForkEraPromaSession(entry.client, entry.sessionId)) continue;
+    candidates.push([sessionKey(entry.client, entry.sessionId) || archiveKey, entry]);
+  }
+  if (!candidates.length) return summary;
   let nextRanges = null;
   for (const [name, range] of Object.entries(ranges)) {
     const window = windows[name];
     if (!range || typeof range !== 'object' || !window?.start || !window?.end) continue;
     let target = null;
     const superseded = [];
-    for (const [archiveKey, entry] of Object.entries(normalizedArchive.sessions)) {
-      if (isForkEraPromaSession(entry.client, entry.sessionId)) continue;
-      const key = sessionKey(entry.client, entry.sessionId) || archiveKey;
+    for (const [key, entry] of candidates) {
       if ((target || range).sessions?.[key]) continue;
       const session = sessionForRange(entry, window, today, now, key);
       if (!session || !hasSessionUsage(session) || isLiveUnderSplitId(target || range, entry, session)) continue;
