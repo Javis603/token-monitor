@@ -1098,6 +1098,7 @@
 
     function appendSessionMetadata(meta, row, nowMs, { live = false, running = false, showCache = false } = {}) {
       if (row.remoteDevice) meta.append(window.TokenMonitorDeviceIcons.sessionDeviceNode(document, row.remoteDevice, {
+        settings: appearance(),
         bindOverflow: node => overflowText.bind(node)
       }));
       const description = el('span', 'session-compact-description');

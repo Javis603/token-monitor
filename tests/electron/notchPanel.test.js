@@ -424,7 +424,7 @@ test('session context retains shared eligibility, tooltips and small meters with
 });
 
 for (const client of ['codex', 'claude']) test(`${client} Notch Home, active and recent rows share persistent main-session effort without tooltips`, t => {
-  const f = panelFixture(t), data = payload();
+  const f = panelFixture(t, { deviceIconScope: 'hub', deviceIconOverrides: { hub: { imac: 'laptop' } } }), data = payload();
   const now = Date.now(), ago = minutes => new Date(now - minutes * 60000).toISOString();
   const row = (id, extra) => ({ key: `${client}:${id}`, client, sessionId: id, title: id,
     totalTokens: 100, models: { 'gpt-test': 100 }, startedAt: ago(20), lastUsedAt: ago(1), ...extra });
@@ -440,6 +440,7 @@ for (const client of ['codex', 'claude']) test(`${client} Notch Home, active and
   f.panel.render(data);
   const home = f.find('notch-now-meta');
   assert.equal(home.querySelector('.session-source-device').textContent, 'imac-m1');
+  assert.ok(home.querySelector('.session-source-device').querySelector('.device-kind-laptop'));
   const toolName = client === 'codex' ? 'Codex' : 'Claude Code';
   assert.ok(home.textContent.includes('2 models · high'));
   assert.equal(home.textContent.includes(toolName), false, 'the heading icon already names the tool');

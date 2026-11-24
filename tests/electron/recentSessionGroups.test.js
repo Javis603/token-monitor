@@ -335,7 +335,8 @@ test('Dock family expansion keeps real member rows and requests the existing nat
     { createTextNode: text => new Node('text', '', text), createElement: tag => new Node(tag) }, presentation, row => row.key,
     (tag, className, text) => new Node(tag, className, text), translate, () => new Node('span'), { bind() {} },
     value => value, rowApi, () => '', { setDetailTooltip() {} }, () => null, sessionLive, String,
-    { payload }, 'bubble', value => resized.push(value), () => new Node('span'), () => ({}),
+    { payload }, 'bubble', value => resized.push(value), () => new Node('span'),
+    () => ({ deviceIconScope: 'hub', deviceIconOverrides: { hub: { imac: 'laptop' } } }),
     { TokenMonitorDeviceIcons: require('../../src/electron/renderer/deviceIcons') }
   );
   const list = build([group]);
@@ -349,6 +350,7 @@ test('Dock family expansion keeps real member rows and requests the existing nat
   const meta = summary.children[2];
   assert.equal(meta.children[0].className, 'session-source-device');
   assert.equal(meta.children[0].children[1].textContent, 'imac-m1');
+  assert.equal(meta.children[0].children[0].className, 'device-kind-icon device-kind-laptop');
   assert.equal(titleLine.children.some(node => node.className === 'edge-dock-session-disclosure'), false,
     'group titles retain the ordinary session row layout without an extra arrow column');
   assert.ok(meta.children.some(node => node.children[0]?.textContent === rowApi.sessionModelLabel(group)));

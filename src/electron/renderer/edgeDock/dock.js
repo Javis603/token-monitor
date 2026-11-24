@@ -1641,6 +1641,7 @@ function sessionsContainer(sessions, options = {}) {
       formatTokens: formatBreakdownTokens
     });
     if (session.remoteDevice) meta.append(window.TokenMonitorDeviceIcons.sessionDeviceNode(document, session.remoteDevice, {
+      settings: appearance(),
       bindOverflow: node => overflowText.bind(node)
     }));
     if (session.sessionGroup === 'cursor-grok-bot') {
