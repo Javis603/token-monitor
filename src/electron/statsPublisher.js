@@ -134,6 +134,7 @@ function createRendererSnapshots(options = {}) {
   const limit = Math.max(1, Number(options.limit) || 3);
   const tags = new WeakMap();
   const projections = new WeakMap();
+  const usagePreviews = new WeakSet();
   const byId = new Map();
   let nextId = 1;
 
@@ -152,7 +153,12 @@ function createRendererSnapshots(options = {}) {
   }
 
   return {
+    // Reads and presentation resends must still identify a partial usage scan.
+    markUsagePreview(stats) {
+      usagePreviews.add(stats);
+    },
     updateActivity(previous, next) {
+      if (usagePreviews.has(previous)) usagePreviews.add(next);
       const tag = register(previous);
       tags.set(next, tag);
       byId.set(tag.id, next);
@@ -160,7 +166,10 @@ function createRendererSnapshots(options = {}) {
     },
     stamp(stats, copy, projection) {
       if (!stats || typeof stats !== 'object' || !copy || typeof copy !== 'object') return copy;
-      return { ...copy, snapshot: { ...register(stats, projection) } };
+      return {
+        ...copy,
+        snapshot: { ...register(stats, projection), ...(usagePreviews.has(stats) ? { usagePreview: true } : {}) }
+      };
     },
     get(id) {
       return byId.get(id) || null;

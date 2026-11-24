@@ -4682,6 +4682,7 @@ function sendPush(payload, options = {}) {
   if (payload?.data?.stats) {
     payload.data.stats = injectLocalDeviceStatus(payload.data.stats);
     latestStats = payload.data.stats;
+    if (options.usagePreview) rendererSnapshots.markUsagePreview(latestStats);
     latestStatsSource = { generation: hubModeGeneration, identity: currentHubStatsIdentity() };
     // Client local batches overlay usage on the cached Hub snapshot; they do
     // not supersede an in-flight read of fresh remote stats.
@@ -4990,7 +4991,7 @@ function primeLocalStatsFromAnchor(usageOptions, widgetProducerOwner) {
   sendPush({
     event: 'stats',
     data: { type: 'stats', reason: 'anchor', stats: localStats, at: deviceRecord.receivedAt }
-  }, { skipExport: true, deferToRenderer: true, widgetProducerOwner });
+  }, { skipExport: true, deferToRenderer: true, usagePreview: true, widgetProducerOwner });
 }
 
 // The first scan holds its record back until all-time is in, which on a long
@@ -5005,7 +5006,7 @@ function publishColdPreview(preview, reason, widgetProducerOwner) {
   sendPush({
     event: 'stats',
     data: { type: 'stats', reason, stats: localStats, at: new Date().toISOString() }
-  }, { skipExport: true, widgetProducerOwner });
+  }, { skipExport: true, usagePreview: true, widgetProducerOwner });
 }
 
 function startLocalCollector() {

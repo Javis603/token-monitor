@@ -5734,9 +5734,10 @@ async function openSessionDetail({ client, sessionId, sessionCost, title, source
 function sessionLiveStatsEntry(request) {
   if (!request) return null;
   const periodKey = request.period || state.period;
-  return request.client === 'reasonix'
-    ? state.stats?.nativeSessions?.[periodKey]?.[request.sessionId] || null
-    : state.stats?.periods?.[periodKey]?.sessions?.[`${request.client}:${request.sessionId}`] || null;
+  const nativeSessions = state.stats?.nativeSessions?.[periodKey];
+  if (request.client === 'reasonix') return nativeSessions?.[request.sessionId] || null;
+  const key = `${request.client}:${request.sessionId}`;
+  return state.stats?.periods?.[periodKey]?.sessions?.[key] || nativeSessions?.[key] || null;
 }
 
 function sessionLiveCost(entry, client) {
@@ -5761,6 +5762,19 @@ function sessionDetailLiveSignature() {
   ]);
 }
 
+// A missing row can close a detail only after that detail has had a row, and
+// only in a complete session list. Previews, lazy All Time reads and History
+// fallbacks can temporarily have no sessions for the selected period.
+function shouldCloseMissingOpenSession(request) {
+  if (!request.liveSignature || state.stats?.snapshot?.usagePreview || sessionLiveStatsEntry(request)) return false;
+  const periodKey = request.period;
+  if (fixedPeriodRangesApi.isDerived(periodKey) && !currentNativeRangeSnapshot(periodKey)) return false;
+  const period = state.stats?.periods?.[periodKey];
+  if (period?.derivedFixedRange === true) return false;
+  if (request.client === 'reasonix') return Boolean(state.stats?.nativeSessions?.[periodKey]);
+  return Boolean(period?.sessions) && !sessionRowsApi.sessionBreakdownIncomplete(state.stats, periodKey);
+}
+
 // The Details page is a point-in-time reading of a transcript: the reader runs
 // once per click, while the session keeps accruing usage through `stats:push`
 // and the refresh timer. Without a re-read, someone who opens a session mid-run
@@ -5772,7 +5786,11 @@ async function refreshOpenSessionDetail() {
   if (request?.kind !== 'session' || request.remote || !request.detail || request.detailLiveBusy) return;
   if (visibleStatsSurface() !== 'main') return;
   const signature = sessionDetailLiveSignature();
-  if (!signature || signature === request.liveSignature) return;
+  if (!signature) {
+    if (shouldCloseMissingOpenSession(request)) closeSessionDetail();
+    return;
+  }
+  if (signature === request.liveSignature) return;
   const sessionCost = sessionLiveCost(sessionLiveStatsEntry(request), request.client);
   const detailPeriod = openSessionDetailPeriod(request);
   request.detailLiveBusy = true;
@@ -5795,10 +5813,11 @@ async function refreshOpenSessionDetail() {
     // Keep the last good reading; the next stats tick tries again.
   } finally {
     request.detailLiveBusy = false;
-    // A successful read checks for a final push via
+    // A successful read or a rollover while busy checks for follow-up via
     // the same visibility/signature guards; failures wait for a later retry.
-    if (readSucceeded && state.openSession === request
-      && sessionDetailLiveSignature() !== request.liveSignature) void refreshOpenSessionDetail();
+    if (state.openSession === request
+      && ((readSucceeded && sessionDetailLiveSignature() !== request.liveSignature)
+        || shouldCloseMissingOpenSession(request))) void refreshOpenSessionDetail();
   }
 }
 

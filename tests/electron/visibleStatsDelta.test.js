@@ -47,6 +47,8 @@ function recoveryFixture() {
   let getStats;
   const mainScope = {
     hubModeGeneration: 1,
+    statsPushRevision: 0,
+    statsPushSource: null,
     currentHubStatsIdentity: () => 'client|test-hub',
     mainWindow: { isDestroyed: () => false, webContents: sender },
     mode: 'sync',
@@ -63,9 +65,10 @@ function recoveryFixture() {
     mainScope
   );
 
-  const publish = (total, full = false) => {
+  const publish = (total, full = false, usagePreview = false) => {
     mainScope.latestStats = makeStats(total);
     mainScope.latestStatsSource = { generation: mainScope.hubModeGeneration, identity: mainScope.currentHubStatsIdentity() };
+    if (usagePreview) snapshots.markUsagePreview(mainScope.latestStats);
     const stats = snapshots.stamp(mainScope.latestStats, mainScope.latestStats);
     const built = buildStatsDelta(mainScope.lastRendererStatsFingerprint, stats);
     mainScope.lastRendererStatsFingerprint = built.fingerprint;
@@ -218,4 +221,32 @@ test('a missed alias presentation does not match the next delta base', () => {
   const { delta } = buildStatsDelta(fingerprintStats(missed), next);
   assert.equal(applyStatsDelta(old, delta), null);
   assert.equal(applyStatsDelta(missed, delta).periods.today.sessions['claude:s1'].model, 'alias');
+});
+
+test('a partial usage snapshot stays marked across deltas, resync and a direct stats read', async () => {
+  const f = recoveryFixture();
+  f.publish(3, true);
+  f.deliver();
+  f.publish(4, false, true);
+  assert.ok(f.sent[0].data.statsDelta);
+  f.deliver();
+  assert.equal(f.rendererScope.state.stats.snapshot.usagePreview, true);
+
+  await f.recover();
+  assert.equal(f.sent[0].data.reason, 'presentation');
+  f.deliver();
+  assert.equal(f.rendererScope.state.stats.snapshot.usagePreview, true);
+
+  f.mainScope.fetchStats = () => f.mainScope.latestStats;
+  f.mainScope.maybeAdoptSharedSubscriptionRevision = () => {};
+  const beforeRead = f.rendererScope.state.stats;
+  const reading = f.rendererScope.refreshStats();
+  await f.finishReply();
+  await reading;
+  assert.notEqual(f.rendererScope.state.stats, beforeRead);
+  assert.equal(f.rendererScope.state.stats.snapshot.usagePreview, true);
+
+  f.publish(5);
+  f.deliver();
+  assert.equal(f.rendererScope.state.stats.snapshot.usagePreview, undefined);
 });

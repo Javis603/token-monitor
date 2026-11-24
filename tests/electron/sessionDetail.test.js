@@ -451,6 +451,7 @@ function sessionDetailHarness(getSessionDetail) {
   const end = rendererSource.indexOf('\nfunction toggleDetailSort', start);
   assert.ok(start >= 0 && end > start, 'openSessionDetail should be present');
   const renders = [];
+  let closed = 0;
   const state = { period: 'today', openSession: null };
   const context = {
     rendererDom,
@@ -461,6 +462,8 @@ function sessionDetailHarness(getSessionDetail) {
     statsRenderScheduler: { request() {} },
     sessionTooltipShouldHoldRender: () => false,
     renderSessionDetail: (args) => renders.push(args),
+    closeSessionDetail: () => { state.openSession = null; closed += 1; },
+    fixedPeriodRangesApi: require('../../src/electron/renderer/fixedPeriodRanges'),
     currentNativeRangeSnapshot: () => null,
     window: { tokenMonitor: { getSessionDetail } }
   };
@@ -471,6 +474,7 @@ function sessionDetailHarness(getSessionDetail) {
   return {
     openSessionDetail: context.testOpenSessionDetail,
     refreshOpenSessionDetail: context.testRefreshOpenSessionDetail,
+    closedCount: () => closed,
     context,
     renders,
     state
@@ -942,4 +946,172 @@ test('live detail anchors the visible turn across growth and exchange reordering
       checkReading();
     }
   }
+});
+
+function rolloverHarness({ period = 'today', getDetail = async () => ({ found: true }) } = {}) {
+  const requests = [];
+  const h = sessionDetailHarness((request) => {
+    requests.push(request);
+    return getDetail(requests.length);
+  });
+  h.state.period = period;
+  h.setPeriodStats = (sessions = {}, extraStats = {}, extraPeriod = {}) => {
+    h.state.stats = { ...extraStats, periods: { [period]: { sessions, ...extraPeriod } } };
+  };
+  h.setUsage = (totalTokens) => h.setPeriodStats({
+    'claude:s': { client: 'claude', sessionId: 's', totalTokens, costUsd: totalTokens / 200 }
+  });
+  h.open = (options) => h.openSessionDetail({ client: 'claude', sessionId: 's', ...options });
+  h.requests = requests;
+  h.setUsage(100);
+  return h;
+}
+
+const rangeBeforeRollover = { range: { start: '2026-11-18', end: '2026-11-24' } };
+const rangeAfterRollover = { range: { start: '2026-11-19', end: '2026-11-25' } };
+
+for (const period of ['today', 'month', 'week', 'last7', 'last30']) {
+  test(`open session detail closes when its session rolls out of ${period}`, async () => {
+    const h = rolloverHarness({ period });
+    if (h.context.fixedPeriodRangesApi.isDerived(period)) {
+      h.context.currentNativeRangeSnapshot = () => rangeBeforeRollover;
+    }
+    await h.open();
+    assert.ok(h.state.openSession.liveSignature);
+
+    h.setPeriodStats();
+    if (h.context.fixedPeriodRangesApi.isDerived(period)) {
+      h.context.currentNativeRangeSnapshot = () => rangeAfterRollover;
+    }
+    await h.refreshOpenSessionDetail();
+
+    assert.equal(h.state.openSession, null);
+    assert.equal(h.closedCount(), 1);
+    assert.equal(h.requests.length, 1, 'closing a rolled-out detail must not re-read its transcript');
+  });
+}
+
+test('rollover during the initial detail read closes on post-load catch-up', async () => {
+  const read = deferred();
+  const h = rolloverHarness({ getDetail: () => read.promise });
+  const opening = h.open();
+  h.setPeriodStats();
+  read.resolve({ found: true });
+  await opening;
+
+  assert.equal(h.state.openSession, null);
+  assert.equal(h.closedCount(), 1);
+  assert.equal(h.requests.length, 1);
+});
+
+for (const [outcome, finishRead] of [
+  ['resolved', (read) => read.resolve({ found: true })],
+  ['failed', (read) => read.resolve({ found: false, error: 'read-failed' })],
+  ['rejected', (read) => read.reject(new Error('read failed'))]
+]) {
+  test(`rollover during a live detail re-read closes on catch-up (${outcome})`, async () => {
+    const read = deferred();
+    const h = rolloverHarness({ getDetail: async (count) => count === 1 ? { found: true } : read.promise });
+    await h.open();
+
+    h.setUsage(200);
+    const refreshing = h.refreshOpenSessionDetail();
+    h.setPeriodStats();
+    finishRead(read);
+    await refreshing;
+
+    assert.equal(h.state.openSession, null);
+    assert.equal(h.closedCount(), 1);
+    assert.equal(h.requests.length, 2);
+  });
+}
+
+test('preview, incomplete and hidden snapshots defer dismissal until a complete render', async () => {
+  const h = rolloverHarness();
+  await h.open();
+
+  for (const stats of [
+    null,
+    { periods: {} },
+    { periods: { today: { totalTokens: 100 } } },
+    { periods: { today: { sessions: {} } }, snapshot: { usagePreview: true } },
+    { periods: { today: { sessions: {} } }, sessionDetailsOmitted: { today: 5 } }
+  ]) {
+    h.state.stats = stats;
+    await h.refreshOpenSessionDetail();
+    assert.ok(h.state.openSession);
+  }
+  h.setPeriodStats();
+  h.context.visibleStatsSurface = () => null;
+  await h.refreshOpenSessionDetail();
+  assert.ok(h.state.openSession);
+
+  h.context.visibleStatsSurface = () => 'main';
+  await h.refreshOpenSessionDetail();
+  assert.equal(h.state.openSession, null);
+});
+
+test('a range without a current native session list cannot dismiss an open detail', async () => {
+  const h = rolloverHarness({ period: 'last7' });
+  h.context.currentNativeRangeSnapshot = () => rangeBeforeRollover;
+  await h.open();
+
+  h.context.currentNativeRangeSnapshot = () => null;
+  h.setPeriodStats({}, {}, { derivedFixedRange: true });
+  await h.refreshOpenSessionDetail();
+  assert.ok(h.state.openSession);
+
+  h.context.currentNativeRangeSnapshot = () => rangeAfterRollover;
+  h.setPeriodStats();
+  await h.refreshOpenSessionDetail();
+  assert.equal(h.state.openSession, null);
+});
+
+test('a remote detail stays open when the session is missing', async () => {
+  const h = rolloverHarness();
+  h.state.settings = { deviceId: 'local' };
+  await h.open({ sourceDevice: { deviceId: 'remote', name: 'remote-mac' } });
+  assert.equal(h.state.openSession.remote, true);
+  h.setPeriodStats();
+  await h.refreshOpenSessionDetail();
+  assert.ok(h.state.openSession);
+  assert.equal(h.requests.length, 0);
+});
+
+test('a session still listed as a pre-token row keeps its detail open', async () => {
+  const h = rolloverHarness();
+  await h.open();
+  h.setPeriodStats({}, {
+    nativeSessions: { today: { 'claude:s': { client: 'claude', sessionId: 's', tokenDataUnavailable: true } } }
+  });
+  await h.refreshOpenSessionDetail();
+  assert.ok(h.state.openSession);
+});
+
+test('a moved range re-reads a still-listed session with the new dates', async () => {
+  const h = rolloverHarness({ period: 'last7' });
+  h.context.currentNativeRangeSnapshot = () => rangeBeforeRollover;
+  await h.open();
+
+  h.context.currentNativeRangeSnapshot = () => rangeAfterRollover;
+  await h.refreshOpenSessionDetail();
+  assert.ok(h.state.openSession);
+  assert.equal(h.requests.length, 2);
+  assert.equal(h.requests.at(-1).period, 'range:2026-11-19:2026-11-25');
+});
+
+test('an existing empty detail stays open until it has a row that later disappears', async () => {
+  const h = rolloverHarness({ getDetail: async () => ({ found: true, exchanges: [] }) });
+  h.setPeriodStats();
+  await h.open();
+  await h.refreshOpenSessionDetail();
+  assert.ok(h.state.openSession);
+
+  h.setUsage(50);
+  await h.refreshOpenSessionDetail();
+  assert.ok(h.state.openSession.liveSignature);
+
+  h.setPeriodStats();
+  await h.refreshOpenSessionDetail();
+  assert.equal(h.state.openSession, null);
 });
