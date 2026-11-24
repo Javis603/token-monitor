@@ -5,6 +5,7 @@ const test = require('node:test');
 const { projectSessionDeviceSessions, projectSessionDeviceStats } = require('../../src/electron/sessionDeviceSources');
 const { rendererStats } = require('../../src/electron/statsPublisher');
 const { sessionRowsForPeriod, sessionSubtitleForDisplay, groupSessionRows } = require('../../src/electron/renderer/sessionRows');
+const { recentSessionRows, buildEdgeDockCells } = require('../../src/electron/renderer/edgeDock/presentation');
 
 const session = { client: 'codex', sessionId: 'a', title: 'Review', totalTokens: 10, models: { model: 10 } };
 const sessions = { 'codex:a': session };
@@ -62,4 +63,23 @@ test('subagent summary and its children retain the individual session source', (
   const [group] = groupSessionRows(rows);
   assert.equal(group.sourceDevice.name, 'MacBook');
   assert.ok(group.groupRows.every(row => row.sourceDevice.name === 'MacBook'));
+});
+
+test('Home and Dock/Notch rows expose only confirmed remote device names', () => {
+  const lastUsedAt = new Date().toISOString();
+  const rows = Object.fromEntries(['local', 'remote', 'unknown', 'ambiguous'].map(id =>
+    [`codex:${id}`, { ...session, sessionId: id, lastUsedAt }]));
+  const stats = { periods: { month: { sessions: rows } }, devices: [
+    { deviceId: 'macbook', periods: { month: { sessions: { 'codex:local': rows['codex:local'], 'codex:ambiguous': rows['codex:ambiguous'] } } } },
+    { deviceId: 'imac', displayName: 'imac-m1', periods: { month: { sessions: { 'codex:remote': rows['codex:remote'], 'codex:ambiguous': rows['codex:ambiguous'] } } } }
+  ] };
+  const visible = projectSessionDeviceStats(stats, 'macbook');
+  const options = { localDeviceId: 'macbook' };
+  const home = recentSessionRows(rendererStats(visible), 6, options);
+  const [dock] = buildEdgeDockCells(visible, { ...options, items: [{ type: 'stat', metric: 'sessions' }] });
+  for (const list of [home, dock.sessions]) {
+    assert.equal(list.length, 4);
+    assert.deepEqual(list.filter(row => row.remoteDevice).map(row => [row.sessionId, row.remoteDevice.name]), [['remote', 'imac-m1']]);
+  }
+  assert.ok(recentSessionRows(visible).every(row => !row.remoteDevice), 'an unknown local identity cannot classify a remote source');
 });

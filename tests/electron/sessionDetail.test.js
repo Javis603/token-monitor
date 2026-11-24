@@ -372,6 +372,13 @@ test('session detail renders its heading before loading, errors and empty result
   assert.equal(els.sessionDetailHead.querySelector('.detail-heading'), null);
   assert.equal(els.sessionDetailHead.children[0].textContent, 'sessions');
   assert.equal(els.sessionDetailHead.children[0].attributes['aria-label'], 'Back to sessions');
+  state.settings = { deviceId: 'local' };
+  render({ loading: true });
+  assert.equal(els.sessionDetail.querySelector('.detail-session-source').textContent, 'Unknown source');
+  state.openSession.sourceDevice = { deviceId: 'local', name: 'MacBook' };
+  render({ loading: true });
+  assert.equal(els.sessionDetail.querySelector('.detail-session-source').textContent, 'This device');
+  delete state.settings;
   state.openSession = { title: 'gpt-5.6-sol · 12:34', returnTo: { kind: 'session-group' } };
   render({ loading: true });
   assert.equal(els.sessionDetailHead.children[0].attributes['aria-label'], 'gpt-5.6-sol · 12:34 — Back to Codex Auto Review');
@@ -447,6 +454,7 @@ function sessionDetailHarness(getSessionDetail) {
   const context = {
     rendererDom,
     state,
+    sessionRowsApi: require('../../src/electron/renderer/sessionRows'),
     visibleStatsSurface: () => 'main',
     isRendererWindowHidden: () => false,
     statsRenderScheduler: { request() {} },
@@ -589,6 +597,23 @@ test('openSessionDetail ignores a stale period result that completes last', asyn
   assert.equal(state.openSession.period, 'month');
   assert.equal(state.openSession.detail.marker, 'month');
   assert.deepEqual(renders.filter((render) => render.detail).map((render) => render.detail.marker), ['month']);
+});
+
+test('a confirmed remote session never opens a local transcript with the same ID', async () => {
+  let localReads = 0;
+  const { openSessionDetail, refreshOpenSessionDetail, renders, state } = sessionDetailHarness(() => {
+    localReads++;
+    return { found: true, marker: 'local transcript' };
+  });
+  state.settings = { deviceId: 'local' };
+  const sourceDevice = { deviceId: 'imac', name: 'imac-m1' };
+  await openSessionDetail({ client: 'codex', sessionId: 'same-session', sourceDevice });
+  state.stats = { periods: { today: { sessions: { 'codex:same-session': { totalTokens: 10 } } } } };
+  await refreshOpenSessionDetail();
+  assert.equal(localReads, 0);
+  assert.equal(state.openSession.sourceDevice, sourceDevice);
+  assert.equal(renders.length, 1);
+  assert.equal(renders[0].detail.found, false);
 });
 
 test('Reasonix rows enter the shared detail navigation path instead of a native accordion', () => {

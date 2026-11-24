@@ -3054,8 +3054,8 @@ function updateRow(row, { name, subtitle, subtitleIdentity, subagentCountLabel, 
   // Local sessions keep their usual density; only a confirmed remote source
   // adds a separate line below the session's activity.
   const deviceEl = row.querySelector('.row-device');
-  const remoteDevice = state.settings?.deviceId && sourceDevice?.deviceId
-    && sourceDevice.deviceId !== state.settings.deviceId && sourceDevice.name ? sourceDevice : null;
+  if (kind === 'session') window.TokenMonitorDomReconcile.data(row, { sourceDevice });
+  const remoteDevice = sessionRowsApi.remoteSessionDevice(sourceDevice, state.settings?.deviceId);
   setHoverMarqueeText(deviceEl, remoteDevice?.name || '');
   deviceEl.classList.toggle('hidden', !remoteDevice);
   if (remoteDevice) {
@@ -3661,6 +3661,7 @@ function modelRowsForPeriod(period, rankingMetric = state.settings?.modelRanking
 function sessionPresentationOptions() {
   const localDevice = state.stats?.devices?.find(device => device.deviceId === state.settings?.deviceId);
   return {
+    localDeviceId: state.settings?.deviceId,
     clientLabels,
     clientColors,
     modelColor,
@@ -5687,14 +5688,23 @@ function applySessionDetailResult(request, options) {
   renderSessionDetail(options);
 }
 
-async function openSessionDetail({ client, sessionId, sessionCost, title, returnTo = null, titleFollowsSession = false }) {
+async function openSessionDetail({ client, sessionId, sessionCost, title, sourceDevice, returnTo = null, titleFollowsSession = false }) {
   // A review run is headed by model and time; a named group run (a subagent, a
   // Grok Bot record) is headed by its session title and follows title display.
   const fixedGroupHeading = returnTo?.kind === 'session-group' && titleFollowsSession !== true;
   const request = { kind: 'session', client, sessionId, sessionCost,
     title: state.settings?.sessionTitlesEnabled === false && !fixedGroupHeading ? '' : title,
+    sourceDevice,
+    remote: Boolean(sourceDevice && sessionRowsApi.remoteSessionDevice(sourceDevice, state.settings?.deviceId)),
     period: state.period, detail: null, returnTo, titleFollowsSession: titleFollowsSession === true };
   state.openSession = request;
+  if (request.remote) {
+    // Transcript readers look at this machine. A matching local ID cannot
+    // establish the contents of a session attributed to another device.
+    request.detail = { found: false };
+    renderSessionDetail({ detail: request.detail });
+    return;
+  }
   renderSessionDetail({ loading: true });
   // Read before the request, not after: a stats push that lands while it is in
   // flight has to stay unseen so catch-up re-reads, instead of being written
@@ -5745,7 +5755,7 @@ function sessionDetailLiveSignature() {
 // the controls being read while the new transcript snapshot is applied.
 async function refreshOpenSessionDetail() {
   const request = state.openSession;
-  if (request?.kind !== 'session' || !request.detail || request.detailLiveBusy) return;
+  if (request?.kind !== 'session' || request.remote || !request.detail || request.detailLiveBusy) return;
   if (visibleStatsSurface() !== 'main') return;
   const signature = sessionDetailLiveSignature();
   if (!signature || signature === request.liveSignature) return;
@@ -5834,6 +5844,19 @@ function renderSessionDetail({ detail, loading, error, preserveScroll = false } 
 
   const idLabel = sessionRowsApi.sessionDetailIdLabel(state.openSession?.client, state.openSession?.sessionId, detail);
   if (idLabel) container.append(sessionIdLine(idLabel));
+  const localDeviceId = state.settings?.deviceId;
+  if (state.openSession && localDeviceId) {
+    const source = state.openSession.sourceDevice;
+    const provenance = document.createElement('div');
+    provenance.className = 'detail-session-source';
+    const remote = sessionRowsApi.remoteSessionDevice(source, localDeviceId);
+    if (remote) provenance.append(deviceIconsApi.sessionDeviceNode(document, remote, {
+      settings: state.settings, bindOverflow: bindHoverMarquee
+    }));
+    else provenance.textContent = source?.deviceId === localDeviceId
+      ? t('settings.sync.panel.thisDevice') : t('session.sourceUnknown');
+    container.append(provenance);
+  }
 
   if (loading) { container.append(detailNote(t('detailLoading') || 'Loading…')); return; }
   if (error || detail?.error) {
@@ -6029,6 +6052,7 @@ function sessionGroupRunNode(row, max, parent) {
         sessionId: row.client === 'reasonix' ? `reasonix:${sessionId}` : sessionId,
         sessionCost: Number(row.cost || 0),
         title,
+        sourceDevice: row.sourceDevice,
         returnTo: parent,
         titleFollowsSession: namedGroup
       });
@@ -7723,6 +7747,9 @@ function renderHomeSessionModule(rows) {
     const value = document.createElement('span');
     value.className = 'home-list-value';
     value.textContent = formatCompact(row.totalTokens);
+    const device = row.remoteDevice && deviceIconsApi.sessionDeviceNode(document, row.remoteDevice, {
+      settings: state.settings, bindOverflow: bindHoverMarquee
+    });
     // One age reading serves both layouts: the short form is what a row shows,
     // the full phrase is what assistive technology hears.
     const ageAt = Date.parse(row.lastUsedAt || row.startedAt || '');
@@ -7739,47 +7766,52 @@ function renderHomeSessionModule(rows) {
         ago.setAttribute('role', 'img');
         ago.setAttribute('aria-label', age);
       }
-      item.append(mark, stateMark, name, ago, value);
+      item.append(mark, stateMark, name);
+      if (device) {
+        item.classList.add('has-source-device');
+        item.append(device);
+      }
+      item.append(ago, value);
       body.append(item);
       return;
     }
     const meta = document.createElement('div');
     meta.className = 'home-session-meta';
     const description = document.createElement('span');
-    description.className = 'home-list-sub';
-    const memberLabel = row.sessionGroup && (!row.subagentGroup || row.subagentCount > 0)
-      ? (row.subagentGroup ? t('sessions.subagentCount', { count: row.subagentCount })
-        : t('sessions.grokBotCount', { count: row.groupRows.length })) : '';
+    description.className = 'home-list-sub session-compact-description';
     // The same "N models" hover the Sessions list draws: the label stays the
     // row's own text, and the tooltip lists the models behind the count.
     const modelLabel = sessionRowsApi.sessionModelLabel(row);
-    const metadataLabel = sessionRowsApi.sessionModelMetadataLabel(row);
-    description.append(sessionRowsApi.sessionModelMetadataNode(document, { ...row, modelLabel }, {
+    const metadata = sessionRowsApi.sessionModelMetadataNode(document, { ...row, modelLabel }, {
       translate: t, view: limitWindowsView,
       latestModelLabel: t('session.latestModel'),
       unattributedLabel: t('dashboard.tooltip.unclassified'),
       formatTokens: formatCompact
-    }));
-    if (memberLabel) {
-      if (metadataLabel) description.append(document.createTextNode(' · '));
+    });
+    if (device) meta.append(device);
+    if (metadata.childElementCount) description.append(metadata);
+    if (row.sessionGroup === 'cursor-grok-bot') {
+      if (description.childElementCount) description.append(document.createTextNode(' · '));
       const count = document.createElement('span');
-      count.className = 'home-session-member-count';
-      count.textContent = memberLabel;
+      count.textContent = t('sessions.grokBotCount', { count: row.groupRows.length });
       description.append(count);
     }
     // A live row keeps its age once it is a minute old: running covers up to ten
     // minutes of quiet, so "8m" separates an active session from a stalled one
     // where "<1m" would only repeat the state mark. Detailed rows show it always.
     if (age && shortAge && (detailed || shortAge !== '<1m')) {
-      if (memberLabel || metadataLabel) description.append(document.createTextNode(' · '));
       const ago = document.createElement('span');
       ago.className = 'home-session-ago-inline';
       ago.textContent = shortAge;
       ago.setAttribute('role', 'img');
       ago.setAttribute('aria-label', age);
+      if (description.childElementCount) description.append(document.createTextNode(' · '));
       description.append(ago);
     }
-    meta.append(description);
+    if (description.childElementCount) {
+      bindHoverMarquee(description);
+      meta.append(description);
+    }
     const status = sessionRowsApi.sessionStatusNode(document, row, { prefix: 'home-session', translate: t,
       view: limitWindowsView, showUsed: state.settings?.sessionContextMetric !== 'remaining' });
     if (status) meta.append(status);
@@ -15442,6 +15474,7 @@ els.breakdown.addEventListener('click', (event) => {
     client,
     sessionId,
     sessionCost: client === 'reasonix' ? Number(session?.reportedCostUsd || 0) : Number(session?.costUsd || 0),
+    sourceDevice: window.TokenMonitorDomReconcile.data(rowEl)?.sourceDevice,
     title: rowEl.querySelector('.row-title')?.textContent || ''
   });
 });

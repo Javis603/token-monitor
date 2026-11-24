@@ -419,6 +419,7 @@ test('updateRow keeps IDs for untitled sessions and moves them into Details for 
   const context = {
     document: h.document, overflowText: h.api,
     rendererDom,
+    window: { TokenMonitorDomReconcile: require('../../src/electron/renderer/domReconcile') },
     state: { breakdown: 'session' }, rowWidth: () => 50,
     iconKindFor: () => ({ kind: 'dot' }),
     setHoverMarqueeText: h.api.setText, formatNumber: String, formatCost: String,
@@ -489,6 +490,7 @@ test('a token and cost update through updateRow keeps the hovered title moving',
   const context = {
     document: h.document, overflowText: h.api,
     rendererDom,
+    window: { TokenMonitorDomReconcile: require('../../src/electron/renderer/domReconcile') },
     state: { breakdown: 'session' }, rowWidth: () => 50,
     iconKindFor: () => ({ kind: 'dot' }),
     setHoverMarqueeText: h.api.setText, formatNumber: String, formatCost: String,
