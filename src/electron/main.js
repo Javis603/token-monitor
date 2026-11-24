@@ -356,6 +356,7 @@ const { createCodexResetForecastClient } = require('./providers/codex/resetForec
 const { createUpdateInstallQuitGuard, observeUpdateInstallHandoff } = require('./updateInstallQuit');
 const { classifyStreamFailure } = require('./syncConnection');
 const {
+  attachLocalNativeRanges,
   attachLocalNativeViews,
   attachLocalPresentationNativeViews,
   completeLocalSyncStats,
@@ -918,8 +919,18 @@ function syncUploadIntervalMs() {
   return normalizeSyncUploadIntervalMs(settings?.syncUploadIntervalMs);
 }
 
-function electronUsageConfig(errorPrefix) {
+// The collector composes the native Week range for this calendar week. The
+// renderer resolves the same locale and checks the range it receives.
+function collectorWeekStartsOn() {
+  const preferred = typeof app.getPreferredSystemLanguages === 'function' ? app.getPreferredSystemLanguages() : [app.getLocale()];
+  return fixedPeriodRangesApi.weekStartsOn(resolveRegionalLocale([...preferred, settings?.locale]));
+}
+
+function electronUsageConfig(errorPrefix, { nativeRangesEnabled = false } = {}) {
   return usageConfigFromSettings(settings, {
+    // Only standalone stats show native ranges; Hub and sync views keep the
+    // History-derived ones, so their collectors skip the extra day windows.
+    nativeRangesEnabled,
     agentVersion: appVersion(),
     agentRuntime: 'electron-widget',
     commandTimeoutMs: 120 * 1000,
@@ -941,6 +952,7 @@ function electronUsageConfig(errorPrefix) {
     intervalRequiresActivity: collectorIntervalRequiresActivity(),
     watchDebounceMs: 1500,
     dailyHistoryArchiveWriteEnabled: () => !isExternalAgentActive(),
+    weekStartsOn: collectorWeekStartsOn(),
     onError: (error, reason) => console.log(`[${errorPrefix}] ${reason}: ${error.message}`),
     logger: (message) => console.log(`[${errorPrefix}] ${message}`)
   });
@@ -5003,7 +5015,7 @@ function startLocalCollector() {
   sendStatus(false, { reason: 'collecting' });
   // One config object for both, so the fingerprint the seed validates against
   // cannot drift from the one the collector will compute.
-  const usageOptions = electronUsageConfig('collector');
+  const usageOptions = electronUsageConfig('collector', { nativeRangesEnabled: true });
   primeLocalStatsFromAnchor(usageOptions, widgetProducerOwner);
   deviceRuntimeHandle = createDeviceRuntime({
     envelope: electronDeviceEnvelope(),
@@ -5024,6 +5036,7 @@ function startLocalCollector() {
       localStats = composeLocalOnlySummary(localDevice, (stats) => {
         withHistoryPreview(stats, [localDevice]);
         attachLocalNativeViews(stats, localDevice);
+        attachLocalNativeRanges(stats, localDevice);
         return stats;
       });
       updateDiscordRpcDisplay(localStats);
@@ -6547,7 +6560,7 @@ function usageCollectorNameForMode() {
 }
 
 function usageConfigForMode() {
-  return electronUsageConfig(usageCollectorNameForMode());
+  return electronUsageConfig(usageCollectorNameForMode(), { nativeRangesEnabled: mode === 'local' });
 }
 
 function applyUsageRuntimeForMode() {

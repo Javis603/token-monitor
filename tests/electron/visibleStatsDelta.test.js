@@ -97,6 +97,8 @@ function recoveryFixture() {
     observeDisplayLiveTokenRates: noop,
     applyCodexActiveAccountFromStats: noop,
     fixedPeriodRangesApi: { isDerived: () => false },
+    statsWithNativeRangePeriods: value => value,
+    replaceDerivedStats: next => { rendererScope.state.stats = next; },
     warmFixedPeriodHistory: noop,
     statsRenderScheduler: { request: noop },
     maybeUpdateBarsIcon: noop,

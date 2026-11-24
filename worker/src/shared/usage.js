@@ -522,6 +522,11 @@ function applyProjectRollups(summary) {
     if (!period || typeof period !== 'object') continue;
     period.projects = projectRollupFromSessions(period.sessions);
   }
+  // Local native ranges (collector.js) need the same rollup to offer a Projects
+  // breakdown; they never reach a device record.
+  for (const period of Object.values(summary.nativeRanges || {})) {
+    if (period && typeof period === 'object') period.projects = projectRollupFromSessions(period.sessions);
+  }
   return summary;
 }
 

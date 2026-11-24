@@ -664,6 +664,57 @@ function isTokscaleWindowDay(value) {
   return !Number.isNaN(date.getTime()) && date.toISOString().slice(0, 10) === key;
 }
 
+// Native date ranges (Week, Last 7 days, Last 30 days) are Today plus the past
+// days in range. A full tick reads each of those past days as its own window in
+// the same scan, named `d<YYYY-MM-DD>`, enough for the longest range.
+const NATIVE_RANGE_NAMES = Object.freeze(['week', 'last7', 'last30']);
+const NATIVE_RANGE_PAST_DAYS = 29;
+
+function dayKeyAddDays(key, delta) {
+  const date = new Date(`${key}T00:00:00Z`);
+  date.setUTCDate(date.getUTCDate() + delta);
+  return date.toISOString().slice(0, 10);
+}
+
+// First day of a native range ending today. `weekStartsOn` is 0 (Sunday) to 6
+// and must match the renderer's locale week, which checks the range it gets.
+function nativeRangeStart(name, todayKey, weekStartsOn = 1) {
+  if (name === 'last7') return dayKeyAddDays(todayKey, -6);
+  if (name === 'last30') return dayKeyAddDays(todayKey, -29);
+  const weekday = new Date(`${todayKey}T00:00:00Z`).getUTCDay();
+  return dayKeyAddDays(todayKey, -((weekday - weekStartsOn + 7) % 7));
+}
+
+function nativeRangePastDays(todayKey) {
+  return Array.from({ length: NATIVE_RANGE_PAST_DAYS }, (_, index) => dayKeyAddDays(todayKey, -(index + 1)));
+}
+
+function nativeDayWindow(key) {
+  return `d${key}`;
+}
+
+// Today, Month and All Time for one windowed scan, plus each native-range day
+// when the caller shows native ranges (standalone Electron only).
+function fullTickWindows(todayKey, allTimeSince, includeDays) {
+  return [
+    { name: 'today', since: todayKey, until: todayKey },
+    { name: 'month', since: `${todayKey.slice(0, 7)}-01`, until: todayKey },
+    { name: 'allTime', since: String(allTimeSince), until: '' },
+    ...(includeDays ? nativeRangePastDays(todayKey).map((key) => ({ name: nativeDayWindow(key), since: key, until: key })) : [])
+  ];
+}
+
+// A batch that drops a window must not publish its siblings, nor turn a
+// malformed window into zero usage. Every report, even an empty one, carries
+// its entries array.
+function assertWindowReports(reports, windows) {
+  for (const { name } of windows) {
+    if (!Array.isArray(reports?.[name]?.entries)) {
+      throw new Error(`tokscale --window output is missing the ${name} window`);
+    }
+  }
+}
+
 function isUnknownTokscaleWindowError(error) {
   return Boolean(error) && /unexpected argument '--window'/i.test(error?.tokscaleStderr || '');
 }
@@ -1073,7 +1124,7 @@ async function collectUsageOnce(options) {
     onTerminationUnconfirmed: () => reportTerminationUnconfirmed('tokscale-scan')
   }));
   const scanTitleClears = new Set();
-  const finishScanJson = (json, period, includesCursor) => {
+  const finishScanJson = (json, period, includesCursor, cursorReport = cursorSnapshot?.[period]) => {
     applyTokscaleSessionMetadata(json, { resolveProjects: projectsEnabled });
     if (period === 'today') {
       for (const session of Array.isArray(json?.sessions) ? json.sessions : []) {
@@ -1084,7 +1135,7 @@ async function collectUsageOnce(options) {
     }
     if (!includesCursor) return json;
     const combined = { native: json };
-    cursorReports.set(combined, cursorSnapshot[period]);
+    cursorReports.set(combined, cursorReport);
     return combined;
   };
   const runTokscaleFn = async (input) => {
@@ -1108,16 +1159,13 @@ async function collectUsageOnce(options) {
     terminationOptions: options.subprocessTerminationOptions,
     onTerminationUnconfirmed: () => reportTerminationUnconfirmed('tokscale-scan')
   }));
-  // The full tick's Today, Month and All Time from one scan, in the calendar
-  // this collection captured. Null when the binary has no windowed mode.
+  // The full tick's Today, Month, All Time and native-range days from one scan,
+  // in the calendar this collection captured. Null when the binary has no
+  // windowed mode.
   const runFullWindowsFn = async (clientsCsv) => {
     const todayKey = localTodayKey(collectedAt);
     if (!runTokscaleWindowsScan || !isTokscaleWindowDay(allTimeSince)) return null;
-    const windows = [
-      { name: 'today', since: todayKey, until: todayKey },
-      { name: 'month', since: `${periodWindows.month.key}-01`, until: todayKey },
-      { name: 'allTime', since: String(allTimeSince), until: '' }
-    ];
+    const windows = fullTickWindows(todayKey, allTimeSince, options.nativeRangesEnabled === true);
     const includesCursor = cursorSnapshot && normalizeClientsCsv(clientsCsv).split(',').includes('cursor');
     const scanClients = includesCursor ? withoutCursor(clientsCsv) : clientsCsv;
     const reports = scanClients
@@ -1125,15 +1173,27 @@ async function collectUsageOnce(options) {
       : Object.fromEntries(windows.map(({ name }) => [name, { entries: [] }]));
     if (!reports) return null;
     assertCollectionCalendar();
-    // A batch that drops a window must not publish its siblings, nor turn a
-    // malformed window into zero usage. Every report, even an empty one,
-    // carries its entries array.
-    for (const { name } of windows) {
-      if (!Array.isArray(reports[name]?.entries)) {
-        throw new Error(`tokscale --window output is missing the ${name} window`);
+    assertWindowReports(reports, windows.slice(0, 3));
+    const result = {
+      today: finishScanJson(reports.today, 'today', includesCursor),
+      month: finishScanJson(reports.month, 'month', includesCursor),
+      allTime: finishScanJson(reports.allTime, 'allTime', includesCursor),
+      days: {},
+      daysComplete: options.nativeRangesEnabled === true
+    };
+    // The days only feed native ranges. A missing one (an older Cursor
+    // snapshot, say) leaves those ranges on their History fallback instead of
+    // failing the periods every surface shows.
+    for (const key of result.daysComplete ? nativeRangePastDays(todayKey) : []) {
+      const name = nativeDayWindow(key);
+      const cursorDay = includesCursor ? cursorSnapshot.days?.[name] : undefined;
+      if (!Array.isArray(reports[name]?.entries) || (includesCursor && !cursorDay)) {
+        result.daysComplete = false;
+        continue;
       }
+      result.days[key] = finishScanJson(reports[name], name, includesCursor, cursorDay);
     }
-    return Object.fromEntries(windows.map(({ name }) => [name, finishScanJson(reports[name], name, includesCursor)]));
+    return result;
   };
   const runGraphScan = options.runGraph || ((input) => runTokscaleGraph({
     ...input,
@@ -1192,6 +1252,10 @@ async function collectUsageOnce(options) {
   let today = emptyPeriod();
   let month = emptyPeriod();
   let allTime = emptyPeriod();
+  // Native-range days from this tick's windowed scan, then the past part of
+  // each range. Watch ticks reuse the anchor's past part: those days are over.
+  let nativeDays = null;
+  let nativePastRanges = null;
   let dailyHistoryLiveDays = options.dailyHistoryLiveDays;
   let todayPartitions = null;
   const anchor = options.todayOnlyAnchor;
@@ -1324,6 +1388,12 @@ async function collectUsageOnce(options) {
         if (typeof options.onProgress === 'function') decorateLocalPeriods({ today, month });
         emitProgress({ today, month });
         allTime = extractScanBundle(windowed.allTime, { partitions: false }).period;
+        if (windowed.daysComplete) {
+          nativeDays = {};
+          for (const [key, json] of Object.entries(windowed.days)) {
+            nativeDays[key] = extractScanBundle(json, { partitions: false }).period;
+          }
+        }
       } else {
         // Serial on purpose: concurrent scans triple the peak CPU/IO load, which
         // is what let the issue #15 self-trigger loop spike tokscale past 500% CPU.
@@ -1387,6 +1457,36 @@ async function collectUsageOnce(options) {
   if (!anchorUsed && normalizedClients) {
     month = normalizePeriod(month);
     allTime = normalizePeriod(allTime);
+  }
+
+  const weekStartsOn = Number.isInteger(options.weekStartsOn) && options.weekStartsOn >= 0 && options.weekStartsOn <= 6
+    ? options.weekStartsOn
+    : 1;
+  const todayKey = localTodayKey(collectedAt);
+  if (options.nativeRangesEnabled !== true) {
+    // Another collector may share this anchor; only one that shows native
+    // ranges reuses or publishes them.
+  } else if (anchorUsed) {
+    // The anchor belongs to this date (see anchorUsed). Its past days are over.
+    // A persisted copy is checked like any other saved input.
+    const saved = anchor.nativePastRanges;
+    if (saved?.todayKey === todayKey && saved.weekStartsOn === weekStartsOn
+      && NATIVE_RANGE_NAMES.every((name) => saved.periods?.[name] && typeof saved.periods[name] === 'object'
+        && saved.starts?.[name] === nativeRangeStart(name, todayKey, weekStartsOn))) {
+      nativePastRanges = saved;
+    }
+  } else if (nativeDays) {
+    const periods = {};
+    const starts = {};
+    for (const name of NATIVE_RANGE_NAMES) {
+      starts[name] = nativeRangeStart(name, todayKey, weekStartsOn);
+      const days = Object.keys(nativeDays).filter((key) => key >= starts[name]);
+      periods[name] = mergePeriods(...days.map((key) => nativeDays[key]));
+    }
+    // Project, title and parent links come from the decorated All Time rows,
+    // so a range never reads transcripts the full scan already resolved.
+    propagateTodayProjects(allTime, periods, { ...localSessionMetadataDeps, projectsFromToday: true });
+    nativePastRanges = { todayKey, weekStartsOn, starts, periods };
   }
 
   // WSL contribution (Windows only; no-op elsewhere). Full tick scans running WSL
@@ -1525,6 +1625,28 @@ async function collectUsageOnce(options) {
     }
   }
 
+  // Native ranges hold only scanned usage. WSL and Codex Dots report Today,
+  // Month and All Time but no days, and a range can reach back past this
+  // month, so any usage from either leaves the ranges on their History
+  // fallback rather than undercounting them.
+  let nativeRanges = null;
+  let nativeRangeWindows = null;
+  // Those sources stop at allTimeSince, so their All Time proves nothing about
+  // a range that starts earlier.
+  if (nativePastRanges && String(allTimeSince) <= nativePastRanges.starts.last30
+    && !periodHasUsage(wslBundle.allTime)
+    && !(codexLocalView?.sessionKeys?.length && periodHasUsage(codexLocalView.allTime))) {
+    nativeRanges = {};
+    nativeRangeWindows = {};
+    for (const name of NATIVE_RANGE_NAMES) {
+      nativeRanges[name] = mergeNormalizedPeriods(nativePastRanges.periods[name], today);
+      nativeRangeWindows[name] = { start: nativePastRanges.starts[name], end: todayKey };
+    }
+    // A session active on past days and Today takes Today's fresh title and
+    // project, exactly as the delta-derived Month does on a watch tick.
+    propagateTodayProjects(today, nativeRanges, { ...localSessionMetadataDeps, t3Titles: anchor?.t3Titles, scanTitleClears });
+  }
+
   // One filesystem probe per tick, shared by the legacy status and the health
   // record below. Probing twice cost a second pass over every client's roots —
   // including the per-workspace walk Copilot needs — and let one snapshot report
@@ -1557,7 +1679,9 @@ async function collectUsageOnce(options) {
     sessionUsageArchiveFullScan: !anchorUsed,
     today,
     month,
-    allTime
+    allTime,
+    // Local only: syncPayload keeps these off the wire.
+    ...(nativeRanges ? { nativeRanges, nativeRangeWindows } : {})
   };
   // The request ledger is this source's archive. A second per-session archive
   // would resurrect its contribution after a native rollout takes precedence.
@@ -1609,6 +1733,7 @@ async function collectUsageOnce(options) {
       catalogProjects,
       wslBundle,
       wslStatus,
+      ...(nativePastRanges ? { nativePastRanges } : {}),
       ...(summary.nativeSessions ? { nativeSessions: summary.nativeSessions } : {}),
       ...(summary.nativeProjects ? { nativeProjects: summary.nativeProjects } : {})
     });
@@ -2170,11 +2295,34 @@ function startCollector(options) {
         timeZone: context.calendar.split('|')[0]
       };
       const next = {};
-      // Keep all three windows and History on one cache/account generation.
-      for (const [period, flags] of [['today', ['--today']], ['month', ['--month']], ['allTime', ['--since', allTimeSince]]]) {
-        next[period] = await scan({ ...input, flags, commandTimeoutMs: period === 'allTime' ? allTimeScanTimeoutMs(options) : commandTimeoutMs });
-        throwIfAborted(signal);
-        applyTokscaleSessionMetadata(next[period], { resolveProjects: options.projectsEnabled !== false });
+      // Keep all windows and History on one cache/account generation. The
+      // windowed scan also supplies the native-range days; an injected or
+      // older scanner keeps the three serial scans and no days.
+      const windows = !options.runTokscale && isTokscaleWindowDay(allTimeSince) && isTokscaleWindowDay(context.day)
+        ? fullTickWindows(context.day, allTimeSince, options.nativeRangesEnabled === true)
+        : null;
+      const reports = windows
+        ? await runTokscaleWindows({ ...input, windows, commandTimeoutMs: allTimeScanTimeoutMs(options) })
+        : null;
+      throwIfAborted(signal);
+      if (reports) {
+        // The days only feed native ranges. A missing one publishes the
+        // periods without days, which keeps those ranges on History.
+        assertWindowReports(reports, windows.slice(0, 3));
+        const days = {};
+        for (const { name } of windows) {
+          if (!Array.isArray(reports[name]?.entries)) continue;
+          applyTokscaleSessionMetadata(reports[name], { resolveProjects: options.projectsEnabled !== false });
+          if (name === 'today' || name === 'month' || name === 'allTime') next[name] = reports[name];
+          else days[name] = reports[name];
+        }
+        if (windows.length > 3 && Object.keys(days).length === windows.length - 3) next.days = days;
+      } else {
+        for (const [period, flags] of [['today', ['--today']], ['month', ['--month']], ['allTime', ['--since', allTimeSince]]]) {
+          next[period] = await scan({ ...input, flags, commandTimeoutMs: period === 'allTime' ? allTimeScanTimeoutMs(options) : commandTimeoutMs });
+          throwIfAborted(signal);
+          applyTokscaleSessionMetadata(next[period], { resolveProjects: options.projectsEnabled !== false });
+        }
       }
       next.graph = null;
       if (historyEnabled) {
@@ -2305,6 +2453,7 @@ function startCollector(options) {
           catalogTitleSources: saved.catalogTitleSources,
           catalogProjects: saved.catalogProjects,
           ...(typeof saved.cursorSnapshotKey === 'string' ? { cursorSnapshotKey: saved.cursorSnapshotKey } : {}),
+          ...(saved.nativePastRanges && typeof saved.nativePastRanges === 'object' ? { nativePastRanges: saved.nativePastRanges } : {}),
           // Per-client partitions are deliberately rebuilt by the first
           // anchored all-client tick after restart. Persisted partitions
           // could be stale for clients that changed while the app was down.
@@ -2345,6 +2494,9 @@ function startCollector(options) {
         ...(anchor.nativeSessions ? { nativeSessions: anchor.nativeSessions } : {}),
         ...(anchor.nativeProjects ? { nativeProjects: anchor.nativeProjects } : {}),
         ...(anchor.cursorSnapshotKey ? { cursorSnapshotKey: anchor.cursorSnapshotKey } : {}),
+        // Watch ticks after a restart reuse the anchor; without its past days
+        // the native ranges would wait for the next full scan.
+        ...(anchor.nativePastRanges ? { nativePastRanges: anchor.nativePastRanges } : {}),
         configFingerprint: configFingerprint(clients, allTimeSince, options.projectsEnabled, options.customScanPaths, tickPricingRevision, sourceOptions, tickSourceRevision),
         fullScanAt: new Date(lastFullScanAt).toISOString()
       }));
@@ -2619,6 +2771,7 @@ function startCollector(options) {
           catalogProjects: captured.catalogProjects,
           ...(captured.nativeSessions ? { nativeSessions: captured.nativeSessions } : {}),
           ...(captured.nativeProjects ? { nativeProjects: captured.nativeProjects } : {}),
+          ...(captured.nativePastRanges ? { nativePastRanges: captured.nativePastRanges } : {}),
           ...(cursorSnapshotKey ? { cursorSnapshotKey } : {})
         };
         wslAnchor = captured.wslBundle;

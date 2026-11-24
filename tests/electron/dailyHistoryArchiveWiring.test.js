@@ -27,7 +27,8 @@ function assertEveryCollectorModeUsesUsageConfig() {
     ['startHostCollector', 'host-collector']
   ]) {
     const collector = functionSource(main, `function ${name}()`);
-    assert.match(collector, new RegExp(`const usageOptions = electronUsageConfig\\('${label}'\\);`));
+    // Mode options such as the standalone collector's native ranges may follow the label.
+    assert.match(collector, new RegExp(`const usageOptions = electronUsageConfig\\('${label}'(?:, \\{[^}]*\\})?\\);`));
     assert.match(collector, /^\s+usageOptions,$/m);
   }
 }

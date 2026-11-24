@@ -496,3 +496,14 @@ test('readSessionDetail filters by the injected clock and passes the period cost
   assert.equal(totalDetail.totals.totalTokens, 150);
   assert.ok(Math.abs(totalDetail.totals.costUsd - 1.5) < 1e-9);
 });
+
+test('a native range keeps only the turns on its local days', () => {
+  const { filterExchangesByPeriod } = require('../../src/shared/sessionDetail');
+  const at = (day, hour) => new Date(2026, 10, day, hour).toISOString();
+  const turn = (timestamp) => ({ timestamp, tokens: { input: 1, output: 0, cacheRead: 0, cacheWrite: 0, reasoning: 0, total: 1 }, tools: [] });
+  const exchanges = [{ promptPreview: 'p', startedAt: at(16, 9), turns: [turn(at(16, 9)), turn(at(18, 0)), turn(at(24, 23))] }];
+  const kept = filterExchangesByPeriod(exchanges, 'range:2026-11-18:2026-11-24', new Date(2026, 10, 24, 12));
+  assert.equal(kept.length, 1);
+  assert.deepEqual(kept[0].turns.map((t) => t.timestamp), [at(18, 0), at(24, 23)]);
+  assert.equal(filterExchangesByPeriod(exchanges, 'range:2026-11-19:2026-11-23', new Date()).length, 0);
+});

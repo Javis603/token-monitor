@@ -193,6 +193,7 @@ test('session detail renders its heading before loading, errors and empty result
   const openEnd = rendererSource.indexOf('\nfunction toggleDetailSort', openStart);
   assert.ok(openStart >= 0 && openEnd > openStart, 'detail navigation should be present');
   context.visibleStatsSurface = () => 'main';
+  context.currentNativeRangeSnapshot = () => null;
   context.renderSessionDetail = render;
   const detailRequest = deferred();
   context.window.tokenMonitor = { getSessionDetail: () => detailRequest.promise };
@@ -460,6 +461,7 @@ function sessionDetailHarness(getSessionDetail) {
     statsRenderScheduler: { request() {} },
     sessionTooltipShouldHoldRender: () => false,
     renderSessionDetail: (args) => renders.push(args),
+    currentNativeRangeSnapshot: () => null,
     window: { tokenMonitor: { getSessionDetail } }
   };
   vm.runInNewContext(
