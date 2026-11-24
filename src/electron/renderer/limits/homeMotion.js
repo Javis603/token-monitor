@@ -198,7 +198,11 @@
         if (!motion) {
           // A target that moved with no motion of its own (an entry growth cut
           // short by a refresh) must not keep animating toward the old one.
-          if (finite(previous.fill) !== finite(current.fill)) for (const animation of running) animation.cancel();
+          // Its record goes too, or a later refresh would replay it.
+          if (finite(previous.fill) !== finite(current.fill)) {
+            for (const animation of running) animation.cancel();
+            meterMotions.delete(track);
+          }
           continue;
         }
         for (const animation of running) animation.cancel();

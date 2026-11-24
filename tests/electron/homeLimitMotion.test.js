@@ -87,3 +87,23 @@ test('Home stops a meter animation whose target moved without motion of its own'
   motion.animate(motionScope({ track: same }), new Map([['row', { fill: '80', displayFill: 80, motion: null }]]));
   assert.equal(same.animation.cancelled, false);
 });
+
+test('Home never replays a meter motion whose target a refresh already replaced', () => {
+  const node = () => ({ animate: () => ({}) });
+  const parts = { '.home-limit-ghost': node(), '.home-limit-fill': node(), '.home-limit-tip': node() };
+  const track = {
+    dataset: { limitFill: '40' }, isConnected: false, running: [],
+    getAnimations() { return this.running; },
+    animate() { const animation = { cancel() {} }; this.running.push(animation); return animation; },
+    querySelector: (selector) => parts[selector] || null
+  };
+  const scope = motionScope({ track });
+  const motion = countMotion([]);
+  // A drain from 80% toward 40% starts and is recorded for replay.
+  motion.animate(scope, new Map([['row', { fill: '80', displayFill: 80, motion: null }]]));
+  assert.equal(motion.capture(scope).get('row').motion.kind, 'drain');
+  // A refresh lands on 60%, right where the meter stands: no motion of its own.
+  track.dataset.limitFill = '60';
+  motion.animate(scope, new Map([['row', { fill: '40', displayFill: 60, motion: motion.capture(scope).get('row').motion }]]));
+  assert.equal(motion.capture(scope).get('row').motion, undefined, 'a later refresh would replay the superseded drain');
+});
