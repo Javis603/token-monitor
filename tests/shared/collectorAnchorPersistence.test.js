@@ -31,6 +31,7 @@ const {
 
 const { emptyPeriod } = require('../../src/shared/usage');
 const { installInProcessWatchHost } = require('../helpers/watchHost');
+const { withoutWindowedScan } = require('../helpers/tokscaleWithoutWindows');
 
 installInProcessWatchHost(test);
 
@@ -403,7 +404,7 @@ test('restart reuse: anchor file on disk enables todayOnly on first interval tic
   const childProcess = require('node:child_process');
   const originalSpawn = childProcess.spawn;
   const calls = [];
-  childProcess.spawn = () => {
+  childProcess.spawn = withoutWindowedScan(() => {
     calls.push('spawn');
     const { EventEmitter } = require('node:events');
     const child = new EventEmitter();
@@ -416,7 +417,7 @@ test('restart reuse: anchor file on disk enables todayOnly on first interval tic
       child.emit('close', 0);
     });
     return child;
-  };
+  });
 
   const originalSharedDir = process.env.TOKEN_MONITOR_SHARED_DIR;
   process.env.TOKEN_MONITOR_SHARED_DIR = tmpShared;
@@ -464,7 +465,7 @@ test('future fullScanAt forces a full scan on first interval tick', async () => 
   const childProcess = require('node:child_process');
   const originalSpawn = childProcess.spawn;
   const calls = [];
-  childProcess.spawn = () => {
+  childProcess.spawn = withoutWindowedScan(() => {
     calls.push('spawn');
     const { EventEmitter } = require('node:events');
     const child = new EventEmitter();
@@ -477,7 +478,7 @@ test('future fullScanAt forces a full scan on first interval tick', async () => 
       child.emit('close', 0);
     });
     return child;
-  };
+  });
 
   const originalSharedDir = process.env.TOKEN_MONITOR_SHARED_DIR;
   process.env.TOKEN_MONITOR_SHARED_DIR = tmpShared;
@@ -525,7 +526,7 @@ test('missing fullScanAt forces a full scan on first interval tick', async () =>
   const childProcess = require('node:child_process');
   const originalSpawn = childProcess.spawn;
   const calls = [];
-  childProcess.spawn = () => {
+  childProcess.spawn = withoutWindowedScan(() => {
     calls.push('spawn');
     const { EventEmitter } = require('node:events');
     const child = new EventEmitter();
@@ -538,7 +539,7 @@ test('missing fullScanAt forces a full scan on first interval tick', async () =>
       child.emit('close', 0);
     });
     return child;
-  };
+  });
 
   const originalSharedDir = process.env.TOKEN_MONITOR_SHARED_DIR;
   process.env.TOKEN_MONITOR_SHARED_DIR = tmpShared;
@@ -587,7 +588,7 @@ test('unparseable fullScanAt forces a full scan on first interval tick', async (
   const childProcess = require('node:child_process');
   const originalSpawn = childProcess.spawn;
   const calls = [];
-  childProcess.spawn = () => {
+  childProcess.spawn = withoutWindowedScan(() => {
     calls.push('spawn');
     const { EventEmitter } = require('node:events');
     const child = new EventEmitter();
@@ -600,7 +601,7 @@ test('unparseable fullScanAt forces a full scan on first interval tick', async (
       child.emit('close', 0);
     });
     return child;
-  };
+  });
 
   const originalSharedDir = process.env.TOKEN_MONITOR_SHARED_DIR;
   process.env.TOKEN_MONITOR_SHARED_DIR = tmpShared;
@@ -653,7 +654,7 @@ test('WSL toggle off: persisted wslAnchor is not merged into warm previews', asy
   // bundle leaks into a preview it shows totalTokens 999 instead of 0.
   const childProcess = require('node:child_process');
   const originalSpawn = childProcess.spawn;
-  childProcess.spawn = () => {
+  childProcess.spawn = withoutWindowedScan(() => {
     const { EventEmitter } = require('node:events');
     const child = new EventEmitter();
     child.stdout = new EventEmitter();
@@ -665,7 +666,7 @@ test('WSL toggle off: persisted wslAnchor is not merged into warm previews', asy
       child.emit('close', 0);
     });
     return child;
-  };
+  });
 
   const originalSharedDir = process.env.TOKEN_MONITOR_SHARED_DIR;
   process.env.TOKEN_MONITOR_SHARED_DIR = tmpShared;
@@ -705,7 +706,7 @@ test('cross-day anchor invalidation: stale dateKey triggers full scan', async ()
   const childProcess = require('node:child_process');
   const originalSpawn = childProcess.spawn;
   const calls = [];
-  childProcess.spawn = () => {
+  childProcess.spawn = withoutWindowedScan(() => {
     calls.push('spawn');
     const { EventEmitter } = require('node:events');
     const child = new EventEmitter();
@@ -718,7 +719,7 @@ test('cross-day anchor invalidation: stale dateKey triggers full scan', async ()
       child.emit('close', 0);
     });
     return child;
-  };
+  });
 
   try {
     const { collectUsageOnce } = freshCollector();

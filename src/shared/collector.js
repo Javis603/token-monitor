@@ -471,6 +471,7 @@ function resetTokscaleCapabilityCache() {
   // Same category of state: what this binary identity was observed to support.
   // Leaving it behind would keep a replaced binary pinned to the fallback grouping.
   tokscaleWorkspaceGroupBySupport.clear();
+  tokscaleWindowSupport.clear();
 }
 
 // Exit code 2 alone is clap's generic "argument parsing failed" code, not a
@@ -501,10 +502,13 @@ function isUnknownTokscaleGroupByError(error) {
   return Boolean(error) && /invalid group-by value/i.test(error?.tokscaleStderr || '');
 }
 
+// clap's usage line repeats the scan's `--client` argument, so a binary that
+// rejects `--window` would otherwise read as one rejecting a client.
 function isUnknownTokscaleClientError(error) {
   return Boolean(error)
     && error.tokscaleExitCode === TOKSCALE_UNKNOWN_CLIENT_EXIT_CODE
-    && /--client/i.test(error.tokscaleStderr || '');
+    && /--client/i.test(error.tokscaleStderr || '')
+    && !isUnknownTokscaleWindowError(error);
 }
 
 // The capability lookup is process-wide and must keep running so it can fill
@@ -584,14 +588,19 @@ function runTokscale({
   workspaces = true,
   offline = false,
   cursorLifecycleHeld = false,
-  timeZone = Intl.DateTimeFormat().resolvedOptions().timeZone
+  timeZone = Intl.DateTimeFormat().resolvedOptions().timeZone,
+  // The report a scan of no supported clients stands for.
+  emptyResult = { entries: [] },
+  // Flags clap must see before `--client`: when a binary rejects one of them,
+  // that is the error it reports even if a fork-only client follows.
+  leadingFlags = []
 }) {
   throwIfAborted(signal);
   const command = tokscaleCommand({ customScanPaths, homeDir });
   const requested = tokscaleClientFilter(clients);
-  if (!requested) return Promise.resolve({ entries: [] });
+  if (!requested) return Promise.resolve(emptyResult);
   const clientFilter = applyKnownCapabilityFilter(requested, command.identity);
-  if (!clientFilter) return Promise.resolve({ entries: [] });
+  if (!clientFilter) return Promise.resolve(emptyResult);
   // Asking for the join is what makes the scan resolve and label workspaces, so
   // the Projects opt-out has to be applied here rather than on the way out: a
   // scan that still resolved them and had its answer discarded would keep
@@ -603,7 +612,7 @@ function runTokscale({
   const groupBy = () => (workspaces && workspaceGroupBySupported(command.identity)
     ? TOKSCALE_WORKSPACE_GROUP_BY
     : TOKSCALE_SESSION_GROUP_BY);
-  const runArgs = (filter, grouping) => [...(offline || offlinePricing ? ['--offline'] : []), '--bucket-timezone', timeZone, '--json', '--client', filter, '--group-by', grouping, ...flags];
+  const runArgs = (filter, grouping) => [...(offline || offlinePricing ? ['--offline'] : []), '--bucket-timezone', timeZone, '--json', ...leadingFlags, '--client', filter, '--group-by', grouping, ...flags];
   const subprocessOptions = {
     operation: 'tokscale scan',
     terminationOptions,
@@ -629,7 +638,7 @@ function runTokscale({
   });
   return runCursorAwareTokscale(clientFilter, () => (
     scan(clientFilter).catch((error) => (
-      retryWithKnownCapabilities(error, requested, command, { entries: [] }, (filtered) => (
+      retryWithKnownCapabilities(error, requested, command, emptyResult, (filtered) => (
         scan(filtered)
       ), signal, {
         terminationOptions,
@@ -637,6 +646,50 @@ function runTokscale({
       })
     ))
   ), signal, cursorLifecycleHeld || (offline && flags.includes('--home')));
+}
+
+// The vendored fork reports several date windows from one parse
+// (`--window NAME:SINCE:UNTIL`); every scan otherwise pays the same full load
+// whatever its range. Like the workspace grouping, support is a property of the
+// binary: an older build rejects the flag, and that answer is cached per binary
+// identity so later ticks go straight to the serial scans.
+const tokscaleWindowSupport = new Map();
+const TOKSCALE_WINDOW_SCHEMA_VERSION = 1;
+// `--window` accepts only real calendar days. A plain `--since` compares day
+// strings, so a start such as 2026-02-30 keeps working through the serial scans.
+function isTokscaleWindowDay(value) {
+  const key = String(value);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(key)) return false;
+  const date = new Date(`${key}T00:00:00Z`);
+  return !Number.isNaN(date.getTime()) && date.toISOString().slice(0, 10) === key;
+}
+
+function isUnknownTokscaleWindowError(error) {
+  return Boolean(error) && /unexpected argument '--window'/i.test(error?.tokscaleStderr || '');
+}
+
+// Resolves to the reports keyed by window name, or null when this binary has no
+// windowed mode. Malformed output is an error, not a silent fallback.
+async function runTokscaleWindows({ windows, ...input }) {
+  const { identity } = tokscaleCommand({ customScanPaths: input.customScanPaths, homeDir: input.homeDir });
+  if (tokscaleWindowSupport.get(identity) === false) return null;
+  const leadingFlags = windows.flatMap(({ name, since = '', until = '' }) => ['--window', `${name}:${since}:${until}`]);
+  const emptyResult = {
+    schemaVersion: TOKSCALE_WINDOW_SCHEMA_VERSION,
+    windows: Object.fromEntries(windows.map(({ name }) => [name, { entries: [] }]))
+  };
+  let json;
+  try {
+    json = await runTokscale({ ...input, flags: [], leadingFlags, emptyResult });
+  } catch (error) {
+    if (!isUnknownTokscaleWindowError(error)) throw error;
+    tokscaleWindowSupport.set(identity, false);
+    return null;
+  }
+  if (json?.schemaVersion !== TOKSCALE_WINDOW_SCHEMA_VERSION || !json.windows) {
+    throw new Error('tokscale --window output has an unsupported shape');
+  }
+  return json.windows;
 }
 
 function runTokscaleGraph({ clients, commandTimeoutMs, signal, terminationOptions, onTerminationUnconfirmed, customScanPaths, homeDir, offline = false, cursorLifecycleHeld = false, offlinePricing = false, timeZone = Intl.DateTimeFormat().resolvedOptions().timeZone }) {
@@ -1020,15 +1073,9 @@ async function collectUsageOnce(options) {
     onTerminationUnconfirmed: () => reportTerminationUnconfirmed('tokscale-scan')
   }));
   const scanTitleClears = new Set();
-  const runTokscaleFn = async (input) => {
-    const includesCursor = cursorSnapshot && !input.flags.includes('--home')
-      && normalizeClientsCsv(input.clients).split(',').includes('cursor');
-    const scanInput = includesCursor ? { ...input, clients: withoutCursor(input.clients) }
-      : cursorSnapshot && input.flags.includes('--home') ? { ...input, offline: true } : input;
-    const json = scanInput.clients ? await runTokscaleScan({ ...scanInput, timeZone: periodWindows.timeZone }) : { entries: [] };
-    assertCollectionCalendar();
+  const finishScanJson = (json, period, includesCursor) => {
     applyTokscaleSessionMetadata(json, { resolveProjects: projectsEnabled });
-    if (input.flags.includes('--today')) {
+    if (period === 'today') {
       for (const session of Array.isArray(json?.sessions) ? json.sessions : []) {
         if (session?.client === 'pi' && session.sessionId && session.title === '') {
           scanTitleClears.add(`pi:${session.sessionId}`);
@@ -1036,10 +1083,57 @@ async function collectUsageOnce(options) {
       }
     }
     if (!includesCursor) return json;
-    const period = input.flags.includes('--today') ? 'today' : input.flags.includes('--month') ? 'month' : 'allTime';
     const combined = { native: json };
     cursorReports.set(combined, cursorSnapshot[period]);
     return combined;
+  };
+  const runTokscaleFn = async (input) => {
+    const includesCursor = cursorSnapshot && !input.flags.includes('--home')
+      && normalizeClientsCsv(input.clients).split(',').includes('cursor');
+    const scanInput = includesCursor ? { ...input, clients: withoutCursor(input.clients) }
+      : cursorSnapshot && input.flags.includes('--home') ? { ...input, offline: true } : input;
+    const json = scanInput.clients ? await runTokscaleScan({ ...scanInput, timeZone: periodWindows.timeZone }) : { entries: [] };
+    assertCollectionCalendar();
+    const period = input.flags.includes('--today') ? 'today' : input.flags.includes('--month') ? 'month' : 'allTime';
+    return finishScanJson(json, period, includesCursor);
+  };
+  // A caller that injects the per-range scanner keeps the serial scans unless it
+  // also injects a windowed one.
+  const runTokscaleWindowsScan = options.runTokscaleWindows || (options.runTokscale ? null : (input) => runTokscaleWindows({
+    ...input,
+    workspaces: projectsEnabled,
+    offlinePricing: options.offlinePricing,
+    customScanPaths: options.customScanPaths,
+    homeDir: options.homeDir,
+    terminationOptions: options.subprocessTerminationOptions,
+    onTerminationUnconfirmed: () => reportTerminationUnconfirmed('tokscale-scan')
+  }));
+  // The full tick's Today, Month and All Time from one scan, in the calendar
+  // this collection captured. Null when the binary has no windowed mode.
+  const runFullWindowsFn = async (clientsCsv) => {
+    const todayKey = localTodayKey(collectedAt);
+    if (!runTokscaleWindowsScan || !isTokscaleWindowDay(allTimeSince)) return null;
+    const windows = [
+      { name: 'today', since: todayKey, until: todayKey },
+      { name: 'month', since: `${periodWindows.month.key}-01`, until: todayKey },
+      { name: 'allTime', since: String(allTimeSince), until: '' }
+    ];
+    const includesCursor = cursorSnapshot && normalizeClientsCsv(clientsCsv).split(',').includes('cursor');
+    const scanClients = includesCursor ? withoutCursor(clientsCsv) : clientsCsv;
+    const reports = scanClients
+      ? await runTokscaleWindowsScan({ clients: scanClients, windows, commandTimeoutMs: allTimeTimeoutMs, signal: options.signal, timeZone: periodWindows.timeZone })
+      : Object.fromEntries(windows.map(({ name }) => [name, { entries: [] }]));
+    if (!reports) return null;
+    assertCollectionCalendar();
+    // A batch that drops a window must not publish its siblings, nor turn a
+    // malformed window into zero usage. Every report, even an empty one,
+    // carries its entries array.
+    for (const { name } of windows) {
+      if (!Array.isArray(reports[name]?.entries)) {
+        throw new Error(`tokscale --window output is missing the ${name} window`);
+      }
+    }
+    return Object.fromEntries(windows.map(({ name }) => [name, finishScanJson(reports[name], name, includesCursor)]));
   };
   const runGraphScan = options.runGraph || ((input) => runTokscaleGraph({
     ...input,
@@ -1218,23 +1312,37 @@ async function collectUsageOnce(options) {
       month = applyPeriodDelta(anchor.month, today, anchor.today);
       allTime = applyPeriodDelta(anchor.allTime, today, anchor.today);
     } else if (normalizedClients) {
-      // Serial on purpose: concurrent scans triple the peak CPU/IO load, which
-      // is what let the issue #15 self-trigger loop spike tokscale past 500% CPU.
-      const todayJson = await runTokscaleFn({ clients: normalizedClients, flags: ['--today'], commandTimeoutMs, signal: options.signal });
+      // One windowed scan where the binary supports it: each range otherwise
+      // pays the same full load.
+      const windowed = await runFullWindowsFn(normalizedClients);
       throwIfAborted(options.signal);
-      const todayBundle = extractScanBundle(todayJson);
-      today = todayBundle.period;
-      todayPartitions = todayBundle.byClient;
-      if (typeof options.onProgress === 'function') decorateLocalPeriods({ today });
-      emitProgress({ today });
-      const monthJson = await runTokscaleFn({ clients: normalizedClients, flags: ['--month'], commandTimeoutMs, signal: options.signal });
-      throwIfAborted(options.signal);
-      month = extractScanBundle(monthJson, { partitions: false }).period;
-      if (typeof options.onProgress === 'function') decorateLocalPeriods({ today, month });
-      emitProgress({ today, month });
-      const allTimeJson = await runTokscaleFn({ clients: normalizedClients, flags: ['--since', allTimeSince], commandTimeoutMs: allTimeTimeoutMs, signal: options.signal });
-      throwIfAborted(options.signal);
-      allTime = extractScanBundle(allTimeJson, { partitions: false }).period;
+      if (windowed) {
+        const todayBundle = extractScanBundle(windowed.today);
+        today = todayBundle.period;
+        todayPartitions = todayBundle.byClient;
+        month = extractScanBundle(windowed.month, { partitions: false }).period;
+        if (typeof options.onProgress === 'function') decorateLocalPeriods({ today, month });
+        emitProgress({ today, month });
+        allTime = extractScanBundle(windowed.allTime, { partitions: false }).period;
+      } else {
+        // Serial on purpose: concurrent scans triple the peak CPU/IO load, which
+        // is what let the issue #15 self-trigger loop spike tokscale past 500% CPU.
+        const todayJson = await runTokscaleFn({ clients: normalizedClients, flags: ['--today'], commandTimeoutMs, signal: options.signal });
+        throwIfAborted(options.signal);
+        const todayBundle = extractScanBundle(todayJson);
+        today = todayBundle.period;
+        todayPartitions = todayBundle.byClient;
+        if (typeof options.onProgress === 'function') decorateLocalPeriods({ today });
+        emitProgress({ today });
+        const monthJson = await runTokscaleFn({ clients: normalizedClients, flags: ['--month'], commandTimeoutMs, signal: options.signal });
+        throwIfAborted(options.signal);
+        month = extractScanBundle(monthJson, { partitions: false }).period;
+        if (typeof options.onProgress === 'function') decorateLocalPeriods({ today, month });
+        emitProgress({ today, month });
+        const allTimeJson = await runTokscaleFn({ clients: normalizedClients, flags: ['--since', allTimeSince], commandTimeoutMs: allTimeTimeoutMs, signal: options.signal });
+        throwIfAborted(options.signal);
+        allTime = extractScanBundle(allTimeJson, { partitions: false }).period;
+      }
     }
     // Always decorate: session timestamps drive the recency sort regardless of the
     // Projects opt-out (issue #182). decorateLocalPeriods gates only project identity

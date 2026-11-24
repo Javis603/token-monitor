@@ -19,6 +19,7 @@ const {
 
 const { installSourceEnvGuard } = require('../helpers/sourceEnv');
 const { installInProcessWatchHost } = require('../helpers/watchHost');
+const { withoutWindowedScan } = require('../helpers/tokscaleWithoutWindows');
 
 const collectorPath = require.resolve('../../src/shared/collector');
 
@@ -49,7 +50,7 @@ function withTmpHome(prepare) {
 }
 
 function recordingSpawn(calls) {
-  return (_bin, args) => {
+  return withoutWindowedScan((_bin, args) => {
     calls.push(args);
     const child = new EventEmitter();
     child.stdout = new EventEmitter();
@@ -61,7 +62,7 @@ function recordingSpawn(calls) {
       child.emit('close', 0);
     });
     return child;
-  };
+  });
 }
 
 function wslBundleWith(client, tokens) {
@@ -672,7 +673,7 @@ test('Antigravity source events target its umbrella client without watching sync
   const childProcess = require('node:child_process');
   const originalSpawn = childProcess.spawn;
   const calls = [];
-  childProcess.spawn = (_bin, args) => {
+  childProcess.spawn = withoutWindowedScan((_bin, args) => {
     calls.push(args);
     const child = new EventEmitter();
     child.stdout = new EventEmitter();
@@ -684,7 +685,7 @@ test('Antigravity source events target its umbrella client without watching sync
       child.emit('close', 0);
     });
     return child;
-  };
+  });
 
   // Pinned to a captured instant, not `originalNow() + offset`: the floor is
   // measured from the startup sync, so letting real time leak into the elapsed
@@ -797,7 +798,7 @@ test('a catch-up that comes due mid-tick keeps its targeted scan scope', async (
   const calls = [];
   let holdNextSpawn = null;
   let heldSpawns = 0;
-  childProcess.spawn = (_bin, args) => {
+  childProcess.spawn = withoutWindowedScan((_bin, args) => {
     calls.push(args);
     const child = new EventEmitter();
     child.stdout = new EventEmitter();
@@ -812,7 +813,7 @@ test('a catch-up that comes due mid-tick keeps its targeted scan scope', async (
       child.emit('close', 0);
     });
     return child;
-  };
+  });
 
   const originalNow = Date.now;
   const baseNow = originalNow();
@@ -1412,7 +1413,7 @@ test('a misbehaving sync child reports failure exactly once', async () => {
   const childProcess = require('node:child_process');
   const originalSpawn = childProcess.spawn;
   let emitAfterError = false;
-  childProcess.spawn = (_bin, args) => {
+  childProcess.spawn = withoutWindowedScan((_bin, args) => {
     const child = new EventEmitter();
     child.stdout = new EventEmitter();
     child.stderr = new EventEmitter();
@@ -1429,7 +1430,7 @@ test('a misbehaving sync child reports failure exactly once', async () => {
       child.emit('close', 1);
     });
     return child;
-  };
+  });
 
   try {
     const { collectUsageOnce } = freshCollector();
@@ -2884,7 +2885,7 @@ test('a Cursor report with implicit sync blocks logout until the report closes',
   let reportCalls = 0;
   let logoutStarted = false;
 
-  childProcess.spawn = () => {
+  childProcess.spawn = withoutWindowedScan(() => {
     const child = new EventEmitter();
     child.stdout = new EventEmitter();
     child.stderr = new EventEmitter();
@@ -2901,7 +2902,7 @@ test('a Cursor report with implicit sync blocks logout until the report closes',
       });
     }
     return child;
-  };
+  });
   cursorAuth.readActiveAccount = () => ({ accessToken: 'token' });
   cursorAuth.runCursorSync = async () => { throw new Error('explicit sync failed'); };
 
@@ -2983,7 +2984,7 @@ test('collectUsageOnce runs the three tokscale scans serially, not concurrently'
   const originalSpawn = childProcess.spawn;
   let active = 0;
   let maxActive = 0;
-  childProcess.spawn = () => {
+  childProcess.spawn = withoutWindowedScan(() => {
     active += 1;
     maxActive = Math.max(maxActive, active);
     const child = new EventEmitter();
@@ -2997,7 +2998,7 @@ test('collectUsageOnce runs the three tokscale scans serially, not concurrently'
       child.emit('close', 0);
     });
     return child;
-  };
+  });
   try {
     const { collectUsageOnce } = freshCollector();
     await collectUsageOnce({
@@ -3057,7 +3058,7 @@ test('a watch event during an in-flight tick re-arms the debounce instead of coa
   const originalSpawn = childProcess.spawn;
   const calls = [];
   let spawnDelayMs = 5;
-  childProcess.spawn = (_bin, args) => {
+  childProcess.spawn = withoutWindowedScan((_bin, args) => {
     calls.push(args);
     const child = new EventEmitter();
     child.stdout = new EventEmitter();
@@ -3069,7 +3070,7 @@ test('a watch event during an in-flight tick re-arms the debounce instead of coa
       child.emit('close', 0);
     }, spawnDelayMs);
     return child;
-  };
+  });
 
   let handle = null;
   try {
@@ -3147,7 +3148,7 @@ test('live watch events scan only changed clients and preserve the other client 
   let codexDeleted = false;
   let codexUnattributed = false;
   let codexUnexpectedClient = false;
-  childProcess.spawn = (_bin, args) => {
+  childProcess.spawn = withoutWindowedScan((_bin, args) => {
     calls.push(args);
     const selected = String(args[args.indexOf('--client') + 1] || '').split(',').filter(Boolean);
     const child = new EventEmitter();
@@ -3179,7 +3180,7 @@ test('live watch events scan only changed clients and preserve the other client 
       child.emit('close', 0);
     });
     return child;
-  };
+  });
 
   let handle = null;
   try {
@@ -3622,7 +3623,7 @@ test('smart collection keeps events received during a scan pending', async () =>
   const originalSpawn = childProcess.spawn;
   const calls = [];
   let spawnDelayMs = 0;
-  childProcess.spawn = (_bin, args) => {
+  childProcess.spawn = withoutWindowedScan((_bin, args) => {
     calls.push(args);
     const child = new EventEmitter();
     child.stdout = new EventEmitter();
@@ -3634,7 +3635,7 @@ test('smart collection keeps events received during a scan pending', async () =>
       child.emit('close', 0);
     }, spawnDelayMs);
     return child;
-  };
+  });
 
   let handle = null;
   try {
@@ -3698,7 +3699,7 @@ test('smart collection retries a failed activity scan on the next interval', asy
   const originalSpawn = childProcess.spawn;
   const calls = [];
   let failNext = false;
-  childProcess.spawn = (_bin, args) => {
+  childProcess.spawn = withoutWindowedScan((_bin, args) => {
     calls.push(args);
     const child = new EventEmitter();
     child.stdout = new EventEmitter();
@@ -3711,7 +3712,7 @@ test('smart collection retries a failed activity scan on the next interval', asy
       failNext = false;
     });
     return child;
-  };
+  });
   const cursorAuth = require('../../src/shared/providers/cursor/auth');
   const originalRunCursorSync = cursorAuth.runCursorSync;
   cursorAuth.runCursorSync = async () => {};
@@ -4320,7 +4321,7 @@ test('live collection retries all clients after a failed targeted watch scan', a
   const originalSpawn = childProcess.spawn;
   const calls = [];
   let failNext = false;
-  childProcess.spawn = (_bin, args) => {
+  childProcess.spawn = withoutWindowedScan((_bin, args) => {
     calls.push(args);
     const child = new EventEmitter();
     child.stdout = new EventEmitter();
@@ -4333,7 +4334,7 @@ test('live collection retries all clients after a failed targeted watch scan', a
       failNext = false;
     });
     return child;
-  };
+  });
 
   let handle = null;
   try {
@@ -4730,7 +4731,7 @@ test('smart collection acknowledges the latest activity revision after tick coal
   const originalSpawn = childProcess.spawn;
   const calls = [];
   let spawnDelayMs = 0;
-  childProcess.spawn = (_bin, args) => {
+  childProcess.spawn = withoutWindowedScan((_bin, args) => {
     calls.push(args);
     const child = new EventEmitter();
     child.stdout = new EventEmitter();
@@ -4742,7 +4743,7 @@ test('smart collection acknowledges the latest activity revision after tick coal
       child.emit('close', 0);
     }, spawnDelayMs);
     return child;
-  };
+  });
 
   let handle = null;
   try {
@@ -5433,7 +5434,7 @@ test('a watch-event storm faster than the debounce still ticks within the max-wa
   const childProcess = require('node:child_process');
   const originalSpawn = childProcess.spawn;
   const calls = [];
-  childProcess.spawn = (_bin, args) => {
+  childProcess.spawn = withoutWindowedScan((_bin, args) => {
     calls.push(args);
     const child = new EventEmitter();
     child.stdout = new EventEmitter();
@@ -5445,7 +5446,7 @@ test('a watch-event storm faster than the debounce still ticks within the max-wa
       child.emit('close', 0);
     }, 5);
     return child;
-  };
+  });
 
   let handle = null;
   let storm = null;
@@ -5529,7 +5530,7 @@ test('a single watch event still waits out the debounce and does not fire early'
   const childProcess = require('node:child_process');
   const originalSpawn = childProcess.spawn;
   const calls = [];
-  childProcess.spawn = (_bin, args) => {
+  childProcess.spawn = withoutWindowedScan((_bin, args) => {
     calls.push(args);
     const child = new EventEmitter();
     child.stdout = new EventEmitter();
@@ -5541,7 +5542,7 @@ test('a single watch event still waits out the debounce and does not fire early'
       child.emit('close', 0);
     }, 5);
     return child;
-  };
+  });
 
   let handle = null;
   try {
