@@ -29,15 +29,16 @@ test('the renderer declares its own base type size', () => {
   assert.doesNotMatch(css, /\nhtml, body \{[^}]*font-size/);
 });
 
-// These carry a glyph rather than body text and were the only things in the app
-// relying on the 16px fallback, so they have to say the size out loud.
-test('the glyph buttons that wanted 16px declare it', () => {
+test('settings reset buttons use a small shared icon and only change color on hover', () => {
   const css = readRendererFile('styles.css');
-  for (const selector of ['.tool-header-action', '.reset-appearance-button']) {
-    const rule = rules(css).find((r) => r.selector === selector);
-    assert.ok(rule, `${selector} rule should exist`);
-    assert.match(rule.body, /font-size: 16px/, selector);
-  }
+  const resetRules = rules(css).filter(rule => rule.selector.includes('.settings-reset-button'));
+  const button = resetRules.find(rule => rule.selector === '.settings-panel .settings-reset-button');
+  const icon = resetRules.find(rule => rule.selector === '.settings-reset-button::before');
+  const hover = resetRules.find(rule => rule.selector.includes(':hover'));
+  assert.match(button.body, /background: transparent/);
+  assert.match(icon.body, /width: 10px; height: 10px/);
+  assert.match(icon.body, /mask: url\("icons\/actions\/undo-2\.svg"\)/);
+  assert.equal(hover.body, 'color: var(--text);');
 });
 
 // Layout here is written with descendant selectors that outrank a lone class, so

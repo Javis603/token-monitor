@@ -19,6 +19,10 @@ const PARTIAL_USAGE_CARRY_FIELDS = Object.freeze([
   'periodProjectsOmitted',
   'nativeSessions',
   'nativeProjects',
+  // A Today/Month preview keeps the last native ranges until the full result
+  // replaces or drops them, instead of flashing the History fallback.
+  'nativeRanges',
+  'nativeRangeWindows',
   'syncUploadIntervalMs'
 ]);
 

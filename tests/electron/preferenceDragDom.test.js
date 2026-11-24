@@ -615,12 +615,12 @@ test('settings mode choices use inline options and compact home limit rows', () 
   const html = readRendererFile('index.html');
   // Each mode choice is a labelled radiogroup, not a bare cluster of inputs.
   assert.match(html, /<div id="floatingBubbleTriggerRow" class="settings-item">/);
-  assert.match(html, /<span id="floatingBubbleTriggerLabel" class="settings-item-text">/);
+  assert.match(html, /<span id="floatingBubbleTriggerLabel" class="settings-item-title"/);
   assert.match(html, /role="radiogroup" aria-labelledby="floatingBubbleTriggerLabel"/);
   for (const value of ['click', 'hover']) {
     assert.match(html, new RegExp(`<input type="radio" name="floatingBubbleTrigger" value="${value}"`));
   }
-  assert.match(html, /<span id="showLimitUsedLabel" class="settings-item-text">/);
+  assert.match(html, /<span id="showLimitUsedLabel" class="settings-item-title"/);
   assert.match(html, /role="radiogroup" aria-labelledby="showLimitUsedLabel"/);
   for (const value of ['remaining', 'used']) {
     assert.match(html, new RegExp(`<input type="radio" name="showLimitUsed" value="${value}"`));
@@ -808,7 +808,7 @@ test('sync section icon uses a local sync asset instead of a hand-drawn refresh 
 
 test('startup setting stays visible when login items are unsupported', () => {
   const html = readRendererFile('index.html');
-  const startupGroup = html.match(/<label id="startupGroup"[\s\S]*?id="startupNote"[\s\S]*?<\/label>/)?.[0] || '';
+  const startupGroup = html.match(/<div id="startupGroup"[\s\S]*?id="startupNote"[\s\S]*?<\/div>/)?.[0] || '';
   assert.match(startupGroup, /id="startAtLoginInput"/);
 
   const app = readRendererFile('app.js');

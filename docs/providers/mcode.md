@@ -32,7 +32,7 @@ Deleting or rewinding a Session in MiniMax Code removes its history, as in other
 
 ## Watching and custom paths
 
-The watcher follows each store's `v2/sessions` tree and the headless `mcode` directories. MiniMax Code writes there only during a turn, and the scan does not write back, so the watch cannot re-trigger itself. Custom scan paths are disabled for `mcode`: an extra root would reach only upstream's headless scan, never the store.
+The watcher follows each store's `v2/sessions` tree and the headless `mcode` directories. MiniMax Code writes there only during a turn, and the scan does not write back, so the watch cannot re-trigger itself. A custom `mcode` scan path is a MiniMax Code data directory — the directory containing `v2/sessions`, such as `.minimax` or `.minimax-<profile>` — not its parent.
 
 The fork caches the usage rows of each history file by length and mtime in `token-monitor/mcode-<home hash>.json` under tokscale's cache directory, one file per scanned home, because history files carry whole conversations and tool output.
 

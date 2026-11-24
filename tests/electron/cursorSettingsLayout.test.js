@@ -1918,9 +1918,11 @@ test('collection cadence setting is exposed in the Collection panel', () => {
 
 test('sync upload interval setting is exposed in the Multi-device Sync panel', () => {
   const html = readRendererFile('index.html');
-  const controls = html.match(/<label id="syncUploadIntervalRow" class="sync-upload-interval-row[^"]*"[\s\S]*?<select id="syncUploadIntervalInput"[\s\S]*?<\/select>[\s\S]*?<\/label>/)?.[0] || '';
+  const controls = html.match(/<div id="syncUploadIntervalRow" class="sync-upload-interval-row[^"]*"[\s\S]*?<select id="syncUploadIntervalInput"[\s\S]*?<\/select>[\s\S]*?<\/div>/)?.[0] || '';
   assert.ok(html.indexOf('id="syncUploadIntervalRow"') > html.indexOf('id="saveSettingsButton"'));
-  assert.ok(html.indexOf('id="syncUploadIntervalRow"') < html.indexOf('id="syncDevicePanel"'));
+  // Frequency is a preference of this device, listed after the sync map's devices.
+  assert.ok(html.indexOf('id="syncUploadIntervalRow"') > html.indexOf('id="syncDevicePanel"'));
+  assert.ok(html.indexOf('id="syncUploadIntervalRow"') > html.indexOf('id="syncThisDeviceCard"'));
   assert.match(controls, /data-i18n="settings\.sync\.uploadInterval"/);
   assert.match(controls, /<option value="0"[\s\S]*data-i18n="settings\.sync\.uploadInterval\.live"/);
   assert.match(controls, /<option value="600000"[\s\S]*data-i18n="settings\.sync\.uploadInterval\.10m"/);
@@ -1975,6 +1977,7 @@ function loadHubSettingsWiring(els, context) {
   for (const id of ['syncConnectionEditor', 'syncConnectionIdentity', 'syncConnectionEndpoint', 'syncConnectionEdit', 'syncConnectionCancel', 'syncConnectionSaveError', 'syncDeviceSettings', 'syncUploadIntervalRow']) {
     els[id] ||= fakeHubControl();
   }
+  els.syncMap ||= { querySelectorAll: () => [] };
   const app = readRendererFile('app.js');
   const modeStart = app.indexOf('function syncHubModeUi()');
   const modeEnd = app.indexOf('function renderHubStatus()', modeStart);

@@ -236,13 +236,15 @@ test('Model settings expose and persist the ranking metric without changing the 
   const context = vm.createContext({
     document, state, t: (key) => key,
     usageAttributionRowsApi: { normalizeRankingMetric },
+    addRenderedSettingReset() {},
     saveSettings: async (patch) => saves.push(patch.modelRankingMetric),
     render: () => { renders++; }
   });
   const start = app.indexOf('function renderModelViewSettingsList()');
   const end = app.indexOf('function renderTrendSettingsList()', start);
   vm.runInContext(app.slice(start, end), context);
-  const [label, group] = context.renderModelViewSettingsList().children[0].children;
+  const [heading, group] = context.renderModelViewSettingsList().children[0].children;
+  const [label] = heading.children;
   assert.equal(group.attributes.role, 'radiogroup');
   assert.equal(group.attributes['aria-labelledby'], label.id);
   const [tokens, cost] = group.children.map((option) => option.children[0]);

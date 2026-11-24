@@ -208,7 +208,8 @@ for (const className of ['detail-ex-title', 'detail-heading']) {
         requestAnimationFrame: h.window.requestAnimationFrame,
         prefersReducedMotion: () => false, homeSessionRenderPending: false,
         visibleStatsSurface: () => 'main', isRendererWindowHidden: () => false,
-        statsRenderScheduler: { request() {} }, renderSessionDetail: options => renders.push(options)
+        statsRenderScheduler: { request() {} }, renderSessionDetail: options => renders.push(options),
+        currentNativeRangeSnapshot: () => null
       });
       vm.runInContext(`${setup}\n${detail}`, context);
       context.bindHoverMarquee(h.element);
@@ -419,6 +420,7 @@ test('updateRow keeps IDs for untitled sessions and moves them into Details for 
   const context = {
     document: h.document, overflowText: h.api,
     rendererDom,
+    window: { TokenMonitorDomReconcile: require('../../src/electron/renderer/domReconcile') },
     state: { breakdown: 'session' }, rowWidth: () => 50,
     iconKindFor: () => ({ kind: 'dot' }),
     setHoverMarqueeText: h.api.setText, formatNumber: String, formatCost: String,
@@ -489,6 +491,7 @@ test('a token and cost update through updateRow keeps the hovered title moving',
   const context = {
     document: h.document, overflowText: h.api,
     rendererDom,
+    window: { TokenMonitorDomReconcile: require('../../src/electron/renderer/domReconcile') },
     state: { breakdown: 'session' }, rowWidth: () => 50,
     iconKindFor: () => ({ kind: 'dot' }),
     setHoverMarqueeText: h.api.setText, formatNumber: String, formatCost: String,
@@ -577,9 +580,17 @@ test('actual shared row rendering keeps group availability and binds Auto Review
   const [unavailable] = rowsApi.groupSessionRows(rowsApi.sessionRowsForPeriod({ sessions: {} }, {
     now, nativeSessions: { new: native, other: { ...native, sessionId: 'other' } }
   }));
+  const pendingRow = makeRow();
+  context.update(pendingRow, unavailable.groupRows[0]);
+  assert.equal(pendingRow.querySelector('.row-value').textContent, '0');
+  assert.equal(pendingRow.querySelector('.row-cost').textContent, '0');
   context.update(row, unavailable);
   assert.equal(row.dataset.tokenDataUnavailable, 'true');
-  assert.equal(row.querySelector('.row-cost').textContent, '');
+  assert.equal(row.querySelector('.row-value').textContent, '0');
+  assert.equal(row.querySelector('.row-cost').textContent, '0');
+  context.update(row, group);
+  assert.equal(row.querySelector('.row-value').textContent, '500');
+  assert.equal(row.querySelector('.row-cost').textContent, '2');
   for (const titled of [true, false]) {
     const [review] = rowsApi.sessionRowsForPeriod({ sessions: { review: { ...accounting,
       sessionId: 'review', sessionKind: 'background-review', title: titled ? 'Review' : '', models: { a: 300, b: 200 }

@@ -29,6 +29,7 @@ class Element {
   }
   set textContent(value) { this.text = String(value); this.children = []; }
   get textContent() { return (this.text || '') + this.children.map(child => child.textContent).join(''); }
+  get childElementCount() { return this.children.length; }
   append(...children) { this.children.push(...children); }
   appendChild(child) { this.append(child); }
   replaceChildren(...children) { this.text = ''; this.children = children; }
@@ -188,8 +189,9 @@ test('Home session rows expose named states and keep idle marks decorative', () 
   const context = {
     document, t, els: { homePanel: { querySelector: () => null } }, state: { settings: {} },
     homeModuleShell: () => ({ module, body }), applyHomeListMark() {}, iconKindFor: () => 'codex',
-    clientColors: { codex: 'blue' }, bindHoverMarquee() {}, formatCompact: String, homeSessionAgo: () => '',
+    clientColors: { codex: 'blue' }, bindHoverMarquee() {}, formatCompact: String, homeSessionAgo: () => '', homeSessionAgoShort: () => '',
     limitWindowsView: {}, sessionRowsApi: require('../../src/electron/renderer/sessionRows'),
+    homeModulePreferencesApi: require('../../src/electron/renderer/homeModulePreferences'),
     window: {
       TokenMonitorSessionLive: require('../../src/shared/sessionLive'),
       TokenMonitorEdgeDockPresentation: {
@@ -211,6 +213,109 @@ test('Home session rows expose named states and keep idle marks decorative', () 
   assert.equal(marks[3].getAttribute('aria-hidden'), 'true');
   assert.equal(marks[3].getAttribute('role'), null);
   assert.equal(marks[3].getAttribute('aria-label'), null);
+});
+
+test('Home sessions lead with live work, head only the recent group and keep finished ones to one line', () => {
+  const body = new Element();
+  const module = new Element();
+  module.append(body);
+  const context = {
+    deviceIconsApi: require('../../src/electron/renderer/deviceIcons'),
+    document, t, els: { homePanel: { querySelector: () => null } }, state: { settings: {} },
+    homeModuleShell: () => ({ module, body }), applyHomeListMark() {}, iconKindFor: () => 'codex',
+    clientColors: { codex: 'blue' }, bindHoverMarquee() {}, formatCompact: String,
+    homeSessionAgo: value => `${Math.round((Date.now() - value) / 60_000)} minutes ago`,
+    homeSessionAgoShort: () => '20m',
+    limitWindowsView: {}, sessionRowsApi: require('../../src/electron/renderer/sessionRows'),
+    homeModulePreferencesApi: require('../../src/electron/renderer/homeModulePreferences'),
+    window: {
+      TokenMonitorSessionLive: require('../../src/shared/sessionLive'),
+      TokenMonitorEdgeDockPresentation: {
+        sessionActivityState: row => row.activityState, runningSessionSummary: () => ({ count: 1 })
+      }
+    }
+  };
+  vm.runInNewContext(section(app, 'renderHomeSessionModule', 'renderHomeDeviceModule'), context);
+  const render = (states, at) => {
+    body.children = [];
+    context.renderHomeSessionModule(states.map(activityState => ({
+      key: activityState, client: 'codex', activityState,
+      lastUsedAt: typeof at === 'object' ? at?.[activityState] : at
+    })));
+    return body.children;
+  };
+  const seenAt = new Date(Date.now() - 20 * 60_000).toISOString();
+  const freshAt = new Date(Date.now() - 20_000).toISOString();
+  // Live rows that have just spoken carry no age; the quiet ones do.
+  const rows = render(['idle', 'running', 'ended', 'waiting'], { idle: seenAt, ended: seenAt, running: freshAt, waiting: freshAt });
+  assert.deepEqual(rows.map(row => row.dataset.key), ['running', 'waiting', 'idle', 'ended'], 'live sessions lead, each group keeps its order');
+  // Only the recent group is headed; live rows show their state, and the module heading counts the running ones.
+  assert.deepEqual(rows.map(row => row.dataset.groupLabel), [undefined, undefined, t('session.recent'), undefined]);
+  for (const row of rows.slice(0, 2)) {
+    assert.ok(!row.className.includes('is-compact'));
+    assert.ok(row.children.some(child => child.className === 'home-session-meta'), 'live rows keep their details');
+    // A live row that has just spoken leaves the age to its state mark.
+    assert.equal(row.textContent.includes('0 minutes ago'), false, 'a fresh live row carries no age');
+    assert.equal(row.textContent.includes('<1m'), false, 'and no short age either');
+    assert.equal(row.querySelectorAll('.home-session-ago-inline').length, 0);
+  }
+  for (const row of rows.slice(2)) {
+    assert.ok(row.className.includes('is-compact'));
+    assert.equal(row.children.some(child => child.className === 'home-session-meta'), false);
+    assert.equal(row.children.at(-2).className, 'home-list-aux home-session-ago', 'one line of title, age and amount');
+    assert.equal(row.children.at(-2).textContent, '20m');
+    assert.equal(row.children.at(-2).getAttribute('role'), 'img', 'a span needs a role to carry the full age as its name');
+    assert.equal(row.children.at(-2).getAttribute('aria-label'), '20 minutes ago');
+    assert.equal(row.children.at(-1).className, 'home-list-value', 'the amount stays last, aligned with live rows');
+  }
+  assert.ok(rows[2].classes.has('starts-recent'));
+  body.children = [];
+  const remoteDevice = { deviceId: 'imac', name: 'imac-m1', deviceKind: 'desktop' };
+  context.renderHomeSessionModule([
+    { key: 'family', client: 'codex', activityState: 'running', totalTokens: 30, models: { codex: 30 },
+      lastUsedAt: new Date(Date.now() - 2 * 60_000).toISOString(), remoteDevice,
+      sessionGroup: 'subagents', subagentGroup: true, subagentCount: 2 },
+    { key: 'recent', client: 'codex', activityState: 'ended', totalTokens: 10, lastUsedAt: seenAt, remoteDevice }
+  ]);
+  const [remoteLive, remoteRecent] = body.children;
+  assert.equal(remoteLive.querySelectorAll('.home-session-meta')[0].children[0].textContent, 'imac-m1');
+  assert.equal(remoteLive.querySelectorAll('.home-session-ago-inline')[0].textContent, '2m');
+  assert.doesNotMatch(remoteLive.textContent, /subagents/);
+  assert.equal(remoteRecent.children.at(-3).textContent, 'imac-m1');
+  assert.equal(remoteRecent.children.at(-2).textContent, '20m');
+  assert.equal(remoteRecent.children.at(-1).textContent, '10');
+  // A live row that has gone quiet for most of the running window keeps its
+  // reading: "8m" is what separates it from one that is actively working.
+  const stalledAt = new Date(Date.now() - 8 * 60_000).toISOString();
+  const [stalled] = render(['running'], { running: stalledAt });
+  const stalledAge = stalled.querySelectorAll('.home-session-ago-inline');
+  assert.equal(stalledAge.length, 1, 'a stalled live row keeps its age');
+  assert.equal(stalled.textContent.includes('8m'), true);
+  assert.equal(stalledAge[0].getAttribute('aria-label'), '8 minutes ago');
+  // A single group needs no headings.
+  for (const states of [['running', 'waiting'], ['idle', 'ended']]) {
+    assert.deepEqual(render(states).map(row => row.dataset.groupLabel), [undefined, undefined]);
+  }
+  // Detailed gives every session its details, in the order received, under no heading.
+  context.state.settings.homeSessionDisplayMode = 'detailed';
+  const detailed = render(['idle', 'running', 'ended', 'waiting'], seenAt);
+  assert.deepEqual(detailed.map(row => row.dataset.key), ['idle', 'running', 'ended', 'waiting']);
+  for (const row of detailed) {
+    assert.ok(!row.className.includes('is-compact'));
+    assert.ok(row.children.some(child => child.className === 'home-session-meta'));
+    assert.equal(row.dataset.groupLabel, undefined);
+  }
+  // Detailed drops the heading but keeps every row's age, live ones included:
+  // running spans up to ten minutes of quiet, so the reading still separates an
+  // active session from a stalled one.
+  const ageSpan = (row) => row.querySelectorAll('.home-session-ago-inline')[0];
+  for (const key of ['idle', 'running', 'ended', 'waiting']) {
+    const span = ageSpan(detailed.find((row) => row.dataset.key === key));
+    assert.ok(span, `${key} keeps its age`);
+    assert.equal(span.textContent, '20m', 'the row shows the short age');
+    assert.equal(span.getAttribute('role'), 'img', 'a span needs a role to carry the full age as its name');
+    assert.equal(span.getAttribute('aria-label'), '20 minutes ago');
+  }
 });
 
 test('subscription cost descriptions stay accessible without adding visible disclaimer text', () => {

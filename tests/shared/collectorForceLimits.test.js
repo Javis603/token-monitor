@@ -8,6 +8,7 @@ const os = require('node:os');
 const path = require('node:path');
 const { extractUsageFromTokscale, mergePeriods } = require('../../src/shared/usage');
 const { installInProcessWatchHost } = require('../helpers/watchHost');
+const { withoutWindowedScan } = require('../helpers/tokscaleWithoutWindows');
 
 installInProcessWatchHost(test);
 
@@ -18,7 +19,7 @@ process.env.TOKEN_MONITOR_SHARED_DIR = sharedDir;
 process.on('exit', () => { try { fs.rmSync(sharedDir, { recursive: true, force: true }); } catch (_) {} });
 
 function fakeTokscaleSpawn() {
-  return () => {
+  return withoutWindowedScan(() => {
     const child = new EventEmitter();
     child.stdout = new EventEmitter();
     child.stderr = new EventEmitter();
@@ -29,7 +30,7 @@ function fakeTokscaleSpawn() {
       child.emit('close', 0);
     });
     return child;
-  };
+  });
 }
 
 test('reset boundary scheduling caps timers that exceed the Node timeout range', () => {
@@ -214,7 +215,7 @@ test('collectUsageOnce requests the workspace-joined session grouping', async ()
   const childProcess = require('node:child_process');
   const originalSpawn = childProcess.spawn;
   const calls = [];
-  childProcess.spawn = (_bin, args) => {
+  childProcess.spawn = withoutWindowedScan((_bin, args) => {
     calls.push(args);
     const child = new EventEmitter();
     child.stdout = new EventEmitter();
@@ -226,7 +227,7 @@ test('collectUsageOnce requests the workspace-joined session grouping', async ()
       child.emit('close', 0);
     });
     return child;
-  };
+  });
 
   const collectorPath = require.resolve('../../src/shared/collector');
   delete require.cache[collectorPath];
@@ -272,7 +273,7 @@ test('collectUsageOnce enriches session rows with local last-used timestamps', a
 
   const childProcess = require('node:child_process');
   const originalSpawn = childProcess.spawn;
-  childProcess.spawn = () => {
+  childProcess.spawn = withoutWindowedScan(() => {
     const child = new EventEmitter();
     child.stdout = new EventEmitter();
     child.stderr = new EventEmitter();
@@ -288,7 +289,7 @@ test('collectUsageOnce enriches session rows with local last-used timestamps', a
       child.emit('close', 0);
     });
     return child;
-  };
+  });
 
   const collectorPath = require.resolve('../../src/shared/collector');
   delete require.cache[collectorPath];
@@ -319,7 +320,7 @@ test('collectUsageOnce falls back to plain session grouping when the binary reje
   const childProcess = require('node:child_process');
   const originalSpawn = childProcess.spawn;
   const calls = [];
-  childProcess.spawn = (_bin, args) => {
+  childProcess.spawn = withoutWindowedScan((_bin, args) => {
     calls.push(args);
     const child = new EventEmitter();
     child.stdout = new EventEmitter();
@@ -338,7 +339,7 @@ test('collectUsageOnce falls back to plain session grouping when the binary reje
       child.emit('close', 0);
     });
     return child;
-  };
+  });
 
   const collectorPath = require.resolve('../../src/shared/collector');
   delete require.cache[collectorPath];
@@ -373,7 +374,7 @@ test('resetting the capability cache lets the workspace grouping be tried again'
   const childProcess = require('node:child_process');
   const originalSpawn = childProcess.spawn;
   const calls = [];
-  childProcess.spawn = (_bin, args) => {
+  childProcess.spawn = withoutWindowedScan((_bin, args) => {
     calls.push(args);
     const child = new EventEmitter();
     child.stdout = new EventEmitter();
@@ -391,7 +392,7 @@ test('resetting the capability cache lets the workspace grouping be tried again'
       child.emit('close', 0);
     });
     return child;
-  };
+  });
 
   const collectorPath = require.resolve('../../src/shared/collector');
   delete require.cache[collectorPath];
@@ -429,7 +430,7 @@ test('turning Projects off stops asking the scan to resolve workspaces', async (
   const childProcess = require('node:child_process');
   const originalSpawn = childProcess.spawn;
   const calls = [];
-  childProcess.spawn = (_bin, args) => {
+  childProcess.spawn = withoutWindowedScan((_bin, args) => {
     calls.push(args);
     const child = new EventEmitter();
     child.stdout = new EventEmitter();
@@ -441,7 +442,7 @@ test('turning Projects off stops asking the scan to resolve workspaces', async (
       child.emit('close', 0);
     });
     return child;
-  };
+  });
 
   const collectorPath = require.resolve('../../src/shared/collector');
   delete require.cache[collectorPath];

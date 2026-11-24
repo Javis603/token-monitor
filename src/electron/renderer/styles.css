@@ -820,6 +820,39 @@ body.is-windows.floating-bubble-collapsed-right .floating-bubble-tab {
   gap: 2px;
 }
 .settings-item-title { color: var(--text); }
+.settings-item-text:is([data-reset-setting], [data-inspector-reset]) {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+.settings-panel :is([data-reset-setting], [data-inspector-reset]) > label.settings-item-title { color: var(--text); }
+.settings-panel .settings-reset-button {
+  display: grid;
+  place-items: center;
+  flex: 0 0 auto;
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--muted);
+  pointer-events: auto;
+  cursor: pointer;
+}
+.settings-reset-button::before {
+  content: "";
+  width: 10px;
+  height: 10px;
+  background: currentColor;
+  mask: url("icons/actions/undo-2.svg") center / contain no-repeat;
+}
+.settings-panel .settings-reset-button:not(:disabled, [aria-disabled="true"]):is(:hover, :focus-visible) {
+  color: var(--text);
+}
+.settings-reset-button:focus-visible { outline: 1px solid var(--accent); }
+.settings-reset-button:is(:disabled, [aria-disabled="true"]) { opacity: 0.38; cursor: default; }
+[data-single-setting-reset]:disabled { visibility: hidden; }
 .model-alias-example { overflow-wrap: anywhere; }
 
 .settings-item-desc,
@@ -1941,18 +1974,16 @@ span.settings-note.settings-item-desc {
   white-space: pre;
   tab-size: 2;
 }
-.sync-connection-fields { display: grid; min-width: 0; }
-.sync-connection-fields > :not([hidden]) ~ :not([hidden]) { margin-top: 8px; }
 .sync-connection-editor,
 .sync-device-settings { display: grid; min-width: 0; gap: 8px; }
-.sync-connection-heading { display: flex; align-items: center; justify-content: space-between; gap: 8px; flex-wrap: wrap; }
-.sync-connection-status { display: inline-flex; align-items: center; gap: 8px; min-height: 24px; }
+.sync-connection-heading { display: flex; align-items: center; gap: 6px; min-width: 0; }
 .hub-profile-picker { display: flex; min-width: 0; }
 /* Sits in the status card where the endpoint line was, so it reads as that
    line with a disclosure rather than as another boxed field. */
 .settings-panel .hub-profile-picker .select-control-trigger {
   width: auto;
-  max-width: 100%;
+  /* The negative side margins pull the trigger 6px past each edge of its box. */
+  max-width: calc(100% + 12px);
   margin: -2px -6px;
   padding: 2px 6px;
   gap: 6px;
@@ -1965,7 +1996,6 @@ span.settings-note.settings-item-desc {
 .settings-panel .hub-profile-picker .select-control-trigger:hover,
 .settings-panel .hub-profile-picker .select-control-trigger[aria-expanded="true"] { color: var(--text); background: rgba(var(--overlay-rgb), 0.06); }
 .settings-panel .hub-profile-remove { margin-left: auto; color: var(--red); }
-.sync-connection-heading .sync-connection-edit { margin-left: auto; }
 .settings-panel .sync-connection-edit,
 .settings-panel .sync-device-side .device-delete-button {
   display: inline-grid;
@@ -2010,7 +2040,7 @@ span.settings-note.settings-item-desc {
 .settings-panel .sync-connection-edit:focus-visible { background: rgba(var(--overlay-rgb), 0.06); }
 .settings-panel .sync-connection-edit:focus-visible,
 .settings-panel .sync-device-side .device-delete-button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
-.sync-connection-identity { display: grid; min-width: 0; margin-left: 22px; gap: 2px; color: var(--muted); font-size: 0.625rem; line-height: 1.5; }
+.sync-connection-identity { display: flex; flex: 0 1 auto; min-width: 0; max-width: 100%; }
 #syncConnectionEndpoint { min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: clip; }
 #syncConnectionCancel { background: transparent; }
 #hubClientFields { container-type: inline-size; }
@@ -2210,14 +2240,6 @@ button.settings-help-trigger:focus-visible { outline: 1px solid var(--accent); o
   to { transform: rotate(360deg); }
 }
 .sync-panel-state { display: grid; gap: 2px; min-width: 0; }
-.sync-panel-state strong { color: var(--text); font-size: 0.6875rem; font-weight: 500; }
-.sync-panel-state > span {
-  margin-left: 22px;
-  color: var(--muted);
-  font-size: 0.625rem;
-  line-height: 1.35;
-  overflow-wrap: anywhere;
-}
 .sync-panel-connection[data-state="disconnected"] #syncPanelDetail { color: var(--red); }
 .sync-panel-build {
   color: var(--muted);
@@ -2319,36 +2341,190 @@ button.settings-help-trigger:focus-visible { outline: 1px solid var(--accent); o
 .settings-panel .sync-device-side .device-delete-button { margin-top: 0; }
 .settings-panel .sync-device-side .device-delete-button:hover,
 .settings-panel .sync-device-side .device-delete-button[data-confirm="true"] { color: var(--red); background: rgba(var(--overlay-rgb), 0.06); }
-.sync-panel-link {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px;
-  width: 100%;
-  padding: 9px 0 2px;
-  border: 0;
-  border-top: 1px solid rgba(var(--line-rgb), 0.07);
-  background: transparent;
-  color: var(--muted);
-  font-size: 0.625rem;
-  text-align: left;
-  cursor: pointer;
-  transition: color 120ms ease, background 120ms ease;
-}
-.sync-panel-link:hover,
-.sync-panel-link:focus-visible { color: var(--text); background: rgba(var(--overlay-rgb), 0.03); }
-.sync-panel-link-arrow::before { content: '→'; display: inline-block; transition: transform 160ms cubic-bezier(0.22, 1, 0.36, 1); }
-.sync-panel-link:hover .sync-panel-link-arrow::before { transform: translateX(2px); }
 @container (max-width: 240px) {
   .sync-device-side { grid-template-columns: minmax(0, 1fr); }
   .sync-device-action { height: auto; }
 }
 :root[data-reduce-motion="on"] .sync-panel-signal > svg { animation: none !important; }
-:root[data-reduce-motion="on"] .sync-panel-link-arrow::before { transition: none; }
 @media (prefers-reduced-motion: reduce) {
   :root:not([data-reduce-motion="off"]) .sync-panel-signal > svg { animation: none !important; }
-  :root:not([data-reduce-motion="off"]) .sync-panel-link-arrow::before { transition: none; }
 }
+/* Multi-device sync is drawn as a map: the sync target on top, and every
+   device hanging off one rail beneath it. Icons sit on a 30px column whose
+   centre carries the rail; text and forms start on the column after it. */
+/* The sync method heads the card: it decides what the map below shows. The
+   picker spans the card so each method's description fits its menu row. */
+.sync-map-head {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+  margin-bottom: 12px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid rgba(var(--line-rgb), 0.08);
+}
+.sync-map-label { color: var(--muted); font-size: 0.6875rem; }
+#syncSettingsDetails .sync-map {
+  --rail: rgba(var(--line-rgb), 0.18);
+  display: grid;
+  min-width: 0;
+  padding: 12px 12px 0;
+}
+.sync-map > * { min-width: 0; }
+.sync-node {
+  --node-rgb: 163, 173, 187;
+  display: grid;
+  grid-template-columns: 30px minmax(0, 1fr) auto;
+  align-items: start;
+  column-gap: 10px;
+  min-width: 0;
+}
+.sync-node-icon {
+  display: grid;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  border-radius: 50%;
+  background: rgba(var(--node-rgb), 0.12);
+  box-shadow: inset 0 0 0 1px rgba(var(--node-rgb), 0.3);
+  color: rgb(var(--node-rgb));
+}
+.sync-node-icon svg,
+.sync-node-icon .sync-panel-signal,
+.sync-node-icon .sync-panel-signal > svg { width: 15px; height: 15px; flex-basis: 15px; }
+.sync-node-text { display: grid; gap: 2px; min-width: 0; padding-top: 1px; }
+.sync-node-title,
+.sync-node #hubStatusRow,
+.sync-node #icloudStatus {
+  width: auto;
+  min-width: 0;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--text);
+  font-size: 0.75rem;
+  font-weight: 600;
+  line-height: 1.4;
+  overflow-wrap: anywhere;
+}
+.sync-node-sub { color: var(--muted); font-size: 0.625rem; line-height: 1.45; overflow-wrap: anywhere; }
+.sync-node-meta { display: flex; flex-wrap: wrap; align-items: center; gap: 2px 6px; min-width: 0; margin-top: 1px; }
+/* The state colour tints the pill; the label keeps text contrast in both themes. */
+.sync-node-state {
+  flex: 0 0 auto;
+  padding: 1px 6px;
+  border-radius: 999px;
+  background: rgba(var(--node-rgb), 0.14);
+  box-shadow: inset 0 0 0 1px rgba(var(--node-rgb), 0.35);
+  color: var(--text);
+  font-size: 0.5625rem;
+  font-weight: 500;
+  line-height: 1.5;
+  white-space: nowrap;
+}
+.sync-node-placeholder .sync-node-icon {
+  background: transparent;
+  box-shadow: none;
+  border: 1px dashed rgba(var(--line-rgb), 0.4);
+  color: var(--muted);
+}
+.sync-node-placeholder { padding-bottom: 12px; }
+/* The node colour follows what each mode reports about its target. */
+#syncPanelConnection.sync-node { --node-rgb: var(--signal-rgb); padding: 0; }
+.sync-map-hub:has(#hubStatusRow.ok) .sync-node,
+.sync-map-hub:has(#icloudStatus.ok) .sync-node { --node-rgb: var(--success-rgb); }
+.sync-map-hub:has(#hubStatusRow.error) .sync-node,
+.sync-map-hub:has(#icloudStatus.error) .sync-node { --node-rgb: 244, 119, 136; }
+.sync-node #hubStatusRow.error,
+.sync-node #icloudStatus.error { color: var(--red); }
+.sync-panel-state .sync-panel-build::before { content: none; }
+#syncConnectionIdentity #syncConnectionEndpoint { font: inherit; }
+.settings-panel .sync-map .hub-profile-picker .select-control-trigger { color: var(--text); font-weight: 600; }
+.settings-panel .sync-node > .sync-connection-edit {
+  align-self: start;
+  grid-template-columns: 12px;
+  width: 26px;
+  height: 26px;
+  min-height: 0;
+  margin: -1px -4px 0 0;
+  padding: 0;
+  font-size: 0;
+  color: var(--muted);
+}
+.settings-panel .sync-node > .sync-connection-edit:hover { color: var(--text); }
+/* Forms that act on the target take the full card width under a divider, so
+   long URLs and secrets fit at 340px. Notices stay plain and close. */
+.sync-map-form { padding-top: 12px; border-top: 1px solid rgba(var(--line-rgb), 0.08); }
+#syncMap .sync-map-hub > .accordion-animation-inner > .sync-map-form:not([hidden]) { margin-top: 12px; }
+#syncMap .sync-map-hub > .accordion-animation-inner > .sync-map-notice:not([hidden]) { margin-top: 8px; }
+/* Spacing below an open target. A pseudo-element, unlike padding, collapses with
+   the accordion when the mode's fields close. */
+.sync-map-hub > .accordion-animation-inner::after { content: ""; height: 12px; }
+#syncDeviceSettings.sync-map-form { padding-bottom: 12px; }
+#syncConnectionSaveError.sync-map-notice { width: auto; margin-bottom: 12px; }
+.sync-map .settings-actions { justify-content: flex-end; }
+.sync-share { display: grid; gap: 8px; min-width: 0; }
+.sync-share-secret { display: grid; gap: 4px; min-width: 0; }
+.sync-share-secret > label { color: var(--muted); font-size: 0.625rem; }
+.sync-share .settings-note { margin: 0; }
+.hub-address-extra { display: grid; gap: 5px; min-width: 0; }
+.hub-address-more {
+  justify-self: start;
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--accent);
+  font-size: 0.625rem;
+  cursor: pointer;
+}
+.hub-address-more:hover { color: var(--text); }
+.hub-address-more:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+/* The port is one short number: a labelled row, not a full-width field. */
+.settings-panel label.sync-port-field { display: flex; align-items: center; justify-content: space-between; gap: 10px; color: var(--muted); font-size: 0.625rem; }
+.settings-panel .sync-port-field input { flex: 0 0 84px; width: 84px; text-align: right; }
+/* Devices hang off one rail. It reaches up to the target only while nothing
+   sits between them; otherwise it starts at the first device. */
+.sync-map { --rail-link: transparent; }
+.sync-map:has(.sync-device-row):not(:has(> #syncDeviceSettings:not([hidden]))) { --rail-link: var(--rail); }
+.sync-map > .sync-map-hub { background: linear-gradient(var(--rail-link), var(--rail-link)) 14.5px 34px / 1px calc(100% - 34px) no-repeat; }
+.sync-map .sync-panel-heading { background: linear-gradient(var(--rail-link), var(--rail-link)) 14.5px 0 / 1px 100% no-repeat; }
+.sync-map .sync-panel { padding-top: 0; border-top: 0; }
+/* The count sits at the right edge, in line with each device's controls. */
+.sync-map .sync-panel-heading { padding: 0 0 4px 40px; }
+/* Each device icon sits on the rail, which breaks 5px above and below it. */
+.sync-map .sync-device-row {
+  --rail-above: var(--rail);
+  --rail-below: var(--rail);
+  position: relative;
+  grid-template-columns: 30px minmax(0, 1fr);
+  column-gap: 10px;
+  row-gap: 1px;
+  padding: 6px 0;
+  box-shadow: none;
+  background: linear-gradient(var(--rail-above) 0 4px, transparent 4px 24px, var(--rail-below) 24px) 14.5px 0 / 1px 100% no-repeat;
+}
+.sync-map .sync-device-row:first-child { --rail-above: var(--rail-link); }
+.sync-map .sync-device-row:last-child { --rail-below: transparent; }
+.sync-map .sync-device-mark { position: relative; grid-row: 1 / span 2; align-self: start; margin-top: 3px; }
+.sync-map .sync-device-title,
+.sync-map .sync-device-meta,
+.sync-map .sync-device-side { grid-column: 2; }
+.sync-map .sync-device-badge {
+  padding: 0 5px;
+  border-radius: 999px;
+  background: rgba(var(--accent-rgb), 0.14);
+  color: var(--accent);
+  font-weight: 500;
+  line-height: 1.6;
+}
+/* A version notice is a quiet line in the text column, clear of the rail. */
+#syncMap .hub-build-status { width: auto; margin-left: 40px; padding: 0; border: 0; background: none; }
+.sync-map .sync-device-empty { padding: 4px 0 12px 40px; }
+.sync-this-device > .settings-item[hidden] + .settings-item { border-top: 0; }
+/* With neither row shown, the disclosure opens the card and needs no divider above it. */
+.sync-this-device > .settings-item[hidden] + .settings-item[hidden] + .theme-color-accordion { margin-top: 0; padding-top: 0; border-top: 0; }
 .currency-rate-row { display: grid; gap: 4px; min-width: 0; }
 /* The rate row is a sub-setting of the Currency row: keep them as one unseparated pair. */
 .settings-subgroup > .settings-item + .currency-rate-row { margin-top: 0; }
@@ -3037,7 +3213,8 @@ button.tool-preference-main:focus-visible {
 }
 @media (forced-colors: active) {
   .tool-visibility-button::before,
-  .tool-pin-button::before {
+  .tool-pin-button::before,
+  .settings-reset-button::before {
     background: ButtonText;
   }
 }
@@ -3245,6 +3422,15 @@ button.tool-preference-main:focus-visible {
   font-size: 0.5rem;
   font-weight: 600;
   line-height: 1;
+}
+/* A plugin's own mark: the slot keeps the shared size, the mark draws itself. */
+.settings-panel .settings-list-plugin-icon {
+  display: inline-flex;
+  background: none;
+}
+.settings-panel .settings-list-plugin-icon img {
+  width: 100%;
+  height: 100%;
 }
 /* Enabled rows above, the rest in a collapsed group (see
    renderSettingsListGroups in app.js). */
@@ -3538,8 +3724,8 @@ p.settings-list-group-label { padding: 2px 0 0; }
   cursor: pointer;
 }
 .reset-appearance-button:hover { border-color: var(--line-strong); color: var(--text); }
-.slider-label { display: flex; align-items: center; justify-content: space-between; }
 .reset-inline { width: 18px; height: 18px; font-size: 10px; line-height: 1; }
+.slider-label { display: flex; align-items: center; justify-content: space-between; }
 /* Slider rows: title (+ reset) left, track with value fill right, numeric readout at the edge */
 .settings-slider-item .slider-label { justify-content: flex-start; gap: 6px; }
 .settings-panel .settings-slider-item input[type="range"] { flex: 0 0 42%; width: 42%; }
@@ -3570,19 +3756,14 @@ p.settings-list-group-label { padding: 2px 0 0; }
 }
 .settings-font-input-row {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 18px;
+  grid-template-columns: minmax(0, 1fr);
   align-items: center;
-  gap: 8px;
   min-width: 0;
 }
 .settings-panel .settings-font-input-row select,
 .settings-panel .settings-font-input-row input {
   width: 100%;
   min-width: 0;
-}
-.settings-font-input-row .reset-appearance-button {
-  width: 18px;
-  height: 18px;
 }
 .settings-font-custom-row {
   display: grid;
@@ -3649,7 +3830,7 @@ p.settings-list-group-label { padding: 2px 0 0; }
 .color-picker-grid { display: grid; }
 .color-picker-row, .vendor-color-row {
   display: grid;
-  grid-template-columns: 1fr auto auto;
+  grid-template-columns: minmax(0, 1fr) auto;
   align-items: center;
   gap: 8px;
   color: var(--muted);
@@ -3689,6 +3870,12 @@ p.settings-list-group-label { padding: 2px 0 0; }
   padding-top: 5px;
 }
 .settings-appearance-vendors > .theme-color-accordion { border-top: 0; padding-top: 0; }
+.settings-reset-heading {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  min-width: 0;
+}
 .color-picker-name, .vendor-color-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .settings-panel button.color-picker-swatch {
   width: 32px;
@@ -4202,14 +4389,10 @@ html.is-windows .settings-panel select option {
   min-width: 0;
   margin-top: 0;
 }
+.session-sort-toggle,
 .session-search-toggle {
-  display: grid;
-  flex: 0 0 28px;
-  width: 28px;
   height: 28px;
-  margin: -7px -4px -7px 0;
-  place-items: center;
-  padding: 0;
+  margin-block: -7px;
   border: 0;
   border-radius: 7px;
   background: transparent;
@@ -4217,21 +4400,54 @@ html.is-windows .settings-panel select option {
   cursor: pointer;
   transition: color 120ms ease, background-color 120ms ease;
 }
+.session-sort-toggle {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex: 0 0 auto;
+  margin-inline-start: auto;
+  padding: 0 7px;
+  font-size: 0.6875rem;
+  white-space: nowrap;
+  -webkit-app-region: no-drag;
+}
+.session-search-toggle {
+  display: grid;
+  place-items: center;
+  flex: 0 0 28px;
+  width: 28px;
+  margin-inline-end: -4px;
+  padding: 0;
+}
+.session-sort-toggle:not(.hidden) + .session-search-toggle {
+  margin-inline-start: -4px;
+}
+.session-sort-toggle:hover,
+.session-sort-toggle:active,
 .session-search-toggle:hover,
 .session-search-toggle:active {
   background: rgba(var(--overlay-rgb), 0.08);
   color: var(--text);
 }
 .session-search-toggle.is-active { color: var(--accent); }
+.session-sort-toggle:focus-visible,
 .session-search-toggle:focus-visible {
   outline: 2px solid rgba(var(--accent-rgb), 0.32);
   outline-offset: 1px;
   color: var(--text);
 }
+.session-sort-toggle::before,
 .session-search-toggle-icon {
   width: 13px;
   height: 13px;
   background: currentColor;
+}
+.session-sort-toggle::before {
+  content: "";
+  -webkit-mask: url("icons/actions/arrow-up-down.svg") center / contain no-repeat;
+  mask: url("icons/actions/arrow-up-down.svg") center / contain no-repeat;
+}
+.session-search-toggle-icon {
   -webkit-mask: url("icons/actions/search.svg") center / contain no-repeat;
   mask: url("icons/actions/search.svg") center / contain no-repeat;
 }
@@ -4333,6 +4549,24 @@ html.is-windows .settings-panel select option {
   scrollbar-width: none;
 }
 .home-panel::-webkit-scrollbar { width: 0; height: 0; }
+/* Content scrolled under the hero fades out instead of being cut mid-line.
+   The fade grows with the first few pixels of scroll, so the page at rest
+   keeps its first heading fully drawn. */
+@property --home-scroll-fade {
+  syntax: '<length>';
+  inherits: false;
+  initial-value: 0px;
+}
+@keyframes home-scroll-fade {
+  to { --home-scroll-fade: 14px; }
+}
+.home-panel {
+  -webkit-mask-image: linear-gradient(to bottom, transparent, #000 var(--home-scroll-fade));
+  mask-image: linear-gradient(to bottom, transparent, #000 var(--home-scroll-fade));
+  animation: home-scroll-fade linear both;
+  animation-timeline: scroll(self);
+  animation-range: 0 24px;
+}
 .home-module {
   display: grid;
   width: 100%;
@@ -4423,8 +4657,16 @@ html.is-windows .settings-panel select option {
   min-width: 0;
   gap: 6px;
 }
+/* Every account's rows share one set of columns: mark, label, meter, reading,
+   reset. Accounts and their window lists are subgrids, so a meter and a
+   percentage sit on the same line however many windows each account has. */
 .home-module-limits .home-module-body {
-  gap: 12px;
+  grid-template-columns: 10px fit-content(40%) fit-content(26%) minmax(28px, 1fr) auto;
+  column-gap: 8px;
+  row-gap: 12px;
+}
+.home-module-limits .home-module-body > * {
+  grid-column: 1 / -1;
 }
 .home-list-row {
   display: grid;
@@ -4507,6 +4749,38 @@ html.is-windows .settings-panel select option {
   grid-template-columns: 10px minmax(0, 1fr) minmax(42px, auto);
   column-gap: 8px;
 }
+.home-device-row.has-share {
+  grid-template-columns: 10px minmax(0, 1fr) minmax(42px, auto) minmax(31px, auto);
+}
+.home-device-row .home-list-aux {
+  text-align: right;
+}
+/* Hover reveal: a monochrome limit account shows its vendor colour while
+   hovered, and status colour still wins. With vendor colours on this
+   resolves to the colour already shown. */
+.home-limit-track {
+  transition: --home-limit-bar 200ms ease, --home-limit-tail 200ms ease;
+}
+.home-limit-meter {
+  transition: background-color 200ms ease;
+}
+.home-limit-account:hover .home-limit-meter {
+  background: color-mix(in srgb, var(--home-vendor-color) 16%, transparent);
+}
+.home-limit-account:hover .home-limit-window:not(.is-low, .is-exhausted) .home-limit-track {
+  --home-limit-bar: var(--home-vendor-color);
+  --home-limit-tail: var(--home-vendor-color);
+}
+:root[data-reduce-motion="on"] .home-limit-track,
+:root[data-reduce-motion="on"] .home-limit-meter {
+  transition: none;
+}
+@media (prefers-reduced-motion: reduce) {
+  :root:not([data-reduce-motion="off"]) .home-limit-track,
+  :root:not([data-reduce-motion="off"]) .home-limit-meter {
+    transition: none;
+  }
+}
 .home-session-row {
   grid-template-columns: 10px 10px minmax(0, 1fr) minmax(42px, auto);
   column-gap: 7px;
@@ -4514,6 +4788,42 @@ html.is-windows .settings-panel select option {
   align-items: start;
 }
 .home-session-row .home-list-mark { margin-top: 1px; }
+/* Sessions list live work first. The recent group opens with its heading
+   (drawn here so rows stay the module's only children) under the same
+   feathered hairline that separates limit accounts. */
+.home-session-row[data-group-label]::before {
+  grid-column: 1 / -1;
+  margin-bottom: 2px;
+  color: var(--readable-muted);
+  font-size: 0.5625rem;
+  letter-spacing: 0.06em;
+  line-height: 1.2;
+  content: attr(data-group-label);
+}
+.home-session-row.starts-recent {
+  position: relative;
+  margin-top: 4px;
+  padding-top: 9px;
+}
+/* Finished and idle sessions: one quiet line of title, age and amount. The
+   amount stays last so it lines up with the live rows above. */
+.home-session-row.is-compact {
+  grid-template-columns: 10px 10px minmax(0, 1fr) auto minmax(42px, auto);
+  align-items: center;
+}
+.home-session-row.is-compact.has-source-device {
+  grid-template-columns: 10px 10px minmax(0, 1fr) fit-content(26%) auto minmax(42px, auto);
+}
+.home-session-row.is-compact .session-source-device {
+  max-width: 100%;
+  font-size: 0.625rem;
+}
+.home-session-row.is-compact .home-list-mark { margin-top: 0; }
+.home-session-row.is-compact .home-list-name { color: var(--readable-muted); }
+.home-session-row.is-compact .home-list-value { color: var(--readable-muted); }
+.home-session-ago {
+  text-align: right;
+}
 .home-session-row .home-list-name { font-size: 0.6875rem; }
 .home-session-state { position: relative; width: 10px; height: 10px; margin-top: 1px; }
 .home-session-state > * {
@@ -4552,8 +4862,9 @@ html.is-windows .settings-panel select option {
   min-width: 0;
   align-items: center;
   gap: 6px;
+  color: var(--readable-muted);
+  font-size: 0.625rem;
 }
-.home-session-meta .home-list-sub { min-width: 0; }
 .home-session-cache { margin-left: auto; flex: 0 0 auto; color: var(--muted); font-size: 0.625rem; white-space: nowrap; }
 .home-session-context { display: inline-flex; flex: 0 0 auto; align-items: center; gap: 4px; margin-left: auto; color: var(--muted); font-size: 0.625rem; }
 .home-session-context-meter { flex: 0 0 16px; width: 16px; height: 3px; overflow: hidden; border-radius: 2px; background: rgba(var(--overlay-rgb), 0.18); }
@@ -4588,14 +4899,77 @@ html.is-windows .settings-panel select option {
 .home-limit-account {
   display: grid;
   min-width: 0;
-  gap: 8px;
+  grid-template-columns: subgrid;
+  row-gap: 6px;
+}
+/* Accounts in the row layout are set apart by the same feathered hairline as
+   the Limits page's account rows, softer than the solid rules between
+   modules. */
+.home-module-limits:not(.home-module-limits-classic) .home-module-body {
+  row-gap: 0;
+}
+.home-module-limits:not(.home-module-limits-classic) .home-limit-account {
+  position: relative;
+  padding: 9px 0 10px;
+}
+.home-module-limits:not(.home-module-limits-classic) .home-limit-account:first-child {
+  padding-top: 0;
+}
+.home-module-limits:not(.home-module-limits-classic) .home-limit-account:last-child {
+  padding-bottom: 0;
+}
+.home-module-limits:not(.home-module-limits-classic) .home-limit-account + .home-limit-account::before,
+.home-session-row.starts-recent::after {
+  position: absolute;
+  top: 0;
+  right: 0;
+  left: 0;
+  height: 1px;
+  background: linear-gradient(
+    to right,
+    rgba(var(--line-rgb), 0) 0,
+    rgba(var(--line-rgb), 0.075) 22%,
+    rgba(var(--line-rgb), 0.075) 78%,
+    rgba(var(--line-rgb), 0) 100%
+  );
+  content: '';
 }
 .home-limit-account-head {
   display: grid;
   min-width: 0;
+  grid-column: 1 / -1;
   grid-template-columns: 10px minmax(0, 1fr);
   gap: 8px;
   align-items: center;
+}
+.home-limit-account-title {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 6px;
+}
+.home-limit-account-title > .home-list-name {
+  min-width: 0;
+}
+/* Quiet text, like the plan beside it: a note on the account, not a control. */
+/* Sized like the Limits card's refresh glyph: a quiet note on the account. */
+.home-limit-resets {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 2px;
+  color: var(--readable-muted);
+  font-size: 0.5625rem;
+  font-variant-numeric: tabular-nums;
+  line-height: 1.2;
+  white-space: nowrap;
+}
+.home-limit-resets-icon {
+  width: 0.85em;
+  height: 0.85em;
+  background: currentColor;
+  -webkit-mask: url("icons/actions/rotate-cw.svg") center / contain no-repeat;
+  mask: url("icons/actions/rotate-cw.svg") center / contain no-repeat;
 }
 .home-limit-account-head:has(> .home-limit-plan) {
   grid-template-columns: 10px minmax(0, 1fr) fit-content(42%);
@@ -4609,25 +4983,231 @@ html.is-windows .settings-panel select option {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.home-limit-windows {
+.home-limit-windows,
+.home-limit-window {
   display: grid;
   min-width: 0;
+  grid-column: 1 / -1;
+  grid-template-columns: subgrid;
+}
+.home-limit-windows {
+  row-gap: 3px;
+}
+.home-limit-window {
+  min-height: 16px;
+  align-items: center;
+}
+.home-limit-window-label {
+  grid-column: 2;
+  min-width: 0;
+  overflow: hidden;
+  color: var(--readable-muted);
+  font-size: 0.625rem;
+  line-height: 1.2;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+/* Registered so one animation of the fill moves the bar and its lit tail,
+   and a hover can fade the bar colour in. */
+@property --home-limit-fill {
+  syntax: '<percentage>';
+  inherits: true;
+  initial-value: 0%;
+}
+@property --home-limit-bar {
+  syntax: '<color>';
+  inherits: true;
+  initial-value: transparent;
+}
+@property --home-limit-tail {
+  syntax: '<color>';
+  inherits: true;
+  initial-value: transparent;
+}
+/* Monochrome Home: one neutral ink for every meter, brightening to a lit
+   tail; status recolours the fill (nearly out) and the reading. Vendor
+   colours set the bar inline. */
+.home-limit-track {
+  --home-limit-bar: var(--text);
+  --home-limit-tail: light-dark(var(--text), #fff);
+  --home-limit-glow: light-dark(color-mix(in srgb, var(--home-limit-bar) 25%, transparent),
+    color-mix(in srgb, var(--home-limit-bar) 55%, transparent));
+  position: relative;
+  grid-column: 4;
+  min-width: 0;
+  height: 4px;
+}
+.home-limit-window.is-low .home-limit-track {
+  --home-limit-bar: var(--yellow);
+  --home-limit-tail: var(--yellow);
+}
+/* An exhausted window shows a full meter in Used mode; it reads red there too. */
+.home-limit-window.is-exhausted .home-limit-track {
+  --home-limit-bar: var(--red);
+  --home-limit-tail: var(--red);
+}
+.home-limit-meter {
+  position: absolute;
+  inset: 0;
+  border-radius: 2px;
+  background: rgba(var(--overlay-rgb), 0.085);
+  box-shadow: inset 0 1px 0 light-dark(rgba(0, 0, 0, 0.05), rgba(0, 0, 0, 0.45));
+}
+/* Where an even pace through the window would leave the meter now: a notch
+   cut through the groove and fill, so it reads on any glass behind it. Pace
+   is on demand: a standing mark on every row read as clutter. */
+.home-limit-account:is(:hover, :focus-within) .home-limit-track.has-pace .home-limit-meter {
+  mask-image: linear-gradient(90deg, #000 calc(var(--home-limit-pace) - 1px), transparent 0,
+    transparent calc(var(--home-limit-pace) + 1px), #000 0);
+}
+.home-limit-ghost,
+.home-limit-fill {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 0;
+  border-radius: 2px;
+}
+.home-limit-ghost {
+  width: 0;
+  background: color-mix(in srgb, var(--home-limit-tail) 50%, transparent);
+  opacity: 0;
+}
+.home-limit-fill {
+  width: var(--home-limit-fill);
+  overflow: hidden;
+  /* Solid enough to read its full length on glass; only the last 18px
+     brightens into the lit tail. */
+  background: linear-gradient(90deg, color-mix(in srgb, var(--home-limit-bar) 72%, transparent) calc(100% - 18px),
+    var(--home-limit-bar) calc(100% - 3px), var(--home-limit-tail));
+}
+/* The refill sheen; parked off the bar until a reset runs it across. */
+.home-limit-fill::before {
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(90deg, transparent, light-dark(rgba(255, 255, 255, 0.7), rgba(255, 255, 255, 0.55)), transparent) no-repeat;
+  background-position: -100% 0;
+  background-size: 30% 100%;
+  content: '';
+}
+/* The lit tail sits outside the masked groove so its glow is not clipped. */
+.home-limit-tip {
+  position: absolute;
+  top: 0;
+  right: calc(100% - var(--home-limit-fill));
+  width: min(14px, var(--home-limit-fill));
+  height: 100%;
+  border-radius: 2px;
+  pointer-events: none;
+  box-shadow: 5px 0 9px -2px var(--home-limit-glow);
+}
+.home-limit-tip::after {
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  box-shadow: 6px 0 14px 1px var(--home-limit-glow);
+  content: '';
+  opacity: 0;
+}
+/* A window close to running out keeps its tail lit; nothing else glows. */
+.home-limit-window:is(.is-low, .is-critical) .home-limit-tip::after { opacity: 1; }
+/* Mixed toward the text colour so amber reads on light panels as well as dark. */
+.home-limit-window.is-low > .home-list-value,
+.home-limit-window.is-low .home-limit-window-value .home-list-value {
+  color: color-mix(in srgb, var(--yellow) 62%, var(--text));
+}
+/* The notch's tick, above the groove; shown with the notch while the account is hovered, like its vendor colour. */
+.home-limit-pace {
+  position: absolute;
+  top: -4px;
+  left: var(--home-limit-pace, 0%);
+  width: 1px;
+  height: 3px;
+  margin-left: -0.5px;
+  border-radius: 1px;
+  background: var(--readable-muted);
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 150ms ease;
+}
+.home-limit-account:is(:hover, :focus-within) .home-limit-pace { opacity: 1; }
+.home-limit-window > .home-list-value,
+.home-limit-window-value {
+  grid-column: 5;
+  justify-self: end;
+  font-size: 0.6875rem;
+  line-height: 1.2;
+}
+.home-limit-window > .home-limit-reading-wide {
+  grid-column: 4 / 6;
+}
+.home-limit-window-value {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.home-limit-window.is-untouched .home-limit-track {
+  opacity: 0.72;
+}
+.home-limit-window.is-untouched > .home-list-value {
+  color: var(--readable-muted);
+}
+.home-limit-value-low {
+  color: var(--home-limit-accent, var(--yellow));
+}
+.home-limit-value-critical {
+  color: var(--red);
+}
+/* Right-aligned so the countdown sits against the meter it refills. */
+.home-limit-reset {
+  grid-column: 3;
+  justify-self: end;
+  min-width: 0;
+  max-width: 100%;
+  overflow: hidden;
+  color: var(--readable-muted);
+  font-size: 0.5625rem;
+  font-variant-numeric: tabular-nums;
+  line-height: 1.2;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.home-limit-window.is-exhausted .home-limit-reset {
+  color: var(--red);
+}
+/* Classic Text / Progress bars layouts: two windows per row, the reading
+   beside the label and the reset underneath. They undo the row layout's
+   shared columns. */
+.home-module-limits-classic .home-module-body {
+  grid-template-columns: none;
+}
+.home-module-limits-classic .home-module-body > *,
+.home-module-limits-classic .home-limit-account-head,
+.home-module-limits-classic .home-limit-windows,
+.home-module-limits-classic .home-limit-window {
+  grid-column: auto;
+}
+.home-module-limits-classic .home-limit-account {
+  grid-template-columns: none;
+  gap: 8px;
+}
+.home-module-limits-classic .home-limit-windows {
   margin-left: 18px;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 16px;
 }
-.home-limit-windows-bars {
+.home-module-limits-classic .home-limit-windows-bars {
   margin-left: 0;
   gap: 10px;
 }
-.home-limit-window:only-child,
-.home-limit-window-wide {
+.home-module-limits-classic .home-limit-window:only-child,
+.home-module-limits-classic .home-limit-window-wide {
   grid-column: 1 / -1;
-  max-width: none;
 }
-.home-limit-window {
-  display: grid;
-  min-width: 0;
+.home-module-limits-classic .home-limit-window {
+  min-height: 0;
+  grid-template-columns: none;
+  align-items: stretch;
   /* A sibling reset line must not stretch this window's text or meter rows. */
   align-content: start;
   gap: 4px;
@@ -4639,52 +5219,21 @@ html.is-windows .settings-panel select option {
   justify-content: space-between;
   gap: 4px;
 }
-.home-limit-window .home-list-value {
+.home-limit-window-line .home-list-value {
   font-size: 0.625rem;
   line-height: 1.1;
 }
-.home-limit-window-value {
-  display: inline-flex;
-  align-items: center;
+.home-module-limits-classic .home-limit-window-value {
+  grid-column: auto;
+  justify-self: auto;
   flex-shrink: 0;
-  gap: 6px;
+  font-size: inherit;
 }
-.home-limit-value-low {
-  color: var(--home-limit-accent, var(--yellow));
-}
-.home-limit-value-critical {
-  position: relative;
-  padding-left: 8px;
-  color: var(--red);
-}
-.home-limit-value-critical::before {
-  position: absolute;
-  top: 50%;
-  left: 0;
-  width: 4px;
-  height: 4px;
-  border-radius: 50%;
-  background: currentColor;
-  content: '';
-  transform: translateY(-50%);
-}
-.home-limit-window-label {
-  overflow: hidden;
-  color: var(--readable-muted);
-  font-size: 0.625rem;
+.home-module-limits-classic .home-limit-window-label,
+.home-module-limits-classic .home-limit-reset {
+  grid-column: auto;
+  justify-self: start;
   line-height: 1.1;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.home-limit-reset {
-  overflow: hidden;
-  color: var(--readable-muted);
-  font-size: 0.5625rem;
-  font-variant-numeric: tabular-nums;
-  line-height: 1.1;
-  opacity: 1;
-  text-overflow: ellipsis;
-  white-space: nowrap;
 }
 .home-area-chart {
   position: relative;
@@ -5326,6 +5875,23 @@ html.is-windows .settings-panel select option {
   mask: var(--device-kind-mask) center / contain no-repeat;
 }
 .row-device .device-kind-icon { margin-right: 4px; }
+.session-source-device {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+  max-width: 42%;
+  color: var(--readable-muted);
+}
+.session-source-device .device-kind-icon { width: 1em; height: 1em; }
+.session-source-device-name, .session-compact-description {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.session-source-device + .session-compact-description > .overflow-text-content::before { content: '· '; }
 .device-kind-computer, .device-kind-desktop { --device-kind-mask: url("icons/views/device.svg"); }
 .device-kind-laptop { --device-kind-mask: url("icons/devices/laptop.svg"); }
 .device-kind-mini { --device-kind-mask: url("icons/devices/mini.svg"); }
@@ -6370,6 +6936,9 @@ html.is-windows .limit-live-badge {
   height: auto;
   flex: 0 0 auto;
 }
+/* Compact rows truncate model text character by character, including when
+   the label also opens the model breakdown popover. */
+.session-compact-description .session-models.limit-detail-tooltip-wrap { display: inline; }
 .limit-detail-tooltip-trigger {
   display: inline-grid;
   width: 10px;
@@ -7940,6 +8509,8 @@ html.native-liquid-glass .view-switcher-menu-item { border-radius: 9px; }
 .row[role="button"]:focus-visible { outline: 2px solid rgba(var(--accent-rgb), 0.35); outline-offset: 2px; }
 .row[role="button"] { cursor: pointer; }
 .detail-session-id { display: flex; align-items: center; gap: 6px; min-width: 0; color: var(--muted, #8a8a90); font-size: 0.625rem; }
+.detail-session-source { color: var(--readable-muted); font-size: 0.625rem; }
+.detail-session-source .session-source-device { max-width: 100%; }
 .detail-session-id-text { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; user-select: text; }
 .detail-session-id-copy { flex-shrink: 0; padding: 0 2px; border: 0; background: transparent; color: inherit; font: inherit; cursor: pointer; opacity: 0.72; }
 .detail-session-id-copy:hover, .detail-session-id-copy:focus-visible { color: var(--text); opacity: 1; }
@@ -8093,7 +8664,6 @@ html.native-liquid-glass .view-switcher-menu-item { border-radius: 9px; }
   line-height: 1.3;
   opacity: 0.8;
 }
-.main-view-nav-footer .tool-header-action { width: 22px; height: 22px; font-size: 14px; }
 .main-view-tab {
   display: flex;
   flex: 1 1 auto;
@@ -8203,7 +8773,6 @@ html.native-liquid-glass .view-switcher-menu-item { border-radius: 9px; }
 }
 .settings-panel .main-view-inspector .home-settings-header { margin: 6px 0 0; min-height: 22px; }
 .main-view-caption { color: var(--muted); font-size: 0.5625rem; }
-.settings-panel .main-view-inspector .home-settings-header .tool-header-action { width: 22px; height: 22px; font-size: 14px; }
 .settings-panel .main-view-inspector .home-module-preference-row {
   grid-template-columns: minmax(0, 1fr) auto;
   min-height: 36px;
@@ -10510,3 +11079,7 @@ button.slot-device-toggle { width: 100%; min-height: 0; padding: 0; border: 0; b
 .slot-device-fix { grid-column: 1 / -1; justify-self: start; }
 .slot-devices-expanded > .slot-status { visibility: hidden; }
 .slot-devices-expanded > .slot-copy > .slot-fix { display: none; }
+
+.main-view-nav-footer .tool-header-action { width: 22px; height: 22px; font-size: 14px; }
+
+.settings-panel .main-view-inspector .home-settings-header .tool-header-action { width: 22px; height: 22px; font-size: 14px; }

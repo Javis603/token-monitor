@@ -81,7 +81,7 @@ Local RPC probes try the running sources in this order. A desktop installation c
 
 When managed OAuth accounts exist, Token Monitor fetches enabled OAuth accounts and the local RPC snapshot concurrently. A successful local snapshot with a trusted email replaces the remote result for the matching account. When both sources return grouped windows for that account, groups present only in OAuth (such as `Gemini 4 Argon` when the local language server predates Hub 2.16.0) are retained alongside the live local groups.
 
-An account-scoped manual refresh fetches only the requested OAuth account. With no managed accounts, normal collection remains local-RPC-only.
+An account-scoped manual refresh fetches only the requested OAuth account. With no managed accounts, normal collection uses local RPC when enabled. Under **Settings → AI Tool Limits → Antigravity**, **Automatically detect local Antigravity accounts** is on by default. Turning it off stops local RPC quota collection on this device and removes its cached RPC quota rows. Saved OAuth accounts continue to refresh according to their enabled state.
 
 ### Local RPC
 
@@ -120,7 +120,7 @@ Grouped quota responses map into the normalized limits windows used by every pro
 - five-hour windows;
 - weekly windows.
 
-Standalone OAuth can still produce legacy model pools when grouped quota is unavailable. These rows and rows synced from older devices keep the fallback layout. A legacy pool without a finite remaining fraction keeps its reset information in the normalized record, and the renderer hides the row across the Limits page, Edge Dock, Home compact windows, and usage checklist. A real zero stays visible as exhausted. In the grouped layout, disabled buckets remain visible without a meter.
+Standalone OAuth can still produce legacy model pools when grouped quota is unavailable. These rows and rows synced from older devices keep the fallback layout. A legacy pool without a finite remaining fraction keeps its reset information in the normalized record, and the renderer hides the row across the Limits page, Edge Dock, Home, Notch compact windows, and usage checklist. A real zero stays visible as exhausted. In the grouped layout, disabled buckets remain visible without a meter.
 
 The Limits page and Edge Dock show Gemini, Claude/GPT, and Gemini 4 Argon in their existing order, followed by new groups in service order. New groups use the service's display name and show whichever five-hour or weekly buckets the summary supplies. Names that need shortening or sanitization use a stable suffix so RPC and OAuth agree on the group within the Hub label limit. Other periods are skipped. A weekly-only Argon allowance spans the full row.
 

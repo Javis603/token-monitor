@@ -684,13 +684,46 @@
     };
   }
 
+  // Local mode publishes this machine's Week / Last 7 days / Last 30 days as
+  // scanned periods with sessions and projects (collector.js). Use one only
+  // for the range this calendar would draw: a locale or date the collector did
+  // not compose for falls back to the History-derived snapshot.
+  function nativeRangeSnapshot(selection, stats, options = {}) {
+    if (!isDerived(selection)) return null;
+    const window = stats?.nativeRangeWindows?.[selection];
+    const period = stats?.periods?.[selection];
+    if (!window || !period || typeof period !== 'object') return null;
+    const range = rangeForSelection(selection, options);
+    if (!range || range.start !== window.start || range.end !== window.end) return null;
+    return { status: 'ready', selection, reason: '', native: true, range, period };
+  }
+
+  // A native range keeps the History-derived Trends summary and device rows
+  // when History describes the same range; the local device shows the native
+  // period like the total does.
+  function nativeRangeWithHistory(native, history, localDeviceId) {
+    if (!native) return null;
+    if (history?.status !== 'ready' || history.selection !== native.selection
+      || history.range?.start !== native.range.start || history.range?.end !== native.range.end) {
+      return native;
+    }
+    return {
+      ...history,
+      native: true,
+      period: native.period,
+      devices: (history.devices || []).map((device) => (
+        localDeviceId && String(device?.deviceId || '') === String(localDeviceId) ? { ...device, period: native.period } : device
+      ))
+    };
+  }
+
   function fixedPeriodDeviceSnapshots(selection, sources, options = {}) {
     return fixedPeriodSnapshotFromDevices(selection, sources, options).devices || [];
   }
 
   function supportsBreakdown(selection, breakdown, options = {}) {
     if (!isDerived(selection)) return true;
-    if (breakdown === 'session' || breakdown === 'project') return false;
+    if (breakdown === 'session' || breakdown === 'project') return options.native === true;
     if (breakdown === 'device') return options.deviceHistoriesAvailable === true;
     return true;
   }
@@ -710,6 +743,8 @@
     isDerived,
     joinDeviceHistorySources,
     localDayKey,
+    nativeRangeSnapshot,
+    nativeRangeWithHistory,
     handlePeriodMenuNavigation,
     normalizeMonthMode,
     periodMenuTargetIndex,
