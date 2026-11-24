@@ -242,3 +242,19 @@ test('a day the scan still reports for a source-archived session is kept', () =>
   // Neither captured again nor dropped: the source ledger owns the session now.
   assert.equal(archive.sessions['claude:ledger'].days[dayKey(1)].session.totalTokens, 20);
 });
+
+test('a released client alias beside its canonical row restores only the newest observation', () => {
+  const entry = (client, tokens, capturedAt) => ({
+    client, sessionId: 'abc', day: TODAY, month: TODAY.slice(0, 7), capturedAt,
+    periodWindows: { today: { capturedAt, day: TODAY } },
+    periods: { today: { client, sessionId: 'abc', totalTokens: tokens, costUsd: 0, models: { m: tokens } } }
+  });
+  // SQLite can still hold the literal alias row first; the canonical path keeps both.
+  const archive = { version: 1, sessions: {
+    'micode:abc': entry('micode', 100, new Date(NOW.getTime() - 60_000).toISOString()),
+    'mimo:abc': entry('mimo', 150, NOW.toISOString())
+  } };
+  const range = applySessionDayArchive(last7(), archive, { now: NOW, canonical: true }).nativeRanges.last7;
+  assert.equal(Object.keys(range.sessions).length, 1);
+  assert.equal(range.sessions['mimo:abc'].totalTokens, 150);
+});

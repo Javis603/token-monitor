@@ -403,6 +403,9 @@ function captureSessionDays(archive, deviceRecord, captureDate, { liveKeys, sour
       if (sourceArchivedKeys.has(key)) continue;
       const previous = archive.sessions[key]?.days?.[day];
       if (previous && Date.parse(previous.capturedAt) > captureTime) continue;
+      // Nearly every past day is unchanged, so compare before copying, as the
+      // period capture does; the second comparison sees what the copy drops.
+      if (previous && sameJson(previous.session, observation)) continue;
       const session = cloneJson(observation);
       delete session.liveActivity;
       delete session.waitingForInput;
@@ -609,14 +612,26 @@ function applySessionUsageArchive(summary, archive, options = {}) {
         period.sessions[key] = sessionWithRetainedSettings(period.sessions[key], session);
         continue;
       }
-      const selectionKey = `${periodName}:${key}`;
       const observedAt = Date.parse(entry.periodWindows?.[periodName]?.capturedAt || entry.capturedAt || '') || 0;
-      const previous = retainedRows.get(selectionKey);
-      if (previous && (previous.observedAt > observedAt
-        || previous.observedAt === observedAt && previous.archiveKey === key)) continue;
-      retainedRows.set(selectionKey, { period, key, entry, session, observedAt, archiveKey });
+      selectRetainedRow(retainedRows, { periodName, period, key, entry, session, observedAt, archiveKey });
     }
   }
+  replayRetainedRows(retainedRows, forkParents);
+  return next;
+}
+
+// Every archive replay picks one whole latest observation per period and
+// session key, then adds them in this order. Shared by the native ranges, so
+// a retained row reaches every period the same way.
+function selectRetainedRow(retainedRows, row) {
+  const selectionKey = `${row.periodName}:${row.key}`;
+  const previous = retainedRows.get(selectionKey);
+  if (previous && (previous.observedAt > row.observedAt
+    || previous.observedAt === row.observedAt && previous.archiveKey === row.key)) return;
+  retainedRows.set(selectionKey, row);
+}
+
+function replayRetainedRows(retainedRows, forkParents) {
   const supersededRows = [];
   const mergedRows = [];
   for (const { period, key: archiveKey, entry, session } of retainedRows.values()) {
@@ -659,8 +674,6 @@ function applySessionUsageArchive(summary, archive, options = {}) {
   for (const [period, archiveKey, session, supersededBy] of supersededRows) {
     if (!period.sessions[supersededBy]) addArchivedSession(period, session, archiveKey);
   }
-
-  return next;
 }
 
 // The decorated identity of a session: titles, projects and links resolved by
@@ -673,18 +686,20 @@ const RANGE_PROJECT_FIELDS = Object.freeze(['projectId', 'projectLabel']);
 // title, project and links come from its All Time row; every count comes from
 // the days themselves.
 function sessionForRange(entry, window, today, now, key) {
-  const rows = Object.entries(entry.days || {})
-    .filter(([day]) => day >= window.start && day <= window.end && day < today)
-    .map(([, value]) => value.session);
+  const days = Object.entries(entry.days || {}).filter(([day]) => day >= window.start && day <= window.end && day < today);
+  const rows = days.map(([, value]) => value.session);
+  const captures = days.map(([, value]) => Date.parse(value.capturedAt) || 0);
   if (window.start <= today && today <= window.end && entry.periods?.today && shouldApplyPeriod('today', entry, now)) {
     rows.push(entry.periods.today);
+    captures.push(Date.parse(entry.periodWindows?.today?.capturedAt || entry.capturedAt || '') || 0);
   }
   if (!rows.length) return null;
   const usage = Object.values(mergePeriods(...rows.map((row) => ({ sessions: { [key]: row } }))).sessions)[0];
   if (!usage) return null;
   const session = { ...usage };
+  const observedAt = Math.max(...captures);
   const allTime = entry.periods?.allTime;
-  if (!allTime) return session;
+  if (!allTime) return { session, observedAt };
   for (const [field, value] of Object.entries(allTime)) {
     if ((typeof value === 'string' || typeof value === 'boolean') && (session[field] === undefined || session[field] === '')) session[field] = value;
   }
@@ -694,7 +709,7 @@ function sessionForRange(entry, window, today, now, key) {
     if (allTime[field]) session[field] = allTime[field];
     else delete session[field];
   }
-  return session;
+  return { session, observedAt };
 }
 
 // The maps addArchivedSession() adds into. A range can be the collector's own
@@ -731,45 +746,28 @@ function applySessionDayArchive(summary, archive, options = {}) {
     if (!entry.days && !entry.periods?.today) continue;
     if (tracked.size && !tracked.has(normalizeClientName(entry.client))) continue;
     if (isForkEraPromaSession(entry.client, entry.sessionId)) continue;
-    candidates.push([sessionKey(entry.client, entry.sessionId) || archiveKey, entry]);
+    candidates.push([sessionKey(entry.client, entry.sessionId) || archiveKey, entry, archiveKey]);
   }
   if (!candidates.length) return summary;
-  let nextRanges = null;
+  const retainedRows = new Map();
+  const targets = new Map();
   for (const [name, range] of Object.entries(ranges)) {
     const window = windows[name];
     if (!range || typeof range !== 'object' || !window?.start || !window?.end) continue;
-    let target = null;
-    const superseded = [];
-    const merged = [];
-    const add = (key, session, entry) => {
-      if (entry.supersededBy) {
-        superseded.push([key, session, entry.supersededBy]);
-        return;
-      }
-      target ||= writablePeriod(range);
-      addArchivedSession(target, session, key);
-    };
-    for (const [key, entry] of candidates) {
+    for (const [key, entry, archiveKey] of candidates) {
       if (range.sessions?.[key]) continue;
-      const session = sessionForRange(entry, window, today, now, key);
-      if (!session || !hasSessionUsage(session)) continue;
-      // As in applySessionUsageArchive(): a row under a merged id replays after
-      // every split-id row, so it can see the split copy of the same session.
-      if (splitClientIdFor(session.client || entry.client)) merged.push([key, session, entry]);
-      else add(key, session, entry);
+      const restored = sessionForRange(entry, window, today, now, key);
+      if (!restored) continue;
+      // Copied only once a row can reach the range, never written in place.
+      if (!targets.has(name)) targets.set(name, writablePeriod(range));
+      selectRetainedRow(retainedRows, { periodName: name, period: targets.get(name), key, entry, archiveKey, ...restored });
     }
-    for (const [key, session, entry] of merged) {
-      if ((target || range).sessions?.[key] || isLiveUnderSplitId(target || range, entry, session)) continue;
-      add(key, session, entry);
-    }
-    for (const [key, session, supersededBy] of superseded) {
-      if ((target || range).sessions?.[supersededBy]) continue;
-      target ||= writablePeriod(range);
-      addArchivedSession(target, session, key);
-    }
-    if (target) (nextRanges ||= { ...ranges })[name] = target;
   }
-  return nextRanges ? { ...summary, nativeRanges: nextRanges } : summary;
+  if (!targets.size) return summary;
+  replayRetainedRows(retainedRows, legacyPiForkParents(normalizedArchive, summary, options));
+  const nextRanges = { ...ranges };
+  for (const [name, target] of targets) nextRanges[name] = target;
+  return { ...summary, nativeRanges: nextRanges };
 }
 
 function sessionUsageArchivePath(options = {}) {
