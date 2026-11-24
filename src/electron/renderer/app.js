@@ -11846,7 +11846,10 @@ function renderHomeSessionDisplaySetting() {
     input.append(option);
   }
   input.value = homeModulePreferencesApi.normalizeHomeSessionDisplayMode(state.settings?.homeSessionDisplayMode);
-  input.addEventListener('change', () => void saveSettings({ homeSessionDisplayMode: input.value }));
+  input.addEventListener('change', () => {
+    // saveSettings reports a failed write and restores the persisted choice.
+    saveSettings({ homeSessionDisplayMode: input.value }).catch(() => {});
+  });
   input.setAttribute('aria-label', title.textContent);
   row.append(text, input);
   addRenderedSettingReset(row, text, title, 'homeSessionDisplayMode');

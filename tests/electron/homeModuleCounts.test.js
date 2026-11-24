@@ -126,6 +126,27 @@ test('each Home count control saves only its own count and refreshes immediately
   }
 });
 
+test('a failed Session display save never leaves an unhandled rejection', async () => {
+  const state = { settings: {} };
+  const wrap = vm.runInNewContext(`${source('renderHomeModuleCountSettings', 'renderHomeSettingsList')}; renderHomeModuleCountSettings('session');`, {
+    state, document: { createElement: () => new Element() }, homeModulePreferencesApi: preferences, addRenderedSettingReset() {},
+    t: key => i18n.translate('en', key),
+    saveSettings: async () => { throw new Error('Settings write failed'); }, renderHomeIfVisible() {}
+  });
+  const display = wrap.children[2].children[1];
+  display.value = 'detailed';
+  const unhandled = [];
+  const onUnhandled = reason => unhandled.push(reason);
+  process.on('unhandledRejection', onUnhandled);
+  try {
+    display.events.change();
+    await new Promise(resolve => setImmediate(resolve));
+  } finally {
+    process.off('unhandledRejection', onUnhandled);
+  }
+  assert.deepEqual(unhandled, []);
+});
+
 test('failed Home count saves restore persisted controls without rejecting the change handler', async () => {
   const saveStart = app.indexOf('async function saveSettings(');
   const saveEnd = app.indexOf('// The resolved settings of a write', saveStart);
