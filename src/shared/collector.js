@@ -1647,8 +1647,13 @@ async function collectUsageOnce(options) {
     nativeRangeWindows = {};
     for (const name of NATIVE_RANGE_NAMES) {
       // Yesterday is over: it is its past day alone. Every other range ends today.
+      // Its rows are copied because propagateTodayProjects() below writes into
+      // published rows, and these belong to the anchor watch ticks reuse.
       const end = name === 'yesterday' ? nativePastRanges.starts[name] : todayKey;
-      nativeRanges[name] = end === todayKey ? mergeNormalizedPeriods(nativePastRanges.periods[name], today) : { ...nativePastRanges.periods[name] };
+      const past = nativePastRanges.periods[name];
+      nativeRanges[name] = end === todayKey
+        ? mergeNormalizedPeriods(past, today)
+        : { ...past, sessions: Object.fromEntries(Object.entries(past.sessions || {}).map(([key, row]) => [key, row && { ...row }])) };
       nativeRangeWindows[name] = { start: nativePastRanges.starts[name], end };
     }
     // A session active on past days and Today takes Today's fresh title and

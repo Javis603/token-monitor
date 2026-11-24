@@ -141,8 +141,12 @@ test('a watch tick adds the fresh Today to the anchored past days', async () => 
   assert.deepEqual(flags, [['--today']]);
   assert.equal(watch.nativeRanges.last7.totalTokens, full.nativeRanges.last7.totalTokens + 200);
   assert.equal(watch.nativeRanges.last7.sessions['claude:today-session'].totalTokens, 300);
-  // Today's growth never reaches Yesterday.
+  // Today's growth never reaches Yesterday, and its published rows are not the
+  // anchor's, which Today's titles and links would otherwise rewrite.
   assert.equal(watch.nativeRanges.yesterday.totalTokens, full.nativeRanges.yesterday.totalTokens);
+  const anchored = anchor.nativePastRanges.periods.yesterday;
+  assert.notEqual(watch.nativeRanges.yesterday.sessions, anchored.sessions);
+  assert.notEqual(watch.nativeRanges.yesterday.sessions['claude:spanning'], anchored.sessions['claude:spanning']);
   assert.deepEqual(watch.nativeRangeWindows, full.nativeRangeWindows);
 });
 
