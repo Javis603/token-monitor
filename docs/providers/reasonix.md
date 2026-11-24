@@ -1,8 +1,9 @@
 ---
-summary: "Reasonix provider notes: Tokscale aggregate-only authority, path resolution, normalization rules and synthetic-session privacy guards."
+summary: "Reasonix provider notes: Tokscale aggregate authority, on-demand local session browsing, and privacy guards."
 ids: [reasonix]
 read_when:
   - Changing Reasonix source paths, tokscale normalization or watcher roots
+  - Changing local Reasonix Sessions or Session Detail
   - Changing serialization, sync, history or synthetic-session filtering for Reasonix
 ---
 
@@ -10,11 +11,13 @@ read_when:
 
 ## Identity and ids
 
-`reasonix` is an aggregate-only tracked client (there is no Reasonix limits provider). Reasonix upstream stopped maintenance on 2026-11-12 (archived; final release v2.61.0), so Token Monitor carries only Tokscale aggregate tracking and no separate native session/detail adapter.
+`reasonix` is a tracked client with no limits provider. Reasonix upstream stopped maintenance on 2026-11-12 (archived; final release v2.61.0).
 
 ## Data sources
 
-Tokscale `stats/*.jsonl` is the sole authority for Reasonix token, model and cost totals across Today, Month, Total, History/Trends and Hub sync. Native Sessions, Projects and Session Detail are deliberately unsupported.
+Tokscale `stats/*.jsonl` is the sole authority for Reasonix token, model and cost totals across Today, Month, Total, History/Trends and Hub sync. Open Sessions to read local session metadata, telemetry, and bounded events for Today, Month, or Total. Reopen Sessions or use Refresh to read the files again. Selecting a session with a readable transcript opens Session Detail. Per-turn data is shown only where the transcript supplies it. Cumulative telemetry is never allocated to individual turns.
+
+Native session files are outside the collector and watcher loop. Their rows are local to the Sessions view and do not enter Projects, the tray, or device records. Sessions routed under `projects/*/sessions/` remain readable.
 
 ## Paths and portability
 
@@ -26,7 +29,7 @@ Reasonix is excluded from WSL discovery (`WSL_EXCLUDED_CLIENTS`): Tokscale's Win
 
 - **Disjoint reasoning and request counts.** Reasonix folds `reasoning` into the public `outputTokens` bucket (`TOKSCALE_DISJOINT_REASONING_CLIENTS`), while History zeroes `messages` for Reasonix because Tokscale's counter reflects provider requests rather than user turns.
 - **Scoped model normalization.** `normalizeModelNameForClient()` strips `deepseek/` and `deepseek-flash/` prefixes only when given explicit `reasonix` client context.
-- **Fail-closed session guard.** Reasonix does not emit ordinary `period.sessions`, archive, history or sync entries. `sessionGuard.js` (`isReasonixSyntheticSession` / `filterReasonixSyntheticSessions`) removes every Reasonix-shaped ordinary session fail-closed — including legacy `reasonix-stats:` path IDs that could leak a local path — across usage normalization, delta application, session usage archives, anchor seeding, local session merging, sync payloads, renderer `sessionRows.js`, and Hub/Worker ingestion. `sessionRows.js` also drops any stale Reasonix entries in `nativeSessions` and strips `reasonix-stats:` prefixes in `sessionIdLabel()`.
+- **Fail-closed session guard.** Reasonix session rows never enter ordinary `period.sessions`, archives, History, or sync. `sessionGuard.js` (`isReasonixSyntheticSession` / `filterReasonixSyntheticSessions`) removes every Reasonix-shaped ordinary session fail-closed — including legacy `reasonix-stats:` path IDs that could leak a local path — across usage normalization, delta application, session usage archives, anchor seeding, local session merging, sync payloads, renderer `sessionRows.js`, and Hub/Worker ingestion. `sessionRows.js` also drops any stale Reasonix entries in `nativeSessions` and strips `reasonix-stats:` prefixes in `sessionIdLabel()`.
 
 ## Verification
 

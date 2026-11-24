@@ -200,10 +200,10 @@
   }
 
   function sessionIds(id) {
-    const raw = String(id || '').trim();
+    const raw = String(id || '').trim().replace(/^reasonix:/i, '');
     if (!raw) return [];
     const lower = raw.toLowerCase();
-    if (lower.startsWith('reasonix-stats:') || lower.startsWith('reasonix:reasonix-stats:')) return [];
+    if (lower.startsWith('reasonix-stats:')) return [];
     const uuids = raw.match(/[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}/gi) || [];
     // Rollout filenames can contain multiple UUIDs. These are display labels,
     // not proof that each UUID is a conversation identity.
@@ -490,7 +490,8 @@
   }
 
   function sessionRowDetailAvailable(row) {
-    return ['claude', 'codebuddy', 'codex', 'opencode', 'dsh', 'workbuddy', 'pi', 'omp', 'senpi'].includes(row?.client);
+    return ['claude', 'codebuddy', 'codex', 'opencode', 'dsh', 'workbuddy', 'pi', 'omp', 'senpi'].includes(row?.client)
+      || (row?.client === 'reasonix' && row.sessionDetailAvailable === true);
   }
 
   function nativeSessionRow(session, key, options, now) {
@@ -556,7 +557,7 @@
       detail: sessionIdLabel(session?.sessionId || key),
       value,
       tokenDataUnavailable,
-      cost: tokenDataUnavailable ? 0 : finiteNumber(session?.costUsd),
+      cost: tokenDataUnavailable ? 0 : finiteNumber(session?.costUsd ?? session?.reportedCostUsd),
       sessionDetailAvailable: session?.sessionDetailAvailable === true,
       color: colors[client] || stable(key, palette),
       stale: false,
@@ -718,6 +719,10 @@
     for (const [key, session] of Object.entries(options.nativeSessions || {})) {
       if (isReasonixSyntheticSession(session, key)) continue;
       if (usageKeys.has(`session:${key}`)) continue;
+      const row = nativeSessionRow(session, key, options, now);
+      if (row) rows.push(row);
+    }
+    for (const [key, session] of Object.entries(options.reasonixSessions || {})) {
       const row = nativeSessionRow(session, key, options, now);
       if (row) rows.push(row);
     }

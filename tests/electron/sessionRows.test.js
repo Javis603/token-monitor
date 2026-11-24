@@ -369,7 +369,7 @@ test('detail identities use Codex metadata without guessing a UUID position', ()
     [`rollout-2026-09-10T02-33-00-${first}`, [first]],
     [first, [first]],
     ['ordinary · label', ['ordinary · label']],
-    ['reasonix:ABC123', ['reasonix:ABC123']],
+    ['reasonix:ABC123', ['ABC123']],
     ['reasonix-stats:/private/stats/day.jsonl', []],
     ['reasonix:reasonix-stats:/private/stats/day.jsonl', []],
     ['2026-09-10T02-33-00', []],

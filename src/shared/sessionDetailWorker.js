@@ -6,7 +6,9 @@ const { resolveSessionDetailForPlatform } = require('./sessionDetailResolver');
 
 (async () => {
   try {
-    const detail = await resolveSessionDetailForPlatform(workerData);
+    const detail = workerData.action === 'listReasonixSessions'
+      ? require('./providers/reasonix/sessions').readReasonixNativeSessions({ allTimeSince: workerData.allTimeSince })
+      : await resolveSessionDetailForPlatform(workerData);
     parentPort.postMessage({ ok: true, detail });
   } catch (error) {
     parentPort.postMessage({

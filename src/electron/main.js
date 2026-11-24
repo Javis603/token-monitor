@@ -307,7 +307,7 @@ const { MIMO_PLATFORM_CONSOLE_URL } = require('../shared/providers/mimo/limits')
 const { deviceHistoryRevision, historyPreview, historyRevision } = require('../shared/history');
 const { completeHistorySource, resolveCompleteHistory, resolveCompleteHistoryWithDevices } = require('./historySource');
 const { fixedPeriodHistoryMeta } = require('./fixedPeriodHistory');
-const { readSessionDetailForPlatform } = require('../shared/sessionDetailResolver');
+const { readSessionDetailForPlatform, runSessionDetailWorker } = require('../shared/sessionDetailResolver');
 const { startDiscordRpc, stopDiscordRpc, updateDiscordRpc } = require('./discordRpc');
 const {
   commitMacWidgetSnapshot,
@@ -8826,9 +8826,28 @@ app.whenReady().then(() => {
     if (result.canceled || !result.filePaths[0]) return { ok: false, canceled: true };
     return { ok: true, dir: result.filePaths[0] };
   });
+  let reasonixSessionRead;
+  ipcMain.handle('session:listReasonix', async (event) => {
+    if (event.sender !== mainWindow?.webContents || !trackedClientSet(clientsCsvForSetting(settings?.clients)).has('reasonix')) return {};
+    const allTimeSince = settings.allTimeSince;
+    if (!reasonixSessionRead || reasonixSessionRead.allTimeSince !== allTimeSince) {
+      const request = { allTimeSince, promise: null };
+      request.promise = runSessionDetailWorker({ action: 'listReasonixSessions', allTimeSince }).finally(() => {
+        if (reasonixSessionRead === request) reasonixSessionRead = null;
+      });
+      reasonixSessionRead = request;
+    }
+    const sessions = await reasonixSessionRead.promise;
+    const { modelAliases, modelAliasGrouping, sessionTitlesEnabled } = settings;
+    return Object.fromEntries(Object.entries(sessions).map(([period, rows]) => [
+      period,
+      projectModelAliasSessions(latestStats || {}, sessionTitlesEnabled === false ? withoutSessionTitles(rows) : rows,
+        modelAliases, { grouping: modelAliasGrouping })
+    ]));
+  });
   ipcMain.handle('session:getDetail', (_event, args) => {
-    const { client, sessionId, period, sessionCost } = args || {};
-    return readSessionDetailForPlatform({ client, sessionId, period, sessionCost }, {
+    const { client, sessionId, period, sessionCost, reasonixSessionRef } = args || {};
+    return readSessionDetailForPlatform({ client, sessionId, period, sessionCost, reasonixSessionRef }, {
       lookupModelPricing, getPricingRevision: () => pricingFingerprint({ pricingPath: customPricingPath() })
     });
   });

@@ -252,7 +252,7 @@ test('returns a native Claude detail without enumerating WSL homes', async () =>
   assert.equal(enumerated, false);
 });
 
-test('Reasonix returns not-found without reading sidecar files', async () => {
+test('resolves a Reasonix native detail through the same platform resolver', async () => {
   const nativeHome = fs.mkdtempSync(path.join(os.tmpdir(), 'tm-native-reasonix-detail-'));
   const stateHome = path.join(nativeHome, 'state');
   const sessions = path.join(stateHome, 'projects', 'opaque', 'sessions');
@@ -274,9 +274,9 @@ test('Reasonix returns not-found without reading sidecar files', async () => {
         })
       }
     );
-    assert.equal(detail.found, false);
-    assert.equal(detail.client, 'reasonix');
-    assert.deepEqual(detail.exchanges, []);
+    assert.equal(detail.found, true);
+    assert.equal(detail.exchanges[0].promptPreview, 'resolver prompt');
+    assert.equal(detail.totals.totalTokens, 5);
   } finally {
     fs.rmSync(nativeHome, { recursive: true, force: true });
   }

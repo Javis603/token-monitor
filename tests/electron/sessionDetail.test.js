@@ -654,13 +654,46 @@ test('a confirmed remote session never opens a local transcript with the same ID
   assert.equal(renders[0].detail.found, false);
 });
 
-test('Reasonix is excluded from Session Detail navigation', () => {
+test('Reasonix loads on a Sessions visit and ignores ordinary stats repaints', async () => {
+  const source = rendererSource.slice(rendererSource.indexOf('let reasonixSessionList = null;'),
+    rendererSource.indexOf('function sessionRowsForPeriod('));
+  const state = { breakdown: 'home', settings: { sessionTitlesEnabled: true } };
+  let calls = 0;
+  let renders = 0;
+  const context = {
+    state, clientRowTracked: () => true,
+    statsRenderScheduler: { request: () => { renders += 1; } },
+    window: { tokenMonitor: { listReasonixSessions: async () => { calls += 1; return {}; } } }
+  };
+  vm.runInNewContext(source, context);
+  context.loadReasonixSessionList();
+  assert.equal(calls, 0);
+  state.breakdown = 'session';
+  context.loadReasonixSessionList();
+  context.loadReasonixSessionList();
+  await Promise.resolve();
+  assert.equal(calls, 1);
+  assert.equal(renders, 1);
+  state.breakdown = 'home';
+  context.loadReasonixSessionList();
+  state.breakdown = 'session';
+  context.loadReasonixSessionList();
+  assert.equal(calls, 2);
+});
+
+test('Reasonix detail stays on demand even if ordinary stats contain a matching row', async () => {
   const { sessionRowDetailAvailable } = require('../../src/electron/renderer/sessionRows');
   assert.equal(sessionRowDetailAvailable({ client: 'reasonix' }), false);
-  assert.equal(sessionRowDetailAvailable({ client: 'reasonix', sessionDetailAvailable: true }), false);
-  assert.doesNotMatch(rendererSource, /client === 'reasonix'/);
-  assert.doesNotMatch(rendererSource, /reportedCostUsd/);
-  assert.doesNotMatch(rendererSource, /nativeSessionBreakdown/);
+  assert.equal(sessionRowDetailAvailable({ client: 'reasonix', sessionDetailAvailable: true }), true);
+  let reads = 0;
+  const { openSessionDetail, refreshOpenSessionDetail, state } = sessionDetailHarness(async () => {
+    reads += 1;
+    return { found: true };
+  });
+  await openSessionDetail({ client: 'reasonix', sessionId: 'reasonix:session' });
+  state.stats = { periods: { today: { sessions: { 'reasonix:reasonix:session': { totalTokens: 100 } } } } };
+  await refreshOpenSessionDetail();
+  assert.equal(reads, 1);
 });
 
 for (const scenario of ['catch-up', 'hover', 'unchanged', 'hidden', 'closed', 'replaced', 'initial failure', 'initial rejection', 'catch-up failure', 'catch-up rejection']) {
