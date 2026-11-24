@@ -42,7 +42,7 @@ Session Detail also counts top-level `usage` entries (including `kind: "cache_wa
 
 - **`reasoning` is never added to the total.** It is a subset of `output`; `totalTokens` is `input + output + cacheRead + cacheWrite`. Adding it would double-count.
 - **The session id is a filename suffix**, so the basename walk used for other clients cannot find a Pi transcript.
-- Session titles and timestamps for Pi are not read here yet; the scan supplies what the Sessions list shows.
+- The scanner supplies the Pi session title and timestamps. A saved name or explicit clear applies across date ranges. An empty title in the scan metadata clears a previously saved title during a live refresh.
 - **The bundled scanner still counts only assistant message usage.** Its separate Pi parser needs equivalent operation accounting, deduplication/pricing regression coverage and shared-parser cache invalidation before a separately approved bundle update. This Detail correction does not correct dashboard/history totals. The Detail live signature uses scanner-reported tokens/cost, so an operation-only append may not trigger a re-read while the page stays open; reopening reads the full transcript.
 
 ## Verification

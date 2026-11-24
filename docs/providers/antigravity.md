@@ -73,19 +73,21 @@ Antigravity quota collection starts in `fetchAntigravityLimits()` in `src/shared
 
 ### Source order
 
-Local RPC probes prefer process kinds in this order:
+Local RPC probes try the running sources in this order. A desktop installation can supply quota on its own.
 
 1. app
 2. CLI
 3. IDE
 
-When managed OAuth accounts exist, Token Monitor fetches enabled OAuth accounts and the local RPC snapshot concurrently. If local RPC returns a trusted email matching an OAuth account, the live local result replaces the remote result for that account, unless the local snapshot is empty or unavailable (`status !== 'ok'`), or a legacy 3-pool RPC fallback (`windowMinutes: null`) would overwrite richer grouped OAuth quota (`windowMinutes: 300` or `10080`). When both sources return grouped windows for the same account, any grouped model family present only in OAuth (such as `Gemini 4 Argon` when the local language server predates Hub 2.16.0) is retained alongside the live local groups.
+When managed OAuth accounts exist, Token Monitor fetches enabled OAuth accounts and the local RPC snapshot concurrently. A successful local snapshot with a trusted email replaces the remote result for the matching account. When both sources return grouped windows for that account, groups present only in OAuth (such as `Gemini 4 Argon` when the local language server predates Hub 2.16.0) are retained alongside the live local groups.
 
-An account-scoped manual refresh fetches only the requested OAuth account. With no managed accounts, normal collection remains local-RPC-only.
+An account-scoped manual refresh fetches only the requested OAuth account. With no managed accounts, normal collection uses local RPC when enabled. Under **Settings → AI Tool Limits → Antigravity**, **Automatically detect local Antigravity accounts** is on by default. Turning it off stops local RPC quota collection on this device and removes its cached RPC quota rows. Saved OAuth accounts continue to refresh according to their enabled state.
 
 ### Local RPC
 
-The probe discovers a running process and its local service ports, then connects to the loopback RPC service. It tries the grouped quota summary path first and uses user status to obtain identity when available. Older model-config RPC methods remain fallbacks for Antigravity builds without the grouped quota response.
+The probe discovers the running process and connects to its loopback RPC service. For Antigravity desktop builds that advertise a host bridge token on stdin, it reads the RPC port and credential from the matching PID’s `~/.gemini/antigravity/daemon/hub_*.json` descriptor and verifies that the process owns the listener and the connected socket before sending the credential. Older builds provide the RPC credential on the process command line.
+
+Local quota comes from the grouped quota summary. If a source cannot provide a usable summary, the probe tries the next local source until its deadline. When all sources fail, the limits runtime applies its last-good policy. An authentication rejection can clear a cached reading if the current runtime has already associated that process and credential with the reading. Ambiguous failures keep the previous reading. User status supplies account identity and plan information after a successful quota lookup.
 
 Identity lookup may fail while quota lookup succeeds. Such a row is valid but anonymous; it must remain device-scoped during hub aggregation. Do not give anonymous RPC rows a cross-device-stable fallback key, because two unrelated Google accounts could otherwise collapse into one row. An anonymous local row also cannot be safely matched to a managed OAuth account, so both rows may be visible until local identity becomes available.
 
@@ -118,9 +120,9 @@ Grouped quota responses map into the normalized limits windows used by every pro
 - five-hour windows;
 - weekly windows.
 
-Older model-config responses are pooled into compatible fallback windows (`Gemini Pro`, `Gemini Flash`, `Claude`, and `Gemini 4 Argon`). UI labels and grouping should describe the upstream pool rather than inventing per-model precision the response does not contain. A pool without a finite remaining fraction stays in the normalized record with its reset information and meter disabled, but the renderer hides its entire row, including the name and reset. Apply the same visibility rule to the Limits page, Edge Dock, Home compact windows, and usage checklist. A real zero remains a visible, metered, exhausted allowance in both remaining and used display modes. This rule does not hide unknown or disabled buckets in the normal grouped-quota layout.
+Standalone OAuth can still produce legacy model pools when grouped quota is unavailable. These rows and rows synced from older devices keep the fallback layout. A legacy pool without a finite remaining fraction keeps its reset information in the normalized record, and the renderer hides the row across the Limits page, Edge Dock, Home, Notch compact windows, and usage checklist. A real zero stays visible as exhausted. In the grouped layout, disabled buckets remain visible without a meter.
 
-The Limits page and Edge Dock preserve the existing Gemini and Claude/GPT quota pairs, then append the separate Gemini 4 Argon group. A weekly-only Argon allowance spans the full row. Apply this ordering in the shared renderer rather than changing normalized window order; an unavailable bucket must not gain an invented percentage or meter.
+The Limits page and Edge Dock show Gemini, Claude/GPT, and Gemini 4 Argon in their existing order, followed by new groups in service order. New groups use the service's display name and show whichever five-hour or weekly buckets the summary supplies. Names that need shortening or sanitization use a stable suffix so RPC and OAuth agree on the group within the Hub label limit. Other periods are skipped. A weekly-only Argon allowance spans the full row.
 
 ### Identity and aggregation
 

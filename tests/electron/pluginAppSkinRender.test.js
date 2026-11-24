@@ -206,6 +206,40 @@ test('a queued glass color edit targets its original scheme after macOS switches
   assert.deepEqual(h.saved[2], { macGlassLightColors: {} });
   assert.deepEqual(h.context.state.settings.themeColors, { chart: '#112233' });
 });
+test('theme color rows expose resets only for overrides in the current palette', async () => {
+  const h = skinHarness();
+  const { context } = h;
+  const { state, themePresetsApi } = context;
+  state.settings.macGlassLightColors = { text: '#123456' };
+  state.settings.macGlassDarkColors = { muted: '#abcdef' };
+  let colorRows;
+  Object.assign(context, {
+    els: {},
+    renderAppearanceColorRows: (_container, _keys, rows) => { colorRows = rows; }
+  });
+  vm.runInContext(['renderThemeColorGrid', 'resetThemeColor', 'commitThemeColors'].map(extract).join('\n'), context);
+
+  context.activeThemeKey = 'macGlassDarkColors';
+  context.renderThemeColorGrid();
+  assert.equal(colorRows.hasOverride('text'), false);
+  assert.equal(colorRows.hasOverride('muted'), true);
+  assert.equal(colorRows.colorFor('muted'), '#abcdef');
+  const resetDarkColor = colorRows.reset;
+
+  context.activeThemeKey = 'macGlassLightColors';
+  context.renderThemeColorGrid();
+  assert.equal(colorRows.hasOverride('text'), true);
+  assert.equal(colorRows.hasOverride('muted'), false);
+  assert.equal(colorRows.colorFor('muted'), themePresetsApi.themePalette({}, context.activeThemeKey).muted);
+  await resetDarkColor('muted');
+  assert.deepEqual(h.saved, [{ macGlassDarkColors: {} }]);
+  assert.deepEqual(state.settings.macGlassLightColors, { text: '#123456' });
+
+  context.activeThemeKey = 'themeColors';
+  context.renderThemeColorGrid();
+  assert.equal(colorRows.hasOverride('chart'), true);
+  assert.equal(colorRows.hasOverride('text'), false);
+});
 test('theme selection uses author identity and has no separate clear button', () => {
   const { Element } = require('../helpers/notchPanel');
   const document = { createElement: tag => new Element(tag, document) };

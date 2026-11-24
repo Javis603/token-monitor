@@ -45,18 +45,20 @@ function fixture() {
 
 test('worker GC bounds frequency and lowers its threshold after a live-set spike subsides', async () => {
   const f = fixture();
-  await f.tick(95, 40);
+  await f.tick(63, 40);
   assert.equal(f.calls, 0);
   await f.tick(200, 190);
   assert.equal(f.calls, 1);
   await f.tick(300, 40, 1);
   assert.equal(f.calls, 1, 'cooldown suppresses repeated collections');
-  await f.tick(210, 40);
+  await f.tick(205, 40);
   assert.equal(f.calls, 1, 'large live set raises threshold');
-  await f.tick(240, 40);
+  await f.tick(206, 40);
   assert.equal(f.calls, 2);
-  await f.tick(100, 40);
-  assert.equal(f.calls, 3, 'collection after shrink restores the 96 MiB floor');
+  await f.tick(63, 40);
+  assert.equal(f.calls, 2, 'collection after shrink still respects the 64 MiB floor');
+  await f.tick(64, 40);
+  assert.equal(f.calls, 3, 'collection after shrink restores the 64 MiB floor');
   assert.equal(f.disconnected, 3);
 });
 

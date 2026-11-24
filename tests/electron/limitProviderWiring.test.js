@@ -224,7 +224,7 @@ test('LIMIT_PROVIDER_SETTING_KEYS is exactly this set (drives per-provider refre
     codex: ['codexManagedAccounts'],
     opencode: ['opencodeCookie', 'opencodeProfiles', 'opencodeLocalLimitsEnabled'],
     cursor: ['cursorDisabledAccountIds'],
-    antigravity: ['antigravityAccountSlots'],
+    antigravity: ['antigravityAccountSlots', 'antigravityLocalLimitsEnabled'],
     cline: ['clineApiKey', 'clineAccountSlots'],
     factory: ['factoryApiKey', 'factoryAccountSlots'],
     kimi: ['kimiApiKey', 'kimiWebAccessToken', 'kimiAccountSlots'],

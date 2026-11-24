@@ -57,6 +57,10 @@ const EDGE_DOCK_METRICS = Object.freeze({
   bubbleRadius: 18,
   bubbleGap: 4,
   triggerDepth: 2,
+  // How far past the display edge an open rail still counts as hovered. A
+  // display beside the dock's edge lets the pointer slide over instead of
+  // stopping at the edge, so a small overshoot must not retract the rail.
+  overshootDepth: 24,
   screenMargin: 8
 });
 
@@ -82,6 +86,10 @@ const EDGE_DOCK_MODES = Object.freeze(['autoHide', 'always', 'alwaysExceptFullSc
 
 function normalizeEdgeDockMode(value) {
   return EDGE_DOCK_MODES.includes(value) ? value : 'autoHide';
+}
+
+function normalizeEdgeDockTriggerRange(value) {
+  return value === 'handle' ? 'handle' : 'rail';
 }
 
 function normalizeEdgeDockSide(value) {
@@ -140,7 +148,7 @@ function edgeDockBubbleScale(settings = {}, railScale = edgeDockScale(settings))
 // Measured from the pointer's side rather than the dock's, so they stay put
 // whatever size the dock is drawn at: a larger dock should not open from
 // further away, nor a smaller one become harder to reach.
-const UNSCALED_METRICS = new Set(['wakeDepth', 'approachDepth', 'approachSlack', 'triggerDepth', 'screenMargin', 'edgeInset']);
+const UNSCALED_METRICS = new Set(['wakeDepth', 'approachDepth', 'approachSlack', 'triggerDepth', 'overshootDepth', 'screenMargin', 'edgeInset']);
 
 // Whole pixels, so every window keeps integer bounds. The handle's window keeps
 // the width AppKit will not clamp, and the handle stays wide enough to find.
@@ -345,6 +353,15 @@ function edgeDockTriggerBounds({ workArea, displayBounds, side, railBounds, metr
   const x = workArea.x + workArea.width - metrics.triggerDepth;
   const right = display.x + display.width;
   return { x, y: railBounds.y, width: Math.max(metrics.triggerDepth, right - x), height: railBounds.height };
+}
+
+// The trigger strip extended outward past the display edge. It only keeps an
+// open rail; reaching it from the neighbouring display never reveals the rail.
+function edgeDockOvershootBounds({ side, triggerBounds, metrics = EDGE_DOCK_METRICS }) {
+  if (!triggerBounds) return null;
+  const depth = metrics.overshootDepth;
+  const x = normalizeEdgeDockSide(side) === 'left' ? triggerBounds.x - depth : triggerBounds.x;
+  return { x, y: triggerBounds.y, width: triggerBounds.width + depth, height: triggerBounds.height };
 }
 
 function edgeDockCellAt(point, railBounds, cellCount, metrics = EDGE_DOCK_METRICS) {
@@ -597,6 +614,7 @@ module.exports = {
   edgeDockFittingScale,
   edgeDockHandleBounds,
   edgeDockHandleZones,
+  edgeDockOvershootBounds,
   edgeDockPeekBounds,
   edgeDockPlacementForDrop,
   edgeDockPollDelay,
@@ -614,6 +632,7 @@ module.exports = {
   normalizeEdgeDockOffset,
   normalizeEdgeDockSide,
   normalizeEdgeDockSize,
+  normalizeEdgeDockTriggerRange,
   railLength,
   rectContains,
   scaledEdgeDockMetrics,

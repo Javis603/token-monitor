@@ -35,6 +35,7 @@ const tokenNumberAnimationApi = require('./tokenNumberAnimation');
 const { createRepositoryStars } = require('./repositoryStars');
 const { clearBackgroundImage, getBackgroundImage, importBackgroundImage } = require('./backgroundImage');
 const { createClientSourceIpcHandlers } = require('./clientSourceIpc');
+const { detectWslClientsAsync } = require('../shared/wslUsage');
 const { createClaudeWebFetch } = require('./providers/claude/webFetch');
 const { createMimoExchangeFetch } = require('./providers/mimo/exchangeFetch');
 
@@ -224,10 +225,12 @@ const {
 } = require('./renderer/viewDisplayPreferences');
 const {
   defaultHomeModulePreferences,
+  migrateHomeLimitDisplayMode,
   normalizeHiddenHomeModules,
   normalizeHomeLimitDisplayMode,
   normalizeHomeModuleCounts,
-  normalizeHomeModuleOrder
+  normalizeHomeModuleOrder,
+  normalizeHomeSessionDisplayMode
 } = require('./renderer/homeModulePreferences');
 const {
   APP_UPDATE_STARTUP_DELAY_MS,
@@ -449,6 +452,7 @@ const {
   normalizeEdgeDockOffset,
   normalizeEdgeDockSide,
   normalizeEdgeDockSize,
+  normalizeEdgeDockTriggerRange,
   normalizeEdgeDockBubbleSize
 } = require('./edgeDock/geometry');
 const { buildEdgeDockCells } = require('./renderer/edgeDock/presentation');
@@ -550,6 +554,9 @@ let initialLimitProvidersPending = false;
 // settings are written through saveSettings() after the window exists, so the flag
 // carries the decision from the read to that first save.
 let seededClientSplitsPending = false;
+// Set by readSettings() when the one-time reset of the Home limits layout to
+// `default` changed a saved value; saved at the same point as a client split.
+let homeLimitDisplayModePending = false;
 let persistedSettingsSnapshot = null;
 let credentialStore = null;
 let openrouterSlotsMigrated = false;
@@ -626,6 +633,7 @@ function defaultSettings() {
     showLiveDot: true,
     showToolIcons: true,
     titleIconOnly: true,
+    settingsInTitlebar: false,
     showCompactTotalTokens: false,
     showLiveTokenRate: false,
     liveTokenRateScope: 'all',
@@ -679,6 +687,7 @@ function defaultSettings() {
     edgeDockRunningIndicatorEnabled: true,
     edgeDockMode: 'autoHide',
     edgeDockHaptic: true,
+    edgeDockTriggerRange: 'rail',
     edgeDockWarnColors: false,
     edgeDockMacBackdrop: 'inherit',
     edgeDockWindowsBackdrop: 'inherit',
@@ -721,7 +730,10 @@ function defaultSettings() {
     hiddenHomeModules: defaultHomeModulePreferences().hiddenHomeModules,
     homeModuleCounts: normalizeHomeModuleCounts(),
     showHomeLimitBars: false,
-    homeLimitDisplayMode: 'text',
+    homeVendorColors: false,
+    homeLimitDisplayMode: 'default',
+    homeLimitDisplayModeDefaulted: true,
+    homeSessionDisplayMode: 'compact',
     showHomeLimitProviderNames: false,
     projectsEnabled: parseBoolean(process.env.TOKEN_MONITOR_PROJECTS_ENABLED, true),
     projectBreakdownMode: 'tool',
@@ -762,6 +774,7 @@ function defaultSettings() {
     limitsHistoryOpenMode: 'hover',
     claudePrepaidBalanceEnabled: parseBoolean(process.env.TOKEN_MONITOR_CLAUDE_PREPAID_BALANCE, true),
     claudeCliFallbackEnabled: true,
+    antigravityLocalLimitsEnabled: true,
     // The key OpenCode stores for itself needs no setup, so tracking it is the
     // default. This turns that off for a machine that is signed in to an account
     // the user does not want reported.
@@ -806,6 +819,34 @@ function defaultSettings() {
       lastKnownLatest: null,
       dismissedVersion: null
     }
+  };
+}
+
+function resettableSettingsDefaults() {
+  const defaults = defaultSettings();
+  const keys = [
+    'language', 'startAtLogin', 'automaticAppUpdates', 'discordRpcEnabled',
+    'periodMonthMode', 'currency', 'heatmapMetric', 'homeActiveDaysWindow', 'showExactHomeTrendTokens',
+    'homeModuleCounts', 'homeLimitDisplayMode', 'showHomeLimitBars', 'showHomeLimitProviderNames', 'homeLimitAccountCount',
+    'homeVendorColors', 'homeSessionDisplayMode',
+    'historyIntervalMs', 'sessionContextMetric', 'limitsHistoryOpenMode', 'modelRankingMetric', 'serviceStatusRefreshMs',
+    'windowBehavior', 'keepAboveTaskbar', 'floatingBubbleTrigger', 'floatingBubbleContent',
+    'hideAppIcon', 'trayContent', 'showTrayProviderBadge',
+    'edgeDockMode', 'edgeDockTriggerRange', 'edgeDockSide', 'edgeDockSize', 'edgeDockCustomScale',
+    'edgeDockBubbleSize', 'edgeDockBubbleCustomScale', 'edgeDockMacBackdrop', 'edgeDockWindowsBackdrop',
+    'edgeDockRunningIndicatorEnabled', 'edgeDockWarnColors', 'edgeDockHaptic',
+    'notchHoverAction', 'notchShape', 'notchSize', 'notchCustomScale',
+    'notchStyle', 'notchProgressiveBlur', 'notchSummaryEnabled', 'notchSummaryMode',
+    'notchHideSummaryInFullScreen', 'notchRunningIndicatorEnabled', 'notchWarnColors', 'notchHaptic', 'notchSwipeGestures',
+    'systemGlass', 'windowsBackdrop', 'macBackdrop', 'textSize', 'reduceMotion', 'tokenNumberAnimation',
+    'showCompactTotalTokens', 'compactTokenUnits', 'showLiveTokenRate', 'liveTokenRateScope',
+    'settingsInTitlebar', 'showLiveDot', 'showToolIcons', 'titleIconOnly',
+    'collectionMode', 'exportIntervalMs',
+    'showLimitSource', 'showLimitUsed', 'workbuddyQuotaTotalEnabled', 'syncUploadIntervalMs'
+  ];
+  return {
+    ...Object.fromEntries(keys.map(key => [key, defaults[key]])),
+    limitsRefresh: defaults.limitsRefreshMode === 'adaptive' ? 'adaptive' : String(defaults.limitsRefreshMs)
   };
 }
 
@@ -1477,6 +1518,59 @@ const floatingBubbleState = { collapsed: false, side: null, collapsedBounds: nul
 let mainWindowChrome = { collapsedFloatingBubble: false };
 let mainWindowReplacementEpoch = 0;
 let mainWindowReplacementTask = Promise.resolve();
+const MAIN_WINDOW_HIBERNATE_MS = 10 * 60 * 1000;
+const MAIN_WINDOW_HIBERNATE_RETRY_MS = 60 * 1000;
+const MAIN_WINDOW_WAKE_FALLBACK_MS = 800;
+let mainWindowHibernateTimer = null;
+let mainWindowHibernated = false;
+let mainWindowPopoverReveal = null;
+let screenUiSuspended = false;
+
+function supportsMainWindowHibernate() {
+  // Windows keeps a WebContentsView across BaseWindow replacements. Its
+  // ownership and teardown differ from BrowserWindow.
+  return process.platform === 'darwin' || process.platform === 'linux';
+}
+
+function hasDependentAppWindow() {
+  return BaseWindow.getAllWindows().some(win => win !== mainWindow
+    && !edgeDockController?.owns(win) && !notchController?.owns(win)
+    && !limitsHistoryController?.isIdleWindow(win));
+}
+
+function cancelMainWindowHibernate() {
+  clearTimeout(mainWindowHibernateTimer);
+  mainWindowHibernateTimer = null;
+}
+
+function hibernateMainWindow() {
+  cancelMainWindowHibernate();
+  const win = mainWindow;
+  mainWindowHibernated = true;
+  mainWindowPopoverReveal = null;
+  mainWindow = null;
+  lastRendererStatsFingerprint = null;
+  if (win && !win.isDestroyed()) win.destroy();
+}
+
+function scheduleMainWindowHibernate(win) {
+  if (win !== mainWindow || mainWindowHibernateTimer || !settings?.trayMode || quitRequested
+    || screenUiSuspended || !supportsMainWindowHibernate()) return;
+  const attempt = () => {
+    mainWindowHibernateTimer = null;
+    if (win !== mainWindow || win.isDestroyed() || win.isVisible() || quitRequested || !settings?.trayMode) return;
+    if (rendererHiddenStatsNeeded() || hasDependentAppWindow()) {
+      // A generated tray icon or dependent window can clear later; keep retrying
+      // instead of dropping the only hibernation attempt.
+      mainWindowHibernateTimer = setTimeout(attempt, MAIN_WINDOW_HIBERNATE_RETRY_MS);
+      mainWindowHibernateTimer.unref();
+      return;
+    }
+    hibernateMainWindow();
+  };
+  mainWindowHibernateTimer = setTimeout(attempt, MAIN_WINDOW_HIBERNATE_MS);
+  mainWindowHibernateTimer.unref();
+}
 
 function stopPersistBoundsTimer() {
   if (persistBoundsTimer) clearTimeout(persistBoundsTimer);
@@ -1507,12 +1601,13 @@ function ensureSettingsLoaded() {
       settings.codexManagedAccounts = hydratedCodexAccounts;
     }
   }
-  // A seeded client identity split is an in-memory addition at this point.
-  // Persist it with the same retry-on-next-save tolerance as the migration
-  // above, so a read-only or failing settings file delays the write instead of
-  // losing the tracked client.
-  if (seededClientSplitsPending) {
+  // A seeded client identity split and the one-time Home limits layout reset are
+  // in-memory changes at this point. Persist them with the same
+  // retry-on-next-save tolerance as the migration above, so a read-only or
+  // failing settings file delays the write instead of losing the change.
+  if (seededClientSplitsPending || homeLimitDisplayModePending) {
     seededClientSplitsPending = false;
+    homeLimitDisplayModePending = false;
     saveSettings();
   }
   rendererViewState = normalizeInitialRendererViewState(settings.lastViewState, rendererViewState);
@@ -2046,10 +2141,16 @@ function readSettings() {
       merged.hiddenHomeModules = normalizeHiddenHomeModules(saved.hiddenHomeModules, DEFAULT_HOME_MODULE_LIST);
     }
     merged.showHomeLimitBars = parseBoolean(merged.showHomeLimitBars, false);
+    merged.homeVendorColors = parseBoolean(merged.homeVendorColors, false);
     merged.homeModuleCounts = normalizeHomeModuleCounts(merged.homeModuleCounts);
-    merged.homeLimitDisplayMode = normalizeHomeLimitDisplayMode(merged.homeLimitDisplayMode);
+    merged.homeSessionDisplayMode = normalizeHomeSessionDisplayMode(merged.homeSessionDisplayMode);
+    const homeLimitDisplay = migrateHomeLimitDisplayMode(saved.homeLimitDisplayMode, saved.homeLimitDisplayModeDefaulted);
+    merged.homeLimitDisplayMode = homeLimitDisplay.mode;
+    merged.homeLimitDisplayModeDefaulted = true;
+    homeLimitDisplayModePending = homeLimitDisplay.changed;
     merged.showHomeLimitProviderNames = parseBoolean(merged.showHomeLimitProviderNames, false);
     merged.claudeCliFallbackEnabled = parseBoolean(merged.claudeCliFallbackEnabled, true);
+    merged.antigravityLocalLimitsEnabled = parseBoolean(merged.antigravityLocalLimitsEnabled, true);
     merged.codexResetForecastEnabled = parseBoolean(merged.codexResetForecastEnabled, false);
     merged.workbuddyQuotaTotalEnabled = parseBoolean(merged.workbuddyQuotaTotalEnabled, false);
     merged.limitsHistoryOpenMode = ['hover', 'click', 'off'].includes(merged.limitsHistoryOpenMode) ? merged.limitsHistoryOpenMode : 'hover';
@@ -2175,6 +2276,7 @@ function readSettings() {
     merged.edgeDockOffset = normalizeEdgeDockOffset(merged.edgeDockOffset);
     merged.edgeDockDisplayId = normalizeEdgeDockDisplayId(merged.edgeDockDisplayId);
     merged.edgeDockMode = normalizeEdgeDockMode(merged.edgeDockMode);
+    merged.edgeDockTriggerRange = normalizeEdgeDockTriggerRange(merged.edgeDockTriggerRange);
     merged.edgeDockHaptic = parseBoolean(merged.edgeDockHaptic, true);
     merged.edgeDockWarnColors = parseBoolean(merged.edgeDockWarnColors, false);
     merged.edgeDockMacBackdrop = normalizeEdgeDockBackdropMode(merged.edgeDockMacBackdrop);
@@ -2518,8 +2620,9 @@ function nativeMaterialOptions(source = settings, dashboard = false) {
 function applyNativeMaterial(source = settings) {
   syncNativeMaterialVisibility(mainWindow, nativeMaterialOptions(source));
   syncNativeMaterialVisibility(dashboardWindow, nativeMaterialOptions(source, true));
-  syncWindowsBackdrop(mainWindow, { enabled: nativeBlurEnabled(source), mode: source.windowsBackdrop });
-  syncWindowsBackdrop(dashboardWindow, { enabled: nativeBlurEnabled(source) });
+  const windowsMaterial = { enabled: nativeBlurEnabled(source), mode: source.windowsBackdrop };
+  syncWindowsBackdrop(mainWindow, windowsMaterial);
+  syncWindowsBackdrop(dashboardWindow, windowsMaterial);
   limitsHistoryController?.syncMaterial();
 }
 
@@ -2677,7 +2780,8 @@ function electronPresentationStats(stats) {
   const limitOptions = {
     localDeviceId: settings?.deviceId,
     syncActive: syncProvenanceActive(),
-    opencodeLocalLimitsEnabled: settings?.opencodeLocalLimitsEnabled === true
+    opencodeLocalLimitsEnabled: settings?.opencodeLocalLimitsEnabled === true,
+    antigravityLocalLimitsEnabled: settings?.antigravityLocalLimitsEnabled !== false
   };
   const aliases = settings?.modelAliases;
   const grouping = settings?.modelAliasGrouping;
@@ -3044,6 +3148,7 @@ async function startEmbeddedHub() {
     }
     const hub = createHub({
       port,
+      deployment: 'app',
       host: '0.0.0.0',
       secret: settings.hubHostSecret,
       syncSessionTitles: settings.hubSyncSessionTitles === true,
@@ -4743,8 +4848,13 @@ function pluginQuotaChanged() {
   });
 }
 
-function updateTrayDisplay() {
+function updateTrayDisplay({ wakeRenderer = true } = {}) {
   if (!tray || tray.isDestroyed()) return;
+  // A tray menu can switch to a live bitmap while the main renderer is asleep.
+  if (wakeRenderer && !screenUiSuspended && mainWindowHibernated && settings?.trayMode
+    && !quitRequested && rendererHiddenStatsNeeded()) {
+    createWindow(undefined, { popoverReveal: { requested: false } });
+  }
   // Keep the exported D-Bus menu in sync (radio checks, refresh state, Codex
   // accounts) — see the Linux note in createTray().
   refreshTrayContextMenu();
@@ -5043,8 +5153,20 @@ async function startStatsStream(options = {}) {
   }
 }
 
-function showPopover(clickPoint = null) {
-  if (!mainWindow || mainWindow.isDestroyed() || !tray) return;
+function showPopover(clickPoint = null, summon = false) {
+  if (!tray || quitRequested || screenUiSuspended) return;
+  if (!mainWindow || mainWindow.isDestroyed()) {
+    applyMacActivationPolicy();
+    createWindow(undefined, { popoverReveal: { requested: true, clickPoint, summon } });
+    return;
+  }
+  if (mainWindowPopoverReveal) {
+    mainWindowPopoverReveal.requested = true;
+    if (clickPoint) mainWindowPopoverReveal.clickPoint = clickPoint;
+    mainWindowPopoverReveal.summon ||= summon;
+    return;
+  }
+  cancelMainWindowHibernate();
   recentPopoverBlur = null;
   applyMacActivationPolicy();
   applyMacSpaceBehavior(true);
@@ -5056,6 +5178,7 @@ function showPopover(clickPoint = null) {
   const showSyncAt = Date.now();
   mainWindow.show();
   scheduleMainWindowShowSync(showSyncAt);
+  if (summon && mainWindow.isVisible()) sendMainWindowEvent('window:summoned');
   // The focus event itself may not fire a blur; the suppress flag covers the
   // case where macOS fires blur immediately after show because the click that
   // opened us still has the menu bar as the focused element.
@@ -5064,29 +5187,38 @@ function showPopover(clickPoint = null) {
 
 function hidePopover() {
   recentPopoverBlur = null;
-  if (!mainWindow || mainWindow.isDestroyed()) return;
-  if (mainWindow.isVisible()) pluginWindowActions.hide(mainWindow);
+  const win = mainWindow;
+  if (!win || win.isDestroyed() || !win.isVisible()) return;
+  pluginWindowActions.hide(win);
+  // macOS can change visibility through hide() without emitting 'hide'.
+  if (!win.isDestroyed() && !win.isVisible()) scheduleMainWindowHibernate(win);
 }
 
-function togglePopover(clickPoint = null, wasVisibleAtMouseDown = null, blurMatchedAtMouseDown = false) {
-  if (!mainWindow || mainWindow.isDestroyed()) return;
+function togglePopover(clickPoint = null, wasVisibleAtMouseDown = null, blurMatchedAtMouseDown = false, summon = false) {
+  const liveWindow = mainWindow && !mainWindow.isDestroyed() ? mainWindow : null;
   const action = popoverToggleAction({
-    visible: mainWindow.isVisible(),
-    focused: mainWindow.isFocused(),
+    visible: liveWindow?.isVisible(),
+    focused: liveWindow?.isFocused(),
     visibleAtMouseDown: wasVisibleAtMouseDown,
     blurMatchedAtMouseDown
   });
   recentPopoverBlur = null;
   if (action === 'hide') hidePopover();
-  else showPopover(clickPoint);
+  else showPopover(clickPoint, summon);
 }
 
 function focusExistingWindow() {
+  if (quitRequested || screenUiSuspended) return;
   applyMacActivationPolicy({ mainWindowVisible: true });
+  if (settings?.trayMode && (!mainWindow || mainWindow.isDestroyed() || mainWindowPopoverReveal)) {
+    showPopover();
+    return;
+  }
   if (!mainWindow || mainWindow.isDestroyed()) {
     createWindow();
     return;
   }
+  if (mainWindowPopoverReveal) return;
   if (mainWindow.isMinimized()) mainWindow.restore();
   if (settings?.trayMode) showPopover();
   else {
@@ -5242,7 +5374,17 @@ function currentSystemDarkTrayUi() {
 function pushSystemUiThemeToRenderer(dark) {
   const value = typeof dark === 'boolean' ? dark : currentSystemDarkTrayUi();
   currentSystemDarkUi = value;
-  if (!mainWindow || mainWindow.isDestroyed()) return;
+  if (!mainWindow || mainWindow.isDestroyed()) {
+    if (mainWindowHibernated) {
+      // The renderer is the only source of re-inked provider tray icons. Drop
+      // the cached bitmaps so the next tray paint cannot keep the previous
+      // theme's ink; the default icon stands in until the window wakes.
+      for (const id of Object.keys(providerTrayIcons)) delete providerTrayIcons[id];
+      defaultTrayIcon = null;
+      updateTrayDisplay();
+    }
+    return;
+  }
   try { mainWindow.webContents.send('theme:systemUi', { dark: value }); } catch (_) {}
 }
 
@@ -5853,7 +5995,7 @@ function ensureEdgeDockController() {
 
 function syncDockSurfaces(rendererSettings) {
   dockAppearancePreview = null;
-  if (!settings) return;
+  if (!settings || screenUiSuspended) return;
   syncNotch(rendererSettings);
   if (!canUseEdgeDock(settings)) {
     edgeDockController?.stop();
@@ -5932,15 +6074,19 @@ function unregisterWindowToggleShortcut() {
 }
 
 function handleWindowToggleShortcut() {
-  if (!mainWindow || mainWindow.isDestroyed()) return;
+  if (!mainWindow || mainWindow.isDestroyed()) {
+    if (settings?.trayMode) togglePopover(null, null, false, true);
+    else if (mainWindowHibernated) focusExistingWindow();
+    return;
+  }
   const action = windowToggleShortcutAction({
     trayMode: Boolean(settings?.trayMode),
     floatingBubbleCollapsed: Boolean(floatingBubbleState.collapsed),
     visible: mainWindow.isVisible(),
     minimized: typeof mainWindow.isMinimized === 'function' ? mainWindow.isMinimized() : false
   });
-  if (action === 'togglePopover') togglePopover();
-  else if (action === 'expandFloatingBubble') expandFloatingBubble();
+  if (action === 'togglePopover') return togglePopover(null, null, false, true);
+  if (action === 'expandFloatingBubble') expandFloatingBubble();
   else if (action === 'hideWindow') pluginWindowActions.hide(mainWindow);
   else focusExistingWindow();
   if (mainWindow && !mainWindow.isDestroyed() && mainWindow.isVisible()) sendMainWindowEvent('window:summoned');
@@ -5948,8 +6094,8 @@ function handleWindowToggleShortcut() {
 
 function handleTrayToggle(_tray, clickPoint = null, wasVisibleAtMouseDown = null, blurMatchedAtMouseDown = false, pointerActivation = false) {
   const action = trayToggleAction(settings);
-  if (action === 'togglePopover') togglePopover(clickPoint, wasVisibleAtMouseDown, blurMatchedAtMouseDown);
-  else if (action === 'focusWindow') focusExistingWindow();
+  if (action === 'togglePopover') return togglePopover(clickPoint, wasVisibleAtMouseDown, blurMatchedAtMouseDown, pointerActivation);
+  if (action === 'focusWindow') focusExistingWindow();
   // Explicit summons share one focus policy. OS app switching and accessibility
   // activation preserve their existing focus without requesting a reset.
   if (pointerActivation && mainWindow && !mainWindow.isDestroyed() && mainWindow.isVisible()) sendMainWindowEvent('window:summoned');
@@ -6257,11 +6403,18 @@ function enterTrayMode() {
     suspendWindowMaximized(mainWindow);
     setWindowMaximizable(mainWindow, false);
     applyMacSpaceBehavior(true);
-    pluginWindowActions.hide(mainWindow);
+    if (mainWindow.isVisible()) hidePopover();
+    else {
+      pluginWindowActions.hide(mainWindow);
+      // Hiding an already-hidden window emits no native hide event, so the
+      // quiet-period timer the show/hide cycle would arm never starts here.
+      scheduleMainWindowHibernate(mainWindow);
+    }
   }
 }
 
 function exitTrayMode() {
+  cancelMainWindowHibernate();
   applyMacActivationPolicy({ mainWindowVisible: true });
   if (mainWindow && !mainWindow.isDestroyed()) {
     // Not an unconditional false: leaving tray-only mode with hideAppIcon still
@@ -6277,8 +6430,12 @@ function exitTrayMode() {
       ...(typeof restore.x === 'number' ? { x: restore.x, y: restore.y } : {})
     });
     applyWindowSettings();
-    mainWindow.show();
-    restoreWindowMaximized(mainWindow, settings);
+    if (!mainWindowPopoverReveal) {
+      mainWindow.show();
+      restoreWindowMaximized(mainWindow, settings);
+    }
+  } else if (mainWindowHibernated) {
+    focusExistingWindow();
   }
   if (!shouldCreateTray(settings)) destroyTray();
   else ensureTray();
@@ -6425,6 +6582,7 @@ function reconfigureUsageRuntimeForMode() {
 // really gone before a new one starts on the same paths.
 function stopAll() {
   disposePluginRuntime();
+  cancelMainWindowHibernate();
   stopPersistBoundsTimer();
   stopLocalCollector({ skipCloseWatchers: true });
   stopStatsStream();
@@ -7163,8 +7321,13 @@ function revealWindow(target = mainWindow, options = {}) {
 function loadWindowFile(target, options = {}) {
   let revealed = false;
   const reveal = () => {
-    if (revealed) return;
+    if (revealed || target.isDestroyed()) return;
     revealed = true;
+    if (options.onAppearanceReady) {
+      cleanup();
+      options.onAppearanceReady();
+      return;
+    }
     if (settings?.trayMode) return; // stay hidden until tray click
     if (restoreWindowMaximizedForReveal(target, settings, {
       restoreMaximized: options.restoreMaximized === true,
@@ -7178,7 +7341,7 @@ function loadWindowFile(target, options = {}) {
   const onContentReady = (event) => {
     if (event.sender === target.webContents) reveal();
   };
-  const fallbackTimer = setTimeout(reveal, 2500);
+  const fallbackTimer = setTimeout(reveal, options.onAppearanceReady ? MAIN_WINDOW_WAKE_FALLBACK_MS : 2500);
   const cleanup = () => {
     clearTimeout(fallbackTimer);
     ipcMain.removeListener(readyChannel, onContentReady);
@@ -7196,12 +7359,14 @@ function loadWindowFile(target, options = {}) {
   const filePath = path.join(__dirname, 'renderer', 'index.html');
   const load = options.query ? target.webContents.loadFile(filePath, { query: options.query }) : target.webContents.loadFile(filePath);
   load.catch((error) => {
+    if (target.isDestroyed()) return;
     console.log(`[window] renderer load failed: ${error.message}`);
     reveal();
   });
 }
 
 function createWindow(boundsOverride, options = {}) {
+  cancelMainWindowHibernate();
   ensureSettingsLoaded();
   const collapsedFloatingBubble = options.collapsedFloatingBubble === true;
   const bounds = boundsOverride || restoredBounds() || DEFAULT_WINDOW;
@@ -7220,6 +7385,11 @@ function createWindow(boundsOverride, options = {}) {
     transparent: true,
     resizable: !collapsedFloatingBubble,
     show: false,
+    // A tray-mode widget can stay closed for a whole session. Electron paints a
+    // show:false window by default, which allocates a compositor surface (and its
+    // textures) even while the window is never revealed. Defer painting until the
+    // first reveal; the renderer still loads and reports readiness as before.
+    ...(settings?.trayMode ? { paintWhenInitiallyHidden: false } : {}),
     backgroundColor: '#00000000',
     ...appWindowIcon(),
     skipTaskbar: collapsedFloatingBubble || skipTaskbarForSettings(settings),
@@ -7243,6 +7413,9 @@ function createWindow(boundsOverride, options = {}) {
     })
     : new BrowserWindow(windowOptions);
   mainWindow = win;
+  mainWindowHibernated = false;
+  const popoverReveal = options.popoverReveal;
+  mainWindowPopoverReveal = popoverReveal || null;
   mainWindowChrome = { collapsedFloatingBubble };
   applyMacSpaceBehavior();
   applyWindowsChrome(win, { round: true });
@@ -7275,6 +7448,7 @@ function createWindow(boundsOverride, options = {}) {
   attachNativeMaterialVisibility(win, () => nativeMaterialOptions());
   applyNativeMaterial();
   win.on('focus', () => {
+    if (win === mainWindow) cancelMainWindowHibernate();
     stopFloatingBubbleAutoCollapseTimer();
   });
   win.on('blur', () => {
@@ -7315,14 +7489,22 @@ function createWindow(boundsOverride, options = {}) {
   // The dock's own windows would otherwise keep the process alive after the
   // last real window closes, which window-all-closed relies on for quitting.
   win.on('closed', () => {
-    if (quitRequested || process.platform === 'darwin') return;
+    if (quitRequested || mainWindowHibernated || process.platform === 'darwin') return;
     if (BaseWindow.getAllWindows().every((other) => (edgeDockController?.owns(other) || notchController?.owns(other)))) app.quit();
   });
   win.on('show', () => syncPluginWindowVisibility(win));
   win.on('hide', () => syncPluginWindowVisibility(win));
   win.on('minimize', () => syncPluginWindowVisibility(win));
   win.on('restore', () => syncPluginWindowVisibility(win));
+  win.on('hide', () => scheduleMainWindowHibernate(win));
+  for (const event of ['show', 'restore', 'closed']) {
+    win.on(event, () => { if (win === mainWindow) cancelMainWindowHibernate(); });
+  }
   if (!options.previousWindow) win.webContents.on('did-finish-load', () => {
+    // A window rebuilt after hibernation can share a renderer with the dock or
+    // notch, which leaves an opaque canvas over the native material (as with
+    // the Dashboard). Restore transparency on every completed load.
+    if (process.platform === 'darwin') win.setBackgroundColor('#00000000');
     if (win === mainWindow) lastRendererStatsFingerprint = null;
     sendFloatingBubbleState();
     // Only report a window that is already on screen. A window still awaiting its
@@ -7341,6 +7523,12 @@ function createWindow(boundsOverride, options = {}) {
     inactive: options.inactive === true,
     collapsedFloatingBubble,
     restoreMaximized: !collapsedFloatingBubble,
+    onAppearanceReady: popoverReveal ? () => {
+      if (win !== mainWindow || win.isDestroyed() || quitRequested) return;
+      mainWindowPopoverReveal = null;
+      if (!settings?.trayMode) focusExistingWindow();
+      else if (popoverReveal.requested) showPopover(popoverReveal.clickPoint, popoverReveal.summon);
+    } : undefined,
     query: {
       ...floatingBubbleInitialRendererQuery(floatingBubbleState, {
         collapsedWindow: collapsedFloatingBubble,
@@ -7348,15 +7536,21 @@ function createWindow(boundsOverride, options = {}) {
         viewState: rendererViewState
       }),
       ...(settings?.trayMode ? { windowHidden: '1' } : {}),
+      ...(popoverReveal ? { hibernateReveal: '1' } : {}),
       ...(settings?.systemGlass === false ? { systemGlassDisabled: '1' } : {})
     }
   });
+  // A tray startup window is created hidden and may never be shown. Start the
+  // same hibernate clock here so a window that never emits a native hide event
+  // still releases its renderer after the quiet period.
+  if (settings?.trayMode) scheduleMainWindowHibernate(win);
 }
 
 function handleZoomShortcut(event, input) {
   if (input.type !== 'keyDown') return;
   const key = input.key;
-  if (key === 'Escape' && !input.control && !input.meta && !input.alt && !input.shift && canUseFloatingBubble(settings)) {
+  if (key === 'Escape' && mainWindow && !mainWindow.isDestroyed()
+    && !input.control && !input.meta && !input.alt && !input.shift && canUseFloatingBubble(settings)) {
     event.preventDefault();
     maybeCollapseFloatingBubble(mainWindow.getBounds());
     return;
@@ -7370,7 +7564,7 @@ function handleZoomShortcut(event, input) {
 function replaceMainWindow(bounds, options = {}) {
   const epoch = ++mainWindowReplacementEpoch;
   mainWindowReplacementTask = mainWindowReplacementTask.then(async () => {
-    if (epoch !== mainWindowReplacementEpoch) return;
+    if (epoch !== mainWindowReplacementEpoch || screenUiSuspended) return;
     const old = mainWindow;
     if (process.platform === 'win32') {
       if (!mainWindowChrome.collapsedFloatingBubble) {
@@ -7466,7 +7660,7 @@ function createDashboardWindow() {
   dashboardWindowReady = false;
   applyWindowsChrome(win, { round: true });
   suppressLinuxSystemContextMenu(win);
-  syncWindowsBackdrop(win, { enabled: nativeBlurEnabled() });
+  syncWindowsBackdrop(win, { enabled: nativeBlurEnabled(), mode: settings.windowsBackdrop });
   attachNativeMaterialVisibility(win, () => nativeMaterialOptions(settings, true));
   syncNativeMaterialVisibility(win, nativeMaterialOptions(settings, true));
   win.webContents.setWindowOpenHandler(({ url }) => {
@@ -7536,10 +7730,38 @@ function appIsIdleForHeapCollection() {
   return !quitRequested && focusedAppWindow() === null;
 }
 
+function suspendScreenUi() {
+  notchController?.setLocked(true);
+  // Electron emits powerMonitor lock-screen/unlock-screen only on macOS and
+  // Windows. Windows keeps its retained BaseWindow path, so suspension is
+  // macOS-only; Linux keeps the quiet-period hibernate timer.
+  if (screenUiSuspended || quitRequested || !settings?.trayMode
+    || process.platform !== 'darwin' || hasDependentAppWindow()) return;
+  screenUiSuspended = true;
+  edgeDockController?.stop();
+  notchController?.stop({ preserveSummary: true });
+  hidePopover();
+  hibernateMainWindow();
+  // A parked history card has no owner and can be rebuilt on the next open.
+  limitsHistoryController?.dispose();
+}
+
+function resumeScreenUi() {
+  const wasSuspended = screenUiSuspended;
+  screenUiSuspended = false;
+  notchController?.setLocked(false);
+  if (!wasSuspended || quitRequested) return;
+  syncDockSurfaces();
+  // Use cached artwork for this refresh. The normal tray update can wake the
+  // main renderer later if its selected artwork requires a fresh bitmap.
+  updateTrayDisplay({ wakeRenderer: false });
+  if (!settings?.trayMode) focusExistingWindow();
+}
+
 app.whenReady().then(() => {
   ensureSettingsLoaded();
-  powerMonitor.on('lock-screen', () => notchController?.setLocked(true));
-  powerMonitor.on('unlock-screen', () => notchController?.setLocked(false));
+  powerMonitor.on('lock-screen', suspendScreenUi);
+  powerMonitor.on('unlock-screen', resumeScreenUi);
   void sessionProxy.apply();
   // Switching the OS between light and dark repaints the taskbar underneath an
   // icon we have already handed to the shell, so the renderer has to recompose
@@ -7624,11 +7846,14 @@ app.whenReady().then(() => {
   syncDockSurfaces();
   ipcMain.handle('settings:get', () => settingsForRenderer());
   ipcMain.handle('appearance:getBackgroundImage', () => getBackgroundImage(app.getPath('userData')));
-  ipcMain.handle('appearance:chooseBackgroundImage', async () => {
-    const result = await dialog.showOpenDialog(mainWindow, {
+  ipcMain.handle('appearance:chooseBackgroundImage', async (event) => {
+    /** @type {import('electron').OpenDialogOptions} */
+    const options = {
       properties: ['openFile'],
       filters: [{ name: 'Images', extensions: ['png', 'jpg', 'jpeg'] }]
-    });
+    };
+    const owner = mainWindow && !mainWindow.isDestroyed() ? mainWindow : actionWindowForEvent(BrowserWindow, event, null);
+    const result = await (owner ? dialog.showOpenDialog(owner, options) : dialog.showOpenDialog(options));
     if (result.canceled || !result.filePaths[0]) return { canceled: true };
     return { bytes: await importBackgroundImage(result.filePaths[0], app.getPath('userData'), nativeImage) };
   });
@@ -7854,6 +8079,7 @@ app.whenReady().then(() => {
     const previousFloatingBubbleCustomLayout = JSON.stringify(settings.floatingBubbleCustomLayout || {});
     const previousShowTrayProviderBadge = settings.showTrayProviderBadge;
     const previousOpenCodeLocalLimitsEnabled = settings.opencodeLocalLimitsEnabled === true;
+    const previousAntigravityLocalLimitsEnabled = settings.antigravityLocalLimitsEnabled !== false;
     const previousCurrency = settings.currency;
     const previousCompactTokenUnits = settings.compactTokenUnits;
     const previousLanguage = settings.language;
@@ -8008,6 +8234,7 @@ app.whenReady().then(() => {
       edgeDockOffset: normalizeEdgeDockOffset(patch.edgeDockOffset ?? settings.edgeDockOffset),
       edgeDockDisplayId: normalizeEdgeDockDisplayId(patch.edgeDockDisplayId ?? settings.edgeDockDisplayId),
       edgeDockMode: normalizeEdgeDockMode(patch.edgeDockMode ?? settings.edgeDockMode),
+      edgeDockTriggerRange: normalizeEdgeDockTriggerRange(patch.edgeDockTriggerRange ?? settings.edgeDockTriggerRange),
       edgeDockHaptic: parseBoolean(patch.edgeDockHaptic ?? settings.edgeDockHaptic, true),
       edgeDockWarnColors: parseBoolean(patch.edgeDockWarnColors ?? settings.edgeDockWarnColors, false),
       edgeDockMacBackdrop: normalizeEdgeDockBackdropMode(patch.edgeDockMacBackdrop ?? settings.edgeDockMacBackdrop),
@@ -8051,7 +8278,9 @@ app.whenReady().then(() => {
       homeModuleCounts: normalizeHomeModuleCounts(patch.homeModuleCounts, settings.homeModuleCounts),
       showHomeLimitBars: parseBoolean(patch.showHomeLimitBars ?? settings.showHomeLimitBars, false),
       showExactHomeTrendTokens: parseBoolean(patch.showExactHomeTrendTokens ?? settings.showExactHomeTrendTokens, false),
+      homeVendorColors: parseBoolean(patch.homeVendorColors ?? settings.homeVendorColors, false),
       homeLimitDisplayMode: normalizeHomeLimitDisplayMode(patch.homeLimitDisplayMode ?? settings.homeLimitDisplayMode),
+      homeSessionDisplayMode: normalizeHomeSessionDisplayMode(patch.homeSessionDisplayMode ?? settings.homeSessionDisplayMode),
       showHomeLimitProviderNames: parseBoolean(patch.showHomeLimitProviderNames ?? settings.showHomeLimitProviderNames, false),
       homeLimitProviderOrder: patch.homeLimitProviderOrder !== undefined ? migrateHomeLimitProviderOrder(patch.homeLimitProviderOrder) : (settings.homeLimitProviderOrder || ''),
       hiddenHomeLimitProviders: patch.hiddenHomeLimitProviders !== undefined ? normalizeHiddenLimitProviders(patch.hiddenHomeLimitProviders) : normalizeHiddenLimitProviders(settings.hiddenHomeLimitProviders),
@@ -8080,6 +8309,7 @@ app.whenReady().then(() => {
       limitsHistoryOpenMode: ['hover', 'click', 'off'].includes(patch.limitsHistoryOpenMode ?? settings.limitsHistoryOpenMode) ? (patch.limitsHistoryOpenMode ?? settings.limitsHistoryOpenMode) : 'hover',
       claudePrepaidBalanceEnabled: parseBoolean(patch.claudePrepaidBalanceEnabled ?? settings.claudePrepaidBalanceEnabled, true),
       claudeCliFallbackEnabled: parseBoolean(patch.claudeCliFallbackEnabled ?? settings.claudeCliFallbackEnabled, true),
+      antigravityLocalLimitsEnabled: parseBoolean(patch.antigravityLocalLimitsEnabled ?? settings.antigravityLocalLimitsEnabled, true),
       codexResetForecastEnabled: parseBoolean(patch.codexResetForecastEnabled ?? settings.codexResetForecastEnabled, false),
       workbuddyQuotaTotalEnabled: parseBoolean(patch.workbuddyQuotaTotalEnabled ?? settings.workbuddyQuotaTotalEnabled, false),
       showCodexAdditionalLimits: parseBoolean(patch.showCodexAdditionalLimits ?? settings.showCodexAdditionalLimits, true),
@@ -8247,7 +8477,8 @@ app.whenReady().then(() => {
       if (settings.discordRpcEnabled && latestStats) updateDiscordRpcDisplay(latestStats);
       refreshExchangeRates();              // async: fetch if stale, then re-push
     }
-    if ((settings.opencodeLocalLimitsEnabled === true) !== previousOpenCodeLocalLimitsEnabled) {
+    if ((settings.opencodeLocalLimitsEnabled === true) !== previousOpenCodeLocalLimitsEnabled
+      || (settings.antigravityLocalLimitsEnabled !== false) !== previousAntigravityLocalLimitsEnabled) {
       // Re-project the cached aggregate immediately. The Hub can be offline and
       // therefore may not send another frame after this local-only setting changes.
       refreshLimitStatsPresentation();
@@ -8288,10 +8519,6 @@ app.whenReady().then(() => {
       notchController.previewScale(patch.notchCustomScale);
     }
     return true;
-  });
-  ipcMain.handle('settings:displayPreview', (event, surface, phase, slots) => {
-    if (event.sender !== mainWindow?.webContents) return null;
-    return require('./displayPreview').buildDisplayPreview(settingsForRenderer(), surface, phase, process.platform, Date.now(), slots, pluginRuntime?.limitsSnapshot());
   });
   ipcMain.on('window:viewState', (_event, patch) => {
     updateRendererViewState(patch);
@@ -8501,6 +8728,7 @@ app.whenReady().then(() => {
     return repositoryStars.get();
   });
   ipcMain.handle('app:getInfo', () => ({
+    resettableSettingsDefaults: resettableSettingsDefaults(),
     notchCapabilities: notchController?.getCapabilities() || null,
     version: app.getVersion(),
     platform: process.platform,
@@ -8538,14 +8766,15 @@ app.whenReady().then(() => {
   // paths stay local by design — they carry the user's home directory and never
   // go on the wire — so the renderer asks the main process for them instead.
   //
-  // Probe only the client whose detail panel is open. The renderer caches the
-  // result for the current health snapshot, or for the current device/client
-  // pair when the tool is not tracked, avoiding eager filesystem work.
+  // Probe a single client's roots when its detail panel is open, or return
+  // only client ids with an existing root when the Collection section is
+  // expanded. The renderer caches both to avoid eager filesystem work.
   const clientSourceIpcHandlers = createClientSourceIpcHandlers({
     knownClients: KNOWN_CLIENTS,
     trackedClients: () => trackedClientSet(clientsCsvForSetting(settings?.clients)),
     visibleDiagnosticRoots: (clients) => visibleDiagnosticRoots(clients, { customScanPaths: settings?.customScanPaths }),
     clientDiagnosticRoots: (clients) => clientDiagnosticRoots(clients, { customScanPaths: settings?.customScanPaths }),
+    detectWslClients: (clients) => (settings?.wslScanEnabled === true ? detectWslClientsAsync({ clients }) : []),
     showItemInFolder: (target) => shell.showItemInFolder(target),
     openPath: (target) => shell.openPath(target),
     revealClientSyncLock: () => {
@@ -8562,6 +8791,7 @@ app.whenReady().then(() => {
     onRescanError: (error) => console.log(`[usage-runtime] rescan failed: ${error.message}`)
   });
   ipcMain.handle('usage:clientSources', (_event, clientId) => clientSourceIpcHandlers.clientSources(clientId));
+  ipcMain.handle('usage:untrackedClientsWithData', () => clientSourceIpcHandlers.untrackedClientsWithData());
   ipcMain.handle('usage:pickCustomScanPath', async (_event, clientId) => {
     const client = String(clientId || '').trim().toLowerCase();
     if (!CUSTOM_SCAN_CLIENT_IDS.includes(client)) return { ok: false, error: 'unsupported-client' };
@@ -8775,7 +9005,11 @@ app.whenReady().then(() => {
     }
     actionWindowForEvent(BrowserWindow, event, mainWindow)?.close();
   });
-  ipcMain.handle('dashboard:open', () => { createDashboardWindow(); return true; });
+  ipcMain.handle('dashboard:open', () => {
+    if (screenUiSuspended) return false;
+    createDashboardWindow();
+    return true;
+  });
   ipcMain.handle('dashboard:getHistory', (_event, options) => getDashboardHistory(options));
   ipcMain.on('dashboard:ready', (event) => {
     const win = BrowserWindow.fromWebContents(event.sender);
@@ -8789,6 +9023,13 @@ app.whenReady().then(() => {
   ipcMain.on('dashboard:minimize', (event) => { BrowserWindow.fromWebContents(event.sender)?.minimize(); });
   ipcMain.on('dashboard:close', (event) => { BrowserWindow.fromWebContents(event.sender)?.close(); });
   app.on('activate', () => {
+    if (screenUiSuspended) return;
+    // A parked history window is not owned by the dock or notch, so the normal
+    // activation filter would return 'none' and never reach the wake path.
+    if (mainWindowHibernated) {
+      focusExistingWindow();
+      return;
+    }
     const action = activateWindowAction({
       mainWindow,
       windows: BaseWindow.getAllWindows(),
@@ -8891,7 +9132,9 @@ app.whenReady().then(() => {
 });
 
 app.on('second-instance', focusExistingWindow);
-app.on('window-all-closed', () => { if (process.platform !== 'darwin') app.quit(); });
+app.on('window-all-closed', () => {
+  if (process.platform !== 'darwin' && !mainWindowHibernated) app.quit();
+});
 // Every window shares one renderer, so a crash blanks them all. Main is the
 // source of truth and republishes settings and stats on load, so reload each
 // crashed page rather than leaving the widget dead. A page that crashes again
@@ -8917,6 +9160,7 @@ app.on('render-process-gone', (_event, contents, details) => {
 // taking the quit over would cancel an OS-initiated logout or restart on macOS.
 app.on('before-quit', () => {
   quitRequested = true;
+  cancelMainWindowHibernate();
   idleHeapCollector?.stop();
   limitsHistoryController?.dispose();
   limitsHistoryStore?.closeSync();

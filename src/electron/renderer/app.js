@@ -151,6 +151,14 @@ const limitResetAnimator = window.TokenMonitorLimitResetAnimator.createLimitRese
   cancelAnimationFrame: (handle) => cancelAnimationFrame(handle),
   performance
 });
+const homeLimitMotion = window.TokenMonitorHomeLimitMotion.createHomeLimitMotion({
+  motion: limitResetMotionApi,
+  resetEasing: window.TokenMonitorLimitResetAnimator.EASING,
+  numbers: tokenNumberAnimationApi,
+  numberMode: () => tokenNumberAnimationApi.normalize(state.settings?.tokenNumberAnimation),
+  prefersReducedMotion: () => prefersReducedMotion(),
+  formatPercent: (value) => formatPercent(value)
+});
 const appUpdatePresentationApi = window.TokenMonitorAppUpdatePresentation;
 const accountIdentityApi = window.TokenMonitorAccountIdentity;
 const clientStatusPresentationApi = window.TokenMonitorClientStatusPresentation;
@@ -349,6 +357,10 @@ state.codexResetForecast = null;
 state.codexResetForecastBusy = false;
 state.codexResetForecastRequestedAt = 0;
 state.codexResetForecastRetryTimer = null;
+state.untrackedWithData = [];
+state.untrackedWithDataProbed = null;
+state.untrackedWithDataPathsKey = '';
+state.untrackedWithDataRequest = 0;
 state.clientRescans = clientRescanStateApi.createClientRescanState({
   onChange: (clientId) => {
     if (state.clientHealthExpanded === clientId || (state.clientHealthExpanded === 'qoder' && qoderDisplayApi.isQoder(clientId))) refillOpenClientHealthPanel();
@@ -387,6 +399,7 @@ state.sessionPage = 0;
 state.sessionPagerSignature = '';
 state.sessionSearchOpen = false;
 state.sessionSearchQuery = '';
+state.sessionSort = 'recent';
 state.sessionRowsCache = null;
 let directBreakdownOverride = null;
 state.homeActivitySettingsExpanded = false;
@@ -410,6 +423,7 @@ const els = {
   subscriptionList: document.getElementById('subscriptionList'), subscriptionAddForm: document.getElementById('subscriptionAddForm'), subscriptionAddToggle: document.getElementById('subscriptionAddToggle'), subscriptionAddDetails: document.getElementById('subscriptionAddDetails'), subscriptionProviderInput: document.getElementById('subscriptionProviderInput'), subscriptionAccountInput: document.getElementById('subscriptionAccountInput'), subscriptionPlanNameInput: document.getElementById('subscriptionPlanNameInput'), subscriptionAmountInput: document.getElementById('subscriptionAmountInput'), subscriptionCurrencyInput: document.getElementById('subscriptionCurrencyInput'), subscriptionIntervalCountInput: document.getElementById('subscriptionIntervalCountInput'), subscriptionIntervalInput: document.getElementById('subscriptionIntervalInput'), subscriptionStartDateInput: document.getElementById('subscriptionStartDateInput'), subscriptionAutoRenewInput: document.getElementById('subscriptionAutoRenewInput'), subscriptionNextRenewalInput: document.getElementById('subscriptionNextRenewalInput'), subscriptionNote: document.getElementById('subscriptionNote'), subscriptionOrphanNotice: document.getElementById('subscriptionOrphanNotice'), subscriptionOrphanText: document.getElementById('subscriptionOrphanText'), subscriptionOrphanAdopt: document.getElementById('subscriptionOrphanAdopt'), subscriptionOrphanDiscard: document.getElementById('subscriptionOrphanDiscard'), subscriptionSyncError: document.getElementById('subscriptionSyncError'), subscriptionNextRenewalLabel: document.getElementById('subscriptionNextRenewalLabel'), subscriptionNextRenewalNote: document.getElementById('subscriptionNextRenewalNote'), subscriptionSubmit: document.getElementById('subscriptionSubmit'), subscriptionCancelEdit: document.getElementById('subscriptionCancelEdit'), subscriptionTotalRow: document.getElementById('subscriptionTotalRow'), subscriptionErrorMessage: document.getElementById('subscriptionErrorMessage'), subscriptionPlanFields: document.getElementById('subscriptionPlanFields'), subscriptionTopUpFields: document.getElementById('subscriptionTopUpFields'), subscriptionTopUpList: document.getElementById('subscriptionTopUpList'), subscriptionTopUpDateInput: document.getElementById('subscriptionTopUpDateInput'), subscriptionTopUpAmountInput: document.getElementById('subscriptionTopUpAmountInput'), subscriptionTopUpAddButton: document.getElementById('subscriptionTopUpAddButton'), subscriptionAmountRow: document.getElementById('subscriptionAmountRow'), subscriptionTopUpHeadingRow: document.getElementById('subscriptionTopUpHeadingRow'), subscriptionKindInputs: [...document.querySelectorAll('input[name="subscriptionKind"]')]
 };
 Object.assign(els, {
+  sessionSortToggle: document.getElementById('sessionSortToggle'),
   sessionSearchToggle: document.getElementById('sessionSearchToggle'),
   sessionSearchHost: document.getElementById('sessionSearchHost'),
   sessionSearchInput: document.getElementById('sessionSearchInput'),
@@ -473,6 +487,8 @@ Object.assign(els, {
   edgeDockMoreOptionsDetails: document.getElementById('edgeDockMoreOptionsDetails'),
   edgeDockSideInputs: Array.from(document.querySelectorAll('input[name="edgeDockSide"]')),
   edgeDockModeInputs: Array.from(document.querySelectorAll('input[name="edgeDockMode"]')),
+  edgeDockTriggerRangeRow: document.getElementById('edgeDockTriggerRangeRow'),
+  edgeDockTriggerRangeInputs: Array.from(document.querySelectorAll('input[name="edgeDockTriggerRange"]')),
   edgeDockBubbleSizeInputs: Array.from(document.querySelectorAll('input[name="edgeDockBubbleSize"]')),
   edgeDockBubbleCustomScaleRow: document.getElementById('edgeDockBubbleCustomScaleRow'),
   edgeDockBubbleCustomScaleInput: document.getElementById('edgeDockBubbleCustomScaleInput'),
@@ -519,6 +535,7 @@ Object.assign(els, {
   secretPasteButton: document.getElementById('secretPasteButton'),
   hubStatusRow: document.getElementById('hubStatusRow'),
   syncDevicePanel: document.getElementById('syncDevicePanel'),
+  syncMap: document.getElementById('syncMap'),
   syncPanelConnection: document.getElementById('syncPanelConnection'),
   syncPanelSignal: document.getElementById('syncPanelSignal'),
   syncPanelState: document.getElementById('syncPanelState'),
@@ -527,7 +544,6 @@ Object.assign(els, {
   syncPanelBuild: document.getElementById('syncPanelBuild'),
   syncPanelCount: document.getElementById('syncPanelCount'),
   syncDeviceList: document.getElementById('syncDeviceList'),
-  syncPanelOpenDevices: document.getElementById('syncPanelOpenDevices'),
   hubAddressList: document.getElementById('hubAddressList'),
   syncUploadIntervalInput: document.getElementById('syncUploadIntervalInput'),
   collectionCadenceInput: document.getElementById('collectionCadenceInput'),
@@ -683,6 +699,7 @@ const syncModeSelect = window.TokenMonitorSelectControl?.enhance(els.hubModeOpti
   getOptionMeta: option => ({ description: t(SYNC_MODE_DESCRIPTIONS[option.value]), icon: syncModeIcons[option.value] })
 });
 window.addEventListener('unload', () => syncModeSelect?.destroy(), { once: true });
+for (const slot of document.querySelectorAll('[data-sync-icon]')) slot.replaceChildren(syncModeIcons[slot.dataset.syncIcon](document));
 window.addEventListener('unload', () => {
   for (const select of document.querySelectorAll('.device-icon-select, #deviceIconInput')) deviceIconsApi.destroyDeviceIconSelect(select);
 }, { once: true });
@@ -827,7 +844,7 @@ let displaySettings = null;
 function applySettingsSectionDom(id, open) {
   if (id === 'sync' && !open) { syncModeSelect?.close(); syncContentForm?.closeHelp(); }
   if (id === 'appearance' && !open) appearanceColorPicker.close();
-  if (id === 'window' && !open) stopWindowShortcutRecording();
+  if (id === 'window' && !open) { stopWindowShortcutRecording(); displaySettings?.close?.(); }
   const toggle = document.querySelector(`[data-settings-section="${id}"]`);
   const details = document.getElementById(`${id}SettingsDetails`);
   const group = toggle?.closest('.settings-collapsible-group');
@@ -852,6 +869,7 @@ function setSettingsSectionExpanded(section, expanded) {
   if (id === 'sync' && next) void syncContentForm?.refresh();
   if (id === 'general' && next) void refreshAboutStars();
   if (id === 'plugins' && next) void pluginSettingsPanel?.refresh().then(renderSettingsSummaries);
+  if (id === 'tools' && next) loadUntrackedClientsWithData();
 }
 
 // Expanding a section auto-collapses the previously open one. When that one
@@ -886,11 +904,13 @@ function shouldAnchorSettingsScroll(section, expanding) {
   return SETTINGS_SECTION_IDS.slice(0, sectionIndex).some(id => state.settingsSections[id]);
 }
 
-function anchorSettingsScroll(anchorEl, mutate) {
+// targetOffset pins the header at that distance from the panel top instead of
+// where it currently sits.
+function anchorSettingsScroll(anchorEl, mutate, targetOffset) {
   cancelSettingsScrollAnchor();
   const panel = els.settingsPanel;
   if (!panel || !anchorEl) { mutate(); return; }
-  const offset = anchorEl.getBoundingClientRect().top - panel.getBoundingClientRect().top;
+  const offset = targetOffset ?? anchorEl.getBoundingClientRect().top - panel.getBoundingClientRect().top;
   mutate();
   const reducedMotion = prefersReducedMotion();
   const deadline = performance.now() + SETTINGS_SCROLL_ANCHOR_MS;
@@ -2204,6 +2224,7 @@ function settleMotionAnimations() {
   updateTotalCompact(state.currentTotal);
   settleRowNumberAnimations();
   limitResetAnimator.settle(els.limitsPanel);
+  homeLimitMotion.settle();
   for (const animation of document.getAnimations?.() || []) {
     try { animation.finish(); } catch (_) { animation.cancel(); }
   }
@@ -2356,9 +2377,8 @@ function animateBreakdownFrom(snapshot, { duration = 420, synchronized = false }
   }
   let enteringIndex = 0;
   for (const row of motionRows) {
-    // An unavailable native session value must stay a semantic label. The
-    // ordinary row-number tween formats its zero placeholder as "0", which
-    // would turn unknown data into a false numeric reading after every render.
+    // Show the zero placeholder immediately. Tweening from a previous reading
+    // would briefly show token values we don't have for this session.
     if (row.dataset.tokenDataUnavailable === 'true') {
       cancelRowNumberAnimation(row.querySelector('.row-value'));
       continue;
@@ -2503,20 +2523,10 @@ function animateHomeHistoryVisuals(activityScroll, activityCanvas, trendChart) {
     });
   });
 
-  const line = trendChart?.querySelector('.area-line-stroke');
-  const fill = trendChart?.querySelector('.area-line-fill');
-  const length = line?.getTotalLength?.() || 0;
-  if (length > 0) {
-    line.animate([
-      { strokeDasharray: `${length} ${length}`, strokeDashoffset: length },
-      { strokeDasharray: `${length} ${length}`, strokeDashoffset: 0 }
-    ], {
-      duration: HOME_HISTORY_MOTION_MS,
-      easing: 'cubic-bezier(0.22, 1, 0.36, 1)',
-      fill: 'backwards'
-    });
-  }
-  fill?.animate([
+  // Wipe the line and its fill in together. A dash-offset draw-in would need the
+  // on-screen path length: the stroke is non-scaling, so dashes are laid out in
+  // screen space while getTotalLength() reports stretched viewBox units.
+  trendChart?.querySelector('.area-line')?.animate([
     { clipPath: 'inset(0 100% 0 0)' },
     { clipPath: 'inset(0 0 0 0)' }
   ], {
@@ -3069,26 +3079,26 @@ function updateRow(row, { name, subtitle, subtitleIdentity, subagentCountLabel, 
   setHoverMarqueeText(detailEl, shownDetail);
   detailEl.classList.toggle('hidden', !shownDetail);
   const valueEl = row.querySelector('.row-value');
+  const tokenLabel = formatNumber(value);
   if (tokenDataUnavailable === true) {
     row.dataset.tokenDataUnavailable = 'true';
     cancelRowNumberAnimation(valueEl);
-    valueEl.textContent = t('detailTokenUnavailable') || 'Unavailable';
+    valueEl.textContent = tokenLabel;
   } else {
     delete row.dataset.tokenDataUnavailable;
     // Metadata-only updates must not replace the glyphs of a matching roll.
     // Changed readings are restarted from the captured visual value below.
     if (rowNumberAnimations.get(valueEl)?.target !== Number(value)) {
       cancelRowNumberAnimation(valueEl);
-      valueEl.textContent = formatNumber(value);
+      valueEl.textContent = tokenLabel;
     }
   }
   valueEl.dataset.motionValue = String(Number(value) || 0);
   row.dataset.motionValue = String(Number(value) || 0);
   const costEl = row.querySelector('.row-cost');
   const costLabelText = formatCost(cost || 0, unpricedTokens);
-  costEl.textContent = tokenDataUnavailable === true ? ''
-    : unpricedTokens > 0 ? (cost > 0 ? `${formatCost(cost)} + ?` : '—') : costLabelText;
-  costEl.setAttribute('aria-label', tokenDataUnavailable === true ? '' : costLabelText);
+  costEl.textContent = unpricedTokens > 0 ? (cost > 0 ? `${formatCost(cost)} + ?` : '—') : costLabelText;
+  costEl.setAttribute('aria-label', costLabelText);
   // The row builder already applied the shared gate (recent enough to have a
   // reading), so this draws whatever arrived rather than re-deciding from
   // `running` - that second gate is exactly what made the dock card and this
@@ -3160,10 +3170,7 @@ function updateRow(row, { name, subtitle, subtitleIdentity, subagentCountLabel, 
   }
   const rowHead = row.querySelector('.row-head');
   const hasAccordion = row.classList.contains('has-accordion');
-  const tokenLabel = tokenDataUnavailable === true
-    ? (t('detailTokenUnavailable') || 'Unavailable')
-    : formatNumber(value);
-  const costLabel = tokenDataUnavailable === true ? '' : `, ${t('dashboard.stat.totalCost')}: ${formatCost(cost || 0, unpricedTokens)}`;
+  const costLabel = `, ${t('dashboard.stat.totalCost')}: ${costLabelText}`;
   sessionRowsApi.applyBreakdownRowSemantics(row, rowHead, {
     interactive,
     hasAccordion,
@@ -3280,6 +3287,9 @@ function setSessionSearchStatus(query, count) {
 function syncSessionSearchChrome() {
   const visible = state.breakdown === 'session' && !state.openSession;
   const open = visible && state.sessionSearchOpen;
+  els.sessionSortToggle.classList.toggle('hidden', !visible);
+  const sortLabel = t(state.sessionSort === 'tokens' ? 'sortMostTokens' : 'sortNewest').replace(/^↕ /, '');
+  if (els.sessionSortToggle.textContent !== sortLabel) els.sessionSortToggle.textContent = sortLabel;
   els.sessionSearchToggle?.classList.toggle('hidden', !visible);
   els.sessionSearchToggle?.classList.toggle('is-active', open);
   els.sessionSearchToggle?.setAttribute('aria-expanded', String(open));
@@ -3700,7 +3710,7 @@ function sessionRowsForPeriod(period) {
   const options = sessionPresentationOptions();
   if (state.breakdown === 'session') options.rowLabelCache = sessionRowLabelCache;
   const rows = rawSessionRowsForPeriod(period, options);
-  if (rows.length > 0) return sessionRowsApi.groupSessionRows(rows, options);
+  if (rows.length > 0) return sessionRowsApi.groupSessionRows(rows, { ...options, sortBy: state.sessionSort });
   if (Number(period?.totalTokens || 0) === 0) return [];
   return modelRowsForPeriod(period);
 }
@@ -5186,8 +5196,10 @@ function formatHomeLimitWindowValue(window, showUsed) {
     }
     return formatCompactMoney(window.remaining, window.currency, state.settings?.compactTokenUnits, currentLocale());
   }
+  if (optionalFiniteNumber(window?.remainingPercent) == null && optionalFiniteNumber(window?.usedPercent) == null) return '—';
   const percent = limitFillPercent(window?.remainingPercent, window?.usedPercent, showUsed);
-  return `${formatPercent(percent)} ${limitModeSuffix(showUsed)}`;
+  // The module heading names the mode, so the reading stays a bare number.
+  return formatPercent(percent);
 }
 
 
@@ -5802,6 +5814,7 @@ function sessionDetailBack() {
 function renderSessionDetail({ detail, loading, error, preserveScroll = false } = {}) {
   els.sessionToolFilter.classList.add('hidden');
   els.sessionSearchHost?.classList.add('hidden');
+  els.sessionSortToggle?.classList.add('hidden');
   els.sessionSearchToggle?.classList.add('hidden');
   els.breakdown.classList.add('hidden');
   els.sessionDetail.classList.remove('hidden');
@@ -6031,6 +6044,7 @@ function sessionGroupRunNode(row, max, parent) {
 function renderSessionGroupDetail(request) {
   els.sessionToolFilter.classList.add('hidden');
   els.sessionSearchHost?.classList.add('hidden');
+  els.sessionSortToggle?.classList.add('hidden');
   els.sessionSearchToggle?.classList.add('hidden');
   els.breakdown.classList.add('hidden');
   els.sessionDetail.classList.remove('hidden');
@@ -6457,14 +6471,19 @@ function openSettingsPanel(section) {
   els.shell.classList.add('settings-open');
   syncPluginLimitsDemand();
   resetMainViewSettings();
+  state.untrackedWithDataProbed = null;
   syncSettingsForm();
   ensureServiceStatusTicker();
   // General stays expanded across closes, so its expand hook alone would leave
   // the count unrefreshed; main's cache decides whether this goes to GitHub.
   if (state.settingsSections?.general) void refreshAboutStars();
   if (section === 'notch') {
-    setSettingsSectionExpanded('window', true);
-    displaySettings?.open('notch');
+    // Tile clicks keep the scroll position; this outside entry point holds the
+    // Window header at the panel top, including while a section above collapses.
+    anchorSettingsScroll(document.querySelector('[data-settings-section="window"]'), () => {
+      setSettingsSectionExpanded('window', true);
+      displaySettings?.open('notch');
+    }, 0);
   }
   els.shell.style.transform = 'translateZ(0)';
   requestAnimationFrame(() => { els.shell.style.transform = ''; });
@@ -6478,8 +6497,10 @@ function openViewFromTray(viewId) {
   syncModeSelect?.close();
   syncContentForm?.closeHelp();
   appearanceColorPicker.close();
+  displaySettings?.close();
   els.settingsPanel?.classList.add('hidden');
   els.shell.classList.remove('settings-open');
+  state.untrackedWithDataProbed = null;
   syncPluginLimitsDemand();
   state.openSession = null;
   // Navigating to the view already on screen changes no breakdown, so it never
@@ -7018,7 +7039,8 @@ function renderViewSwitcher({ focusMenu = false, focusDisclosure = false } = {})
 function homeModuleShell(kind, title, viewId, meta = '') {
   const module = document.createElement('section');
   module.className = `home-module home-module-${kind}`;
-  module.setAttribute('aria-label', title);
+  // The meta (the Limits mode) is part of what the module's numbers mean.
+  module.setAttribute('aria-label', meta ? `${title}: ${meta}` : title);
   // Plugin modules have no detail view to jump to.
   if (viewId) {
     module.tabIndex = 0;
@@ -7071,20 +7093,33 @@ function homeLimitRows() {
   const isWindowHidden = (providerId, window) => limitUsageItemsApi.isLimitWindowHidden(
     state.settings?.limitProviderHiddenItems, providerId, window
   );
+  // The row layout lists every window the user still shows; the classic Text /
+  // Progress bars layouts keep their compact pick of at most two per account.
+  // Hidden rows go first either way, so each pick sees only the shown ones.
+  const compact = homeModulePreferencesApi.resolveHomeLimitDisplayMode(state.settings?.homeLimitDisplayMode) !== 'rows';
   return homeOverviewApi.homeLimitAccountsForProviders({
-    // Hidden rows go before the compact pick, so Antigravity's tightest window
-    // per group is chosen among the ones the user still shows.
-    providers: limitWindowsView.collapseWorkbuddyAccounts(desktopLimitRecords()).map((provider) => ({
-      ...provider,
-      windows: limitProviderPresentationApi.limitProviderCompactWindows(
-        provider,
-        (provider.windows || []).filter((window) => !isWindowHidden(provider.provider, window))
-      )
-    })),
+    providers: limitWindowsView.collapseWorkbuddyAccounts(desktopLimitRecords()).map((provider) => {
+      // An install still carrying the retired `showCodexAdditionalLimits: false`
+      // (its migration could not save) keeps the extra pools off Home too.
+      const legacyHidden = (window) => provider.provider === 'codex' && window?.additional === true
+        && state.settings?.showCodexAdditionalLimits === false;
+      const shown = (provider.windows || []).filter((window) => !isWindowHidden(provider.provider, window) && !legacyHidden(window));
+      return {
+        ...provider,
+        // The reset count follows the card's "Resets" usage item.
+        resetCredits: limitUsageItemsApi.hiddenUsageItemSet(state.settings?.limitProviderHiddenItems, provider.provider).has('resets')
+          ? null
+          : provider.resetCredits,
+        windows: compact
+          ? limitProviderPresentationApi.limitProviderCompactWindows(provider, shown)
+          : limitProviderPresentationApi.limitProviderHomeWindows(provider, shown)
+      };
+    }),
     providerOptions,
     enabledProviderIds: Array.from(enabled),
     hiddenProviderIds: Array.from(hiddenHomeLimitProviderSet()),
     isWindowHidden,
+    compact,
     colors: { ...clientColors, factory: clientColors.droid },
     limit: state.settings?.homeLimitAccountCount ?? 3,
     sort: hasConfiguredOrder ? 'configured' : 'remaining',
@@ -7130,6 +7165,246 @@ function homeLimitRows() {
 }
 
 function homeLimitWindowLabel(window, providerId = '', visibleWindows = []) {
+  const providerLabel = limitProviderPresentationApi.limitProviderHomeWindowLabel(providerId, window);
+  if (providerLabel) return providerLabel;
+  if (providerId === 'codex' && window?.additional === true) {
+    return limitWindowsView.codexAdditionalWindowLabel(window, visibleWindows.filter((candidate) => candidate?.additional === true));
+  }
+  const label = String(window?.label || '').trim();
+  if (window?.kind === 'billing') {
+    if (providerId === 'cursor' && label === 'Included usage') return t('home.limit.monthly');
+    if (label) return label;
+  }
+  const key = {
+    session: 'home.limit.session',
+    daily: 'home.limit.daily',
+    weekly: 'home.limit.weekly',
+    billing: 'home.limit.billing',
+    monthly: 'home.limit.monthly'
+  }[window?.kind];
+  if (!key) return window?.label;
+  const period = t(key);
+  // Every window is listed, so a second window of the same period (Claude's
+  // Fable weekly, a Kimi model quota) keeps its own name beside the period.
+  // A label that only restates the period marks the account's plain window.
+  const generic = ['', 'session', '5-hour', '5h', 'daily', 'weekly', 'monthly', 'billing', period.toLowerCase()];
+  const named = !generic.includes(label.toLowerCase());
+  const sharesPeriod = visibleWindows.some((candidate) => candidate !== window && candidate?.kind === window.kind);
+  return named && sharesPeriod ? `${label} ${period}` : period;
+}
+
+// The reset column reads as a countdown ("4h 26m") for every timed boundary,
+// expiries included, so Home rows read alike; the full sentence ("Expires in
+// 23d 1h") remains the accessible name and the Limits page keeps the wording.
+// A provider's own description has no time to count down, so it stays as is.
+function homeLimitResetText(window, nowMs = Date.now()) {
+  const full = window?.resetsAt
+    ? formatLimitBoundary(window) || ''
+    : window?.resetDescription ? t('home.reset', { value: window.resetDescription }) : '';
+  const remainingMs = full && window.resetsAt
+    ? limitProviderPresentationApi.limitResetRemainingMs(window.resetsAt, nowMs)
+    : null;
+  return { text: remainingMs ? limitProviderPresentationApi.limitDurationText(remainingMs) : full, full };
+}
+
+function renderHomeLimitModule() {
+  const rows = homeLimitRows();
+  const showUsed = Boolean(state.settings?.showLimitUsed);
+  // Readings are bare percentages, so the heading says once which way they count.
+  const { module, body } = homeModuleShell('limits', t('home.limits'), 'limits',
+    rows.length ? t(showUsed ? 'settings.limits.barsUsed' : 'settings.limits.barsRemaining') : '');
+  if (rows.length === 0) {
+    const empty = document.createElement('div');
+    empty.className = 'home-module-empty';
+    const providerOrder = state.settings?.homeLimitProviderOrder || state.settings?.limitProviderOrder;
+    const awaitingFirstData = homeOverviewApi.homeLimitsAwaitingFirstData({
+      providers: desktopLimitRecords(),
+      providerOptions: limitProviderOrderApi.orderedLimitProviders(desktopLimitProviders(), providerOrder),
+      enabledProviderIds: Array.from(enabledLimitProviderSet()),
+      hiddenProviderIds: Array.from(hiddenHomeLimitProviderSet())
+    });
+    empty.textContent = t(awaitingFirstData ? 'home.limitsInitializing' : 'home.noLimits');
+    body.append(empty);
+    return module;
+  }
+  const displayMode = homeModulePreferencesApi.resolveHomeLimitDisplayMode(state.settings?.homeLimitDisplayMode);
+  if (displayMode !== 'rows') return renderClassicHomeLimits(module, body, rows, displayMode === 'bars');
+  const vendorColors = homeVendorColorsEnabled();
+  // Low-limit colour is opt-in in every layout; the reading and meter length
+  // already show how much is left.
+  const highlightLow = state.settings?.showHomeLimitBars === true;
+  const nowMs = Date.now();
+  for (const row of rows) {
+    const item = document.createElement('div');
+    item.className = 'home-limit-account';
+    item.dataset.key = row.key;
+    // Monochrome meters reveal the account's colour while it is hovered.
+    item.style.setProperty('--home-vendor-color', homeVendorRevealColor(row.color));
+    const account = document.createElement('div');
+    account.className = 'home-limit-account-head';
+    const mark = document.createElement('span');
+    const pluginModule = state.pluginCatalog?.limits?.modules?.find(module => module.id === row.providerId);
+    if (pluginModule) mark.append(window.TokenMonitorPluginViews.navigationIcon(document, pluginModule, 14));
+    else applyHomeListMark(mark, iconKindFor({ key: row.iconId || row.providerId || row.key }, 'limits'), row.color);
+    const name = document.createElement('span');
+    name.className = 'home-list-name';
+    name.textContent = row.name;
+    if (row.resetCount) {
+      // Spare full resets belong to the account, so they sit beside its name.
+      const title = document.createElement('span');
+      title.className = 'home-limit-account-title';
+      // A reset glyph and the count; the full phrase is its accessible name.
+      const resets = document.createElement('span');
+      resets.className = 'home-limit-resets';
+      resets.setAttribute('role', 'img');
+      resets.setAttribute('aria-label', t('home.limitResets', { count: row.resetCount }));
+      const glyph = document.createElement('span');
+      glyph.className = 'home-limit-resets-icon';
+      glyph.setAttribute('aria-hidden', 'true');
+      const count = document.createElement('span');
+      count.className = 'home-limit-resets-count';
+      count.textContent = String(row.resetCount);
+      resets.append(glyph, count);
+      title.append(name, resets);
+      account.append(mark, title);
+    } else {
+      account.append(mark, name);
+    }
+    if (row.plan) {
+      const plan = document.createElement('span');
+      plan.className = 'home-limit-plan';
+      plan.textContent = row.plan;
+      plan.setAttribute('aria-label', row.plan);
+      account.append(plan);
+    }
+    // One row per window, on columns the whole card shares: name, reset,
+    // meter, reading. Rows look the same however many windows an account has.
+    const windows = document.createElement('div');
+    windows.className = 'home-limit-windows';
+    for (const window of row.windows) {
+      const metric = document.createElement('div');
+      metric.className = 'home-limit-window';
+      metric.dataset.key = `${window.kind}:${window.label || ''}`;
+      const label = document.createElement('span');
+      label.className = 'home-limit-window-label';
+      label.textContent = homeLimitWindowLabel(window, row.providerId, row.windows);
+      metric.append(label);
+      // Identifies the window across refreshes so a change can animate; the
+      // label is already unique within its account.
+      metric.setAttribute('data-limit-motion-key', `${row.key}\0${row.name}\0${label.textContent}`);
+      if (window.resetsAt) metric.setAttribute('data-limit-reset-at', String(window.resetsAt));
+      // The reset sits beside the name it belongs to.
+      const reset = homeLimitResetText(window, nowMs);
+      if (reset.text) {
+        const resetText = document.createElement('span');
+        resetText.className = 'home-limit-reset';
+        resetText.textContent = reset.text;
+        if (reset.full !== reset.text) {
+          // A plain span cannot carry a name, so the shortened countdown is
+          // exposed as an image of its full wording, like the reset count.
+          resetText.setAttribute('role', 'img');
+          resetText.setAttribute('aria-label', reset.full);
+        }
+        metric.append(resetText);
+      }
+      const value = document.createElement('span');
+      value.className = 'home-list-value';
+      value.textContent = window.value || formatHomeLimitWindowValue(window, showUsed);
+      const remainingPercent = optionalFiniteNumber(window.remainingPercent);
+      const fixedValue = Boolean(window.value) || isCreditsWindow(window);
+      if (remainingPercent != null) metric.setAttribute('data-limit-remaining-percent', String(remainingPercent));
+      const readingPercent = fixedValue ? null : limitFillPercent(window.remainingPercent, window.usedPercent, showUsed);
+      // Only a plain percentage reading rolls; plan states and amounts stay put.
+      if (readingPercent != null && value.textContent === formatPercent(readingPercent)) {
+        value.setAttribute('data-limit-motion-value', String(readingPercent));
+        value.setAttribute('data-limit-motion-text', value.textContent);
+      }
+      if (highlightLow && remainingPercent != null) {
+        const clamped = Math.max(0, Math.min(100, remainingPercent));
+        if (!vendorColors) {
+          // Red only when exhausted, amber when nearly out.
+          if (clamped === 0) {
+            value.classList.add('home-limit-value-critical');
+            metric.classList.add('is-exhausted');
+          } else if (clamped < 20) {
+            value.classList.add('home-limit-value-low');
+            metric.classList.add('is-low');
+          }
+        } else if (clamped < 20) {
+          value.classList.add('home-limit-value-critical');
+          metric.classList.add('is-critical');
+          if (clamped === 0) metric.classList.add('is-exhausted');
+        } else if (clamped < 50) {
+          value.classList.add('home-limit-value-low');
+          value.style.setProperty('--home-limit-accent', row.color);
+        }
+      }
+      // An untouched window needs no attention, so it steps back.
+      if (remainingPercent === 100 && !fixedValue) metric.classList.add('is-untouched');
+      let reading = value;
+      const info = limitWindowsView.limitDetailInfoNode(window.detailEntries);
+      if (info) {
+        reading = document.createElement('span');
+        reading.className = 'home-limit-window-value';
+        reading.append(value, info);
+      }
+      // Money and fixed labels retain a remaining meter; only percentage
+      // labels follow the global used/remaining display preference.
+      const meterPercent = window.showMeter !== false ? remainingPercent : null;
+      if (meterPercent != null) {
+        // A groove whose fill brightens toward a lit tail. The ghost is the
+        // just-used chunk while it drains (limits/homeMotion.js).
+        const track = document.createElement('div');
+        track.className = 'home-limit-track';
+        const percentUsed = showUsed && !fixedValue;
+        const fillPercent = Math.max(0, Math.min(100, limitFillPercent(meterPercent, null, percentUsed)));
+        track.setAttribute('data-limit-fill', String(fillPercent));
+        track.style.setProperty('--home-limit-fill', `${fillPercent}%`);
+        if (vendorColors) {
+          track.style.setProperty('--home-limit-bar', row.color);
+          track.style.setProperty('--home-limit-tail', row.color);
+        }
+        const meter = document.createElement('div');
+        meter.className = 'home-limit-meter';
+        meter.setAttribute('aria-hidden', 'true');
+        const ghost = document.createElement('span');
+        ghost.className = 'home-limit-ghost';
+        const fill = document.createElement('span');
+        fill.className = 'home-limit-fill';
+        meter.append(ghost, fill);
+        const tip = document.createElement('span');
+        tip.className = 'home-limit-tip';
+        tip.setAttribute('aria-hidden', 'true');
+        track.append(meter, tip);
+        // The notch marks where an even pace through the window would be now;
+        // a fill short of it (or past it, in used mode) is running fast.
+        const pace = fixedValue ? null : homeOverviewApi.limitWindowPaceRemainingPercent(window, nowMs);
+        if (pace != null) {
+          const pacePercent = percentUsed ? 100 - pace : pace;
+          track.classList.add('has-pace');
+          track.style.setProperty('--home-limit-pace', `${pacePercent}%`);
+          const tick = document.createElement('span');
+          tick.className = 'home-limit-pace';
+          tick.setAttribute('aria-hidden', 'true');
+          track.append(tick);
+          // No standing caption: it read as clutter under every card.
+          track.setAttribute('aria-description', t(percentUsed ? 'home.limitPace.used' : 'home.limitPace.remaining'));
+        }
+        metric.append(track, reading);
+      } else {
+        reading.classList.add('home-limit-reading-wide');
+        metric.append(reading);
+      }
+      windows.append(metric);
+    }
+    item.append(account, windows);
+    body.append(item);
+  }
+  return module;
+}
+
+// The classic layouts' label, for their compact pick.
+function classicHomeLimitWindowLabel(window, providerId = '', visibleWindows = []) {
   const compactLabel = limitProviderPresentationApi.limitProviderCompactWindowLabel(providerId, window, visibleWindows);
   if (compactLabel) return compactLabel;
   if (window?.kind === 'billing') {
@@ -7148,24 +7423,13 @@ function homeLimitWindowLabel(window, providerId = '', visibleWindows = []) {
   return window.label;
 }
 
-function renderHomeLimitModule() {
-  const { module, body } = homeModuleShell('limits', t('home.limits'), 'limits');
-  const rows = homeLimitRows();
-  if (rows.length === 0) {
-    const empty = document.createElement('div');
-    empty.className = 'home-module-empty';
-    const providerOrder = state.settings?.homeLimitProviderOrder || state.settings?.limitProviderOrder;
-    const awaitingFirstData = homeOverviewApi.homeLimitsAwaitingFirstData({
-      providers: desktopLimitRecords(),
-      providerOptions: limitProviderOrderApi.orderedLimitProviders(desktopLimitProviders(), providerOrder),
-      enabledProviderIds: Array.from(enabledLimitProviderSet()),
-      hiddenProviderIds: Array.from(hiddenHomeLimitProviderSet())
-    });
-    empty.textContent = t(awaitingFirstData ? 'home.limitsInitializing' : 'home.noLimits');
-    body.append(empty);
-    return module;
-  }
-  const showBars = state.settings?.homeLimitDisplayMode === 'bars';
+// The earlier Home layouts, kept as choices: each account's compact pick of
+// windows sits two to a row, a reading beside its name and the reset
+// underneath, with or without a meter.
+function renderClassicHomeLimits(module, body, rows, showBars) {
+  module.classList.add('home-module-limits-classic');
+  const showUsed = Boolean(state.settings?.showLimitUsed);
+  const highlightLow = state.settings?.showHomeLimitBars === true;
   for (const row of rows) {
     const item = document.createElement('div');
     item.className = 'home-limit-account';
@@ -7198,16 +7462,21 @@ function renderHomeLimitModule() {
       line.className = 'home-limit-window-line';
       const label = document.createElement('span');
       label.className = 'home-limit-window-label';
-      label.textContent = homeLimitWindowLabel(window, row.providerId, row.windows);
+      label.textContent = classicHomeLimitWindowLabel(window, row.providerId, row.windows);
       const value = document.createElement('span');
       value.className = 'home-list-value';
-      const showUsed = Boolean(state.settings?.showLimitUsed);
       value.textContent = window.value || formatHomeLimitWindowValue(window, showUsed);
-      if (state.settings?.showHomeLimitBars === true && window.remainingPercent != null) {
-        const remainingPercent = Math.max(0, Math.min(100, Number(window.remainingPercent) || 0));
-        if (remainingPercent < 20) {
+      const remainingPercent = optionalFiniteNumber(window.remainingPercent);
+      if (highlightLow && remainingPercent != null) {
+        const clamped = Math.max(0, Math.min(100, remainingPercent));
+        if (!homeVendorColorsEnabled()) {
+          // Same monochrome thresholds as the default rows: red only when
+          // exhausted, amber when nearly out.
+          if (clamped === 0) value.classList.add('home-limit-value-critical');
+          else if (clamped < 20) value.classList.add('home-limit-value-low');
+        } else if (clamped < 20) {
           value.classList.add('home-limit-value-critical');
-        } else if (remainingPercent < 50) {
+        } else if (clamped < 50) {
           value.classList.add('home-limit-value-low');
           value.style.setProperty('--home-limit-accent', row.color);
         }
@@ -7224,21 +7493,16 @@ function renderHomeLimitModule() {
       metric.append(line);
       // Money and fixed labels retain a remaining meter; only percentage
       // labels follow the global used/remaining display preference.
-      if (showBars && window.showMeter !== false) {
-        const remainingPercent = optionalFiniteNumber(window.remainingPercent);
-        if (remainingPercent != null) {
-          const fillPercent = limitFillPercent(remainingPercent, null, showUsed && !isCreditsWindow(window) && !window.value);
-          const tone = window.kind === 'session' || window.kind === 'daily' ? 0.95 : 0.68;
-          const meter = limitWindowsView.limitMeterNode(row.color, fillPercent, tone);
-          meter.setAttribute('aria-hidden', 'true');
-          metric.append(meter);
-        }
+      if (showBars && window.showMeter !== false && remainingPercent != null) {
+        const fillPercent = limitFillPercent(remainingPercent, null, showUsed && !isCreditsWindow(window) && !window.value);
+        const tone = window.kind === 'session' || window.kind === 'daily' ? 0.95 : 0.68;
+        const meter = limitWindowsView.limitMeterNode(row.color, fillPercent, tone);
+        meter.setAttribute('aria-hidden', 'true');
+        metric.append(meter);
       }
       const resetLabel = window.resetsAt
         ? formatLimitBoundary(window) || ''
-        : window.resetDescription
-        ? t('home.reset', { value: window.resetDescription })
-        : '';
+        : window.resetDescription ? t('home.reset', { value: window.resetDescription }) : '';
       if (resetLabel) {
         const resetText = document.createElement('span');
         resetText.className = 'home-limit-reset';
@@ -7254,6 +7518,55 @@ function renderHomeLimitModule() {
   return module;
 }
 
+function homeNearBlackColor(color) {
+  const raw = String(color || '').replace('#', '');
+  if (!/^[0-9a-f]{6}$/i.test(raw)) return false;
+  const [r, g, b] = [0, 2, 4].map((i) => parseInt(raw.slice(i, i + 2), 16) / 255);
+  return 0.2126 * r + 0.7152 * g + 0.0722 * b < 0.12;
+}
+
+// Home is monochrome unless vendor colours are switched on: list marks and
+// limit meters share one neutral ink, and colour is left to status
+// (exhausted, nearly out).
+function homeVendorColorsEnabled() {
+  return state.settings?.homeVendorColors === true;
+}
+
+// The colour a limit account reveals on hover in monochrome (and already shows
+// with vendor colours on). Near-black brand colours (Grok, Copilot) read as a
+// gap on a dark panel, so they take the theme ink instead.
+function homeVendorRevealColor(color) {
+  return homeNearBlackColor(color) ? 'rgba(var(--overlay-rgb), 0.55)' : color;
+}
+
+// A list mark without an icon: the vendor colour when vendor colours are on
+// (near-black ones take the theme ink), otherwise ink, so monochrome Home
+// keeps colour for status alone.
+function homeListMarkColor(color) {
+  return homeVendorColorsEnabled() ? homeVendorRevealColor(color) : 'rgba(var(--overlay-rgb), 0.5)';
+}
+
+// Tools and Models list their split as aligned rows; the share column carries
+// the proportion, so Home keeps horizontal bars for limits alone.
+function homeSplitRow(className, row, iconKind) {
+  const item = document.createElement('div');
+  item.className = `home-list-row ${className}`;
+  item.dataset.key = row.key;
+  const mark = document.createElement('span');
+  applyHomeListMark(mark, iconKind, homeListMarkColor(row.color));
+  const name = document.createElement('span');
+  name.className = 'home-list-name';
+  name.textContent = row.name;
+  const value = document.createElement('span');
+  value.className = 'home-list-value';
+  value.textContent = formatCompact(row.value);
+  const share = document.createElement('span');
+  share.className = 'home-list-aux';
+  share.textContent = formatPercent(row.share * 100);
+  item.append(mark, name, value, share);
+  return item;
+}
+
 function renderHomeModelModule(period) {
   const { module, body } = homeModuleShell('model', t('home.models'), 'model');
   const rows = homeOverviewApi.homeModelRows(modelRowsForPeriod(period, 'tokens'), period?.totalTokens, homeModulePreferencesApi.homeModuleCount(state.settings, 'model'));
@@ -7265,22 +7578,7 @@ function renderHomeModelModule(period) {
     return module;
   }
   for (const row of rows) {
-    const item = document.createElement('div');
-    item.className = 'home-list-row home-model-row';
-    item.dataset.key = row.key;
-    const mark = document.createElement('span');
-    applyHomeListMark(mark, iconKindFor({ key: row.key || row.name, modelSource: row.modelSource }, 'model'), row.color);
-    const name = document.createElement('span');
-    name.className = 'home-list-name';
-    name.textContent = row.name;
-    const value = document.createElement('span');
-    value.className = 'home-list-value';
-    value.textContent = formatCompact(row.value);
-    const share = document.createElement('span');
-    share.className = 'home-list-aux';
-    share.textContent = formatPercent(row.share * 100);
-    item.append(mark, name, value, share);
-    body.append(item);
+    body.append(homeSplitRow('home-model-row', row, iconKindFor({ key: row.key || row.name, modelSource: row.modelSource }, 'model')));
   }
   return module;
 }
@@ -7305,22 +7603,7 @@ function renderHomeToolModule(period) {
     return module;
   }
   for (const row of rows) {
-    const item = document.createElement('div');
-    item.className = 'home-list-row home-tool-row';
-    item.dataset.key = row.key;
-    const mark = document.createElement('span');
-    applyHomeListMark(mark, iconKindFor({ key: row.key }, 'tool'), row.color);
-    const name = document.createElement('span');
-    name.className = 'home-list-name';
-    name.textContent = row.name;
-    const value = document.createElement('span');
-    value.className = 'home-list-value';
-    value.textContent = formatCompact(row.value);
-    const share = document.createElement('span');
-    share.className = 'home-list-aux';
-    share.textContent = formatPercent(row.share * 100);
-    item.append(mark, name, value, share);
-    body.append(item);
+    body.append(homeSplitRow('home-tool-row', row, iconKindFor({ key: row.key }, 'tool')));
   }
   return module;
 }
@@ -7333,6 +7616,18 @@ function homeSessionAgo(value) {
   const hours = Math.round(minutes / 60);
   if (hours < 24) return t('edgeDock.agoHours', { count: hours });
   return t('edgeDock.agoDays', { count: Math.round(hours / 24) });
+}
+
+// The one-line form of a session's age ("28m", "3h", "2d"), in the same units
+// as the limit countdowns; the full phrase stays its accessible name.
+function homeSessionAgoShort(value) {
+  if (!Number.isFinite(value) || value <= 0) return '';
+  const minutes = Math.round(Math.max(0, Date.now() - value) / 60000);
+  if (minutes < 1) return t('edgeDock.agoNow');
+  if (minutes < 60) return `${minutes}m`;
+  const hours = Math.round(minutes / 60);
+  if (hours < 24) return `${hours}h`;
+  return `${Math.round(hours / 24)}d`;
 }
 
 function stopHomeSessionRepaint() {
@@ -7398,11 +7693,26 @@ function renderHomeSessionModule(rows) {
     body.append(empty);
     return module;
   }
-  for (const row of rows) {
-    const activityState = window.TokenMonitorEdgeDockPresentation.sessionActivityState(row);
+  // Live sessions (running, waiting) lead with their full details; the rest
+  // close the list one line each. When both are present, the first quiet row
+  // carries the Recent heading, drawn by CSS so the rows stay the module's only
+  // children. Live rows need none: their state marks say so, the module heading
+  // counts the running ones, and a "Running" heading would mislabel waiting rows.
+  const isLive = (activityState) => activityState === 'running' || activityState === 'waiting';
+  const entries = rows.map((row) => ({ row, activityState: window.TokenMonitorEdgeDockPresentation.sessionActivityState(row) }));
+  // The Detailed setting keeps every row's details, in the order received.
+  const detailed = homeModulePreferencesApi.normalizeHomeSessionDisplayMode(state.settings?.homeSessionDisplayMode) === 'detailed';
+  const ordered = detailed ? entries
+    : [...entries.filter((entry) => isLive(entry.activityState)), ...entries.filter((entry) => !isLive(entry.activityState))];
+  ordered.forEach(({ row, activityState }, index) => {
+    const full = detailed || isLive(activityState);
     const item = document.createElement('div');
-    item.className = 'home-list-row home-session-row';
+    item.className = full ? 'home-list-row home-session-row' : 'home-list-row home-session-row is-compact';
     item.dataset.key = row.key;
+    if (!full && index > 0 && isLive(ordered[index - 1].activityState)) {
+      item.dataset.groupLabel = t('session.recent');
+      item.classList.add('starts-recent');
+    }
     const mark = document.createElement('span');
     applyHomeListMark(mark, iconKindFor({ client: row.client }, 'session'), clientColors[row.client] || stableColor(row.key, fallbackModelColors));
     const stateMark = document.createElement('span');
@@ -7427,9 +7737,21 @@ function renderHomeSessionModule(rows) {
     const value = document.createElement('span');
     value.className = 'home-list-value';
     value.textContent = formatCompact(row.totalTokens);
+    const age = homeSessionAgo(Date.parse(row.lastUsedAt || row.startedAt || ''));
+    if (!full) {
+      const ago = document.createElement('span');
+      ago.className = 'home-list-aux home-session-ago';
+      ago.textContent = homeSessionAgoShort(Date.parse(row.lastUsedAt || row.startedAt || ''));
+      if (age) {
+        ago.setAttribute('role', 'img');
+        ago.setAttribute('aria-label', age);
+      }
+      item.append(mark, stateMark, name, ago, value);
+      body.append(item);
+      return;
+    }
     const meta = document.createElement('div');
     meta.className = 'home-session-meta';
-    const age = homeSessionAgo(Date.parse(row.lastUsedAt || row.startedAt || ''));
     const description = document.createElement('span');
     description.className = 'home-list-sub';
     const memberLabel = row.sessionGroup && (!row.subagentGroup || row.subagentCount > 0)
@@ -7459,17 +7781,19 @@ function renderHomeSessionModule(rows) {
     if (status) meta.append(status);
     item.append(mark, stateMark, name, value, meta);
     body.append(item);
-  }
+  });
   return module;
 }
 
 function renderHomeDeviceModule() {
   const { module, body } = homeModuleShell('device', t('home.devices'), 'device');
-  const rows = homeOverviewApi.homeDeviceRows(fixedPeriodDevices(), {
+  // Shares are of every device's usage; the count setting only caps the rows.
+  const allRows = homeOverviewApi.homeDeviceRows(fixedPeriodDevices(), {
     localDeviceId: state.settings?.deviceId || '',
     period: state.period,
-    limit: homeModulePreferencesApi.homeModuleCount(state.settings, 'device')
+    limit: Infinity
   });
+  const rows = allRows.slice(0, homeModulePreferencesApi.homeModuleCount(state.settings, 'device'));
   if (rows.length === 0) {
     const empty = document.createElement('div');
     empty.className = 'home-module-empty';
@@ -7477,16 +7801,22 @@ function renderHomeDeviceModule() {
     body.append(empty);
     return module;
   }
+  // Devices take the same rows as Tools and Models, with the local device
+  // badged and offline ones muted. A lone device owns 100%, which says
+  // nothing, so a share column appears only beside another device.
+  const total = allRows.reduce((sum, row) => sum + row.value, 0);
   for (const row of rows) {
     const item = document.createElement('div');
     item.className = 'home-list-row home-device-row';
     item.dataset.key = row.key;
+    if (allRows.length > 1) item.classList.add('has-share');
     if (row.isStale) {
       item.classList.add('is-stale');
       item.setAttribute('aria-description', t('home.staleDevice'));
     }
     const mark = document.createElement('span');
-    applyHomeListMark(mark, iconKindFor({ platform: row.platform }, 'device'), row.isStale ? deviceStaleColor : deviceAccent);
+    const color = row.isStale ? deviceStaleColor : deviceAccent;
+    applyHomeListMark(mark, iconKindFor({ platform: row.platform }, 'device'), homeListMarkColor(color));
     const label = document.createElement('span');
     label.className = 'home-list-name home-device-label';
     const name = document.createElement('span');
@@ -7503,6 +7833,12 @@ function renderHomeDeviceModule() {
     value.className = 'home-list-value';
     value.textContent = formatCompact(row.value);
     item.append(mark, label, value);
+    if (allRows.length > 1) {
+      const share = document.createElement('span');
+      share.className = 'home-list-aux';
+      share.textContent = formatPercent(total > 0 ? (row.value / total) * 100 : 0);
+      item.append(share);
+    }
     body.append(item);
   }
   return module;
@@ -8090,6 +8426,7 @@ function renderHome() {
     return;
   }
   let sessionRows;
+  const limitMotion = homeLimitMotion.capture(els.homePanel);
   const nodes = moduleIds.map((id) => {
     if (id === 'limits') return renderHomeLimitModule();
     if (id === 'tool') return renderHomeToolModule(period);
@@ -8124,6 +8461,9 @@ function renderHome() {
   for (const child of [...els.homePanel.children]) {
     if (!ordered.includes(child)) child.remove();
   }
+  // Attached now, so meters and readings can measure and animate. Page entry
+  // grows the meters from zero like the other breakdowns' bars.
+  homeLimitMotion.animate(els.homePanel, limitMotion, { entry: state.animateBarsFromZero });
   if (moduleIds.includes('session')) scheduleHomeSessionRepaint(sessionRows);
   updateHomeActivity();
 }
@@ -8247,6 +8587,7 @@ function renderAppContent({ fromSearch = false } = {}) {
   const { fixedUnavailable, detailUnavailable } = periodContentAvailability();
   if (fixedUnavailable || detailUnavailable) {
     els.sessionToolFilter.classList.add('hidden');
+    els.sessionSortToggle.classList.add('hidden');
     els.sessionSearchToggle.classList.add('hidden');
     els.sessionSearchHost.classList.add('hidden');
     cancelNumberAnimation();
@@ -8506,6 +8847,7 @@ async function refreshStats(options = {}) {
     allTimeSessions.invalidate();
     state.stats = sessionStatsForDisplay(allTimeSessions.attach(nextStats));
     observeDisplayLiveTokenRates(nextStats);
+    if (typeof signalHibernateRevealIfReady === 'function') signalHibernateRevealIfReady();
     if (options.forceHistory === true) {
       // A manual history rescan is an explicit retry boundary. Let Home request the
       // corresponding full payload even when its revision is unchanged, and restore
@@ -8996,7 +9338,7 @@ function renderThemePresetChips() {
   }
 }
 
-function renderAppearanceColorRows(container, keys, { rowClass, nameClass, resetLabel, nameFor, colorFor, preview, save, reset }) {
+function renderAppearanceColorRows(container, keys, { rowClass, nameClass, resetLabel, nameFor, colorFor, hasOverride, preview, save, reset }) {
   if (!container) return;
   const existing = new Map([...container.children].map(row => [row.dataset.colorKey, row]));
   for (const key of keys) {
@@ -9018,27 +9360,33 @@ function renderAppearanceColorRows(container, keys, { rowClass, nameClass, reset
       }, event.detail === 0));
       const resetButton = document.createElement('button');
       resetButton.type = 'button';
-      resetButton.className = 'reset-appearance-button reset-inline';
-      resetButton.textContent = '↺';
+      resetButton.className = 'settings-reset-button';
       resetButton.addEventListener('click', () => queueAppearanceColorChange(() => reset(key)));
-      row.append(name, swatch, resetButton);
+      const heading = document.createElement('span');
+      heading.className = 'settings-reset-heading';
+      heading.append(name, resetButton);
+      row.append(heading, swatch);
       container.appendChild(row);
     }
-    const [name, swatch, resetButton] = row.children;
+    const [heading, swatch] = row.children;
+    const [name, resetButton] = heading.children;
     const label = nameFor(key);
     name.textContent = label;
     swatch.setAttribute('aria-label', label);
     resetButton.setAttribute('aria-label', t(resetLabel));
+    syncSettingResetVisibility(resetButton, swatch, !hasOverride(key));
     appearanceColorPicker.setSwatch(swatch, colorFor(key));
   }
 }
 
 function renderThemeColorGrid() {
   const slot = activeThemeKey;
+  const overrides = currentThemeOverrides(slot);
   const saved = themePresetsApi.mergeThemeColors(themePresetsApi.themePalette(state.settings, slot));
   renderAppearanceColorRows(els.themeColorGrid, ['bg', 'text', 'muted', 'accent', 'chart'], {
     rowClass: 'color-picker-row', nameClass: 'color-picker-name', resetLabel: 'settings.appearance.resetColor',
     nameFor: key => t(`settings.appearance.color.${key}`), colorFor: key => saved[key],
+    hasOverride: key => Object.hasOwn(overrides, key),
     preview: (key, value) => previewThemeColor(slot, key, value),
     save: (key, value) => saveThemeColor(slot, key, value),
     reset: key => resetThemeColor(slot, key)
@@ -9051,6 +9399,7 @@ function renderVendorColorList() {
     rowClass: 'vendor-color-row', nameClass: 'vendor-color-name', resetLabel: 'settings.appearance.resetBrand',
     nameFor: id => id === 'default' ? t('settings.appearance.vendorDefault') : themePresetsApi.vendorLabel(id),
     colorFor: id => overrides[id] || BRAND_VENDOR_COLORS[id],
+    hasOverride: id => Object.hasOwn(overrides, id),
     preview: previewVendorColor, save: saveVendorColor, reset: resetVendorColor
   });
 }
@@ -9670,6 +10019,10 @@ function syncFontSettingsControls() {
     if (controls.preset) controls.preset.value = preset;
     if (controls.input) controls.input.value = preset === 'custom' ? value : '';
     syncFontCustomRow(role);
+    const isInterface = role === 'interface';
+    const reset = isInterface ? els.resetInterfaceFontButton : els.resetDisplayFontButton;
+    const control = controls.preset?.parentElement.querySelector('.select-control-trigger') || controls.preset;
+    syncSettingResetVisibility(reset, control, value === (isInterface ? '' : fontSettingsApi.DEFAULT_DISPLAY_FONT));
   }
 }
 
@@ -9680,11 +10033,19 @@ function syncSliderRow(input) {
 }
 
 function syncSliderRows() {
-  syncSliderRow(els.glassInput);
-  for (const [key] of nativeGlassTintSettings) syncSliderRow(els[`${key}Input`]);
-  syncSliderRow(els.blurInput);
-  syncSliderRow(els.backgroundImageOpacityInput);
-  syncSliderRow(els.zoomInput);
+  const sliders = [
+    [els.glassInput, els.resetGlassButton, defaultAppearance.glassOpacity],
+    [els.blurInput, els.resetDepthButton, defaultAppearance.glassBlur],
+    [els.backgroundImageOpacityInput, els.resetBackgroundImageOpacityButton, defaultAppearance.backgroundImageOpacity],
+    [els.zoomInput, els.resetZoomButton, Math.round(defaultAppearance.zoomFactor * 100)],
+    ...nativeGlassTintSettings.map(([key, mode]) => [
+      els[`${key}Input`], els[`${key}Reset`], macBackdropApi.normalizeLiquidGlassTint(undefined, mode)
+    ])
+  ];
+  for (const [input, reset, defaultValue] of sliders) {
+    syncSliderRow(input);
+    if (input) syncSettingResetVisibility(reset, input, Number(input.value) === defaultValue);
+  }
 }
 
 function applyAppearanceFromControls() {
@@ -9712,6 +10073,12 @@ function syncHubModeUi() {
   if (els.icloudFields) {
     els.icloudFields.classList.toggle('hidden', mode !== 'icloud');
     els.icloudFields.inert = mode !== 'icloud';
+  }
+  // Blocks outside the per-mode field groups name the modes they belong to.
+  for (const node of els.syncMap.querySelectorAll('[data-sync-modes]')) {
+    const shown = node.dataset.syncModes.split(' ').includes(mode);
+    node.hidden = !shown;
+    node.inert = !shown;
   }
   if (mode === 'host') {
     els.hubSecretInput.value = state.settings.hubHostSecret || '';
@@ -9893,7 +10260,6 @@ function stopSyncPanelAgeTimer() {
 function renderSyncPanelDevices(rows) {
   const counts = syncDevicePanelApi.deviceCounts(rows);
   els.syncPanelCount.textContent = counts.total > 0 ? t('settings.sync.panel.onlineCount', counts) : '';
-  els.syncPanelOpenDevices.hidden = counts.total === 0 || !availableBreakdownIds().includes('device');
   const list = els.syncDeviceList;
   const scope = JSON.stringify([
     state.settings?.hubMode, state.mode, state.settings?.deviceId,
@@ -10086,6 +10452,26 @@ function renderHubBuildStatus() {
   els.hubBuildStatus.hidden = false;
 }
 
+let hubAddressesExpanded = false;
+function hubAddressRow(addr, port) {
+  const url = `http://${addr.address}:${port}`;
+  const row = document.createElement('div');
+  row.className = 'hub-address-row';
+  const code = document.createElement('code');
+  code.textContent = url;
+  const ifaceLabel = document.createElement('span');
+  ifaceLabel.className = 'hub-address-iface';
+  ifaceLabel.textContent = addr.interface;
+  const copy = document.createElement('button');
+  copy.type = 'button';
+  copy.className = 'icon-button';
+  copy.setAttribute('aria-label', t('settings.sync.copyUrl', { url }));
+  copy.textContent = '⧉';
+  copy.addEventListener('click', () => copyToClipboard(url, copy));
+  row.append(code, ifaceLabel, copy);
+  return row;
+}
+
 function renderHubAddresses(addresses, port) {
   els.hubAddressList.replaceChildren();
   if (addresses.length === 0) {
@@ -10095,28 +10481,34 @@ function renderHubAddresses(addresses, port) {
     els.hubAddressList.appendChild(empty);
     return;
   }
+  // Lead with the network card other devices most likely share, not a VPN or
+  // virtual adapter; the rest stay one click away.
+  const physical = addr => /^(en|eth|wl|wi-?fi|ethernet)/i.test(String(addr.interface || ''));
+  const ordered = [...addresses.filter(physical), ...addresses.filter(addr => !physical(addr))];
   const header = document.createElement('div');
   header.className = 'hub-address-header';
   header.textContent = t('settings.sync.connectWith');
-  els.hubAddressList.appendChild(header);
-  for (const addr of addresses) {
-    const url = `http://${addr.address}:${port}`;
-    const row = document.createElement('div');
-    row.className = 'hub-address-row';
-    const code = document.createElement('code');
-    code.textContent = url;
-    const ifaceLabel = document.createElement('span');
-    ifaceLabel.className = 'hub-address-iface';
-    ifaceLabel.textContent = addr.interface;
-    const copy = document.createElement('button');
-    copy.type = 'button';
-    copy.className = 'icon-button';
-    copy.setAttribute('aria-label', t('settings.sync.copyUrl', { url }));
-    copy.textContent = '⧉';
-    copy.addEventListener('click', () => copyToClipboard(url, copy));
-    row.append(code, ifaceLabel, copy);
-    els.hubAddressList.appendChild(row);
-  }
+  els.hubAddressList.append(header, hubAddressRow(ordered[0], port));
+  const rest = ordered.slice(1);
+  if (rest.length === 0) return;
+  const extra = document.createElement('div');
+  extra.className = 'hub-address-extra';
+  extra.id = 'hubAddressExtra';
+  extra.hidden = !hubAddressesExpanded;
+  extra.append(...rest.map(addr => hubAddressRow(addr, port)));
+  const more = document.createElement('button');
+  more.type = 'button';
+  more.className = 'hub-address-more';
+  more.setAttribute('aria-expanded', String(hubAddressesExpanded));
+  more.setAttribute('aria-controls', extra.id);
+  more.textContent = hubAddressesExpanded ? t('settings.sync.fewerAddresses') : t('settings.sync.moreAddresses', { count: rest.length });
+  more.addEventListener('click', () => {
+    hubAddressesExpanded = !hubAddressesExpanded;
+    renderHubAddresses(addresses, port);
+    els.hubAddressList.querySelector('.hub-address-more')?.focus({ preventScroll: true });
+  });
+  // The toggle precedes the rows it reveals, so Tab reaches them next.
+  els.hubAddressList.append(more, extra);
 }
 
 async function copyToClipboard(text, button) {
@@ -10544,6 +10936,86 @@ function syncHideAppIconControl(showTrayIcon, trayMode) {
   els.hideAppIconOptions?.classList.toggle('hidden', !els.hideAppIconInput.checked);
 }
 
+const settingResetRows = [];
+
+function settingResetControl(row) {
+  return row.querySelector('.select-control-trigger')
+    || row.querySelector('select, input:not([type="radio"]), input[type="radio"]:checked');
+}
+
+function syncSettingResetVisibility(button, control, hide) {
+  if (!button) return;
+  if (hide && document.activeElement === button) control?.focus({ preventScroll: true });
+  button.hidden = hide;
+}
+
+function createSettingReset(row, heading, title, defaultValue, read, save) {
+  const button = document.createElement('button');
+  button.type = 'button';
+  button.className = 'settings-reset-button';
+  button.hidden = true;
+  heading.append(button);
+  let saving = false;
+  const sync = () => {
+    const control = settingResetControl(row);
+    const hidden = !saving && (control?.disabled || (read() ?? defaultValue) === defaultValue);
+    syncSettingResetVisibility(button, control, hidden);
+    const setting = title.dataset.i18n ? t(title.dataset.i18n) : title.textContent;
+    button.setAttribute('aria-label', t('settings.common.resetSetting', { setting }));
+  };
+  button.addEventListener('click', async () => {
+    if (button.hidden || saving || settingResetControl(row)?.disabled) return;
+    saving = true;
+    button.setAttribute('aria-disabled', 'true');
+    try {
+      await save(defaultValue);
+    } catch (_) {
+      window.alert(t('settings.common.resetSettingFailed'));
+    } finally {
+      saving = false;
+      button.removeAttribute('aria-disabled');
+      sync();
+    }
+  });
+  return sync;
+}
+
+function setupSettingResets() {
+  const defaults = state.appInfo?.resettableSettingsDefaults || {};
+  for (const heading of els.settingsPanel.querySelectorAll('[data-reset-setting]')) {
+    const key = heading.dataset.resetSetting;
+    if (defaults[key] === undefined) continue;
+    const row = heading.closest('.settings-item');
+    const title = heading.querySelector('.settings-item-title');
+    let read = () => state.settings[key];
+    let save = value => saveSettings({ [key]: value });
+    if (key === 'edgeDockSide') {
+      read = () => Number.isFinite(state.settings.edgeDockFloatingX) ? 'floating' : state.settings.edgeDockSide;
+    }
+    if (key === 'periodMonthMode') save = saveDefaultUsageRange;
+    if (key === 'liveTokenRateScope') save = saveLiveTokenRateScope;
+    if (key === 'limitsRefresh') {
+      read = () => els.limitsRefreshInput.value;
+      save = saveLimitsRefresh;
+    }
+    settingResetRows.push(createSettingReset(row, heading, title, defaults[key], read, save));
+  }
+}
+
+function syncSettingResets() {
+  for (const sync of settingResetRows) sync();
+}
+
+function addRenderedSettingReset(row, heading, title, key, itemId) {
+  const defaults = state.appInfo?.resettableSettingsDefaults;
+  const defaultValue = itemId === undefined ? defaults?.[key] : defaults?.[key]?.[itemId];
+  if (defaultValue === undefined) return;
+  heading.dataset.inspectorReset = itemId === undefined ? key : `${key}:${itemId}`;
+  const read = () => itemId === undefined ? state.settings[key] : state.settings[key]?.[itemId];
+  const save = value => saveSettings({ [key]: itemId === undefined ? value : { [itemId]: value } });
+  createSettingReset(row, heading, title, defaultValue, read, save)();
+}
+
 function syncSettingsForm() {
   if (isRendererWindowHidden()) {
     applyInitialBreakdownPreference();
@@ -10706,6 +11178,7 @@ function syncSettingsForm() {
   modelAliasForm?.syncSettings();
   renderCursorStatus();
   displaySettings?.sync();
+  syncSettingResets();
 }
 
 function applyVisibleSettingsAppearance() {
@@ -11088,6 +11561,9 @@ function renderViewPreferences() {
 function renderMainViewInspector(view, { off, lastVisible, unavailable }) {
   const inspector = els.mainViewInspector;
   if (!inspector) return;
+  const focusedReset = document.activeElement?.matches('.settings-reset-button')
+    ? document.activeElement.parentElement.dataset.inspectorReset
+    : undefined;
   inspector.classList.toggle('is-subpage', view.id === 'home' && Boolean(state.homeLimitProvidersOpen));
   if (view.id === 'home' && state.homeLimitProvidersOpen) {
     inspector.removeAttribute('aria-labelledby');
@@ -11130,6 +11606,13 @@ function renderMainViewInspector(view, { off, lastVisible, unavailable }) {
   inspector.replaceChildren(header);
   const settings = MAIN_VIEW_SETTINGS[view.id];
   if (settings) inspector.append(settings());
+  if (focusedReset && document.activeElement === document.body) {
+    const heading = inspector.querySelector(`[data-inspector-reset="${CSS.escape(focusedReset)}"]`);
+    const row = heading?.closest('.settings-item, .home-limit-status-setting') || heading?.parentElement;
+    const target = heading?.querySelector('.settings-reset-button:not([hidden])')
+      || (row && settingResetControl(row));
+    target?.focus({ preventScroll: true });
+  }
 }
 
 function homeLimitProviders() {
@@ -11151,7 +11634,7 @@ function setHomeLimitProvidersOpen(open) {
 function renderHomeLimitSettings() {
   const wrap = document.createElement('div');
   wrap.className = 'settings-nested-list home-limit-settings';
-  const displayRow = document.createElement('label');
+  const displayRow = document.createElement('div');
   displayRow.className = 'settings-item home-limit-display-setting';
   const displayText = document.createElement('span');
   displayText.className = 'settings-item-text';
@@ -11160,36 +11643,55 @@ function renderHomeLimitSettings() {
   displayTitle.textContent = t('settings.home.limitDisplayMode');
   displayText.append(displayTitle);
   const displayInput = document.createElement('select');
-  for (const mode of ['text', 'bars']) {
+  // `default` follows the recommended layout; `rows` joins this list once a
+  // newer layout replaces it as the recommendation.
+  for (const mode of ['default', 'text', 'bars']) {
     const option = document.createElement('option');
     option.value = mode;
     option.textContent = t(`settings.home.limitDisplayMode.${mode}`);
     displayInput.append(option);
   }
-  displayInput.value = homeModulePreferencesApi.normalizeHomeLimitDisplayMode(state.settings?.homeLimitDisplayMode);
+  const storedDisplayMode = homeModulePreferencesApi.normalizeHomeLimitDisplayMode(state.settings?.homeLimitDisplayMode);
+  // `rows` is not offered while it is the recommendation, so Default stands for it.
+  displayInput.value = storedDisplayMode === 'rows' ? 'default' : storedDisplayMode;
   displayInput.addEventListener('change', () => void saveSettings({ homeLimitDisplayMode: displayInput.value }));
+  displayInput.setAttribute('aria-label', displayTitle.textContent);
   displayRow.append(displayText, displayInput);
-  const statusLabel = document.createElement('label');
+  addRenderedSettingReset(displayRow, displayText, displayTitle, 'homeLimitDisplayMode');
+  const statusLabel = document.createElement('div');
   statusLabel.className = 'checkbox-label home-limit-status-setting';
   const statusInput = document.createElement('input');
   statusInput.type = 'checkbox';
   statusInput.checked = state.settings?.showHomeLimitBars === true;
-  const statusText = document.createElement('span');
+  statusInput.id = 'homeLimitBarsInput';
+  const statusText = document.createElement('label');
+  statusText.htmlFor = statusInput.id;
   statusText.textContent = t('settings.home.showLimitBars');
   statusInput.addEventListener('change', () => void saveSettings({ showHomeLimitBars: statusInput.checked }));
-  statusLabel.append(statusInput, statusText);
-  const providerNamesLabel = document.createElement('label');
+  statusText.className = 'settings-item-title';
+  const statusCopy = document.createElement('span');
+  statusCopy.className = 'settings-item-text';
+  statusCopy.append(statusText);
+  statusLabel.append(statusInput, statusCopy);
+  addRenderedSettingReset(statusLabel, statusCopy, statusText, 'showHomeLimitBars');
+  const providerNamesLabel = document.createElement('div');
   providerNamesLabel.className = 'checkbox-label home-limit-status-setting';
   const providerNamesInput = document.createElement('input');
   providerNamesInput.type = 'checkbox';
   const providerNamesRequired = state.settings?.showToolIcons === false;
   providerNamesInput.checked = providerNamesRequired || state.settings?.showHomeLimitProviderNames === true;
   providerNamesInput.disabled = providerNamesRequired;
-  const providerNamesText = document.createElement('span');
+  providerNamesInput.id = 'homeLimitProviderNamesInput';
+  const providerNamesText = document.createElement('label');
+  providerNamesText.htmlFor = providerNamesInput.id;
   providerNamesText.textContent = t('settings.home.showLimitProviderNames');
   const providerNamesCopy = document.createElement('span');
   providerNamesCopy.className = 'home-limit-provider-names-copy';
-  providerNamesCopy.append(providerNamesText);
+  providerNamesText.className = 'settings-item-title';
+  const providerNamesHeading = document.createElement('span');
+  providerNamesHeading.className = 'settings-item-text';
+  providerNamesHeading.append(providerNamesText);
+  providerNamesCopy.append(providerNamesHeading);
   if (providerNamesRequired) {
     const requiredReason = t('settings.home.providerNamesRequiredWithoutIcons');
     const requiredReasonText = document.createElement('span');
@@ -11205,7 +11707,8 @@ function renderHomeLimitSettings() {
     renderHomeIfVisible();
   });
   providerNamesLabel.append(providerNamesInput, providerNamesCopy);
-  const countLabel = document.createElement('label');
+  addRenderedSettingReset(providerNamesLabel, providerNamesHeading, providerNamesText, 'showHomeLimitProviderNames');
+  const countLabel = document.createElement('div');
   countLabel.className = 'settings-item home-limit-account-count-setting';
   const countText = document.createElement('span');
   countText.className = 'settings-item-text';
@@ -11224,7 +11727,9 @@ function renderHomeLimitSettings() {
     await saveSettings({ homeLimitAccountCount: Number(countInput.value) });
     renderHomeIfVisible();
   });
+  countInput.setAttribute('aria-label', countTitle.textContent);
   countLabel.append(countText, countInput);
+  addRenderedSettingReset(countLabel, countText, countTitle, 'homeLimitAccountCount');
   const providers = homeLimitProviders();
   const hidden = hiddenHomeLimitProviderSet();
   const link = document.createElement('button');
@@ -11247,7 +11752,7 @@ function renderHomeLimitProviderList() {
   page.className = 'main-view-subpage';
   const back = document.createElement('button');
   back.type = 'button';
-  back.className = 'display-settings-back main-view-back';
+  back.className = 'main-view-back';
   back.textContent = t('views.home');
   back.addEventListener('click', () => setHomeLimitProvidersOpen(false));
   const title = document.createElement('strong');
@@ -11312,7 +11817,7 @@ function renderHomeLimitProviderList() {
 function renderHomeModuleCountSettings(id) {
   const wrap = document.createElement('div');
   wrap.className = 'settings-nested-list';
-  const label = document.createElement('label');
+  const label = document.createElement('div');
   label.className = 'settings-item home-module-count-setting';
   const text = document.createElement('span');
   text.className = 'settings-item-text';
@@ -11338,7 +11843,9 @@ function renderHomeModuleCountSettings(id) {
     }
     renderHomeIfVisible();
   });
+  input.setAttribute('aria-label', title.textContent);
   label.append(text, input);
+  addRenderedSettingReset(label, text, title, 'homeModuleCounts', id);
   wrap.append(label);
   if (id === 'session') {
     const note = document.createElement('p');
@@ -11346,14 +11853,42 @@ function renderHomeModuleCountSettings(id) {
     note.className = 'settings-note';
     note.textContent = t('settings.home.sessionCountNote');
     input.setAttribute('aria-describedby', note.id);
-    wrap.append(note);
+    wrap.append(note, renderHomeSessionDisplaySetting());
   }
   return wrap;
 }
 
+function renderHomeSessionDisplaySetting() {
+  const row = document.createElement('div');
+  row.className = 'settings-item home-session-display-setting';
+  const text = document.createElement('span');
+  text.className = 'settings-item-text';
+  const title = document.createElement('span');
+  title.className = 'settings-item-title';
+  title.textContent = t('settings.home.sessionDisplayMode');
+  text.append(title);
+  const input = document.createElement('select');
+  for (const mode of ['compact', 'detailed']) {
+    const option = document.createElement('option');
+    option.value = mode;
+    option.textContent = t(`settings.home.sessionDisplayMode.${mode}`);
+    input.append(option);
+  }
+  input.value = homeModulePreferencesApi.normalizeHomeSessionDisplayMode(state.settings?.homeSessionDisplayMode);
+  input.addEventListener('change', () => {
+    // saveSettings reports a failed write and restores the persisted choice.
+    saveSettings({ homeSessionDisplayMode: input.value }).catch(() => {});
+  });
+  input.setAttribute('aria-label', title.textContent);
+  row.append(text, input);
+  addRenderedSettingReset(row, text, title, 'homeSessionDisplayMode');
+  return row;
+}
+
 function homeModuleSummary(id) {
   if (id === 'limits') {
-    return t(`settings.home.limitDisplayMode.${homeModulePreferencesApi.normalizeHomeLimitDisplayMode(state.settings?.homeLimitDisplayMode)}`);
+    const mode = homeModulePreferencesApi.normalizeHomeLimitDisplayMode(state.settings?.homeLimitDisplayMode);
+    return t(`settings.home.limitDisplayMode.${mode === 'rows' ? 'default' : mode}`);
   }
   if (id === 'trends') return t((state.settings?.heatmapMetric || 'cost') === 'tokens' ? 'dashboard.heatmap.tokens' : 'dashboard.heatmap.cost');
   if (HOME_MODULE_SUBGROUPS[id]) return t('settings.home.itemCountValue', { n: homeModulePreferencesApi.homeModuleCount(state.settings, id) });
@@ -11438,6 +11973,25 @@ function renderHomeSettingsList() {
       wrap.append(listContainer);
     }
   }
+  // Home is monochrome by default; this brings back each provider's colour.
+  // The row is not a <label>, so a click on its reset button does not toggle it.
+  const vendorColors = document.createElement('div');
+  vendorColors.className = 'checkbox-label settings-item';
+  const vendorColorsText = document.createElement('span');
+  vendorColorsText.className = 'settings-item-text';
+  const vendorColorsTitle = document.createElement('label');
+  vendorColorsTitle.className = 'settings-item-title';
+  vendorColorsTitle.htmlFor = 'homeVendorColorsInput';
+  vendorColorsTitle.textContent = t('settings.home.vendorColors');
+  vendorColorsText.append(vendorColorsTitle);
+  const vendorColorsInput = document.createElement('input');
+  vendorColorsInput.id = 'homeVendorColorsInput';
+  vendorColorsInput.type = 'checkbox';
+  vendorColorsInput.checked = homeVendorColorsEnabled();
+  vendorColorsInput.addEventListener('change', () => void saveSettings({ homeVendorColors: vendorColorsInput.checked }));
+  vendorColors.append(vendorColorsText, vendorColorsInput);
+  addRenderedSettingReset(vendorColors, vendorColorsText, vendorColorsTitle, 'homeVendorColors');
+  wrap.append(vendorColors);
   return wrap;
 }
 
@@ -11447,8 +12001,8 @@ function renderHomeSettingsList() {
 function renderHomeActivitySettings() {
   const wrap = document.createElement('div');
   wrap.className = 'settings-nested-list';
-  const row = (titleKey, options, value, onChange) => {
-    const label = document.createElement('label');
+  const row = (key, titleKey, options, value, onChange) => {
+    const label = document.createElement('div');
     label.className = 'settings-item';
     const text = document.createElement('span');
     text.className = 'settings-item-text';
@@ -11465,18 +12019,20 @@ function renderHomeActivitySettings() {
     }
     select.value = value;
     select.addEventListener('change', () => void onChange(select.value).then(renderHomeIfVisible));
+    select.setAttribute('aria-label', title.textContent);
     label.append(text, select);
+    addRenderedSettingReset(label, text, title, key);
     wrap.append(label);
   };
-  row('settings.home.heatmapColor',
+  row('heatmapMetric', 'settings.home.heatmapColor',
     [['tokens', 'dashboard.heatmap.tokens'], ['cost', 'dashboard.heatmap.cost']],
     state.settings?.heatmapMetric || 'cost',
     (metric) => saveSettings({ heatmapMetric: metric }));
-  row('settings.home.activeDaysWindow',
+  row('homeActiveDaysWindow', 'settings.home.activeDaysWindow',
     ['all', 'year'].map((mode) => [mode, `settings.home.activeDaysWindow.${mode}`]),
     state.settings?.homeActiveDaysWindow || 'all',
     (mode) => saveSettings({ homeActiveDaysWindow: mode }));
-  row('settings.home.trendTokens',
+  row('showExactHomeTrendTokens', 'settings.home.trendTokens',
     ['compact', 'exact'].map((mode) => [mode, `settings.home.trendTokens.${mode}`]),
     state.settings?.showExactHomeTrendTokens === true ? 'exact' : 'compact',
     (mode) => saveSettings({ showExactHomeTrendTokens: mode === 'exact' }));
@@ -11486,7 +12042,7 @@ function renderHomeActivitySettings() {
 function renderLimitsViewSettingsList() {
   const wrap = document.createElement('div');
   wrap.className = 'settings-nested-list';
-  const row = document.createElement('label');
+  const row = document.createElement('div');
   row.className = 'settings-item';
   const text = document.createElement('span');
   text.className = 'settings-item-text';
@@ -11507,7 +12063,9 @@ function renderLimitsViewSettingsList() {
     await saveSettings({ limitsHistoryOpenMode: input.value });
     renderLimits();
   });
+  input.setAttribute('aria-label', title.textContent);
   row.append(text, input);
+  addRenderedSettingReset(row, text, title, 'limitsHistoryOpenMode');
   wrap.appendChild(row);
   return wrap;
 }
@@ -11519,7 +12077,7 @@ function renderModelViewSettingsList() {
   row.className = 'settings-item';
   const label = document.createElement('span');
   label.id = 'modelRankingMetricLabel';
-  label.className = 'settings-item-text settings-item-title';
+  label.className = 'settings-item-title';
   label.textContent = t('settings.modelRanking.label');
   const options = document.createElement('div');
   options.className = 'inline-options';
@@ -11544,7 +12102,11 @@ function renderModelViewSettingsList() {
     option.append(input, text);
     options.append(option);
   }
-  row.append(label, options);
+  const heading = document.createElement('span');
+  heading.className = 'settings-item-text';
+  heading.append(label);
+  row.append(heading, options);
+  addRenderedSettingReset(row, heading, label, 'modelRankingMetric');
   wrap.append(row);
   return wrap;
 }
@@ -11564,10 +12126,11 @@ function renderTrendSettingsList() {
   wrap.append(label);
 
   const HISTORY_INTERVAL_OPTIONS = [300000, 600000, 900000, 1800000, 3600000];
-  const intervalRow = document.createElement('label');
+  const intervalRow = document.createElement('div');
   intervalRow.className = 'status-provider-interval';
   intervalRow.classList.toggle('hidden', !input.checked);
   const intervalLabel = document.createElement('span');
+  intervalLabel.className = 'settings-item-text';
   intervalLabel.textContent = t('settings.views.trendInterval');
   const select = document.createElement('select');
   select.id = 'trendIntervalSelect';
@@ -11580,7 +12143,9 @@ function renderTrendSettingsList() {
     select.appendChild(option);
   }
   select.addEventListener('change', () => void saveSettings({ historyIntervalMs: Number(select.value) }));
+  select.setAttribute('aria-label', intervalLabel.textContent);
   intervalRow.append(intervalLabel, select);
+  addRenderedSettingReset(intervalRow, intervalLabel, intervalLabel, 'historyIntervalMs');
   wrap.append(intervalRow);
 
   input.addEventListener('change', async () => {
@@ -11696,6 +12261,7 @@ function renderSessionSettingsList() {
     options.append(option);
   }
   row.append(label, options);
+  addRenderedSettingReset(row, label, title, 'sessionContextMetric');
   wrap.append(row);
   return wrap;
 }
@@ -11725,9 +12291,10 @@ function renderServiceProviderList() {
   header.append(note, headerActions);
   wrap.append(header);
   const SERVICE_STATUS_REFRESH_OPTIONS = [0, 60000, 120000, 300000, 900000, 1800000];
-  const intervalRow = document.createElement('label');
+  const intervalRow = document.createElement('div');
   intervalRow.className = 'status-provider-interval';
   const intervalLabel = document.createElement('span');
+  intervalLabel.className = 'settings-item-text';
   intervalLabel.textContent = t('serviceStatus.refreshEvery');
   const select = document.createElement('select');
   select.id = 'serviceStatusRefreshSelect';
@@ -11740,7 +12307,9 @@ function renderServiceProviderList() {
     select.appendChild(option);
   }
   select.addEventListener('change', () => void saveSettings({ serviceStatusRefreshMs: Number(select.value) }));
+  select.setAttribute('aria-label', intervalLabel.textContent);
   intervalRow.append(intervalLabel, select);
+  addRenderedSettingReset(intervalRow, intervalLabel, intervalLabel, 'serviceStatusRefreshMs');
   wrap.append(intervalRow);
   for (const { id, label } of providers) {
     const isHidden = hidden.has(id);
@@ -11871,6 +12440,38 @@ function clientSourcesPanelIds(clientId) {
 function clientSourcesPanelKey(clientId) {
   const keys = clientSourcesPanelIds(clientId).map(id => clientSourceCacheApi.clientSourceRequestKey(clientSourcesIdentity(id)));
   return keys.every(Boolean) ? (keys.length === 1 ? keys[0] : JSON.stringify(keys)) : '';
+}
+
+function loadUntrackedClientsWithData(localUsage = clientHealthPresentationApi.clientIdsWithUsage([localDevice()])) {
+  if (!state.settings || els.settingsPanel?.classList.contains('hidden') || !state.settingsSections?.tools) return;
+  const enabled = enabledClientSet();
+  const untracked = KNOWN_CLIENTS.map(({ id }) => id).filter((id) => !enabled.has(id));
+  const pathsKey = JSON.stringify([state.settings.customScanPaths || {}, Boolean(state.settings.wslScanEnabled)]);
+  if (!untracked.length) {
+    state.untrackedWithDataPathsKey = pathsKey;
+    state.untrackedWithDataProbed = new Set();
+    state.untrackedWithData = [];
+    return;
+  }
+  if (
+    state.untrackedWithDataPathsKey === pathsKey
+    && state.untrackedWithDataProbed
+    && untracked.every((id) => localUsage.has(id) || state.untrackedWithDataProbed.has(id))
+  ) {
+    return;
+  }
+  const request = ++state.untrackedWithDataRequest;
+  state.untrackedWithDataPathsKey = pathsKey;
+  state.untrackedWithDataProbed = new Set(untracked);
+  void window.tokenMonitor?.untrackedClientsWithData?.().then((clients) => {
+    if (state.untrackedWithDataRequest !== request) return;
+    const next = Array.isArray(clients) ? clients : [];
+    if (next.join(',') === state.untrackedWithData.join(',')) return;
+    state.untrackedWithData = next;
+    renderToolPreferences();
+  }).catch(() => {
+    if (state.untrackedWithDataRequest === request) state.untrackedWithDataProbed = null;
+  });
 }
 
 function loadClientSources(clientId, options = {}) {
@@ -12568,14 +13169,23 @@ function toolPreferenceRows() {
   return { clients, matched: new Set(matches.map(({ id }) => id)) };
 }
 
-// Leads a tracked-tool or limit-provider row, always in the text colour. A tool
-// without a mark keeps the same footprint with its initial, so names still
-// line up.
+// Leads a tracked-tool or limit-provider row, always in the text colour. A
+// plugin limit shows the mark its manifest declares, as it does on the Limits
+// page. A tool without a mark keeps the same footprint with its initial, so
+// names still line up.
 function settingsListIcon(id, label, iconSet, extraClass = '') {
   const icon = document.createElement('span');
   icon.setAttribute('aria-hidden', 'true');
+  const pluginModule = iconSet.has(id) ? null : pluginLimitMetadata(id);
   if (iconSet.has(id)) {
     icon.className = `settings-list-icon ink-icon row-icon-${id}${extraClass ? ` ${extraClass}` : ''}`;
+  } else if (pluginModule?.presentation?.icon || pluginModule?.identityIcon) {
+    icon.className = 'settings-list-icon settings-list-plugin-icon';
+    const mark = window.TokenMonitorPluginViews.navigationIcon(document, pluginModule, 14);
+    // The list sizes the slot (smaller in the collapsed group's chips).
+    mark.style.width = '100%';
+    mark.style.height = '100%';
+    icon.append(mark);
   } else {
     icon.className = 'settings-list-icon settings-list-icon-fallback';
     icon.textContent = String(label || id).trim().charAt(0).toUpperCase();
@@ -12656,7 +13266,10 @@ function restoreSettingsListFocus(focusedId) {
   const target = document.getElementById(focusedId);
   const group = target?.closest('.settings-list-group');
   const toggle = group?.inert ? document.getElementById(`${group.id}Toggle`) : null;
-  (toggle || target)?.focus({ preventScroll: true });
+  const control = target?.hidden && target.matches('.settings-reset-button')
+    ? settingResetControl(target.closest('.settings-item'))
+    : target;
+  (toggle || control)?.focus({ preventScroll: true });
   // The toggle can sit below the fold of a long list. Reveal it after the
   // repaint's scroll preservation, by id since a later repaint may replace it,
   // and as an interaction so a pending restore does not scroll it away again.
@@ -12733,7 +13346,7 @@ function renderSettingsListEmptyState(list) {
   list.append(empty);
 }
 
-function toolPreferenceRenderSignature() {
+function toolPreferenceRenderSignature(untrackedTags) {
   const clientStatus = localClientStatus();
   const health = localClientHealth();
   const device = localDevice();
@@ -12756,6 +13369,7 @@ function toolPreferenceRenderSignature() {
     query: toolPreferenceQuery(),
     deviceId: device?.deviceId || '',
     clientStatus,
+    untrackedTags,
     healthRows: KNOWN_CLIENTS.map(({ id }) => [
       id,
       health?.clients?.[id]?.overall || '',
@@ -12765,7 +13379,22 @@ function toolPreferenceRenderSignature() {
 }
 
 function renderToolPreferencesNow() {
-  const renderSignature = toolPreferenceRenderSignature();
+  const { clients, matched } = toolPreferenceRows();
+  const untrackedClients = clients.filter(({ id }) => !clientRowTracked(id));
+  const localUsage = clientHealthPresentationApi.clientIdsWithUsage([localDevice()]);
+  loadUntrackedClientsWithData(localUsage);
+  const detectedSources = new Set(state.untrackedWithData || []);
+  const untrackedTags = Object.fromEntries(untrackedClients.map(({ id }) => {
+    const members = clientSourcesPanelIds(id);
+    if (members.some(member => localUsage.has(member))) {
+      return [id, { key: 'settings.tools.status.hasData', tone: 'neutral' }];
+    }
+    if (members.some(member => detectedSources.has(member))) {
+      return [id, { key: 'settings.tools.status.detected', tone: 'muted' }];
+    }
+    return [id, null];
+  }));
+  const renderSignature = toolPreferenceRenderSignature(untrackedTags);
   const detailSignature = JSON.stringify([
     localClientHealth(),
     localDevice(),
@@ -12775,7 +13404,6 @@ function renderToolPreferencesNow() {
     state.settings?.clients || ''
   ]);
   const sourceSignature = clientSourcesPanelKey(state.clientHealthExpanded);
-  const { clients, matched } = toolPreferenceRows();
   // Every client keeps a row; a query with no match adds the no-matches note on
   // top of them, so the short-circuit compares against what this query is
   // expected to have produced.
@@ -12817,7 +13445,6 @@ function renderToolPreferencesNow() {
   const motion = takeSettingsListMotion('client', isTracked)
     ? captureSettingsRowMotion(els.clientDisplayList, '.tool-preference-row[data-client]', 'client')
     : null;
-  const untrackedClients = clients.filter(({ id }) => !isTracked(id));
   const groups = renderSettingsListGroups(els.clientDisplayList, {
     id: 'clientDisplayUntrackedGroup',
     enabledCount: clients.length - untrackedClients.length,
@@ -12845,7 +13472,7 @@ function renderToolPreferencesNow() {
     name.className = 'tool-preference-name';
     name.textContent = label;
     labelGroup.append(settingsListIcon(id, label, clientsWithIcon), name);
-    let statusTag = null;
+    let tagInfo = untrackedTags[id] || null;
     if (tracked) {
       // A tracked client with no reported status yet (first collect still running)
       // reads as "waiting for data" rather than a bare blank.
@@ -12857,23 +13484,24 @@ function renderToolPreferencesNow() {
       const needsAttention = id === 'qoder'
         ? qoderDisplayApi.IDS.some(member => enabled.has(member) && health?.clients?.[member]?.overall === 'attention')
         : health?.clients?.[id]?.overall === 'attention';
-      const tagInfo = needsAttention
+      tagInfo = needsAttention
         ? { key: 'settings.tools.status.attention', tone: 'warn' }
         : id === 'qoder'
           ? { key: qoderTracking.mixed ? 'settings.tools.qoder.partial' : 'settings.tools.qoder.all', tone: 'ok' }
           : clientStatusPresentationApi.clientStatusTag(id, clientStatus[id] || 'waiting');
-      if (tagInfo) {
-        statusTag = document.createElement('span');
-        statusTag.className = `tool-status-tag tool-status-tag-${tagInfo.tone}`;
-        // A healthy client is a dot: the group heading already says it is
-        // tracked. Every other state keeps its words.
-        if (tagInfo.tone === 'ok' && tagInfo.key !== 'settings.tools.qoder.partial') {
-          statusTag.classList.add('is-dot');
-          statusTag.setAttribute('role', 'img');
-          statusTag.setAttribute('aria-label', t(tagInfo.key));
-        } else {
-          statusTag.textContent = t(tagInfo.key);
-        }
+    }
+    let statusTag = null;
+    if (tagInfo) {
+      statusTag = document.createElement('span');
+      statusTag.className = `tool-status-tag tool-status-tag-${tagInfo.tone}`;
+      // A healthy client is a dot: the group heading already says it is
+      // tracked. Every other state keeps its words.
+      if (tagInfo.tone === 'ok' && tagInfo.key !== 'settings.tools.qoder.partial') {
+        statusTag.classList.add('is-dot');
+        statusTag.setAttribute('role', 'img');
+        statusTag.setAttribute('aria-label', t(tagInfo.key));
+      } else {
+        statusTag.textContent = t(tagInfo.key);
       }
     }
     const track = document.createElement('label');
@@ -13027,12 +13655,53 @@ function renderLimitProviderCheckboxes() {
   return preserveSettingsPanelScroll(renderLimitProviderCheckboxesNow);
 }
 
+const MAX_LIMIT_READING_DEVICE_ICONS = 3;
+
+function disabledLimitReadingDevices(providers) {
+  const localId = state.settings?.deviceId || '';
+  // Device rows retain both origins even when the aggregate picks one account reading.
+  const devices = state.stats?.devices || [];
+  const aggregate = state.stats?.limits?.providers || [];
+  const localProviders = [
+    ...(localId ? localDeviceLimitsProviders() ?? aggregate.filter(row => row.sourceDeviceId === localId) : []),
+    ...(state.pluginCatalog?.limits?.providers || [])
+  ];
+  const byProvider = limitProviderPresentationApi.providerReadingDeviceIds(
+    localProviders,
+    devices,
+    aggregate,
+    localId
+  );
+  const deviceById = new Map(devices.filter(device => device?.deviceId).map(device => [device.deviceId, device]));
+  const local = localDevice() || { deviceId: localId, deviceKind: 'desktop' };
+  const describe = (id) => {
+    const isLocal = !localId || id === localId || id === '__local__';
+    const device = isLocal ? local : (deviceById.get(id) || { deviceId: id });
+    return {
+      deviceId: isLocal ? (localId || '__local__') : id,
+      local: isLocal,
+      kind: deviceIconsApi.deviceIconKind(state.settings, device),
+      name: isLocal ? t('settings.sync.panel.thisDevice') : deviceBreakdownApi.deviceLabel(device)
+    };
+  };
+  return Object.fromEntries(providers.map(({ id }) => {
+    const list = (byProvider.get(id) || []).map(describe).sort((a, b) => {
+      if (a.local !== b.local) return a.local ? -1 : 1;
+      return a.name.localeCompare(b.name) || a.deviceId.localeCompare(b.deviceId);
+    });
+    return [id, list];
+  }));
+}
+
 function renderLimitProviderCheckboxesNow() {
   renderAccountSlotPanels();
   refreshAccountSlotPanels();
   for (const [id, panel] of automaticAccountPanels) panel.controller.update(strictLocalProviderStatuses(id));
-  const renderSignature = limitProviderSettingsRenderSignature();
   const { providers, matched } = limitProviderRows();
+  const enabled = enabledLimitProviderSet();
+  const disabledProviders = providers.filter(({ id }) => !enabled.has(id));
+  const readingDevicesByProvider = disabledLimitReadingDevices(disabledProviders);
+  const renderSignature = limitProviderSettingsRenderSignature(readingDevicesByProvider);
   // Same reasoning as the tracked-tools list: every provider keeps a row, and no
   // matches leaves the no-matches note on top of them.
   if (
@@ -13059,12 +13728,10 @@ function renderLimitProviderCheckboxesNow() {
       reusableSettingInputs.set(`${providerId}:item:${input.dataset.itemId}`, input);
     }
   }
-  const enabled = enabledLimitProviderSet();
   const filtering = Boolean(limitProviderQuery());
   const motion = takeSettingsListMotion('provider', id => enabled.has(id))
     ? captureSettingsRowMotion(els.limitProviderCheckboxes, '.limit-provider-row[data-provider]', 'provider')
     : null;
-  const disabledProviders = providers.filter(({ id }) => !enabled.has(id));
   const groups = renderSettingsListGroups(els.limitProviderCheckboxes, {
     id: 'limitProviderDisabledGroup',
     enabledCount: providers.length - disabledProviders.length,
@@ -13152,6 +13819,27 @@ function renderLimitProviderCheckboxesNow() {
     row.classList.toggle('has-status-tag', Boolean(actions.querySelector('.limit-provider-tag-status')));
     copy.append(nameLine);
     wrap.append(cb);
+    const readingDevices = !isEnabled ? (readingDevicesByProvider[id] || []) : [];
+    let readingIndicator = null;
+    if (readingDevices.length) {
+      readingIndicator = document.createElement('span');
+      readingIndicator.id = `limitProviderReadingDevices-${id}`;
+      readingIndicator.className = 'limit-provider-reading-devices';
+      for (const device of readingDevices.slice(0, MAX_LIMIT_READING_DEVICE_ICONS)) {
+        readingIndicator.append(deviceIconsApi.deviceIconNode(document, device.kind));
+      }
+      if (readingDevices.length > MAX_LIMIT_READING_DEVICE_ICONS) {
+        const overflow = document.createElement('span');
+        overflow.className = 'limit-provider-reading-overflow';
+        overflow.setAttribute('aria-hidden', 'true');
+        overflow.textContent = `+${readingDevices.length - MAX_LIMIT_READING_DEVICE_ICONS}`;
+        readingIndicator.append(overflow);
+      }
+      limitWindowsView.setDetailTooltip(readingIndicator, [
+        { full: t('settings.limits.readingsFrom'), caption: true },
+        ...readingDevices.map(device => ({ full: device.name }))
+      ], { centered: true });
+    }
     const accountStatus = limitProviderAccountStatus(id);
     if (accountStatus) {
       accountStatus.classList.toggle('hidden', !isEnabled);
@@ -13235,7 +13923,9 @@ function renderLimitProviderCheckboxesNow() {
       main.className = 'limit-provider-main';
     }
     main.append(disclosure, copy, actions);
-    row.append(main, wrap);
+    row.classList.toggle('has-reading-devices', Boolean(readingIndicator));
+    if (readingIndicator) row.append(main, readingIndicator, wrap);
+    else row.append(main, wrap);
     // Reordering is suppressed while a filter is on: the drop commits the order
     // it reads off the list, and a filtered list is only part of it. Disabled
     // providers wait in their own group and have no order to change.
@@ -13566,6 +14256,12 @@ const LIMIT_PROVIDER_SETTINGS = {
     descKey: 'settings.limits.claudeCliFallbackDesc',
     defaultValue: true
   }],
+  antigravity: [{
+    key: 'antigravityLocalLimitsEnabled',
+    titleKey: 'settings.limits.antigravityLocalLimits',
+    descKey: 'settings.limits.antigravityLocalLimitsDesc',
+    defaultValue: true
+  }],
   codex: [{
     key: 'codexResetForecastEnabled',
     titleKey: 'settings.limits.codexResetForecast',
@@ -13586,7 +14282,7 @@ const LIMIT_PROVIDER_SETTINGS = {
   }]
 };
 
-function limitProviderSettingsRenderSignature() {
+function limitProviderSettingsRenderSignature(readingDevices) {
   const settings = state.settings || {};
   const providerSignature = (provider) => {
     return [
@@ -13631,6 +14327,7 @@ function limitProviderSettingsRenderSignature() {
     connectionReadings: [...enabledLimitProviderSet()].sort().map((id) => [id, strictLocalProviderStatuses(id)
       .map((row) => [row.status || '', Boolean(row.stale), row.source || '', row.sourceDetail || ''])]),
     query: limitProviderQuery(),
+    readingDevices,
     providers: (state.stats?.limits?.providers || []).map(providerSignature),
     devices: (state.stats?.devices || []).map(deviceSignature)
   });
@@ -13644,7 +14341,8 @@ function limitProviderSettingsList(providerId, settings, reusableInputs = null) 
     // not part of the title cell, so the switch stays on the title's line and
     // the note wraps full-width underneath instead of squeezing it onto its own
     // row.
-    const item = document.createElement('label');
+    const canReset = setting.key === 'workbuddyQuotaTotalEnabled';
+    const item = document.createElement(canReset ? 'div' : 'label');
     item.className = 'checkbox-label settings-item';
     const copy = document.createElement('span');
     copy.className = 'settings-item-text';
@@ -13677,6 +14375,14 @@ function limitProviderSettingsList(providerId, settings, reusableInputs = null) 
     desc.className = 'settings-note settings-item-desc';
     desc.textContent = t(setting.descKey);
     item.append(copy, input, desc);
+    if (canReset) {
+      desc.id = 'workbuddyQuotaTotalNote';
+      input.setAttribute('aria-describedby', desc.id);
+      input.setAttribute('aria-label', title.textContent);
+      addRenderedSettingReset(item, copy, title, setting.key);
+      const reset = copy.querySelector('.settings-reset-button');
+      if (reset) reset.id = 'resetWorkbuddyQuotaTotalButton';
+    }
     list.append(item);
   }
   return list;
@@ -14494,6 +15200,14 @@ if (pluginBridge) {
   pluginBridge.onChanged(() => void refreshPluginCatalog());
 }
 
+let hibernateRevealPending = false;
+
+function signalHibernateRevealIfReady() {
+  if (!hibernateRevealPending || !initialSettingsApplied || !state.stats) return;
+  hibernateRevealPending = false;
+  window.tokenMonitor.signalAppearanceReady?.();
+}
+
 async function init() {
   // Subscribe before querying: a native appearance/accessibility change can
   // arrive while the initial state round trip is in flight.
@@ -14537,6 +15251,7 @@ async function init() {
   });
   window.tokenMonitor.onSystemUiThemePush?.((payload) => applySystemUiTheme(payload?.dark === true));
   try { state.appInfo = await window.tokenMonitor.getAppInfo?.(); } catch (_) {}
+  setupSettingResets();
   if (!notchCapabilitiesSeeded) state.notchCapabilities = state.appInfo?.notchCapabilities || null;
   syncNotchCapabilities();
   // Seeding assigns directly: the rest of init delivers both icon sets anyway,
@@ -14550,11 +15265,22 @@ async function init() {
   // Tray startup also needs its saved appearance prepared before native show.
   applyVisibleSettingsAppearance();
   initialSettingsApplied = true;
-  if (state.windowVisible) {
+  // A tray action can arrive at did-finish-load, before this asynchronous init
+  // finishes. Replay it now, before the window can announce appearance, so the
+  // first painted frame is the requested view or settings section.
+  flushPendingTrayOpen();
+  const hibernateReveal = new URLSearchParams(window.location.search).get('hibernateReveal') === '1';
+  if (hibernateReveal) {
+    // Do not reveal the recreated popover on the static zero defaults. Wait for
+    // the first real stats snapshot; the main process still falls back after
+    // its short wake timeout if stats do not arrive.
+    hibernateRevealPending = true;
+    signalHibernateRevealIfReady();
+  } else if (state.windowVisible) {
     const signalAppearanceReady = () => window.tokenMonitor.signalAppearanceReady?.();
     // A retained WebContentsView can be document.hidden until its native host
     // shows. Prepare it now, without waiting on animation frames that pause while
-    // hidden. windowVisible still excludes intentionally hidden tray startup.
+    // hidden.
     if (document.hidden) signalAppearanceReady();
     else requestAnimationFrame(() => requestAnimationFrame(signalAppearanceReady));
   }
@@ -14573,6 +15299,7 @@ async function init() {
     renderAppUpdatePill();
     renderSettingsAppUpdateRow();
     renderAutomaticAppUpdateControl();
+    syncSettingResets();
     if (els.appUpdatePopover.matches(':popover-open')) renderAppUpdatePopover(payload);
   });
   if (state.appInfo?.loginItemSupported) {
@@ -14681,14 +15408,16 @@ els.monthPeriodMenu?.addEventListener('keydown', (event) => {
   });
 });
 
-els.periodMonthModeInput?.addEventListener('change', async () => {
-  const selection = fixedPeriodRangesApi.normalizeMonthMode(els.periodMonthModeInput.value);
+async function saveDefaultUsageRange(value) {
+  const selection = fixedPeriodRangesApi.normalizeMonthMode(value);
   state.settings.periodMonthMode = selection;
   if (fixedPeriodRangesApi.slotForSelection(state.period) === 'month') setPeriod(selection);
   syncPeriodTabs();
   render();
   await saveSettings({ periodMonthMode: selection });
-});
+}
+
+els.periodMonthModeInput?.addEventListener('change', () => saveDefaultUsageRange(els.periodMonthModeInput.value));
 
 document.addEventListener('click', (event) => {
   if (!state.periodMenuOpen) return;
@@ -14766,8 +15495,10 @@ els.settingsButton.addEventListener('click', (event) => {
     syncModeSelect?.close();
     syncContentForm?.closeHelp();
     appearanceColorPicker.close();
+    displaySettings?.close();
     resetSettingsListSearch();
     stopWindowShortcutRecording();
+    state.untrackedWithDataProbed = null;
   }
   els.shell.classList.toggle('settings-open', settingsOpen);
   syncPluginLimitsDemand();
@@ -14881,8 +15612,6 @@ els.hubProfileRemove?.addEventListener('click', async () => {
   await changeHubProfile({ type: 'delete', id: state.settings?.activeHubProfileId });
 });
 
-els.syncPanelOpenDevices?.addEventListener('click', () => openViewFromTray('device'));
-
 els.hubModeOptions.addEventListener('change', async (event) => {
   const target = event.target;
   if (target !== els.hubModeOptions) return;
@@ -14978,14 +15707,16 @@ els.secretPasteButton?.addEventListener('click', async () => {
     }
   } catch (_) {}
 });
-els.limitsRefreshInput.addEventListener('change', async () => {
+async function saveLimitsRefresh(value) {
   // Adaptive carries its own baseline, so the stored interval is left alone and
   // comes back unchanged when a fixed option is selected again.
-  const value = els.limitsRefreshInput.value;
   await saveSettings(value === 'adaptive'
     ? { limitsRefreshMode: 'adaptive' }
     : { limitsRefreshMode: 'fixed', limitsRefreshMs: Number(value) });
   await refreshStats({ force: true });
+}
+els.limitsRefreshInput.addEventListener('change', async () => {
+  await saveLimitsRefresh(els.limitsRefreshInput.value);
 });
 els.showLimitSourceInput.addEventListener('change', async () => {
   await saveSettings({ showLimitSource: els.showLimitSourceInput.checked });
@@ -15263,6 +15994,12 @@ for (const input of els.reduceMotionInputs || []) {
   });
 }
 els.liveDotInput.addEventListener('change', saveAppearanceFromControls);
+els.sessionSortToggle.addEventListener('click', () => {
+  state.sessionSort = state.sessionSort === 'tokens' ? 'recent' : 'tokens';
+  state.sessionPage = 0;
+  els.breakdown.scrollTop = 0;
+  render();
+});
 els.sessionSearchToggle?.addEventListener('click', () => {
   const open = !state.sessionSearchOpen;
   setSessionSearchOpen(open, { focus: open });
@@ -15326,13 +16063,15 @@ els.showLiveTokenRateInput.addEventListener('change', async () => {
   if (state.settings.showLiveTokenRate) observeLiveTokenRate(state.stats);
   renderLiveTokenRate();
 });
-els.liveTokenRateScopeInput?.addEventListener('change', async () => {
-  state.settings.liveTokenRateScope = els.liveTokenRateScopeInput.value === 'device' ? 'device' : 'all';
+async function saveLiveTokenRateScope(scope) {
+  await saveSettings({ liveTokenRateScope: scope });
   resetLiveTokenRateTracking();
   observeLiveTokenRate(state.stats);
   renderLiveTokenRate();
-  await saveAppearanceFromControls();
-});
+}
+els.liveTokenRateScopeInput?.addEventListener('change', () => saveLiveTokenRateScope(
+  els.liveTokenRateScopeInput.value === 'device' ? 'device' : 'all'
+));
 els.compactTokenUnitsInput?.addEventListener('change', async () => {
   await saveAppearanceFromControls();
 });
@@ -15392,7 +16131,11 @@ function syncNotchHoverControls() {
 
 function syncNotchHoverDelayValue() {
   const value = els.notchHoverDelayRow?.querySelector('.slider-value');
-  if (value && els.notchHoverDelayInput) value.textContent = `${(Number(els.notchHoverDelayInput.value) / 1000).toFixed(1)} s`;
+  const input = els.notchHoverDelayInput;
+  if (!input) return;
+  const delay = Number(input.value);
+  if (value) value.textContent = `${(delay / 1000).toFixed(1)} s`;
+  syncSettingResetVisibility(els.resetNotchHoverDelayButton, input, delay === NOTCH_HOVER_DELAY_DEFAULT_MS);
 }
 
 function syncNotchStyleInput(preview) {
@@ -15436,6 +16179,9 @@ function syncDockControls() {
   const modes = (els.edgeDockModeInputs || []).map((input) => input.value);
   const mode = modes.includes(state.settings?.edgeDockMode) ? state.settings.edgeDockMode : 'autoHide';
   for (const input of els.edgeDockModeInputs || []) input.checked = input.value === mode;
+  els.edgeDockTriggerRangeRow?.classList.toggle('hidden', mode === 'always' || floating);
+  const triggerRange = state.settings?.edgeDockTriggerRange ?? 'rail';
+  for (const input of els.edgeDockTriggerRangeInputs || []) input.checked = input.value === triggerRange;
   syncDockSizeControls('edgeDock');
   syncDockSizeControls('edgeDockBubble');
   syncDockSizeControls('notch');
@@ -15617,6 +16363,11 @@ els.edgeDockHapticInput?.addEventListener('change', () => {
 for (const input of els.edgeDockModeInputs || []) {
   input.addEventListener('change', () => {
     if (input.checked) void saveSettings({ edgeDockMode: input.value });
+  });
+}
+for (const input of els.edgeDockTriggerRangeInputs || []) {
+  input.addEventListener('change', () => {
+    if (input.checked) void saveSettings({ edgeDockTriggerRange: input.value });
   });
 }
 for (const surface of ['edgeDock', 'edgeDockBubble', 'notch']) {
@@ -15907,8 +16658,39 @@ reducedMotionMedia?.addEventListener?.('change', () => {
   applyReduceMotionPreference('system');
 });
 
-window.tokenMonitor.onOpenSettings?.(openSettingsPanel);
-window.tokenMonitor.onOpenView?.(openViewFromTray);
+// The main process sends tray navigation as soon as did-finish-load fires,
+// which can be earlier than the asynchronous settings load above. Dispatching
+// then would open the panel or switch views against the default state; keep the
+// last request until init has applied the saved settings instead.
+let pendingTrayOpen = null;
+
+function dispatchTrayOpen(request) {
+  // An explicit tray view outranks the saved startup preference. Consume the
+  // one-time preference so the later syncSettingsForm() cannot replace it; a
+  // plugin page as the last view leaves the query seed absent, so this is not
+  // already covered by initialViewState.
+  if (request.kind === 'view') initialBreakdownPreferenceApplied = true;
+  if (request.kind === 'view') openViewFromTray(request.value);
+  else openSettingsPanel(request.value);
+}
+
+function handleTrayOpenRequest(kind, value) {
+  if (!initialSettingsApplied || !state.settings) {
+    pendingTrayOpen = { kind, value };
+    return;
+  }
+  dispatchTrayOpen({ kind, value });
+}
+
+function flushPendingTrayOpen() {
+  if (!pendingTrayOpen) return;
+  const request = pendingTrayOpen;
+  pendingTrayOpen = null;
+  dispatchTrayOpen(request);
+}
+
+window.tokenMonitor.onOpenSettings?.((section) => handleTrayOpenRequest('settings', section));
+window.tokenMonitor.onOpenView?.((viewId) => handleTrayOpenRequest('view', viewId));
 
 window.tokenMonitor.onFloatingBubbleState?.((payload) => {
   applyFloatingBubbleState(payload);
@@ -16072,6 +16854,7 @@ window.tokenMonitor.onStatsPush?.((payload) => {
     state.stats = sessionStatsForDisplay(allTimeSessions.attach(incomingStats));
     observeLiveTokenRate(state.stats);
     observeDisplayLiveTokenRates(state.stats);
+    if (typeof signalHibernateRevealIfReady === 'function') signalHibernateRevealIfReady();
     applyCodexActiveAccountFromStats();
     // Progressive mid-tick pushes never carry a fresh history scan (see
     // AGENTS.md collector notes), so only the final push can retire the
@@ -17223,7 +18006,6 @@ function refreshTrayComposers() {
     createTrayComposer
   );
   Object.values(trayComposers).forEach((composer) => composer?.refresh());
-  displaySettings?.refreshLivePreview();
   syncCustomTrayClockTimer();
 }
 
@@ -18144,14 +18926,11 @@ setupSettingsAccordion(
   document.getElementById('syncContentDetails'), expanded => syncContentForm.setExpanded(expanded)
 );
 setupSettingsSections();
-const displaySettingsPreview = window.TokenMonitorDisplaySettingsPreview.create({
-  window, document, bridge: window.tokenMonitor, settings: () => state.settings,
-  bitmap: trayComposerPreview, stats: () => state.stats, t
-});
 displaySettings = window.TokenMonitorDisplaySettings.create({
   document, root: document.getElementById('windowSettingsDetails').querySelector('.settings-section-details-inner'),
-  scrollPanel: els.settingsPanel, t, platform: () => state.appInfo?.platform, settings: () => state.settings,
-  preview: displaySettingsPreview.show, cancelScroll: cancelSettingsScrollAnchorOnInteraction,
+  t, platform: () => state.appInfo?.platform, settings: () => state.settings,
+  helpPopover: window.TokenMonitorHelpPopover,
+  cancelScroll: cancelSettingsScrollAnchorOnInteraction,
   stopWindowShortcutRecording
 });
 let legacyAccountOwners;

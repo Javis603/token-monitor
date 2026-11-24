@@ -368,11 +368,12 @@ test('Home sends the complete source readings through the shared WorkBuddy colla
   vm.runInNewContext(`${source}\nhomeLimitRows();`, {
     accountSlotLists: {},
     state: { settings: {}, stats: { limits: { providers: members } } },
+    homeModulePreferencesApi: require('../../src/electron/renderer/homeModulePreferences'),
     enabledLimitProviderSet: () => new Set(['workbuddy']), hiddenHomeLimitProviderSet: () => new Set(),
     desktopLimitProviders: () => [{ id: 'workbuddy', label: 'WorkBuddy' }], desktopLimitRecords: () => members,
   LIMIT_PROVIDERS: [], clientColors: {},
     limitProviderOrderApi: { orderedLimitProviders: () => [] },
-    limitUsageItemsApi: { isLimitWindowHidden: () => false },
+    limitUsageItemsApi: { isLimitWindowHidden: () => false, hiddenUsageItemSet: () => new Set() },
     limitProviderPresentationApi: presentation,
     limitWindowsView: { collapseWorkbuddyAccounts: (providers) => { collapsed = providers; return providers; } },
     homeOverviewApi: { homeLimitAccountsForProviders: (options) => { drawn = options.providers; } }

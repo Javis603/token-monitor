@@ -589,10 +589,10 @@
       return accountReadings(headlineRecord(entry), nowMs);
     }
 
-    // An account's windows, led by the pair Home's limits card shows: the same
-    // compact pick (Antigravity's tightest per model group, Codex's canonical
-    // windows) in the same shortest-cycle-first order. The rest follow in the
-    // collector's order, so a third window is one window page away.
+    // An account's windows, led by its compact pick (Antigravity's tightest per
+    // model group, Codex's canonical windows) in Home's shortest-cycle-first
+    // order. The rest follow in the collector's order, so a third window is one
+    // window page away.
     function orderedWindows(record) {
       const windows = limitWindows(record);
       const lead = new Set(limitPresentation.limitProviderCompactWindows(record, windows));

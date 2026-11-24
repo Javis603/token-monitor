@@ -104,16 +104,6 @@ test('native demand follows Tray, rail and Notch page/summary visibility indepen
   settings.trayContent = 'bars'; run(true); settings.showTrayIcon = false; run(false);
   settings.showTrayIcon = true; settings.limitsEnabled = false; run(false);
 });
-test('display preview reuses retained module identity and balances without collecting or mutating them', () => {
-  const { buildDisplayPreview } = require('../../src/electron/displayPreview');
-  const before = structuredClone(snapshot);
-  const preview = buildDisplayPreview({ edgeDockItems: [{ type: 'limit', provider: id }] }, 'edgeDock', 'open', 'darwin', Date.now(), null, snapshot);
-  assert.equal(preview.payload.cells[0].pluginQuota.label, 'API pool');
-  assert.equal(preview.payload.cells[0].accounts[0].record.windows[0].remaining, 80);
-  assert.deepEqual(snapshot, before);
-  const disabled = buildDisplayPreview({ edgeDockItems: [{ type: 'limit', provider: id }] }, 'edgeDock', 'open', 'darwin', Date.now(), null, { modules: [], providers: [reading] });
-  assert.deepEqual(disabled.payload.cells, []);
-});
 test('renderer Tray picker retains inactive source labels while the desktop readings omit that module', () => {
   const source = fs.readFileSync(path.join(__dirname, '../../src/electron/renderer/app.js'), 'utf8');
   const state = { stats: base(), pluginCatalog: { plugins: [{ id: 'sample-plugin', status: 'disabled', limits: [{ id: 'credits', name: 'API pool' }] }], limits: { modules: [], providers: [reading] } } };

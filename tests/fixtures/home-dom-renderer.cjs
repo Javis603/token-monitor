@@ -45,6 +45,8 @@ const limits = Array.from({ length: 6 }, (_, i) => ({ key: 'account-' + i, provi
 const daily = Array.from({ length: 365 }, (_, i) => ({ date: charts.localDayKey(new Date(now - (364 - i) * 86400000)), tokens: 100000 + i * 300, costUsd: 2 + i / 100 }));
 const state = { period: 'today', breakdown: 'home', settings: { historyEnabled: true, homeModuleCounts: { tool: 10, model: 10, device: 8, session: 20 }, homeLimitDisplayMode: 'bars' }, stats: { periods: { today: { totalTokens: 5500000, clients: Object.fromEntries(tools.map(r => [r.key, r.value])) } }, historyPreview: { daily, summary: { activeDays: 365, activeDaysComplete: true } } }, homeActivityScrollLeft: null, homeActivityFollowEnd: true };
 const limitWindowsView = load('limits/windowsView').createLimitWindowsView({ document, t, tooltip: { hasOpened: () => false, markOpened() {}, release() {} }, settings: () => state.settings, presentation: limitProviderPresentationApi, formatCompact, formatPercent, optionalFiniteNumber, limitFillPercent, colorWithAlpha: color => color, applyBarScale: (node, scale) => node.style.setProperty('--bar-scale', scale) });
+const tokenNumberAnimationApi = require(root + '/src/electron/tokenNumberAnimation');
+const homeLimitMotion = load('limits/homeMotion').createHomeLimitMotion({ motion: load('limits/resetMotion'), resetEasing: load('limits/resetAnimator').EASING, numbers: tokenNumberAnimationApi, prefersReducedMotion, formatPercent });
 const overflowText = load('overflowText').create({ document, window, prefersReducedMotion: () => false });
 const bindHoverMarquee = node => overflowText.bind(node);
 const homeLimitRows = () => limits;

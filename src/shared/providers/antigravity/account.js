@@ -12,6 +12,7 @@ module.exports = /** @satisfies {import('../../limits/accounts').AccountDeclarat
   ],
   form: { kind: 'custom', fields: [] },
   fetch: 'fetchAntigravityLimits',
+  extraSettingKeys: ['antigravityLocalLimitsEnabled'],
   fields: [
     {
       key: 'antigravityManagedAccounts',

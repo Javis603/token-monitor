@@ -675,3 +675,16 @@ test('Claude CLI fallback defaults on and toggling it reconfigures only Claude l
     assert.equal(change.modeStructural, false);
   }
 });
+
+test('Antigravity local detection defaults on and toggling it refreshes only Antigravity limits', () => {
+  assert.equal(limitsConfigFromSettings({}).antigravityLocalLimitsEnabled, true);
+  for (const enabled of [false, true]) {
+    const settings = { antigravityLocalLimitsEnabled: enabled };
+    assert.equal(limitsConfigFromSettings(settings).antigravityLocalLimitsEnabled, enabled);
+    const change = classifySettingsChange({ antigravityLocalLimitsEnabled: !enabled }, settings);
+    assert.equal(change.limitsReconfigure, true);
+    assert.deepEqual(change.limitScopes, [{ provider: 'antigravity', preserveReadings: true }]);
+    assert.equal(change.usageStructural, false);
+    assert.equal(change.modeStructural, false);
+  }
+});

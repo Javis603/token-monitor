@@ -22,6 +22,7 @@ test('custom scan paths keep supported Tokscale clients in catalog order', () =>
   const normalized = normalizeCustomScanPaths({
     dsh: ['/var/data/dsh'],
     codex: ['/var/data/codex'],
+    mcode: ['/var/data/minimax'],
     opencode: ['/var/data/opencode'],
     cursor: ['/var/data/cursor'],
     proma: ['/var/data/proma'],
@@ -32,10 +33,12 @@ test('custom scan paths keep supported Tokscale clients in catalog order', () =>
   assert.deepEqual(normalized, {
     codex: ['/var/data/codex'],
     kilo: ['/var/data/kilo'],
-    dsh: ['/var/data/dsh']
+    dsh: ['/var/data/dsh'],
+    mcode: ['/var/data/minimax']
   });
   assert.equal(CUSTOM_SCAN_CLIENT_IDS.includes('codex'), true);
   assert.equal(CUSTOM_SCAN_CLIENT_IDS.includes('kilo'), true);
+  assert.equal(CUSTOM_SCAN_CLIENT_IDS.includes('mcode'), true);
   assert.equal(CUSTOM_SCAN_CLIENT_IDS.includes('opencode'), false);
   assert.equal(CUSTOM_SCAN_CLIENT_IDS.includes('cursor'), false);
   assert.equal(CUSTOM_SCAN_CLIENT_IDS.includes('proma'), false);

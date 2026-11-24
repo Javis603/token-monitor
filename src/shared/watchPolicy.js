@@ -469,6 +469,13 @@ function watchPolicyEntries(clientsCsv, options = {}) {
   // Claude's parser and source fingerprint also read same-stem agent metadata.
   bound('claude', sourceRoots('claude', 'claude-projects', 'claude-transcripts'),
     recursiveSourceFiles((name) => name.endsWith('.jsonl') || name.endsWith('.meta.json')));
+  // Codex compresses a finished rollout to `.jsonl.zst` beside it. chokidar
+  // holds a native watcher per discovered file, so an archive that can never
+  // grow again keeps a descriptor for the rest of the session — 5.8k of them on
+  // a real profile. Scans still read archives, and compressing a live rollout
+  // removes its watched `.jsonl`, whose unlink event already triggers the scan.
+  bound('codex', sourceRoots('codex', 'codex-sessions'),
+    (_parts, resolved) => path.basename(resolved).endsWith('.jsonl.zst'));
   bound('gemini', candidates.gemini || [],
     recursiveSourceFiles((name) => name.endsWith('.json') || name.endsWith('.jsonl')));
   bound('kilo', sourceRoots('kilo', 'kilo-db'), directChildOnly((name) => KILO_DB_WATCH_PATTERN.test(name)));
@@ -991,11 +998,12 @@ function watcherOptions(usePolling, ignored) {
 // it on the first read before their source cache is warm. A read-only SQLite
 // connection can write its wal-index; it is not evidence of new token usage.
 // Adding a client to this list asserts a measurement rather than a hunch.
+// MiniMax Code rewrites runtime-state.sqlite-shm on every read-only metadata scan of a watched data directory (measured on darwin with the pinned 4.23 scanner, first and repeat scans).
 // Cherry Studio, CatPaw and Goose also rewrite their wal-index on repeated read-only WAL scans.
 // Cursor's read-only desktop credential/title queries change state.vscdb-shm too.
 const SELF_WATCHED_SQLITE_SIDECAR_CLIENTS = Object.freeze([
   'antigravity', 'catpaw', 'cherrystudio', 'copilot', 'cursor', 'devin', 'goose',
-  'hermes', 'kilo', 'kiro', 'mimo', 'opencode', 'openclaw', 'unsloth', 'zcode', 'zed'
+  'hermes', 'kilo', 'kiro', 'mimo', 'mcode', 'opencode', 'openclaw', 'unsloth', 'zcode', 'zed'
 ]);
 
 function isSelfWatchSqliteSidecarEvent(filePath, rootsByClient = {}) {

@@ -137,7 +137,6 @@ app.whenReady().then(async () => {
   let domHistoryOpens = 0;
   const handlers = {
     'settings:get': () => settings,
-    'settings:displayPreview': (_event, surface, phase, slots) => require('../src/electron/displayPreview').buildDisplayPreview(settings, surface, phase, process.platform, Date.now(), slots),
     'settings:update': async (event, patch) => { const after = await runtime.beforeSettingsChange(event, patch); settings = { ...settings, ...patch }; runtime.settingsChanged(); await after(); return settings; },
     'app:getInfo': () => ({ version: 'fixture', platform: process.platform, systemUiTheme: 'dark', loginItemSupported: false }),
     'appUpdate:get': () => ({}), 'appearance:getNativeMaterial': () => null,
@@ -272,69 +271,6 @@ app.whenReady().then(async () => {
     console.log('PASS actual App explicit lifecycle recovery reloads the affected host without changing plugin enablement');
     assertConsoleClean(['Intentional fixture cleanup failure']); clearTimeout(deadline);
     await runtime.dispose(); runtime = null; win.destroy(); app.exit(0); return;
-  }
-  if (process.env.TM_PREVIEWS_ONLY === '1') {
-    const baseline = process.env.TM_EXPECT_BASELINE === '1';
-    const results = [];
-    await js(`window.previewMessages=[];window.addEventListener('message',event=>{
-      if(event.data?.type?.startsWith('display-preview-'))window.previewMessages.push({type:event.data.type,url:event.source.location.href});
-    });els.settingsButton.click();document.querySelector('[data-settings-section=window]').click()`);
-    await pause(500);
-    for (const surface of ['edgeDock','notch']) {
-      const entry = surface === 'edgeDock' ? '.display-settings-row:first-child .display-settings-open' : '#display-tab-notch';
-      await js(`document.querySelector('${entry}').scrollIntoView({block:'center',behavior:'instant'});document.querySelector('${entry}').click()`);
-      const stage = `#display-page-${surface} .display-settings-preview`;
-      await waitFor(`document.querySelector('${stage} iframe')`, `${surface} iframe creation`);
-      if (baseline) await pause(3400);
-      else await waitFor(`document.querySelector('${stage} iframe')?.dataset.ready==='true' && !document.querySelector('${stage} iframe').hidden`, `${surface} ready/render`);
-      await pause(500);
-      await js(`document.querySelector('#display-page-${surface} .display-settings-title').scrollIntoView({block:'start',behavior:'instant'})`);
-      await pause(200);
-      fs.writeFileSync(path.join(evidence, `${surface}-preview.png`), (await capture()).toPNG());
-      if (baseline) {
-        assert.equal(await js(`document.querySelector('${stage} iframe')?.dataset.ready==='true'`), false);
-        results.push({surface,ready:false,errors:[...errors]});
-        continue;
-      }
-      const frame = win.webContents.mainFrame.frames.find(frame => frame.url.includes(`surface=${surface === 'notch' ? 'notch' : 'rail'}&settingsPreview=1`));
-      assert.ok(frame, `${surface} real child frame`);
-      const read = () => frame.executeJavaScript(`({trusted:typeof window.tokenMonitorTrustedPlugins,node:typeof require,preview:bridge.isSettingsPreview,host:pluginHost===null,content:pluginContent===null,payload:state.payload,shapes:document.querySelectorAll('.edge-dock-shape path').length,text:document.getElementById('edgeDockRoot').textContent})`);
-      const first = await read();
-      assert.equal(first.trusted,'undefined');assert.equal(first.node,'undefined');assert.equal(first.preview,true);
-      assert.equal(first.host,true);assert.equal(first.content,true);assert.ok(first.payload);assert.ok(first.shapes>0);assert.ok(first.text.trim());
-      const firstZoom = surface === 'notch' ? first.payload.appearance.zoomFactor : first.payload.side;
-      if (surface === 'notch') {
-        await js("document.querySelector('#display-notch-appearance-tab').click();document.querySelector('input[name=notchSize][value=large]').click()");
-      } else {
-        await js("document.querySelector('#display-edgeDock-appearance-tab').click();document.querySelector('input[name=edgeDockSide][value=left]').click()");
-      }
-      let updated;
-      for(let i=0;i<100;i++) {
-        updated=await read();
-        if((surface==='notch'?updated.payload.appearance.zoomFactor:updated.payload.side)!==firstZoom)break;
-        await pause(40);
-      }
-      assert.notEqual(surface==='notch'?updated.payload.appearance.zoomFactor:updated.payload.side,firstZoom, `${surface} settings reaches existing renderer`);
-      if(surface==='notch') {
-        await js("document.querySelector('#display-page-notch [data-phase=closed]').click()");
-        for(let i=0;i<100&&(await read()).payload.expanded;i++)await pause(40);
-        assert.equal((await read()).payload.expanded,false);
-        await js("document.querySelector('#display-page-notch [data-phase=open]').click()");
-        for(let i=0;i<100&&!(await read()).payload.expanded;i++)await pause(40);
-        assert.equal((await read()).payload.expanded,true);
-      }
-      results.push({surface,ready:true,noTrustedBridge:true,noNode:true,pluginHost:false,nativeShapes:first.shapes,settingsUpdated:true});
-    }
-    const messages=await js('window.previewMessages');
-    const previewCalls=pluginCalls.filter(call=>call.frameUrl?.includes('settingsPreview=1'));
-    assert.deepEqual(previewCalls,[]);assert.equal(runtime.manager.backendCount(),0);
-    assert.ok(pluginCalls.some(call=>!call.frameUrl?.includes('settingsPreview=1')), 'runtime observation includes parent calls');
-    if(baseline) {assert.ok(errors.some(text=>text.includes('contentSelections')));assert.equal(messages.filter(message=>message.type==='display-preview-ready').length,0);}
-    else {assertConsoleClean();assert.equal(messages.filter(message=>message.type==='display-preview-ready').length,2);}
-    fs.writeFileSync(path.join(evidence,'preview-results.json'),JSON.stringify({baseline,results,messages,previewCalls,backendCount:runtime.manager.backendCount(),errors,electron:process.versions.electron,chrome:process.versions.chrome},null,2));
-    console.log('PASS actual no-preload preview iframe checks',JSON.stringify(results));
-    ipcMain.removeListener('plugins:demand',demandListener);
-    await runtime.dispose();runtime=null;win.destroy();clearTimeout(deadline);app.exit(0);return;
   }
   const preview = await js("tokenMonitor.plugins.importPackage('directory')");
   if (process.env.TM_DEFAULT_PLACEMENTS === '1') {
@@ -1010,7 +946,7 @@ app.whenReady().then(async () => {
     };
     await js("els.settingsButton.click();document.querySelector('[data-settings-section=window]').click()");
     for (const [surface, key] of [['floatingBubble', 'floatingBubbleCustomLayout'], ['notch', 'notchCustomLayout']]) {
-      const entry = surface === 'floatingBubble' ? '.display-settings-row:nth-child(3) .display-settings-open' : '#display-tab-notch';
+      const entry = `#display-tab-${surface}`;
       await frameVisible(entry);
       await js(`document.querySelector('${entry}').click()`);
       if (surface === 'floatingBubble') {

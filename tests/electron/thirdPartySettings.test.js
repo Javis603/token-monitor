@@ -426,6 +426,52 @@ test('third-party service DTO retains collector identity through redaction and s
   assert.equal((await service.getProfiles()).profiles.sub.accountKey, safe.sub.accountKey);
 });
 
+test('dragging a named third-party account lands the row and saves its order', async () => {
+  const { createThirdpartyAccountService } = require('../../src/electron/providers/thirdparty/accountService');
+  const profiles = Object.fromEntries(['GPTNB', 'Z', 'Niba'].map((name, index) => [
+    name, { adapter: 'newapi-token', baseUrl: `https://account-${index}.example`, apiKey: `fixture-${index}` }
+  ]));
+  const api = createThirdpartyAccountService({ getThirdPartyProfiles: () => profiles, env: {} });
+  const { profiles: dto } = await api.getProfiles();
+  const calls = [];
+  const { list, rows } = await thirdPartyRows({}, false, [], { api, presentation: async (...args) => {
+    calls.push(args);
+    return { ok: true };
+  } });
+  const slotList = list.querySelector('.slot-list');
+  const order = () => slotList.children.filter(row => row.dataset.slotId).map(row => row.dataset.slotId);
+  rows.forEach((row, index) => { row.rect = { top: index * 50, bottom: (index + 1) * 50, height: 50 }; });
+  const previous = { window: global.window, requestAnimationFrame: global.requestAnimationFrame, cancelAnimationFrame: global.cancelAnimationFrame };
+  const listeners = new Map();
+  const frames = new Set();
+  global.window = {
+    addEventListener: (event, listener) => listeners.set(event, listener),
+    removeEventListener: (event, listener) => { if (listeners.get(event) === listener) listeners.delete(event); }
+  };
+  global.requestAnimationFrame = callback => { frames.add(callback); return callback; };
+  global.cancelAnimationFrame = callback => frames.delete(callback);
+  try {
+    const dragged = rows[2];
+    const pointer = clientY => ({ pointerId: 1, clientY, preventDefault() {} });
+    dragged.listeners.pointerdown({ ...pointer(110), button: 0, currentTarget: dragged, target: dragged.querySelector('.slot-drag-handle') });
+    listeners.get('pointermove')(pointer(10));
+    assert.equal(dragged.classList.contains('dragging'), true);
+    listeners.get('pointerup')(pointer(10));
+    assert.deepEqual(order(), ['Niba', 'GPTNB', 'Z']);
+    assert.equal(dragged.classList.contains('dragging'), false);
+    assert.equal(dragged.style['--drag-y'], undefined);
+    assert.equal(slotList.classList.contains('drag-active'), false);
+
+    for (const frame of frames) frame();
+    await new Promise(resolve => setTimeout(resolve, 0));
+    assert.deepEqual(calls, [['thirdparty', dto.Niba.accountKey, 'order', [
+      dto.Niba.accountKey, dto.GPTNB.accountKey, dto.Z.accountKey
+    ]]]);
+  } finally {
+    Object.assign(global, previous);
+  }
+});
+
 for (const mode of ['account', 'token']) for (const status of ['ok', 'unauthorized']) {
   test(`third-party ${mode} environment DTO drives ${status} status and presentation controls`, async () => {
     const limits = require('../../src/shared/providers/thirdparty/limits');
