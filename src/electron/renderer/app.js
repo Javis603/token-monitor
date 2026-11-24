@@ -1086,18 +1086,47 @@ function formatDetailTokens(value) {
 function detailTokenDisplaySignature() {
   return detailTokenDisplayApi.stateSignature();
 }
+function captureDetailTokenFocus() {
+  const active = document.activeElement;
+  if (!active || active.dataset?.detailTokenToggle !== 'true') return null;
+  const host = state.openSession ? els.sessionDetail : els.breakdown;
+  if (!host || !host.contains?.(active)) return null;
+  const row = active.closest?.('.row[data-key]');
+  if (row) {
+    const tokens = Array.from(row.querySelectorAll('[data-detail-token-toggle="true"]'));
+    const index = tokens.indexOf(active);
+    if (index >= 0) return { host, rowKey: row.dataset.key, index };
+  }
+  const tokens = Array.from(host.querySelectorAll('[data-detail-token-toggle="true"]'));
+  const index = tokens.indexOf(active);
+  return index >= 0 ? { host, rowKey: '', index } : null;
+}
+function restoreDetailTokenFocus(anchor) {
+  if (!anchor) return;
+  const scope = anchor.rowKey
+    ? Array.from(anchor.host.querySelectorAll('.row[data-key]')).find((row) => row.dataset.key === anchor.rowKey)
+    : anchor.host;
+  const target = scope?.querySelectorAll('[data-detail-token-toggle="true"]')?.[anchor.index];
+  if (target && document.activeElement !== target) {
+    target.focus?.({ preventScroll: true });
+  }
+}
 function refreshDetailTokenViews() {
+  const focusAnchor = captureDetailTokenFocus();
   settleRowNumberAnimations();
   if (state.openSession?.kind === 'session-group') {
     renderSessionGroupDetail(state.openSession);
+    restoreDetailTokenFocus(focusAnchor);
     return;
   }
   if (state.openSession?.detail) {
     renderSessionDetail({ detail: state.openSession.detail, preserveScroll: true });
+    restoreDetailTokenFocus(focusAnchor);
     return;
   }
   if (state.stats && ['tool', 'model', 'project', 'device', 'session'].includes(state.breakdown)) {
     render();
+    restoreDetailTokenFocus(focusAnchor);
   }
 }
 function decorateDetailTokenElement(el, value, options = {}) {
