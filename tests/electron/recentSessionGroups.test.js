@@ -309,7 +309,9 @@ test('Home keeps family membership below the title and routes mouse and keyboard
       && node.children[0]?.textContent === rowApi.sessionModelLabel(group));
     assert.ok(modelIndex >= 0 && countIndex > modelIndex, 'models precede membership like Sessions');
     assert.equal(description.children[countIndex].textContent, '2 subagents');
-    assert.equal(description.children.at(-1).textContent, ' · just now');
+    // The live row's age would only say "just now", so membership ends the line.
+    assert.equal(description.children.at(-1).textContent, '2 subagents');
+    assert.equal(description.textContent.includes('just now'), false, 'a live row carries no age');
     assert.equal(row.attributes.role, undefined, 'rows do not create nested navigation buttons');
     assert.equal(row.handlers.click, undefined);
     assert.equal(row.dataset.key, group.key);

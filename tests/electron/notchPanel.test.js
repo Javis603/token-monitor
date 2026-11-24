@@ -454,6 +454,13 @@ for (const client of ['codex', 'claude']) test(`${client} Notch Home, active and
   assert.deepEqual(recent.map(node => node.querySelector('.session-reasoning-effort')?.textContent), ['medium', 'high', undefined]);
   assert.equal(recent[0].querySelector('.notch-session-context'), null);
   assert.equal(recent[2].querySelector('.notch-recent-meta').textContent.includes(' ·  · '), false);
+  // Every quiet row keeps its age, and the short form still announces the phrase:
+  // two rows are an hour old, the archived one between them two hours.
+  const recentAges = recent.map(node => node.querySelector('.notch-session-age'));
+  assert.ok(recentAges.every(Boolean), 'each quiet row carries an age node');
+  assert.deepEqual(recentAges.map(node => node.textContent), ['1h', '2h', '1h']);
+  assert.deepEqual(recentAges.map(node => node.getAttribute('aria-label')), ['1h ago', '2h ago', '1h ago']);
+  assert.ok(recentAges.every(node => node.getAttribute('role') === 'img'));
   for (const setting of [...home.querySelectorAll('.session-reasoning-effort'), ...page.querySelectorAll('.session-reasoning-effort')]) {
     assert.equal(setting.tooltipEntries, undefined);
     assert.equal(setting.getAttribute('tabindex'), undefined);
@@ -496,10 +503,12 @@ test('Notch replaces session age with weighted cache hit usage from projected se
   delete sessions['codex:parent'].liveActivity;
   f.panel.selectPage('home');
   render();
-  assert.equal(f.find('notch-now-meta').textContent, 'gpt-test · high · 0% · just now');
+  // The card shows the widget's one-line age; the full phrase stays its name.
+  assert.equal(f.find('notch-now-meta').textContent, 'gpt-test · high · 0% · <1m');
+  assert.equal(f.find('notch-now-meta').querySelector('.notch-session-age').getAttribute('aria-label'), 'just now');
   sessions['codex:parent'].tokenDataUnavailable = true;
   render();
-  assert.equal(f.find('notch-now-meta').textContent, 'gpt-test · high · just now');
+  assert.equal(f.find('notch-now-meta').textContent, 'gpt-test · high · <1m');
 });
 
 for (const client of ['codex', 'claude']) test(`resumed ${client} native activity displays the accounting cache rate`, t => {
@@ -652,6 +661,9 @@ test('quiet sessions use concise age metadata and explicit empty-state copy', t 
     models: { 'model-a': 1 }, totalTokens: 1, lastUsedAt: new Date(Date.now() - 660000).toISOString() }];
   f.panel.render(data);
   assert.match(f.find('notch-now-meta').textContent, /^model-a · /);
+  const nowAge = f.find('notch-now-meta').querySelector('.notch-session-age');
+  assert.equal(nowAge.textContent, '11m');
+  assert.equal(nowAge.getAttribute('aria-label'), '11m ago');
   assert.doesNotMatch(f.find('notch-now-meta').textContent, /Codex/);
   assert.doesNotMatch(f.find('notch-now-meta').textContent, /Last active/);
   assert.equal(f.find('notch-now-caption'), null);

@@ -636,7 +636,10 @@
       body.append(sessionHeading(row, 'notch-now-title'));
       const meta = el('div', 'notch-now-meta');
       if (running) meta.append(wave());
-      const time = !live ? relativeAgo(row.lastUsedAt, nowMs) : '';
+      const fullTime = !live ? relativeAgo(row.lastUsedAt, nowMs) : '';
+      const shortTime = fullTime ? sessionRows.sessionAgeShort(row.lastUsedAt, nowMs) : '';
+      const time = shortTime ? text('notch-session-age', shortTime, fullTime) : '';
+      if (time) time.setAttribute('role', 'img');
       meta.append(sessionMetaLabel(row, { running, lead: !running && live ? t('notch.waiting') : '', time }));
       const extra = (running ? waitingCount : Math.max(0, waitingCount - 1));
       if (extra > 0) meta.append(text('notch-waiting-note', t('notch.moreWaiting', { count: extra })));
@@ -1108,7 +1111,9 @@
         const reading = text('notch-session-cache-hit', `${running ? 'Cache ' : ''}${percent}`);
         parts.push(reading);
       }
-      if (time) parts.push(text('', time));
+      // A caller may pass the age as a node so it can carry the full phrase as
+      // its accessible name.
+      if (time) parts.push(typeof time === 'string' ? text('', time) : time);
       parts.forEach((part, index) => {
         if (index) label.append(text('', ' · '));
         label.append(part);
@@ -1182,7 +1187,13 @@
         const meta = el('span', 'notch-recent-meta');
         meta.append(sessionModelMetadata(row));
         const age = relativeAgo(row.lastUsedAt, nowMs);
-        if (age) meta.append(text('', `${sessionRows.sessionModelMetadataLabel(row) ? ' · ' : ''}${age}`));
+        const shortAge = age ? sessionRows.sessionAgeShort(row.lastUsedAt, nowMs) : '';
+        if (shortAge) {
+          if (sessionRows.sessionModelMetadataLabel(row)) meta.append(text('', ' · '));
+          const ageNode = text('notch-session-age', shortAge, age);
+          ageNode.setAttribute('role', 'img');
+          meta.append(ageNode);
+        }
         body.append(sessionHeading(row, 'notch-recent-title'), meta);
         const value = el('div', 'notch-recent-value');
         value.append(sessionTokens(row, 'notch-recent-tokens'));

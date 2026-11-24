@@ -628,8 +628,10 @@ test('a startedAt-only session keeps its display age without becoming running', 
   }
   assert.equal(edgeDockPresentation.runningSessionSummary([home]).count, 0);
   assert.equal(edgeDockPresentation.nextRunningExpiryAt([home]), 0);
-  assert.match(readRendererFile('app.js'), /homeSessionAgo\(Date\.parse\(row\.lastUsedAt \|\| row\.startedAt \|\| ''\)\)/);
-  assert.match(readRendererFile(path.join('edgeDock', 'dock.js')), /relativeAgo\(session\.lastUsedAt \|\| session\.startedAt\)/);
+  assert.match(readRendererFile('app.js'), /const ageAt = Date\.parse\(row\.lastUsedAt \|\| row\.startedAt \|\| ''\);/);
+  assert.match(readRendererFile('app.js'), /sessionAgeShort\(ageAt, now\)/);
+  assert.match(readRendererFile(path.join('edgeDock', 'dock.js')), /relativeAgo\(ageSource, now\)/);
+  assert.match(readRendererFile(path.join('edgeDock', 'dock.js')), /sessionRowsApi\.sessionAgeShort\(ageSource, now\)/);
 });
 
 test('running sessions are never truncated by the recent cap, and the count matches the rows', () => {

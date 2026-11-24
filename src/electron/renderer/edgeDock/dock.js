@@ -1441,10 +1441,10 @@ function usageTile(label, usage) {
   return tile;
 }
 
-function relativeAgo(value) {
+function relativeAgo(value, now = Date.now()) {
   const ms = Date.parse(value || '');
   if (!Number.isFinite(ms)) return '';
-  const minutes = Math.round(Math.max(0, Date.now() - ms) / 60000);
+  const minutes = Math.round(Math.max(0, now - ms) / 60000);
   if (minutes < 1) return t('edgeDock.agoNow');
   if (minutes < 60) return t('edgeDock.agoMinutes', { count: minutes });
   const hours = Math.round(minutes / 60);
@@ -1632,7 +1632,14 @@ function sessionsContainer(sessions, options = {}) {
     // row per model with its tokens and share.
     const modelLabel = sessionRowsApi.sessionModelLabel(session);
     const metadataLabel = sessionRowsApi.sessionModelMetadataLabel(session);
-    const age = relativeAgo(session.lastUsedAt || session.startedAt);
+    // A live row keeps its age once it is a minute old: running covers up to ten
+    // minutes of quiet, so "8m" separates an active session from a stalled one
+    // where "<1m" would only repeat the state mark.
+    const ageSource = session.lastUsedAt || session.startedAt;
+    const now = Date.now();
+    const liveRow = activityState === 'running' || activityState === 'waiting';
+    const shortAge = sessionRowsApi.sessionAgeShort(ageSource, now);
+    const age = shortAge && (!liveRow || shortAge !== '<1m') ? relativeAgo(ageSource, now) : '';
     description.append(sessionRowsApi.sessionModelMetadataNode(document, { ...session, modelLabel }, {
       translate: t, view: limitWindowsView,
       latestModelLabel: t('session.latestModel'),
@@ -1643,7 +1650,16 @@ function sessionsContainer(sessions, options = {}) {
       if (metadataLabel) description.append(document.createTextNode(' · '));
       description.append(el('span', 'edge-dock-session-member-count', memberLabel));
     }
-    if (age) description.append(document.createTextNode(`${memberLabel || metadataLabel ? ' · ' : ''}${age}`));
+    // The card shows the one-line age the rest of the widget uses; the full
+    // phrase stays the row's accessible name. Nothing is drawn without a short
+    // form, so a reading the formatter cannot render never leaves a separator.
+    if (age) {
+      if (memberLabel || metadataLabel) description.append(document.createTextNode(' · '));
+      const node = el('span', 'edge-dock-session-age', shortAge);
+      node.setAttribute('role', 'img');
+      node.setAttribute('aria-label', age);
+      description.append(node);
+    }
     meta.append(description);
     const status = sessionRowsApi.sessionStatusNode(document, session, { prefix: 'edge-dock-session', translate: t,
       view: limitWindowsView, showUsed: appearance().sessionContextMetric !== 'remaining' });

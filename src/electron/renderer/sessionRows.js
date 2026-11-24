@@ -290,6 +290,20 @@
     return compactSessionTime(session?.lastUsedAt || session?.startedAt, now);
   }
 
+  // The one-line age a row carries ("<1m", "28m", "3h", "2d"), in the same units
+  // as the limit countdowns. Shared so Home, the edge dock and the notch read
+  // alike; each row keeps the full localized phrase as its accessible name.
+  function sessionAgeShort(value, now = Date.now()) {
+    const ms = typeof value === 'number' ? value : Date.parse(value || '');
+    if (!Number.isFinite(ms) || ms <= 0) return '';
+    const minutes = Math.round(Math.max(0, now - ms) / 60000);
+    if (minutes < 1) return '<1m';
+    if (minutes < 60) return `${minutes}m`;
+    const hours = Math.round(minutes / 60);
+    if (hours < 24) return `${hours}h`;
+    return `${Math.round(hours / 24)}d`;
+  }
+
   function textValue(value) {
     return typeof value === 'string' ? value.trim() : '';
   }
@@ -1012,6 +1026,7 @@
     sessionIdLabel,
     sessionDetailIdLabel,
     sessionTitleForDisplay,
+    sessionAgeShort,
     // Exported for the edge dock's session rows: a card that shows the top
     // model reads a different name than the list's "N models" for the same
     // session, so both surfaces compose the label from this one helper.
