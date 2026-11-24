@@ -225,10 +225,12 @@ const {
 } = require('./renderer/viewDisplayPreferences');
 const {
   defaultHomeModulePreferences,
+  migrateHomeLimitDisplayMode,
   normalizeHiddenHomeModules,
   normalizeHomeLimitDisplayMode,
   normalizeHomeModuleCounts,
-  normalizeHomeModuleOrder
+  normalizeHomeModuleOrder,
+  normalizeHomeSessionDisplayMode
 } = require('./renderer/homeModulePreferences');
 const {
   APP_UPDATE_STARTUP_DELAY_MS,
@@ -354,6 +356,7 @@ const { createCodexResetForecastClient } = require('./providers/codex/resetForec
 const { createUpdateInstallQuitGuard, observeUpdateInstallHandoff } = require('./updateInstallQuit');
 const { classifyStreamFailure } = require('./syncConnection');
 const {
+  attachLocalNativeRanges,
   attachLocalNativeViews,
   attachLocalPresentationNativeViews,
   completeLocalSyncStats,
@@ -552,6 +555,9 @@ let initialLimitProvidersPending = false;
 // settings are written through saveSettings() after the window exists, so the flag
 // carries the decision from the read to that first save.
 let seededClientSplitsPending = false;
+// Set by readSettings() when the one-time reset of the Home limits layout to
+// `default` changed a saved value; saved at the same point as a client split.
+let homeLimitDisplayModePending = false;
 let persistedSettingsSnapshot = null;
 let credentialStore = null;
 let openrouterSlotsMigrated = false;
@@ -578,7 +584,7 @@ if (!gotLock) app.exit(0);
 
 const HOME_LIMIT_ACCOUNT_COUNT_DEFAULT = 3;
 const HOME_LIMIT_ACCOUNT_COUNT_MAX = 12;
-const PERIOD_MONTH_MODES = new Set(['month', 'week', 'last7', 'last30', 'cycle']);
+const PERIOD_MONTH_MODES = new Set(['month', 'yesterday', 'week', 'last7', 'last30', 'cycle']);
 
 function normalizePeriodMonthMode(value) {
   return PERIOD_MONTH_MODES.has(value) ? value : 'month';
@@ -728,7 +734,10 @@ function defaultSettings() {
     hiddenHomeModules: defaultHomeModulePreferences().hiddenHomeModules,
     homeModuleCounts: normalizeHomeModuleCounts(),
     showHomeLimitBars: false,
-    homeLimitDisplayMode: 'text',
+    homeVendorColors: false,
+    homeLimitDisplayMode: 'default',
+    homeLimitDisplayModeDefaulted: true,
+    homeSessionDisplayMode: 'compact',
     showHomeLimitProviderNames: false,
     projectsEnabled: parseBoolean(process.env.TOKEN_MONITOR_PROJECTS_ENABLED, true),
     projectBreakdownMode: 'tool',
@@ -823,6 +832,7 @@ function resettableSettingsDefaults() {
     'language', 'startAtLogin', 'automaticAppUpdates', 'discordRpcEnabled',
     'periodMonthMode', 'currency', 'heatmapMetric', 'homeActiveDaysWindow', 'showExactHomeTrendTokens',
     'homeModuleCounts', 'homeLimitDisplayMode', 'showHomeLimitBars', 'showHomeLimitProviderNames', 'homeLimitAccountCount',
+    'homeVendorColors', 'homeSessionDisplayMode',
     'historyIntervalMs', 'sessionContextMetric', 'limitsHistoryOpenMode', 'modelRankingMetric', 'serviceStatusRefreshMs',
     'windowBehavior', 'keepAboveTaskbar', 'floatingBubbleTrigger', 'floatingBubbleContent',
     'hideAppIcon', 'trayContent', 'showTrayProviderBadge',
@@ -915,8 +925,18 @@ function syncUploadIntervalMs() {
   return normalizeSyncUploadIntervalMs(settings?.syncUploadIntervalMs);
 }
 
-function electronUsageConfig(errorPrefix) {
+// The collector composes the native Week range for this calendar week. The
+// renderer resolves the same locale and checks the range it receives.
+function collectorWeekStartsOn() {
+  const preferred = typeof app.getPreferredSystemLanguages === 'function' ? app.getPreferredSystemLanguages() : [app.getLocale()];
+  return fixedPeriodRangesApi.weekStartsOn(resolveRegionalLocale([...preferred, settings?.locale]));
+}
+
+function electronUsageConfig(errorPrefix, { nativeRangesEnabled = false } = {}) {
   return usageConfigFromSettings(settings, {
+    // Only standalone stats show native ranges; Hub and sync views keep the
+    // History-derived ones, so their collectors skip the extra day windows.
+    nativeRangesEnabled,
     agentVersion: appVersion(),
     agentRuntime: 'electron-widget',
     commandTimeoutMs: 120 * 1000,
@@ -938,6 +958,7 @@ function electronUsageConfig(errorPrefix) {
     intervalRequiresActivity: collectorIntervalRequiresActivity(),
     watchDebounceMs: 1500,
     dailyHistoryArchiveWriteEnabled: () => !isExternalAgentActive(),
+    weekStartsOn: collectorWeekStartsOn(),
     onError: (error, reason) => console.log(`[${errorPrefix}] ${reason}: ${error.message}`),
     logger: (message) => console.log(`[${errorPrefix}] ${message}`)
   });
@@ -1595,12 +1616,13 @@ function ensureSettingsLoaded() {
       settings.codexManagedAccounts = hydratedCodexAccounts;
     }
   }
-  // A seeded client identity split is an in-memory addition at this point.
-  // Persist it with the same retry-on-next-save tolerance as the migration
-  // above, so a read-only or failing settings file delays the write instead of
-  // losing the tracked client.
-  if (seededClientSplitsPending) {
+  // A seeded client identity split and the one-time Home limits layout reset are
+  // in-memory changes at this point. Persist them with the same
+  // retry-on-next-save tolerance as the migration above, so a read-only or
+  // failing settings file delays the write instead of losing the change.
+  if (seededClientSplitsPending || homeLimitDisplayModePending) {
     seededClientSplitsPending = false;
+    homeLimitDisplayModePending = false;
     saveSettings();
   }
   rendererViewState = normalizeInitialRendererViewState(settings.lastViewState, rendererViewState);
@@ -2134,8 +2156,13 @@ function readSettings() {
       merged.hiddenHomeModules = normalizeHiddenHomeModules(saved.hiddenHomeModules, DEFAULT_HOME_MODULE_LIST);
     }
     merged.showHomeLimitBars = parseBoolean(merged.showHomeLimitBars, false);
+    merged.homeVendorColors = parseBoolean(merged.homeVendorColors, false);
     merged.homeModuleCounts = normalizeHomeModuleCounts(merged.homeModuleCounts);
-    merged.homeLimitDisplayMode = normalizeHomeLimitDisplayMode(merged.homeLimitDisplayMode);
+    merged.homeSessionDisplayMode = normalizeHomeSessionDisplayMode(merged.homeSessionDisplayMode);
+    const homeLimitDisplay = migrateHomeLimitDisplayMode(saved.homeLimitDisplayMode, saved.homeLimitDisplayModeDefaulted);
+    merged.homeLimitDisplayMode = homeLimitDisplay.mode;
+    merged.homeLimitDisplayModeDefaulted = true;
+    homeLimitDisplayModePending = homeLimitDisplay.changed;
     merged.showHomeLimitProviderNames = parseBoolean(merged.showHomeLimitProviderNames, false);
     merged.claudeCliFallbackEnabled = parseBoolean(merged.claudeCliFallbackEnabled, true);
     merged.antigravityLocalLimitsEnabled = parseBoolean(merged.antigravityLocalLimitsEnabled, true);
@@ -2605,8 +2632,9 @@ function nativeMaterialOptions(source = settings, dashboard = false) {
 function applyNativeMaterial(source = settings) {
   syncNativeMaterialVisibility(mainWindow, nativeMaterialOptions(source));
   syncNativeMaterialVisibility(dashboardWindow, nativeMaterialOptions(source, true));
-  syncWindowsBackdrop(mainWindow, { enabled: nativeBlurEnabled(source), mode: source.windowsBackdrop });
-  syncWindowsBackdrop(dashboardWindow, { enabled: nativeBlurEnabled(source) });
+  const windowsMaterial = { enabled: nativeBlurEnabled(source), mode: source.windowsBackdrop };
+  syncWindowsBackdrop(mainWindow, windowsMaterial);
+  syncWindowsBackdrop(dashboardWindow, windowsMaterial);
   limitsHistoryController?.syncMaterial();
 }
 
@@ -4994,7 +5022,7 @@ function startLocalCollector() {
   sendStatus(false, { reason: 'collecting' });
   // One config object for both, so the fingerprint the seed validates against
   // cannot drift from the one the collector will compute.
-  const usageOptions = electronUsageConfig('collector');
+  const usageOptions = electronUsageConfig('collector', { nativeRangesEnabled: true });
   primeLocalStatsFromAnchor(usageOptions, widgetProducerOwner);
   deviceRuntimeHandle = createDeviceRuntime({
     envelope: electronDeviceEnvelope(),
@@ -5015,6 +5043,7 @@ function startLocalCollector() {
       localStats = composeLocalOnlySummary(localDevice, (stats) => {
         withHistoryPreview(stats, [localDevice]);
         attachLocalNativeViews(stats, localDevice);
+        attachLocalNativeRanges(stats, localDevice);
         return stats;
       });
       updateDiscordRpcDisplay(localStats);
@@ -5557,7 +5586,10 @@ function syncNotch(rendererSettings) {
 // allowlisted appearance projection instead of the full renderer settings.
 function edgeDockAppearance(rendererSettings = settingsForRenderer()) {
   const source = rendererSettings || {};
+  const deviceIconScope = source.deviceIconScope || 'local';
   return {
+    deviceIconScope,
+    deviceIconOverrides: { [deviceIconScope]: source.deviceIconOverrides?.[deviceIconScope] },
     language: source.language,
     currency: source.currency,
     currencyRatesEffective: source.currencyRatesEffective,
@@ -6535,7 +6567,7 @@ function usageCollectorNameForMode() {
 }
 
 function usageConfigForMode() {
-  return electronUsageConfig(usageCollectorNameForMode());
+  return electronUsageConfig(usageCollectorNameForMode(), { nativeRangesEnabled: mode === 'local' });
 }
 
 function applyUsageRuntimeForMode() {
@@ -7639,7 +7671,7 @@ function createDashboardWindow() {
   dashboardWindowReady = false;
   applyWindowsChrome(win, { round: true });
   suppressLinuxSystemContextMenu(win);
-  syncWindowsBackdrop(win, { enabled: nativeBlurEnabled() });
+  syncWindowsBackdrop(win, { enabled: nativeBlurEnabled(), mode: settings.windowsBackdrop });
   attachNativeMaterialVisibility(win, () => nativeMaterialOptions(settings, true));
   syncNativeMaterialVisibility(win, nativeMaterialOptions(settings, true));
   win.webContents.setWindowOpenHandler(({ url }) => {
@@ -8253,7 +8285,9 @@ app.whenReady().then(() => {
       homeModuleCounts: normalizeHomeModuleCounts(patch.homeModuleCounts, settings.homeModuleCounts),
       showHomeLimitBars: parseBoolean(patch.showHomeLimitBars ?? settings.showHomeLimitBars, false),
       showExactHomeTrendTokens: parseBoolean(patch.showExactHomeTrendTokens ?? settings.showExactHomeTrendTokens, false),
+      homeVendorColors: parseBoolean(patch.homeVendorColors ?? settings.homeVendorColors, false),
       homeLimitDisplayMode: normalizeHomeLimitDisplayMode(patch.homeLimitDisplayMode ?? settings.homeLimitDisplayMode),
+      homeSessionDisplayMode: normalizeHomeSessionDisplayMode(patch.homeSessionDisplayMode ?? settings.homeSessionDisplayMode),
       showHomeLimitProviderNames: parseBoolean(patch.showHomeLimitProviderNames ?? settings.showHomeLimitProviderNames, false),
       homeLimitProviderOrder: patch.homeLimitProviderOrder !== undefined ? migrateHomeLimitProviderOrder(patch.homeLimitProviderOrder) : (settings.homeLimitProviderOrder || ''),
       hiddenHomeLimitProviders: patch.hiddenHomeLimitProviders !== undefined ? normalizeHiddenLimitProviders(patch.hiddenHomeLimitProviders) : normalizeHiddenLimitProviders(settings.hiddenHomeLimitProviders),

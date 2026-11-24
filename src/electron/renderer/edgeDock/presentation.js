@@ -271,9 +271,11 @@
   // One row shape for both callers. `client` rides the row because the Sessions
   // item is a mixed list: it is what the row's mark is drawn from, and without
   // it the card could not say which tool a row belongs to.
-  function sessionRowsFor(entries, stateByKey) {
+  function sessionRowsFor(entries, stateByKey, localDeviceId) {
     return entries.map(({ key, session }) => {
+      const remoteDevice = sessionRowsApi.remoteSessionDevice(session.sourceDevice, localDeviceId);
       return {
+        ...(remoteDevice ? { remoteDevice } : {}),
         parentClient: normalizedId(session.parentClient || session.client),
         parentSessionId: String(session.parentSessionId || ''),
         grokBotSession: session.grokBotSession,
@@ -387,7 +389,7 @@
     };
     const projected = new Map();
     const projectMember = key => {
-      if (!projected.has(key)) projected.set(key, sessionRowsFor([entriesByKey.get(key)], states)[0]);
+      if (!projected.has(key)) projected.set(key, sessionRowsFor([entriesByKey.get(key)], states, options.localDeviceId)[0]);
       return projected.get(key);
     };
     const project = summary => {
@@ -418,6 +420,11 @@
         activityState: sessionActivityState({ groupRows: members }),
         groupRows: members
       };
+      // A subagent group names its main conversation. A synthetic group has
+      // a source only when every member came from the same remote device.
+      if (!summary.subagentGroup && members.some(member => member.remoteDevice?.deviceId !== parent.remoteDevice?.deviceId)) {
+        delete result.remoteDevice;
+      }
       projected.set(summary.key, result);
       return result;
     };
@@ -888,7 +895,7 @@
     // push/expiry; a stats-key cache would freeze time-dependent selection.
     const groupedSessions = items.some(item => item.metric === dockItems.SESSIONS_METRIC
       || (item.type === 'limit' && options.limitsEnabled !== false))
-      ? groupedSessionRows(stats) : { rows: [], project: row => row, stateFor: sessionActivityState };
+      ? groupedSessionRows(stats, { localDeviceId: options.localDeviceId }) : { rows: [], project: row => row, stateFor: sessionActivityState };
     const pluginRefs = Array.isArray(options.availablePluginRefs) ? new Set(options.availablePluginRefs) : null;
     const cells = [];
     for (const item of items) {

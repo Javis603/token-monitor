@@ -101,7 +101,7 @@ function fixture(t, mode = 'replace', selector = '.home-module-tool > .home-modu
       const control = document.createElement('input'); control.value = ref + ' draft'; node.append(control);
       standalone.set(ref, { node, control });
     } }, homeSessionRenderPending: false,
-    sessionTooltipShouldHoldRender: () => false, hideHomeActivityTooltip() {}, updateHomeActivity() {},
+    sessionTooltipShouldHoldRender: () => false, hideHomeActivityTooltip() {}, updateHomeActivity() {}, homeLimitMotion: { capture() {}, animate() {} },
     rendererDom: require('../../src/electron/renderer/domReconcile').create({ nodesFor: node => composition.nodesFor(node) }),
     homeModuleIds: () => modules, loadHomeHistory() {},
     homeModulePreferencesApi: { homeModuleCount: () => 5, isPluginModuleId: placements.isHomeToken },
@@ -125,7 +125,7 @@ function fixture(t, mode = 'replace', selector = '.home-module-tool > .home-modu
     visibleStatsSurface: () => 'main', openViewFromTray() {}, isSettingsPanelOpen: () => false,
     isRendererWindowHidden: () => false
   });
-  vm.runInContext(['homeModuleShell', 'renderHomeToolModule', 'renderHomePluginModule', 'applyHomeActivityScroll', 'renderHome', 'render'].map(extract).join('\n'), context);
+  vm.runInContext(['homeModuleShell', 'homeNearBlackColor', 'homeVendorColorsEnabled', 'homeVendorRevealColor', 'homeListMarkColor', 'homeSplitRow', 'renderHomeToolModule', 'renderHomePluginModule', 'applyHomeActivityScroll', 'renderHome', 'render'].map(extract).join('\n'), context);
   return { render: () => context.render(), home, state, document, trace, mutations, navigations, standalone,
     get input() { return input; }, get container() { return container; }, get mounts() { return mounts; },
     get disposals() { return disposals; }, get latest() { return latest; },

@@ -37,6 +37,8 @@ The normalized client id is `antigravity`. The tokscale aliases `antigravity-cli
 
 The parse-local CLI source lives under `${GEMINI_CLI_HOME || ~/.gemini}/antigravity-cli/conversations`. The IDE extension's generation databases are read directly from `~/.gemini/antigravity/conversations/*.db`; this source follows the home directory and not `GEMINI_CLI_HOME`. Neither source depends on a successful `antigravity sync`. The extension directory is already inside a watched native root, while the CLI directory is watched separately.
 
+Token Monitor also discovers T3 Code Antigravity ACP conversation directories under `~/.t3/userdata/providers/antigravity/<profile-id>/antigravity-acp/conversations` (or under the configured `T3CODE_HOME`). With Antigravity tracking enabled, these directories are read by the CLI scanner and watched for updates. Overlaps with manual Antigravity scan paths are read only once by the CLI scanner. Settings → Tools → Antigravity shows the directories in an expandable Auto-discovered row when any are present. The Source counter excludes them.
+
 Normal scans include both database identities. A custom Antigravity root is passed only to `antigravity` and `antigravity-cli`: the CLI and extension use the same `*.db` parser, so passing one custom directory to both would count rows without response IDs twice. When a persisted custom root is inside the built-in extension directory — the pre-upgrade workaround for reading it — the `antigravity-cli` leg is dropped for that root so its files are not parsed a second time. A custom root that contains the extension directory keeps the leg because it may hold databases outside it; the shared subtree can still count rows without response IDs twice until Tokscale dedupes on canonical file paths.
 
 ### Watch behavior
@@ -120,7 +122,7 @@ Grouped quota responses map into the normalized limits windows used by every pro
 - five-hour windows;
 - weekly windows.
 
-Standalone OAuth can still produce legacy model pools when grouped quota is unavailable. These rows and rows synced from older devices keep the fallback layout. A legacy pool without a finite remaining fraction keeps its reset information in the normalized record, and the renderer hides the row across the Limits page, Edge Dock, Home compact windows, and usage checklist. A real zero stays visible as exhausted. In the grouped layout, disabled buckets remain visible without a meter.
+Standalone OAuth can still produce legacy model pools when grouped quota is unavailable. These rows and rows synced from older devices keep the fallback layout. A legacy pool without a finite remaining fraction keeps its reset information in the normalized record, and the renderer hides the row across the Limits page, Edge Dock, Home, Notch compact windows, and usage checklist. A real zero stays visible as exhausted. In the grouped layout, disabled buckets remain visible without a meter.
 
 The Limits page and Edge Dock show Gemini, Claude/GPT, and Gemini 4 Argon in their existing order, followed by new groups in service order. New groups use the service's display name and show whichever five-hour or weekly buckets the summary supplies. Names that need shortening or sanitization use a stable suffix so RPC and OAuth agree on the group within the Hub label limit. Other periods are skipped. A weekly-only Argon allowance spans the full row.
 

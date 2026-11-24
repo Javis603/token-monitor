@@ -36,6 +36,38 @@ test('legacy commands retain authority id and use canonical history key only for
   assert.deepEqual(h.calls[1], ['enabled', 'managed-home', false]);
   assert.equal(h.update()[0][0].accountKeyAliases[0], 'old');
 });
+test('reorder keeps a paused owner account’s email without a quota reading', async () => {
+  const { createDocument } = require('./accountOwnerDom.fixture.cjs');
+  const document = createDocument();
+  const accounts = [
+    { id: 'paused', accountKey: 'paused-key', enabled: false, accountEmail: 'fixture3@example.test' },
+    { id: 'active', accountKey: 'active-key', enabled: true, accountEmail: 'fixturee@example.test' }
+  ];
+  const settings = { maskLimitAccountEmails: true };
+  const calls = [];
+  const list = require(path.join(renderer, 'limits/legacyAccountList.js')).create({
+    document, provider: 'antigravity', container: document.root,
+    t: (key, params) => key === 'settings.slots.account' ? `Account #${params.fingerprint}` : key,
+    bridge: { limits: { accountSlots: { presentation: async (...args) => {
+      calls.push(args);
+      return {
+        ok: true,
+        // The generic slot projection does not have the provider owner's email.
+        accounts: accounts.map(({ id, accountKey, enabled }) => ({ id, accountKey, enabled, fingerprint: '9ee588ba2521' })),
+        presentation: { antigravity: { order: args[3] } }
+      };
+    } } } },
+    getContext: () => ({ settings }), preserveScroll: fn => fn(), refresh() {}, changed() {}
+  });
+  list.update(accounts, []);
+  const rows = () => document.root.querySelectorAll('.slot-row');
+  assert.equal(rows()[0].querySelector('.slot-name').textContent, 'f***3@example.test');
+  rows()[0].key('ArrowDown', true);
+  await new Promise(resolve => setImmediate(resolve));
+  assert.deepEqual(calls, [['antigravity', 'paused-key', 'order', ['active-key', 'paused-key']]]);
+  assert.deepEqual(rows().map(row => row.dataset.slotId), ['active', 'paused']);
+  assert.equal(rows()[1].querySelector('.slot-name').textContent, 'f***3@example.test');
+});
 test('ambiguous email never lends an identity from another workspace', () => {
   const h = adapterHarness();
   h.list.update([{ id: 'home', email: 'same@example.com' }], [{ accountEmail: 'same@example.com', accountKey: 'one' }, { accountEmail: 'same@example.com', accountKey: 'two' }]);

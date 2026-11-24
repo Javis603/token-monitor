@@ -42,6 +42,16 @@
     node.setAttribute('aria-hidden', 'true');
     return node;
   }
+  function sessionDeviceNode(document, device, { settings, bindOverflow } = {}) {
+    const node = document.createElement('span');
+    node.className = 'session-source-device';
+    const name = document.createElement('span');
+    name.className = 'session-source-device-name';
+    name.textContent = device.name;
+    bindOverflow?.(name);
+    node.append(deviceIconNode(document, deviceIconKind(settings, device)), name);
+    return node;
+  }
   function populateDeviceIconSelect(select, translate, detectedKind) {
     select.dataset.detectedKind = normalizeDeviceKind(detectedKind);
     select.replaceChildren(...choices.map(kind => {
@@ -71,6 +81,6 @@
     controls.get(select)?.destroy();
     controls.delete(select);
   }
-  return { normalizeDeviceIconOverrides, deviceIconOverride, deviceIconKind, deviceIconPatch, deviceIconNode,
+  return { normalizeDeviceIconOverrides, deviceIconOverride, deviceIconKind, deviceIconPatch, deviceIconNode, sessionDeviceNode,
     populateDeviceIconSelect, syncDeviceIconSelect, destroyDeviceIconSelect };
 });

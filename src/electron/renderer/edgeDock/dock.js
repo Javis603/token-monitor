@@ -1441,10 +1441,10 @@ function usageTile(label, usage) {
   return tile;
 }
 
-function relativeAgo(value) {
+function relativeAgo(value, now = Date.now()) {
   const ms = Date.parse(value || '');
   if (!Number.isFinite(ms)) return '';
-  const minutes = Math.round(Math.max(0, Date.now() - ms) / 60000);
+  const minutes = Math.round(Math.max(0, now - ms) / 60000);
   if (minutes < 1) return t('edgeDock.agoNow');
   if (minutes < 60) return t('edgeDock.agoMinutes', { count: minutes });
   const hours = Math.round(minutes / 60);
@@ -1619,32 +1619,47 @@ function sessionsContainer(sessions, options = {}) {
       : activityState === 'ended' ? t('session.finished')
         : t('session.idle');
     nameNode.append(el('span', 'sr-only', ` ${stateLabel}`));
-    // Membership belongs with model and age, leaving the title its full column.
     const meta = el('span', 'edge-dock-session-meta');
-    const description = el('span', 'edge-dock-session-description');
-    const memberLabel = session.groupRows && (!session.subagentGroup || session.subagentCount > 0)
-      ? (session.subagentGroup ? t('sessions.subagentCount', { count: session.subagentCount })
-        : t('sessions.grokBotCount', { count: session.groupRows.length })) : '';
     // The model label is composed by the Sessions list's own helper, so a
     // multi-model session reads "N models" here exactly as it does there —
     // projecting only the top model showed a different name than the list's
     // for the same session. The label is the tooltip trigger there too: one
     // row per model with its tokens and share.
     const modelLabel = sessionRowsApi.sessionModelLabel(session);
-    const metadataLabel = sessionRowsApi.sessionModelMetadataLabel(session);
-    const age = relativeAgo(session.lastUsedAt || session.startedAt);
-    description.append(sessionRowsApi.sessionModelMetadataNode(document, { ...session, modelLabel }, {
+    // A live row keeps its age once it is a minute old: running covers up to ten
+    // minutes of quiet, so "8m" separates an active session from a stalled one
+    // where "<1m" would only repeat the state mark.
+    const ageSource = session.lastUsedAt || session.startedAt;
+    const now = Date.now();
+    const liveRow = activityState === 'running' || activityState === 'waiting';
+    const shortAge = sessionRowsApi.sessionAgeShort(ageSource, now);
+    const age = shortAge && (!liveRow || shortAge !== '<1m') ? relativeAgo(ageSource, now) : '';
+    const description = sessionRowsApi.sessionModelMetadataNode(document, { ...session, modelLabel }, {
       translate: t, view: limitWindowsView,
       latestModelLabel: t('session.latestModel'),
       unattributedLabel: t('dashboard.tooltip.unclassified'),
       formatTokens: formatBreakdownTokens
+    });
+    if (session.remoteDevice) meta.append(window.TokenMonitorDeviceIcons.sessionDeviceNode(document, session.remoteDevice, {
+      settings: appearance(),
+      bindOverflow: node => overflowText.bind(node)
     }));
-    if (memberLabel) {
-      if (metadataLabel) description.append(document.createTextNode(' · '));
-      description.append(el('span', 'edge-dock-session-member-count', memberLabel));
+    if (session.sessionGroup === 'cursor-grok-bot') {
+      if (description.childElementCount) description.append(document.createTextNode(' · '));
+      description.append(el('span', '', t('sessions.grokBotCount', { count: session.groupRows.length })));
     }
-    if (age) description.append(document.createTextNode(`${memberLabel || metadataLabel ? ' · ' : ''}${age}`));
-    meta.append(description);
+    if (age) {
+      const node = el('span', 'edge-dock-session-age', shortAge);
+      node.setAttribute('role', 'img');
+      node.setAttribute('aria-label', age);
+      if (description.childElementCount) description.append(document.createTextNode(' · '));
+      description.append(node);
+    }
+    if (description.childElementCount) {
+      description.classList.add('session-compact-description');
+      overflowText.bind(description);
+      meta.append(description);
+    }
     const status = sessionRowsApi.sessionStatusNode(document, session, { prefix: 'edge-dock-session', translate: t,
       view: limitWindowsView, showUsed: appearance().sessionContextMetric !== 'remaining' });
     if (status) meta.append(status);

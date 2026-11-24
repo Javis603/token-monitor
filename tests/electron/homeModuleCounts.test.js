@@ -24,6 +24,7 @@ class Element {
     this.events = {};
     this.attributes = {};
     this.dataset = {};
+    this.style = { setProperty(name, value) { this[name] = value; } };
     this.classList = { add() {}, toggle() {} };
   }
   append(...children) { this.children.push(...children); }
@@ -80,9 +81,16 @@ test('Tools, Models and Devices render more than their old hardcoded caps with u
     ['renderHomeModelModule', 'homeToolSourceRows', 8],
     ['renderHomeDeviceModule', 'dailyWithHeatIntensity', 7]
   ]) {
-    vm.runInNewContext(`${source(name, next)}; ${name}(period);`, { ...context, period, homeModuleShell: () => ({ module: new Element(), body: context.body = new Element() }) });
-    assert.equal(context.body.children.length, count);
-    if (count !== 7) assert.equal(context.body.children[0].children[3].textContent, '5', 'share uses the full period total');
+    vm.runInNewContext(`${source('homeNearBlackColor', 'renderHomeModelModule')}; ${source(name, next)}; ${name}(period);`, { ...context, period, homeModuleShell: () => ({ module: new Element(), body: context.body = new Element() }) });
+    const [first] = context.body.children;
+    assert.equal(context.body.children.length, count, 'one aligned row per item, with no share bar');
+    assert.equal(first.className, `home-list-row ${{ renderHomeToolModule: 'home-tool-row', renderHomeModelModule: 'home-model-row', renderHomeDeviceModule: 'home-device-row' }[name]}`);
+    if (name !== 'renderHomeDeviceModule') {
+      assert.equal(first.children[2].textContent, '100', 'each row keeps its amount');
+      assert.equal(first.children[3].textContent, '5', 'share uses the full period total');
+    } else {
+      assert.equal(first.children[3].textContent, String(100 / 1395 * 100), 'share uses every device, not just the shown rows');
+    }
   }
 });
 
@@ -105,8 +113,38 @@ test('each Home count control saves only its own count and refreshes immediately
     assert.equal(input.value, '50');
     assert.equal(JSON.stringify(patch), JSON.stringify({ homeModuleCounts: { [id]: 50 } }));
     assert.equal(refreshed, true);
-    if (id === 'session') assert.equal(input.attributes['aria-describedby'], wrap.children[1].id);
+    if (id === 'session') {
+      assert.equal(input.attributes['aria-describedby'], wrap.children[1].id);
+      // Sessions also choose between compact and detailed rows.
+      const display = wrap.children[2].children[1];
+      assert.deepEqual(display.children.map(option => option.value), ['compact', 'detailed']);
+      assert.equal(display.value, 'compact');
+      display.value = 'detailed';
+      await display.events.change();
+      assert.equal(JSON.stringify(patch), JSON.stringify({ homeSessionDisplayMode: 'detailed' }));
+    }
   }
+});
+
+test('a failed Session display save never leaves an unhandled rejection', async () => {
+  const state = { settings: {} };
+  const wrap = vm.runInNewContext(`${source('renderHomeModuleCountSettings', 'renderHomeSettingsList')}; renderHomeModuleCountSettings('session');`, {
+    state, document: { createElement: () => new Element() }, homeModulePreferencesApi: preferences, addRenderedSettingReset() {},
+    t: key => i18n.translate('en', key),
+    saveSettings: async () => { throw new Error('Settings write failed'); }, renderHomeIfVisible() {}
+  });
+  const display = wrap.children[2].children[1];
+  display.value = 'detailed';
+  const unhandled = [];
+  const onUnhandled = reason => unhandled.push(reason);
+  process.on('unhandledRejection', onUnhandled);
+  try {
+    display.events.change();
+    await new Promise(resolve => setImmediate(resolve));
+  } finally {
+    process.off('unhandledRejection', onUnhandled);
+  }
+  assert.deepEqual(unhandled, []);
 });
 
 test('failed Home count saves restore persisted controls without rejecting the change handler', async () => {
@@ -184,7 +222,7 @@ test('Home sessions respect a smaller count while retaining an active session be
     window: { TokenMonitorEdgeDockPresentation: presentation, TokenMonitorSessionLive: { sessionStateMarkup: () => '' } },
     sessionPresentationOptions: () => ({}), homeModuleShell: () => ({ module: new Element(), body: context.body = new Element() }),
     applyHomeListMark() {}, iconKindFor() {}, clientColors: {}, stableColor() {}, fallbackModelColors: [], bindHoverMarquee() {},
-    formatCompact: String, homeSessionAgo: () => '', t: key => key, limitWindowsView: {},
+    formatCompact: String, homeSessionAgo: () => '', homeSessionAgoShort: () => '', t: key => key, limitWindowsView: {},
     sessionRowsApi: require('../../src/electron/renderer/sessionRows')
   };
   vm.runInNewContext(`${source('renderHomeSessionModule', 'renderHomeDeviceModule')}; renderHomeSessionModule();`, context);

@@ -208,7 +208,8 @@ for (const className of ['detail-ex-title', 'detail-heading']) {
         requestAnimationFrame: h.window.requestAnimationFrame,
         prefersReducedMotion: () => false, homeSessionRenderPending: false,
         visibleStatsSurface: () => 'main', isRendererWindowHidden: () => false,
-        statsRenderScheduler: { request() {} }, renderSessionDetail: options => renders.push(options)
+        statsRenderScheduler: { request() {} }, renderSessionDetail: options => renders.push(options),
+        currentNativeRangeSnapshot: () => null
       });
       vm.runInContext(`${setup}\n${detail}`, context);
       context.bindHoverMarquee(h.element);
@@ -419,6 +420,7 @@ test('updateRow keeps IDs for untitled sessions and moves them into Details for 
   const context = {
     document: h.document, overflowText: h.api,
     rendererDom,
+    window: { TokenMonitorDomReconcile: require('../../src/electron/renderer/domReconcile') },
     state: { breakdown: 'session' }, rowWidth: () => 50,
     iconKindFor: () => ({ kind: 'dot' }),
     setHoverMarqueeText: h.api.setText, formatNumber: String, formatCost: String,
@@ -489,6 +491,7 @@ test('a token and cost update through updateRow keeps the hovered title moving',
   const context = {
     document: h.document, overflowText: h.api,
     rendererDom,
+    window: { TokenMonitorDomReconcile: require('../../src/electron/renderer/domReconcile') },
     state: { breakdown: 'session' }, rowWidth: () => 50,
     iconKindFor: () => ({ kind: 'dot' }),
     setHoverMarqueeText: h.api.setText, formatNumber: String, formatCost: String,

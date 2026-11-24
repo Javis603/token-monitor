@@ -41,10 +41,12 @@ test('period switches keep the same group and return to Sessions when that group
   const tab = { dataset: { period: 'month', periodSlot: 'month' }, addEventListener(_type, callback) { activate = callback; } };
   let renders = 0;
   const noop = () => {};
-  const start = source.indexOf("for (const tab of document.querySelectorAll('.tab'))");
+  // The tab loop and the open-session follow-up it shares with the range menu.
+  const start = source.indexOf('function followOpenSessionToPeriod()');
   const end = source.indexOf('\nfor (const button of els.monthPeriodMenu', start);
   vm.runInNewContext(source.slice(start, end), { state, document: { querySelectorAll: () => [tab] },
     fixedPeriodRangesApi: { slotForSelection: value => value, normalizeMonthMode: () => 'month', supportsBreakdown: () => true },
+    currentNativeRangeSnapshot: () => null,
     captureBreakdownMotion: noop, setPeriod: value => { state.period = value; return true; }, syncPeriodTabs: noop,
     setPeriodMenuOpen: noop, sessionRowsForPeriod: rowsForPeriod, render: () => { renders += 1; },
     periodBreakdownMotionDuration: () => 800, animateBreakdownFrom: noop });
@@ -164,4 +166,27 @@ test('conflicting absent parents split a shared native identity into stable inde
   const dock = require('../../src/electron/renderer/edgeDock/presentation').recentSessionRows({ periods: { month: { sessions } } }, 100);
   assert.equal(new Set(dock.map(row => row.key)).size, 2, 'Dock expansion keys also remain distinct');
   assert.equal(dock.reduce((sum, row) => sum + row.totalTokens, 0), 100);
+});
+
+test('an open session follows a period change with that period\'s row cost', () => {
+  const row = cost => ({ sessions: { 'claude:s1': { client: 'claude', sessionId: 's1', totalTokens: 10, costUsd: cost } } });
+  const state = { period: 'last7', stats: { periods: { month: row(20), last7: row(3) } },
+    openSession: { kind: 'session', client: 'claude', sessionId: 's1', sessionCost: 20, period: 'month' } };
+  const opened = [];
+  const start = source.indexOf('function followOpenSessionToPeriod()');
+  const end = source.indexOf("for (const tab of document.querySelectorAll('.tab'))", start);
+  const sessionStart = source.indexOf('function sessionLiveStatsEntry(');
+  const sessionEnd = source.indexOf('function sessionDetailLiveSignature(', sessionStart);
+  const context = { state, fixedPeriodRangesApi: { supportsBreakdown: () => true },
+    currentNativeRangeSnapshot: () => ({ range: {} }), sessionRowsForPeriod: rowsForPeriod,
+    openSessionDetail: request => opened.push(request) };
+  vm.runInNewContext(`${source.slice(sessionStart, sessionEnd)}\n${source.slice(start, end)}\nglobalThis.follow = followOpenSessionToPeriod;`, context);
+  context.follow();
+  assert.equal(opened.length, 1);
+  assert.equal(opened[0].sessionCost, 3);
+  assert.equal(opened[0].returnTo, null);
+  // A destination without the row carries no cost over from the old period.
+  state.stats.periods.last7 = { sessions: {} };
+  context.follow();
+  assert.equal(opened[1].sessionCost, 0);
 });

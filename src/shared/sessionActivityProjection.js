@@ -11,11 +11,34 @@
   if (root) root.TokenMonitorSessionActivityProjection = api;
 })(typeof window !== 'undefined' ? window : null, function createApi(live, providers) {
   const indexes = new WeakMap();
-  const names = ['today', 'month', 'allTime'];
+  // Local native ranges (Yesterday, Week, Last 7 days, Last 30 days) list the same live
+  // sessions, so their rows take the same observations.
+  const names = ['today', 'month', 'allTime', 'yesterday', 'week', 'last7', 'last30'];
+  const nativeSessionNames = ['today', 'month', 'allTime'];
   const LOOKUP_CACHE_LIMIT = 512;
   const clients = providers.SESSION_ACTIVITY_CLIENTS;
   const { isSessionActivityClient } = providers;
   function periods(summary) { return summary?.periods || summary; }
+  // A collector summary keeps its native ranges under `nativeRanges`; display
+  // stats carry them as ordinary periods.
+  function rangeHeld(summary, name) {
+    return !periods(summary)?.[name] && !nativeSessionNames.includes(name) && Boolean(summary?.nativeRanges?.[name]);
+  }
+  function periodNamed(summary, name) {
+    return rangeHeld(summary, name) ? summary.nativeRanges[name] : periods(summary)?.[name];
+  }
+  function withPeriods(summary, updates) {
+    let nextPeriods = null;
+    let nextRanges = null;
+    for (const [name, period] of updates) {
+      if (rangeHeld(summary, name)) (nextRanges ||= { ...summary.nativeRanges })[name] = period;
+      else (nextPeriods ||= { ...periods(summary) })[name] = period;
+    }
+    let result = summary;
+    if (nextPeriods) result = summary.periods ? { ...summary, periods: nextPeriods } : nextPeriods;
+    if (nextRanges) result = { ...result, nativeRanges: nextRanges };
+    return result;
+  }
   function remember(cache, key, value) {
     cache.delete(key);
     cache.set(key, value);
@@ -39,7 +62,7 @@
     // and without allocating Object.entries() for the full accounting maps.
     const clock = Date.parse(summary?.updatedAt);
     for (const name of names) {
-      const period = periods(summary)?.[name];
+      const period = periodNamed(summary, name);
       for (const key in period?.sessions) {
         if (!Object.prototype.hasOwnProperty.call(period.sessions, key)) continue;
         const row = period.sessions[key];
@@ -65,7 +88,7 @@
     // Collector and normalized presentation maps already use client:sessionId
     // keys. No second identity index is needed, even for an old resumed session.
     for (const name of names) {
-      const sessions = periods(summary)?.[name]?.sessions;
+      const sessions = periodNamed(summary, name)?.sessions;
       if (legacyPeriods.has(name)) {
         // Raw, unnormalized callers can use arbitrary keys. Only those maps
         // require a cold lookup; they still share the same bounded cache.
@@ -84,7 +107,7 @@
   function hasKnownSession(summary, client, id, periodName, includeArchived = true) {
     const locations = locationsFor(summary, client, id);
     return locations.some((row) => (!periodName || row.name === periodName)
-      && (includeArchived || !live.isArchivedSession(periods(summary)[row.name].sessions[row.key])));
+      && (includeArchived || !live.isArchivedSession(periodNamed(summary, row.name).sessions[row.key])));
   }
   function nativeSessionsForPeriod(summary, client, sessions, name) {
     return Object.fromEntries(Object.entries(sessions).filter(([, row]) =>
@@ -108,7 +131,7 @@
     if (includeLeased) for (const id of index.leased.get(client) || []) selected.add(id);
     const result = [];
     for (const id of selected) for (const location of locationsFor(summary, client, id)) {
-      const session = live.sessionWithActivity(periods(summary)[location.name], location.key);
+      const session = live.sessionWithActivity(periodNamed(summary, location.name), location.key);
       if (session && !live.isArchivedSession(session)) result.push({ ...location, session });
     }
     return result;
@@ -153,7 +176,7 @@
     // from discovery, search the existing maps once for just the missing native
     // IDs. Cache hits and misses with a bound on total retained candidate IDs.
     if (pending.size) for (const name of names) {
-      const sessions = periods(summary)?.[name]?.sessions;
+      const sessions = periodNamed(summary, name)?.sessions;
       for (const key in sessions) {
         if (!Object.prototype.hasOwnProperty.call(sessions, key)) continue;
         const row = sessions[key];
@@ -180,7 +203,7 @@
       if (row.liveActivity.state === 'unknown') leased.get(row.client)?.delete(row.sessionId);
       else leased.get(row.client)?.add(row.sessionId);
     }
-    const sameAccounting = names.every((name) => periods(previous)?.[name]?.sessions === periods(next)?.[name]?.sessions);
+    const sameAccounting = names.every((name) => periodNamed(previous, name)?.sessions === periodNamed(next, name)?.sessions);
     if (sameAccounting) indexes.set(next, { lookup: old.lookup, leased });
   }
   function activityPatch(previous, next) {
@@ -188,20 +211,19 @@
     for (const client of clients) {
       const ids = new Set([...indexFor(previous).leased.get(client), ...indexFor(next).leased.get(client)]);
       for (const { name, key, session } of activityEntries(next, client, ids)) {
-        const before = live.sessionWithActivity(periods(previous)?.[name], key)?.liveActivity;
+        const before = live.sessionWithActivity(periodNamed(previous, name), key)?.liveActivity;
         if (session.liveActivity && (before?.state !== session.liveActivity.state || before?.observedAt !== session.liveActivity.observedAt)) {
           observations.set(`${client}:${session.sessionId}`, { client, sessionId: session.sessionId, liveActivity: session.liveActivity });
         }
       }
     }
     const nativeSessions = {};
-    for (const name of names) nativeSessions[name] = Object.fromEntries(Object.entries(next.nativeSessions?.[name] || {})
+    for (const name of nativeSessionNames) nativeSessions[name] = Object.fromEntries(Object.entries(next.nativeSessions?.[name] || {})
       .filter(([, row]) => isSessionActivityClient(row.client)));
     return { observations: [...observations.values()], nativeSessions };
   }
   function applyActivityPatch(summary, patch) {
     if (!summary || !patch) return summary;
-    const source = periods(summary);
     let result = summary;
     const maps = new Map();
     const accepted = [];
@@ -212,19 +234,17 @@
       for (const { name, key, session } of activityEntries(summary, row.client, [row.sessionId], false)) {
         if (!live.canReplaceLiveActivity(session.liveActivity, observation)) continue;
         if (session.liveActivity?.state === observation.state && session.liveActivity?.observedAt === observation.observedAt) continue;
-        if (!maps.has(name)) maps.set(name, compactActivity(source[name], Date.parse(observation.observedAt)));
+        if (!maps.has(name)) maps.set(name, compactActivity(periodNamed(summary, name), Date.parse(observation.observedAt)));
         maps.get(name)[key] = observation;
         accepted.push({ ...row, liveActivity: observation });
       }
     }
     if (maps.size) {
-      const nextPeriods = { ...source };
-      for (const [name, sessionActivity] of maps) nextPeriods[name] = { ...source[name], sessionActivity };
-      result = summary.periods ? { ...summary, periods: nextPeriods } : nextPeriods;
+      result = withPeriods(summary, [...maps].map(([name, sessionActivity]) => [name, { ...periodNamed(summary, name), sessionActivity }]));
     }
     if (patch.nativeSessions) {
       const nativeSessions = {};
-      for (const name of names) {
+      for (const name of nativeSessionNames) {
         const other = Object.fromEntries(Object.entries(summary.nativeSessions?.[name] || {})
           .filter(([, row]) => !isSessionActivityClient(row.client)));
         nativeSessions[name] = { ...other, ...patch.nativeSessions[name] };
@@ -250,19 +270,17 @@
   }
   function materializeActivity(summary) {
     if (!summary) return summary;
-    const source = periods(summary);
-    let result = summary;
+    const updates = [];
     for (const name of names) {
-      const period = source[name];
+      const period = periodNamed(summary, name);
       if (!period?.sessionActivity) continue;
       const sessions = { ...period.sessions };
       for (const key of Object.keys(period.sessionActivity)) if (sessions[key]) sessions[key] = live.sessionWithActivity(period, key, sessions[key]);
       const next = { ...period, sessions };
       delete next.sessionActivity;
-      if (result === summary) result = summary.periods ? { ...summary, periods: { ...source } } : { ...summary };
-      periods(result)[name] = next;
+      updates.push([name, next]);
     }
-    return result;
+    return updates.length ? withPeriods(summary, updates) : summary;
   }
   function invalidateActivityIndex(summary) { if (summary) indexes.delete(summary); }
   return { hasKnownSession, nativeSessionsForPeriod, activityEntries, codexActivityCandidates, rememberProjection, activityPatch, applyActivityPatch,
