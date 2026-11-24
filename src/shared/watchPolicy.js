@@ -19,6 +19,7 @@ const {
 } = require('./clientSources');
 const { dirExists } = require('./clientSourceObservations');
 const { normalizeCustomScanPaths } = require('./customScanPaths');
+const { ANTIGRAVITY_ACP_SOURCE_ID, discoverAntigravityAcpPaths } = require('./providers/antigravity/acpPaths');
 const { activityWatchIgnored } = require('./sessionActivityWatch');
 const { antigravityDataRoots } = require('./providers/antigravity/selfSync');
 const { antigravityConversationSummaryCandidates } = require('./providers/antigravity/sessionMetadata');
@@ -102,6 +103,11 @@ function antigravitySummaryWatchSources(options = {}) {
 }
 
 function watchClientRootsForClients(clientsCsv, options = {}) {
+  const enabled = new Set(String(clientsCsv || '').split(',').map((value) => value.trim().toLowerCase()).filter(Boolean));
+  const acpDirs = enabled.has('antigravity')
+    ? options.antigravityAcpPaths ?? discoverAntigravityAcpPaths(options)
+    : [];
+  options = { ...options, antigravityAcpPaths: acpDirs };
   const rootsByClient = {};
   const customScanPaths = normalizeCustomScanPaths(options.customScanPaths, {
     platform: options.platform || process.platform
@@ -121,7 +127,6 @@ function watchClientRootsForClients(clientsCsv, options = {}) {
   // The Antigravity CLI writes parse-local SQLite that tokscale reads directly,
   // so it is also safe to watch and shares the umbrella client id. The filter
   // expands that id to antigravity-cli when the targeted scan runs.
-  const enabled = new Set(String(clientsCsv || '').split(',').map((value) => value.trim().toLowerCase()).filter(Boolean));
   const antigravityCliDir = antigravityCliDataDir(options);
   if (enabled.has('antigravity') && dirExists(antigravityCliDir)) {
     rootsByClient.antigravity = [...new Set([...(rootsByClient.antigravity || []), antigravityCliDir])];
@@ -130,8 +135,8 @@ function watchClientRootsForClients(clientsCsv, options = {}) {
     // Watch the parent so a summary DB or WAL created after startup is seen.
     // Its policy below admits only those exact files, never the surrounding tree.
     const summaryDirs = antigravitySummaryWatchSources(options).map(({ dir }) => dir).filter(dirExists);
-    if (summaryDirs.length > 0) {
-      rootsByClient.antigravity = [...new Set([...(rootsByClient.antigravity || []), ...summaryDirs])];
+    if (acpDirs.length > 0 || summaryDirs.length > 0) {
+      rootsByClient.antigravity = [...new Set([...(rootsByClient.antigravity || []), ...acpDirs, ...summaryDirs])];
     }
   }
   if (enabled.has('reasonix')) {
@@ -184,6 +189,7 @@ function watchAttributionRootsForClients(clientsCsv, watchRoots = null, options 
     const canonicalRoot = (dir) => path.resolve(canonicalWatchPath(dir));
     const usageRoots = new Set([
       ...antigravityDataRoots(options.homeDir || os.homedir()), antigravityCliDataDir(options),
+      ...(options.antigravityAcpPaths ?? discoverAntigravityAcpPaths(options)),
       ...(normalizeCustomScanPaths(options.customScanPaths, options).antigravity || [])
     ].map(canonicalRoot));
     const summaries = antigravitySummaryWatchSources(options);
@@ -711,12 +717,15 @@ function watchPolicyEntries(clientsCsv, options = {}) {
   ]));
   const isCustomOnly = (client, root) => Boolean(customRoots.get(client)?.has(root))
     && !builtInBySource.get(client)?.has(root);
+  const acpDirs = new Set(rootsByClient.antigravity
+    ?.filter(root => root.id === ANTIGRAVITY_ACP_SOURCE_ID).map(root => root.dir));
   const recursive = [
     ...Object.entries(candidates)
       .flatMap(([client, dirs]) => dirs
         .filter((dir) => (
           (client !== 'copilot' || customRoots.get(client)?.has(canonicalRoot(dir)))
-          && (!SELF_SYNCED_CLIENTS.has(client) || customScanPaths[client]?.includes(dir))
+          && (!SELF_SYNCED_CLIENTS.has(client) || customScanPaths[client]?.includes(dir)
+            || (client === 'antigravity' && acpDirs.has(dir)))
           && !(claimed.get(client) || EMPTY_SET).has(dir)
         ))
         .map((dir) => ({ client, root: canonicalRoot(dir), custom: isCustomOnly(client, canonicalRoot(dir)) }))),
@@ -925,6 +934,7 @@ function openWatch(chokidar, config = {}, onEvent) {
   const copilotExporter = copilotEnabled ? copilotExporterWatch(os.homedir()) : null;
   const ignored = activityWatchIgnored(watchIgnoreMatcher(config.clients, {
     customScanPaths: config.customScanPaths,
+    antigravityAcpPaths: config.antigravityAcpPaths,
     cursorDesktopRoots: config.cursorDesktopRoots,
     homeDir: config.homeDir,
     env: config.env,

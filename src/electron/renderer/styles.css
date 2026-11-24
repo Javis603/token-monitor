@@ -2909,6 +2909,35 @@ button.tool-preference-main:focus-visible {
   font: inherit;
   font-weight: 500;
 }
+.tool-health-auto-source {
+  min-width: 0;
+}
+.tool-health-auto-source > summary {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: fit-content;
+  list-style: none;
+  color: var(--fg);
+  cursor: pointer;
+}
+.tool-health-auto-source > summary::-webkit-details-marker {
+  display: none;
+}
+.tool-health-auto-source > summary::after {
+  content: '';
+  width: 4px;
+  height: 4px;
+  border: solid var(--muted);
+  border-width: 0 1px 1px 0;
+  transform: rotate(-45deg);
+}
+.tool-health-auto-source[open] > summary::after {
+  transform: translateY(-1px) rotate(45deg);
+}
+.tool-health-auto-source > .tool-health-checks {
+  margin-top: 4px;
+}
 .tool-health-source-summary-row {
   display: flex;
   align-items: center;

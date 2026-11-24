@@ -149,14 +149,19 @@
     const usage = options.usage;
     const sources = Array.isArray(options.sources) ? options.sources : [];
     const wireChecks = Array.isArray(entry.source?.checks) ? entry.source.checks : [];
+    const acp = wireChecks.find(check => check.id === 't3-antigravity-acp');
+    const detectedCount = Number(entry.source?.detectedCount || 0) - Number(acp?.exists === true);
+    const checkedCount = Number(entry.source?.checkedCount || 0) - Number(Boolean(acp));
+    const sourceState = acp ? (detectedCount > 0 ? 'detected' : checkedCount > 0 ? 'missing' : 'unknown')
+      : String(entry.source?.state || 'unknown');
     return [
       {
         id: 'source',
         key: 'settings.tools.health.source',
-        state: String(entry.source?.state || 'unknown'),
-        detectedCount: Number(entry.source?.detectedCount || 0),
-        checkedCount: Number(entry.source?.checkedCount || 0),
-        checks: mergeSourceChecks(wireChecks, sources)
+        state: sourceState,
+        detectedCount,
+        checkedCount,
+        checks: mergeSourceChecks(wireChecks.filter(check => check.id !== 't3-antigravity-acp'), sources)
       },
       {
         id: 'collection',

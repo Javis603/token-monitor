@@ -71,6 +71,7 @@ const {
 } = require('./subprocessTermination');
 const { lowerSubprocessPriority } = require('./subprocessPriority');
 const { createAntigravitySelfSync } = require('./providers/antigravity/selfSync');
+const { ANTIGRAVITY_ACP_SOURCE_ID, discoverAntigravityAcpPaths } = require('./providers/antigravity/acpPaths');
 const { withCursorLifecycle } = require('./providers/cursor/lifecycle');
 const { createCursorSelfSync } = require('./providers/cursor/selfSync');
 const { createCursorUsageSource, snapshotUsageKey } = require('./providers/cursor/usageSource');
@@ -248,7 +249,7 @@ function tokscaleCommand(options = {}) {
   const customExtraDirs = tokscaleExtraDirsEnv(
     options.customScanPaths,
     process.env.TOKSCALE_EXTRA_DIRS,
-    { platform: options.platform || process.platform, home: options.homeDir }
+    { platform: options.platform || process.platform, home: options.homeDir, antigravityAcpPaths: options.antigravityAcpPaths }
   );
   const extraDirsEnv = customExtraDirs
     ? { ...process.env, TOKSCALE_EXTRA_DIRS: customExtraDirs }
@@ -592,6 +593,7 @@ function runTokscale({
   terminationOptions,
   onTerminationUnconfirmed,
   customScanPaths,
+  antigravityAcpPaths,
   homeDir,
   offlinePricing = false,
   workspaces = true,
@@ -605,7 +607,7 @@ function runTokscale({
   leadingFlags = []
 }) {
   throwIfAborted(signal);
-  const command = tokscaleCommand({ customScanPaths, homeDir });
+  const command = tokscaleCommand({ customScanPaths, antigravityAcpPaths, homeDir });
   const requested = tokscaleClientFilter(clients);
   if (!requested) return Promise.resolve(emptyResult);
   const clientFilter = applyKnownCapabilityFilter(requested, command.identity);
@@ -731,7 +733,7 @@ function isUnknownTokscaleWindowError(error) {
 // Resolves to the reports keyed by window name, or null when this binary has no
 // windowed mode. Malformed output is an error, not a silent fallback.
 async function runTokscaleWindows({ windows, ...input }) {
-  const { identity } = tokscaleCommand({ customScanPaths: input.customScanPaths, homeDir: input.homeDir });
+  const { identity } = tokscaleCommand();
   if (tokscaleWindowSupport.get(identity) === false) return null;
   const leadingFlags = windows.flatMap(({ name, since = '', until = '' }) => ['--window', `${name}:${since}:${until}`]);
   const emptyResult = {
@@ -752,9 +754,9 @@ async function runTokscaleWindows({ windows, ...input }) {
   return json.windows;
 }
 
-function runTokscaleGraph({ clients, commandTimeoutMs, signal, terminationOptions, onTerminationUnconfirmed, customScanPaths, homeDir, offline = false, cursorLifecycleHeld = false, offlinePricing = false, timeZone = Intl.DateTimeFormat().resolvedOptions().timeZone }) {
+function runTokscaleGraph({ clients, commandTimeoutMs, signal, terminationOptions, onTerminationUnconfirmed, customScanPaths, antigravityAcpPaths, homeDir, offline = false, cursorLifecycleHeld = false, offlinePricing = false, timeZone = Intl.DateTimeFormat().resolvedOptions().timeZone }) {
   throwIfAborted(signal);
-  const command = tokscaleCommand({ customScanPaths, homeDir });
+  const command = tokscaleCommand({ customScanPaths, antigravityAcpPaths, homeDir });
   const requested = tokscaleClientFilter(clients);
   if (!requested) return Promise.resolve({ contributions: [] });
   const clientFilter = applyKnownCapabilityFilter(requested, command.identity);
@@ -1086,6 +1088,8 @@ function allTimeScanTimeoutMs(options) {
 async function collectUsageOnce(options) {
   throwIfAborted(options.signal);
   const { clients, allTimeSince, commandTimeoutMs, deviceId, agentVersion = appVersion(), agentRuntime = '' } = options;
+  const normalizedClients = normalizeClientsCsv(clients);
+  const antigravityAcpPaths = options.antigravityAcpPaths ?? antigravityAcpScanPaths(normalizedClients, options);
   const allTimeTimeoutMs = allTimeScanTimeoutMs(options);
   // One snapshot, one instant: capture the clock before any tokscale scan and
   // reuse it for the today-window key and updatedAt, so a collection that
@@ -1157,7 +1161,10 @@ async function collectUsageOnce(options) {
       && normalizeClientsCsv(input.clients).split(',').includes('cursor');
     const scanInput = includesCursor ? { ...input, clients: withoutCursor(input.clients) }
       : cursorSnapshot && input.flags.includes('--home') ? { ...input, offline: true } : input;
-    const json = scanInput.clients ? await runTokscaleScan({ ...scanInput, timeZone: periodWindows.timeZone }) : { entries: [] };
+    const scanAcpPaths = input.flags.includes('--home') ? [] : antigravityAcpPaths;
+    const json = scanInput.clients
+      ? await runTokscaleScan({ ...scanInput, antigravityAcpPaths: scanAcpPaths, timeZone: periodWindows.timeZone })
+      : { entries: [] };
     assertCollectionCalendar();
     const period = input.flags.includes('--today') ? 'today' : input.flags.includes('--month') ? 'month' : 'allTime';
     return finishScanJson(json, period, includesCursor);
@@ -1183,7 +1190,7 @@ async function collectUsageOnce(options) {
     const includesCursor = cursorSnapshot && normalizeClientsCsv(clientsCsv).split(',').includes('cursor');
     const scanClients = includesCursor ? withoutCursor(clientsCsv) : clientsCsv;
     const reports = scanClients
-      ? await runTokscaleWindowsScan({ clients: scanClients, windows, commandTimeoutMs: allTimeTimeoutMs, signal: options.signal, timeZone: periodWindows.timeZone })
+      ? await runTokscaleWindowsScan({ clients: scanClients, windows, antigravityAcpPaths, commandTimeoutMs: allTimeTimeoutMs, signal: options.signal, timeZone: periodWindows.timeZone })
       : Object.fromEntries(windows.map(({ name }) => [name, { entries: [] }]));
     if (!reports) return null;
     assertCollectionCalendar();
@@ -1218,7 +1225,7 @@ async function collectUsageOnce(options) {
     onTerminationUnconfirmed: () => reportTerminationUnconfirmed('tokscale-graph')
   }));
   const runGraphFn = async (input) => {
-    const graph = await runGraphScan({ ...input, timeZone: periodWindows.timeZone });
+    const graph = await runGraphScan({ ...input, antigravityAcpPaths, timeZone: periodWindows.timeZone });
     assertCollectionCalendar();
     return graph;
   };
@@ -1231,7 +1238,6 @@ async function collectUsageOnce(options) {
   const osInfo = options.osInfo === undefined
     ? hostOsInfo()
     : normalizeOsInfo(options.osInfo);
-  const normalizedClients = normalizeClientsCsv(clients);
   const localSessionMetadataDeps = {
     ...(options.sessionMetadataDeps || {}),
     env: options.env || options.sessionMetadataDeps?.env,
@@ -1706,6 +1712,7 @@ async function collectUsageOnce(options) {
   // a directory as both present and absent when it appeared between the two.
   const sourceChecks = clientSourceChecks(normalizedClients, {
     customScanPaths: options.customScanPaths,
+    antigravityAcpPaths,
     env: options.env,
     homeDir: options.homeDir,
     platform: platformValue,
@@ -1998,10 +2005,13 @@ function deriveClientHealth(clientsCsv, allTimePeriod, options = {}) {
     const activityDay = activityDays[client];
     if (activityDay) entry.data.lastActivityDay = activityDay;
     const overall = deriveClientOverall(entry);
+    // Tools displays this check separately from the official path count, even
+    // on a healthy device that would otherwise omit the breakdown.
+    if ((overall !== 'healthy' && detected.length < checks.length)
+        || checks.some(check => check.id === ANTIGRAVITY_ACP_SOURCE_ID)) {
+      entry.source.checks = checks.map(({ id, exists }) => ({ id, exists }));
+    }
     if (overall !== 'healthy') {
-      if (checks.length > 0 && detected.length < checks.length) {
-        entry.source.checks = checks.map(({ id, exists }) => ({ id, exists }));
-      }
       const codes = [];
       // Only "nothing at all" is a fault. A client's roots are alternatives, not
       // dependencies — Antigravity's IDE cache, native sources and CLI data are
@@ -2107,7 +2117,19 @@ function pricingFingerprint(options = {}) {
   return hash.digest('hex');
 }
 
-function configFingerprint(clientsCsv, allTimeSince, projectsEnabled = true, customScanPaths = null, pricingRevision = pricingFingerprint(), sourceOptions = {}, catpawRevision = catpawSourcesFingerprint(normalizeClientsCsv(clientsCsv), sourceOptions)) {
+function antigravityAcpScanPaths(normalizedClients, options) {
+  return normalizedClients.split(',').includes('antigravity')
+    ? discoverAntigravityAcpPaths({ ...options, env: options.env || options.sessionMetadataDeps?.env })
+    : [];
+}
+
+function scanSourceFingerprint(normalizedClients, options, acpPaths = antigravityAcpScanPaths(normalizedClients, options)) {
+  const catpawRevision = catpawSourcesFingerprint(normalizedClients, options);
+  return (catpawRevision ? `|catpaw:${catpawRevision}` : '')
+    + (acpPaths.length ? `|antigravityAcp:${JSON.stringify(acpPaths)}` : '');
+}
+
+function configFingerprint(clientsCsv, allTimeSince, projectsEnabled = true, customScanPaths = null, pricingRevision = pricingFingerprint(), sourceOptions = {}, sourceRevision = scanSourceFingerprint(normalizeClientsCsv(clientsCsv), sourceOptions)) {
   // Source changes invalidate the persisted anchor before any Today delta.
   const qoderCnProjectsPart = normalizeClientsCsv(clientsCsv).split(',').includes('qodercn')
     ? `|qodercnProjects:${clientSourceRoots('qodercn', sourceOptions).qodercn[0].dir}` : '';
@@ -2119,8 +2141,7 @@ function configFingerprint(clientsCsv, allTimeSince, projectsEnabled = true, cus
     ? `|qoder:${clientSourceRoots('qoder', sourceOptions).qoder[0].dir}` : '';
   const scanKey = customScanPathsFingerprint(customScanPaths);
   const scanPart = scanKey ? `|scan:${scanKey}` : '';
-  const catpawPart = catpawRevision ? `|catpaw:${catpawRevision}` : '';
-  return `${normalizeClientsCsv(clientsCsv)}|${allTimeSince}|projects:${projectsEnabled !== false ? 'on' : 'off'}${qoderCnProjectsPart}${qoderPart}${scanPart}${catpawPart}|pricing:${pricingRevision}`;
+  return `${normalizeClientsCsv(clientsCsv)}|${allTimeSince}|projects:${projectsEnabled !== false ? 'on' : 'off'}${qoderCnProjectsPart}${qoderPart}${scanPart}${sourceRevision}|pricing:${pricingRevision}`;
 }
 
 // The one place that decides whether a persisted anchor may be reused, shared by
@@ -2284,7 +2305,8 @@ function startCollector(options) {
   // later full/history tick instead of losing it at the tick boundary.
   let liveDailyHistoryDays = {};
   let pricingRevision = pricingFingerprint(options);
-  let sourceRevision = catpawSourcesFingerprint(normalizedClients, sourceOptions);
+  let antigravityAcpPaths = antigravityAcpScanPaths(normalizedClients, sourceOptions);
+  let sourceRevision = scanSourceFingerprint(normalizedClients, sourceOptions, antigravityAcpPaths);
   let lastFullScanAt = 0;
   let pendingWaiters = [];
   let debounceTimer = null;
@@ -2595,7 +2617,7 @@ function startCollector(options) {
   }
 
   const pricingChangedDuringScan = Symbol('pricing changed during scan');
-  const catpawSourcesChangedDuringScan = Symbol('CatPaw sources changed during scan');
+  const sourcesChangedDuringScan = Symbol('scan sources changed during scan');
 
   async function performTick(reason, tickOptions = {}) {
     const visibilityRevision = codexVisibilityRevision;
@@ -2607,9 +2629,10 @@ function startCollector(options) {
     const tickPricingRevision = pricingFingerprint(options);
     const sessionMetadataFallback = anchor;
     const pricingChanged = tickPricingRevision !== pricingRevision;
-    const tickSourceRevision = catpawSourcesFingerprint(normalizedClients, sourceOptions);
-    const catpawSourcesChanged = tickSourceRevision !== sourceRevision;
-    if (pricingChanged || catpawSourcesChanged || timezoneChanged) {
+    antigravityAcpPaths = antigravityAcpScanPaths(normalizedClients, sourceOptions);
+    const tickSourceRevision = scanSourceFingerprint(normalizedClients, sourceOptions, antigravityAcpPaths);
+    const sourcesChanged = tickSourceRevision !== sourceRevision;
+    if (pricingChanged || sourcesChanged || timezoneChanged) {
       anchor = null;
       wslAnchor = null;
       wslStatusAnchor = null;
@@ -2628,7 +2651,7 @@ function startCollector(options) {
       collectedAt.getTime(),
       lastHistoryAt,
       historyIntervalMs,
-      Boolean(tickOptions.forceHistory) || localDayRolledOver || pricingChanged || catpawSourcesChanged || timezoneChanged,
+      Boolean(tickOptions.forceHistory) || localDayRolledOver || pricingChanged || sourcesChanged || timezoneChanged,
       historyEnabled
     );
     if (includeHistory) {
@@ -2661,9 +2684,10 @@ function startCollector(options) {
       }
       let captured = null;
       let tickLocalView = null;
-      let catpawSourceChangeObserved = false;
+      let sourceChangeObserved = false;
       const summary = await collectUsageOnce({
         ...options,
+        antigravityAcpPaths,
         ...(tickCursorSnapshot ? { cursorSnapshot: tickCursorSnapshot } : {}),
         offlinePricing: true,
         codexDotsVisible,
@@ -2720,12 +2744,12 @@ function startCollector(options) {
         refreshWsl: anchored ? refreshWsl : false,
         onAnchorComputed: (x) => { captured = x; },
         onProgress: (partial) => {
-          if (catpawSourcesFingerprint(normalizedClients, sourceOptions) !== tickSourceRevision) catpawSourceChangeObserved = true;
+          if (scanSourceFingerprint(normalizedClients, sourceOptions) !== tickSourceRevision) sourceChangeObserved = true;
           if (visibilityRevision !== codexVisibilityRevision) return;
           if (visibilityRevision !== publishedCodexVisibilityRevision) return;
           if (!partial.today) return;
           if (pricingChanged || pricingFingerprint(options) !== tickPricingRevision
-              || catpawSourcesChanged || catpawSourceChangeObserved) return;
+              || sourcesChanged || sourceChangeObserved) return;
           try {
             if (typeof onPreview === 'function') {
               // Frozen WSL snapshot, gated so a cross-day/cross-month full scan
@@ -2797,9 +2821,8 @@ function startCollector(options) {
         // its local revision starts at zero, but DeviceState keeps old history.
         summary.history = historyScanSucceeded ? normalizeHistory([], { todayKey }) : null;
       }
-      if (catpawSourceChangeObserved
-          || catpawSourcesFingerprint(normalizedClients, sourceOptions) !== tickSourceRevision) {
-        return catpawSourcesChangedDuringScan;
+      if (sourceChangeObserved || scanSourceFingerprint(normalizedClients, sourceOptions) !== tickSourceRevision) {
+        return sourcesChangedDuringScan;
       }
       // A settings save can land between the serial period scans. Discard that
       // mixed result and replay all windows against one pricing revision.
@@ -3088,12 +3111,12 @@ function startCollector(options) {
     let inputReplayUsed = false;
     const performWithInputReplay = async (tickReason, scanOptions) => {
       const result = await performTick(tickReason, scanOptions);
-      if ((result !== pricingChangedDuringScan && result !== catpawSourcesChangedDuringScan) || inputReplayUsed || stopped) return result;
+      if ((result !== pricingChangedDuringScan && result !== sourcesChangedDuringScan) || inputReplayUsed || stopped) return result;
       inputReplayUsed = true;
       // At most one automatic replay belongs to this initiating tick, including
       // its coalesced work. A second mismatch waits for a normal tick; neither
       // mixed result is published. Already acknowledged source sync stays consumed.
-      return performTick(result === pricingChangedDuringScan ? 'pricing-change' : 'catpaw-source-change', {
+      return performTick(result === pricingChangedDuringScan ? 'pricing-change' : 'scan-source-change', {
         ...scanOptions,
         forceHistory: true,
         todayOnly: false,
@@ -3275,6 +3298,7 @@ function startCollector(options) {
     if (!watchEnabled || watchIntervalFallback) return;
     const watchOptions = {
       ...sourceOptions,
+      antigravityAcpPaths,
       codexHomes: customCodexHomes(),
       ...(trackedClients.has('senpi') ? { senpiSources: senpiWatchSources(sourceOptions) } : {})
     };
@@ -3397,6 +3421,7 @@ function startCollector(options) {
           activitySources,
           clients,
           customScanPaths: sourceOptions.customScanPaths,
+          antigravityAcpPaths,
           cursorDesktopRoots: sourceSyncRootsByClient.cursor || [],
           homeDir: sourceOptions.homeDir,
           env: sourceOptions.env,
@@ -3440,7 +3465,8 @@ function startCollector(options) {
     // retain the hourly reconciliation path for missed events, newly created
     // client directories, WSL-only activity, and cross-day metadata refreshes.
     const calendarChanged = Boolean(anchor && anchor.calendarKey !== collectionCalendarKey(collectionDate(options.now)));
-    const fullScanDue = calendarChanged || lastFullScanAt === 0 || Date.now() - lastFullScanAt >= FULL_SCAN_INTERVAL_MS;
+    const acpPathsChanged = JSON.stringify(antigravityAcpScanPaths(normalizedClients, sourceOptions)) !== JSON.stringify(antigravityAcpPaths);
+    const fullScanDue = calendarChanged || acpPathsChanged || lastFullScanAt === 0 || Date.now() - lastFullScanAt >= FULL_SCAN_INTERVAL_MS;
     // Smart mode trusts the watcher to say which clients moved. Without one it
     // is plain interval collection, or it would scan nothing but the hourly
     // reconciliation.

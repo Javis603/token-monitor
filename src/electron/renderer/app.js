@@ -12441,7 +12441,8 @@ function setClientHealthExpanded(clientId, options = {}) {
     // left alone so a collapse still has something to animate.
     if (open) {
       const force = options.refreshPlaceholder === true
-        && !clientHealthPresentationApi.hasClientHealth(localClientHealth(), row.dataset.client);
+        && (row.dataset.client === 'antigravity'
+          || !clientHealthPresentationApi.hasClientHealth(localClientHealth(), row.dataset.client));
       loadClientSources(row.dataset.client, { force });
       if (container.childElementCount === 0) {
         fillClientHealthPanel(container, row.dataset.client);
@@ -12593,7 +12594,7 @@ function clientHealthDetailFor(clientId) {
 function clientEditionHealthDetail(clientId) {
   const options = {
     usage: clientPeriodUsage(clientId),
-    sources: localClientSources(clientId),
+    sources: localClientSources(clientId)?.filter(source => source.id !== 't3-antigravity-acp'),
     collectionState: enabledClientSet().has(clientId) ? 'waiting' : 'notTracked'
   };
   const detail = clientHealthPresentationApi.clientHealthDetail(localClientHealth(), clientId, options);
@@ -13087,6 +13088,41 @@ function clientHealthActions(clientId, detail) {
   return actions;
 }
 
+let antigravityAcpDisclosureOpen = false;
+
+function antigravityAcpSourceGroup(sources) {
+  const section = document.createElement('section');
+  section.className = 'tool-health-group';
+  const heading = document.createElement('h4');
+  heading.className = 'tool-health-group-title';
+  heading.textContent = t('settings.tools.health.autoDiscovery');
+  const disclosure = document.createElement('details');
+  disclosure.className = 'tool-health-auto-source';
+  disclosure.open = antigravityAcpDisclosureOpen;
+  const summary = document.createElement('summary');
+  summary.textContent = 'T3 Code ACP';
+  summary.addEventListener('click', (event) => {
+    event.preventDefault();
+    antigravityAcpDisclosureOpen = !disclosure.open;
+    disclosure.open = antigravityAcpDisclosureOpen;
+  });
+  const paths = document.createElement('div');
+  paths.className = 'tool-health-checks';
+  for (const { dir, exists, pending } of sources) {
+    const row = document.createElement('div');
+    row.className = 'tool-health-check-row';
+    const chip = document.createElement('code');
+    chip.className = `tool-health-check${exists ? ' found' : pending ? ' pending' : ''}`;
+    chip.textContent = friendlyPath(dir);
+    chip.setAttribute('aria-label', dir);
+    row.append(chip);
+    paths.append(row);
+  }
+  disclosure.append(summary, paths);
+  section.append(heading, disclosure);
+  return section;
+}
+
 function clientHealthPanel(detail, clientId) {
   const inner = document.createElement('div');
   inner.className = 'accordion-animation-inner';
@@ -13105,6 +13141,11 @@ function clientHealthPanel(detail, clientId) {
       detail.notes.filter((note) => note.group === group.id),
       clientId
     ));
+    if (group.id === 'source' && clientId === 'antigravity') {
+      const sources = (localClientSources(clientId) || [])
+        .filter(source => source.id === 't3-antigravity-acp' && source.dir);
+      if (sources.length > 0) groups.append(antigravityAcpSourceGroup(sources));
+    }
   }
   box.append(groups);
   for (const id of clientSourcesPanelIds(clientId)) {
