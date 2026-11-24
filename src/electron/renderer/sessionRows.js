@@ -165,8 +165,17 @@
     return Number.isFinite(n) ? n : 0;
   }
 
+  const detailTokenDisplay = root?.TokenMonitorDetailTokenDisplay || null;
+
   function formatNumber(value) {
     return Math.round(finiteNumber(value)).toLocaleString('en-US');
+  }
+
+  function formatDetailTokenNumber(value) {
+    if (typeof detailTokenDisplay?.formatDetailTokens === 'function') {
+      return detailTokenDisplay.formatDetailTokens(value);
+    }
+    return formatNumber(value);
   }
 
   function stableColor(value, colors = fallbackColors) {
@@ -259,7 +268,7 @@
     const total = finiteNumber(session?.totalTokens);
     const attributed = entries.reduce((sum, entry) => sum + entry.tokens, 0);
     const denominator = Math.max(total, attributed);
-    const formatTokens = typeof options.formatTokens === 'function' ? options.formatTokens : formatNumber;
+    const formatTokens = typeof options.formatTokens === 'function' ? options.formatTokens : formatDetailTokenNumber;
     // The same share label the tool-detail accordion prints for model rows: a
     // real sliver reads "<1%" rather than rounding to a misleading 0.
     const percentLabel = (percent) => (
@@ -347,6 +356,7 @@
 
   function handleBreakdownRowKeydown(event) {
     if (event?.key !== 'Enter' && event?.key !== ' ') return false;
+    if (event.target?.dataset?.detailTokenToggle === 'true') return false;
     const row = event.target?.closest?.('.row[role="button"]');
     if (!row) return false;
     event.preventDefault();
@@ -559,7 +569,9 @@
       name: titleParts.join(' · '),
       modelLabel,
       modelTooltipEntries: sessionModelTooltipEntries(session, {
-        unattributedLabel: options.unattributedLabel, latestModelLabel: options.latestModelLabel
+        unattributedLabel: options.unattributedLabel,
+        latestModelLabel: options.latestModelLabel,
+        formatTokens: options.formatTokens
       }),
       subtitle: subtitleParts.join(' · '),
       activitySummary: subtitleParts.join(' · '),
@@ -608,7 +620,8 @@
       session.client, clientLabel, id, session.models, session.latestModel, session.reasoningEffort,
       session.title, session.totalTokens, session.messageCount, session.cacheReadTokens,
       session.cacheWriteTokens, session.cacheReported, session.inputTokens, session.outputTokens,
-      session.timedOutputTokens, session.timedDurationMs, options.unattributedLabel, options.latestModelLabel
+      session.timedOutputTokens, session.timedDurationMs, options.unattributedLabel, options.latestModelLabel,
+      options.formatTokensKey || (typeof detailTokenDisplay?.stateSignature === 'function' ? detailTokenDisplay.stateSignature() : '')
     ]);
     const cached = previous?.get(key);
     if (cached && cached.signature === signature) {
@@ -624,7 +637,9 @@
       tokenRate: tokenRateLabel(session),
       usageMetrics: sessionUsageMetrics(session),
       modelTooltipEntries: sessionModelTooltipEntries(session, {
-        unattributedLabel: options.unattributedLabel, latestModelLabel: options.latestModelLabel
+        unattributedLabel: options.unattributedLabel,
+        latestModelLabel: options.latestModelLabel,
+        formatTokens: options.formatTokens
       })
     };
     if (next) next.set(key, { signature, data });
@@ -904,7 +919,11 @@
       name: display.titled ? display.name : titleParts,
       modelLabel,
       modelTooltipEntries: options.includeModelTooltip === false ? []
-        : sessionModelTooltipEntries(group, { unattributedLabel: options.unattributedLabel, latestModelLabel: options.latestModelLabel }),
+        : sessionModelTooltipEntries(group, {
+          unattributedLabel: options.unattributedLabel,
+          latestModelLabel: options.latestModelLabel,
+          formatTokens: options.formatTokens
+        }),
       modelTokens: models,
       // Keep the tool/model reading order; the renderer reserves space for the
       // count while the preceding text can shrink in a narrow window.

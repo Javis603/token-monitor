@@ -8589,6 +8589,9 @@ html.native-liquid-glass .view-switcher-menu-item { border-radius: 9px; }
 .session-group-totals { white-space: nowrap; color: var(--text); }
 .row[role="button"]:focus-visible { outline: 2px solid rgba(var(--accent-rgb), 0.35); outline-offset: 2px; }
 .row[role="button"] { cursor: pointer; }
+.detail-token-toggle { cursor: pointer; }
+.detail-token-toggle:hover { text-decoration: underline dotted rgba(var(--overlay-rgb), 0.35); text-underline-offset: 2px; }
+.detail-token-toggle:focus-visible { outline: 2px solid rgba(var(--accent-rgb), 0.35); outline-offset: 2px; border-radius: 3px; }
 .detail-session-id { display: flex; align-items: center; gap: 6px; min-width: 0; color: var(--muted, #8a8a90); font-size: 0.625rem; }
 .detail-session-source { color: var(--readable-muted); font-size: 0.625rem; }
 .detail-session-source .session-source-device { max-width: 100%; }
