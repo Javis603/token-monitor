@@ -138,7 +138,7 @@
     };
   }
 
-  function createPanel({ form, label, loginAction, document, t, ipc, forms, preserveScroll, onChanged, openExternal, maskEmail = value => value, customEditor, onAdd, addCanToggle = () => false, addBlocked = () => false, capabilities = () => ({}), isBusy = () => false, extraActions = () => [], statusReading = (_slot, reading) => reading, sourceText = () => '', secondaryText = () => '', detailText = () => '', hideAdd = false }) {
+  function createPanel({ form, label, loginAction, document, t, ipc, forms, preserveScroll, onChanged, openExternal, copyToClipboard, maskEmail = value => value, customEditor, onAdd, addCanToggle = () => false, addBlocked = () => false, capabilities = () => ({}), isBusy = () => false, extraActions = () => [], statusReading = (_slot, reading) => reading, sourceText = () => '', secondaryText = () => '', detailText = () => '', hideAdd = false }) {
     const make = (tag, className = '', text) => {
       const el = document.createElement(tag);
       el.className = className;
@@ -382,7 +382,9 @@
         verdict.setAttribute('role', 'alert');
         verdict.id = `${prefix}Verdict`;
         const choices = make('div', 'settings-actions');
+        let clearLoginStatus = () => {};
         const submit = async (values, clearInput, asNew = false) => {
+          clearLoginStatus();
           const original = Object.fromEntries([...keys].map(([key, mapped]) => [key, values[mapped]]));
           const result = await run(slot && !asNew ? 'replace' : 'add', ...(slot && !asNew ? [slot.id, original] : [original, name.value]));
           if (!result || revision !== editorRevision) return;
@@ -432,21 +434,70 @@
         if (!slot && form.loginAction && loginAction) {
           let flowId;
           let unsubscribe;
+          let activeCode = '';
+          let copiedToClipboard = true;
+          const loginStatus = make('div', 'slot-login-status hidden');
+          loginStatus.setAttribute('role', 'status');
+          loginStatus.setAttribute('aria-live', 'polite');
+          const copyCode = (code, target) => {
+            if (typeof copyToClipboard === 'function') return void copyToClipboard(code, target);
+            const clipboard = document.defaultView?.navigator?.clipboard;
+            if (typeof clipboard?.writeText === 'function') void clipboard.writeText(code).catch(() => {});
+          };
+          clearLoginStatus = () => {
+            activeCode = '';
+            copiedToClipboard = true;
+            loginStatus.replaceChildren();
+            loginStatus.classList.add('hidden');
+          };
+          const renderLoginStatus = status => {
+            if (status.phase === 'error') {
+              clearLoginStatus();
+              verdict.textContent = status.error || tr('failed');
+              return;
+            }
+            verdict.textContent = '';
+            if (status.userCode) activeCode = String(status.userCode);
+            if (typeof status.copiedToClipboard === 'boolean') copiedToClipboard = status.copiedToClipboard;
+            const nodes = [];
+            if (status.phase === 'requesting') {
+              nodes.push(make('div', 'settings-note', t(`settings.${form.id}.loginStarting`)));
+            } else if (status.phase === 'success') {
+              nodes.push(make('div', 'settings-note', t(`settings.${form.id}.loginSuccess`)));
+            } else if ((status.phase === 'authorize' || status.phase === 'polling') && activeCode) {
+              const codeRow = make('div', 'slot-login-code-row');
+              const code = make('code', 'slot-login-code', activeCode);
+              const copyButton = button(t(`settings.${form.id}.copyCode`), () => copyCode(activeCode, copyButton));
+              copyButton.className = 'slot-login-copy';
+              codeRow.append(code, copyButton);
+              nodes.push(codeRow);
+              const guideKey = copiedToClipboard ? 'authorize' : 'authorizeManual';
+              nodes.push(make('div', 'settings-note', t(`settings.${form.id}.${guideKey}`, { code: activeCode })));
+              if (status.phase === 'polling') {
+                nodes.push(make('div', 'settings-note', t(`settings.${form.id}.polling`)));
+              }
+            } else {
+              nodes.push(make('div', 'settings-note', t(`settings.${form.id}.polling`)));
+            }
+            loginStatus.replaceChildren(...nodes);
+            loginStatus.classList.remove('hidden');
+          };
           const signIn = button(t(form.loginAction.labelKey), async () => {
             if (flowId) return;
             flowId = `${form.id}-${Date.now()}-${Math.random().toString(36).slice(2)}`;
             const current = flowId;
+            verdict.textContent = '';
+            clearLoginStatus();
             signIn.disabled = true;
             cancelLogin = () => {
               if (flowId) void loginAction.cancelSignIn({ flowId });
               flowId = null;
               unsubscribe?.();
+              clearLoginStatus();
             };
             unsubscribe = loginAction.onLoginStatus?.(status => {
               if (status.flowId !== flowId || revision !== editorRevision) return;
-              verdict.textContent = status.phase === 'authorize'
-                ? t(`settings.${form.id}.authorize`, { code: status.userCode || '' })
-                : status.phase === 'error' ? status.error : t(`settings.${form.id}.polling`);
+              renderLoginStatus(status);
             });
             const values = Object.fromEntries(form.fields.filter(field => !field.secret).map(field => [field.key, editorPanel.querySelector(`#${prefix}${field.key}Input`)?.value || '']));
             try {
@@ -458,14 +509,22 @@
               if (result.ok) {
                 await run('list');
                 if (revision === editorRevision) preserveScroll(closeEditor);
+              } else {
+                clearLoginStatus();
+                verdict.textContent = result.error || tr('failed');
               }
-              else verdict.textContent = result.error || tr('failed');
-            } catch (_) { if (revision === editorRevision) verdict.textContent = tr('failed'); }
+            } catch (_) {
+              if (revision === editorRevision) {
+                clearLoginStatus();
+                verdict.textContent = tr('failed');
+              }
+            }
             finally { if (flowId === current) { unsubscribe?.(); flowId = null; cancelLogin = null; } signIn.disabled = false; }
           });
           const loginChoices = make('div', 'settings-actions');
           loginChoices.append(signIn);
           editor.insertBefore(loginChoices, editorPanel);
+          editor.insertBefore(loginStatus, editorPanel);
           editorPanel.querySelector(`#${prefix}OpenBrowser`).classList.add('hidden');
         }
 

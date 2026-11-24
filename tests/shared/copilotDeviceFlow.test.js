@@ -187,6 +187,9 @@ test('runCopilotDeviceFlowLogin opens the browser and reports status phases', as
   assert.deepEqual(statuses.map((entry) => entry.phase), ['requesting', 'authorize', 'polling', 'success']);
   assert.equal(statuses[1].userCode, 'WXYZ-5678');
   assert.equal(statuses[1].copiedToClipboard, true);
+  assert.equal(statuses[2].userCode, 'WXYZ-5678');
+  assert.equal(statuses[2].verificationUrl, 'https://github.com/login/device?user_code=WXYZ-5678');
+  assert.equal(statuses[2].copiedToClipboard, true);
   assert.deepEqual(copied, ['WXYZ-5678']);
   assert.equal(opened[0], 'https://github.com/login/device?user_code=WXYZ-5678');
 });
