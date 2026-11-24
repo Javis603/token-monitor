@@ -105,7 +105,7 @@ function createUsageTransform(options = {}) {
           canonical: true,
           canonicalSummary: true,
           mutate: true
-        }), archive, { now, canonical: true });
+        }), archive, { now, canonical: true, activeClients: settings.clients });
     delete visibleSummary.sessionUsageArchiveFullScan;
     return settings.projectsEnabled === false ? visibleSummary : applyProjectRollups(visibleSummary);
   }

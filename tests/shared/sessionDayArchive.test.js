@@ -220,3 +220,12 @@ test('a merged-id copy of a split session is not added twice', () => {
   assert.equal(Object.keys(range.sessions).length, 1);
   assert.equal(range.totalTokens, 10);
 });
+
+test('a client that is no longer tracked does not fill the ranges from its days', () => {
+  const archive = capture(normalizeSessionUsageArchive({}), fullTick({
+    allTime: period(row('gone', 40)),
+    days: { [dayKey(1)]: period(row('gone', 40)) }
+  }));
+  assert.equal(applySessionDayArchive(last7(), archive, { now: NOW, activeClients: 'codex' }).nativeRanges.last7.sessions['claude:gone'], undefined);
+  assert.equal(applySessionDayArchive(last7(), archive, { now: NOW, activeClients: ['claude', 'codex'] }).nativeRanges.last7.sessions['claude:gone'].totalTokens, 40);
+});

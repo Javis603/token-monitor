@@ -3,7 +3,7 @@
 const fs = require('node:fs');
 const path = require('node:path');
 const { isDeepStrictEqual } = require('node:util');
-const { PERIODS, mergePeriods, normalizePeriod } = require('../usage');
+const { PERIODS, mergePeriods, normalizeClientName, normalizePeriod } = require('../usage');
 const { isSessionReasoningEffortClient } = require('../sessionLive');
 const {
   archivedSessionInput,
@@ -720,10 +720,14 @@ function applySessionDayArchive(summary, archive, options = {}) {
   const normalizedArchive = options.canonical === true ? canonicalSessionUsageArchive(archive) : normalizeSessionUsageArchive(archive);
   const now = toDate(options.now);
   const today = localDay(now);
+  // A client that is no longer tracked keeps its own archive; its retained
+  // days never fill the ranges.
+  const tracked = new Set(String(options.activeClients || '').split(',').map(normalizeClientName).filter(Boolean));
   // Only entries with retained days or a retained Today can add to a range.
   const candidates = [];
   for (const [archiveKey, entry] of Object.entries(normalizedArchive.sessions)) {
     if (!entry.days && !entry.periods?.today) continue;
+    if (tracked.size && !tracked.has(normalizeClientName(entry.client))) continue;
     if (isForkEraPromaSession(entry.client, entry.sessionId)) continue;
     candidates.push([sessionKey(entry.client, entry.sessionId) || archiveKey, entry]);
   }
