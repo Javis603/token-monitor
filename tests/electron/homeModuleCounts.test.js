@@ -24,6 +24,7 @@ class Element {
     this.events = {};
     this.attributes = {};
     this.dataset = {};
+    this.style = { setProperty(name, value) { this[name] = value; } };
     this.classList = { add() {}, toggle() {} };
   }
   append(...children) { this.children.push(...children); }
@@ -80,9 +81,16 @@ test('Tools, Models and Devices render more than their old hardcoded caps with u
     ['renderHomeModelModule', 'homeToolSourceRows', 8],
     ['renderHomeDeviceModule', 'dailyWithHeatIntensity', 7]
   ]) {
-    vm.runInNewContext(`${source(name, next)}; ${name}(period);`, { ...context, period, homeModuleShell: () => ({ module: new Element(), body: context.body = new Element() }) });
-    assert.equal(context.body.children.length, count);
-    if (count !== 7) assert.equal(context.body.children[0].children[3].textContent, '5', 'share uses the full period total');
+    vm.runInNewContext(`${source('homeNearBlackColor', 'renderHomeModelModule')}; ${source(name, next)}; ${name}(period);`, { ...context, period, homeModuleShell: () => ({ module: new Element(), body: context.body = new Element() }) });
+    const [first] = context.body.children;
+    assert.equal(context.body.children.length, count, 'one aligned row per item, with no share bar');
+    assert.equal(first.className, `home-list-row ${{ renderHomeToolModule: 'home-tool-row', renderHomeModelModule: 'home-model-row', renderHomeDeviceModule: 'home-device-row' }[name]}`);
+    if (name !== 'renderHomeDeviceModule') {
+      assert.equal(first.children[2].textContent, '100', 'each row keeps its amount');
+      assert.equal(first.children[3].textContent, '5', 'share uses the full period total');
+    } else {
+      assert.equal(first.children[3].textContent, String(100 / 1395 * 100), 'share uses every device, not just the shown rows');
+    }
   }
 });
 
@@ -184,7 +192,7 @@ test('Home sessions respect a smaller count while retaining an active session be
     window: { TokenMonitorEdgeDockPresentation: presentation, TokenMonitorSessionLive: { sessionStateMarkup: () => '' } },
     sessionPresentationOptions: () => ({}), homeModuleShell: () => ({ module: new Element(), body: context.body = new Element() }),
     applyHomeListMark() {}, iconKindFor() {}, clientColors: {}, stableColor() {}, fallbackModelColors: [], bindHoverMarquee() {},
-    formatCompact: String, homeSessionAgo: () => '', t: key => key, limitWindowsView: {},
+    formatCompact: String, homeSessionAgo: () => '', homeSessionAgoShort: () => '', t: key => key, limitWindowsView: {},
     sessionRowsApi: require('../../src/electron/renderer/sessionRows')
   };
   vm.runInNewContext(`${source('renderHomeSessionModule', 'renderHomeDeviceModule')}; renderHomeSessionModule();`, context);

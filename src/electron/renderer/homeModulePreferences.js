@@ -34,8 +34,31 @@
     return normalizeHomeModuleCounts(settings?.homeModuleCounts)[id];
   }
 
+  // `default` follows the app's recommended Home limits layout, so changing the
+  // recommendation reaches everyone who has not picked a layout themselves.
+  // `rows` is the current recommendation's own value: it is offered once a
+  // newer layout replaces it, so its users can keep it. `text` and `bars` are
+  // the earlier layouts.
+  const RECOMMENDED_HOME_LIMIT_DISPLAY_MODE = 'rows';
+  const HOME_LIMIT_DISPLAY_MODES = ['rows', 'text', 'bars'];
+
   function normalizeHomeLimitDisplayMode(value) {
-    return value === 'bars' ? 'bars' : 'text';
+    return HOME_LIMIT_DISPLAY_MODES.includes(value) ? value : 'default';
+  }
+
+  function resolveHomeLimitDisplayMode(value) {
+    const mode = normalizeHomeLimitDisplayMode(value);
+    return mode === 'default' ? RECOMMENDED_HOME_LIMIT_DISPLAY_MODE : mode;
+  }
+
+  // Before `default` existed every settings file stored the old `text`
+  // default, so a saved `text` cannot tell a choice from that default, and a
+  // saved `bars` predates the layout now recommended. Both reset to `default`
+  // once. `homeLimitDisplayModeDefaulted` is read from the saved file, never
+  // the merged defaults, and keeps any layout picked afterwards.
+  function migrateHomeLimitDisplayMode(mode, defaulted) {
+    if (defaulted === true) return { mode: normalizeHomeLimitDisplayMode(mode), changed: false };
+    return { mode: 'default', changed: mode !== undefined && mode !== 'default' };
   }
 
   function optionIds(options) {
@@ -123,7 +146,9 @@
     isPluginModuleId,
     moveHomeModuleOrder,
     normalizeHiddenHomeModules,
+    migrateHomeLimitDisplayMode,
     normalizeHomeLimitDisplayMode,
+    resolveHomeLimitDisplayMode,
     normalizeHomeModuleOrder,
     orderedHomeModules,
     reorderHomeModuleOrder

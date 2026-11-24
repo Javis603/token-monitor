@@ -151,6 +151,14 @@ const limitResetAnimator = window.TokenMonitorLimitResetAnimator.createLimitRese
   cancelAnimationFrame: (handle) => cancelAnimationFrame(handle),
   performance
 });
+const homeLimitMotion = window.TokenMonitorHomeLimitMotion.createHomeLimitMotion({
+  motion: limitResetMotionApi,
+  resetEasing: window.TokenMonitorLimitResetAnimator.EASING,
+  numbers: tokenNumberAnimationApi,
+  numberMode: () => tokenNumberAnimationApi.normalize(state.settings?.tokenNumberAnimation),
+  prefersReducedMotion: () => prefersReducedMotion(),
+  formatPercent: (value) => formatPercent(value)
+});
 const appUpdatePresentationApi = window.TokenMonitorAppUpdatePresentation;
 const accountIdentityApi = window.TokenMonitorAccountIdentity;
 const clientStatusPresentationApi = window.TokenMonitorClientStatusPresentation;
@@ -2213,6 +2221,7 @@ function settleMotionAnimations() {
   updateTotalCompact(state.currentTotal);
   settleRowNumberAnimations();
   limitResetAnimator.settle(els.limitsPanel);
+  homeLimitMotion.settle();
   for (const animation of document.getAnimations?.() || []) {
     try { animation.finish(); } catch (_) { animation.cancel(); }
   }
@@ -5184,8 +5193,10 @@ function formatHomeLimitWindowValue(window, showUsed) {
     }
     return formatCompactMoney(window.remaining, window.currency, state.settings?.compactTokenUnits, currentLocale());
   }
+  if (optionalFiniteNumber(window?.remainingPercent) == null && optionalFiniteNumber(window?.usedPercent) == null) return '—';
   const percent = limitFillPercent(window?.remainingPercent, window?.usedPercent, showUsed);
-  return `${formatPercent(percent)} ${limitModeSuffix(showUsed)}`;
+  // The module heading names the mode, so the reading stays a bare number.
+  return formatPercent(percent);
 }
 
 
@@ -7025,7 +7036,8 @@ function renderViewSwitcher({ focusMenu = false, focusDisclosure = false } = {})
 function homeModuleShell(kind, title, viewId, meta = '') {
   const module = document.createElement('section');
   module.className = `home-module home-module-${kind}`;
-  module.setAttribute('aria-label', title);
+  // The meta (the Limits mode) is part of what the module's numbers mean.
+  module.setAttribute('aria-label', meta ? `${title}: ${meta}` : title);
   // Plugin modules have no detail view to jump to.
   if (viewId) {
     module.tabIndex = 0;
@@ -7078,20 +7090,33 @@ function homeLimitRows() {
   const isWindowHidden = (providerId, window) => limitUsageItemsApi.isLimitWindowHidden(
     state.settings?.limitProviderHiddenItems, providerId, window
   );
+  // The row layout lists every window the user still shows; the classic Text /
+  // Progress bars layouts keep their compact pick of at most two per account.
+  // Hidden rows go first either way, so each pick sees only the shown ones.
+  const compact = homeModulePreferencesApi.resolveHomeLimitDisplayMode(state.settings?.homeLimitDisplayMode) !== 'rows';
   return homeOverviewApi.homeLimitAccountsForProviders({
-    // Hidden rows go before the compact pick, so Antigravity's tightest window
-    // per group is chosen among the ones the user still shows.
-    providers: limitWindowsView.collapseWorkbuddyAccounts(desktopLimitRecords()).map((provider) => ({
-      ...provider,
-      windows: limitProviderPresentationApi.limitProviderCompactWindows(
-        provider,
-        (provider.windows || []).filter((window) => !isWindowHidden(provider.provider, window))
-      )
-    })),
+    providers: limitWindowsView.collapseWorkbuddyAccounts(desktopLimitRecords()).map((provider) => {
+      // An install still carrying the retired `showCodexAdditionalLimits: false`
+      // (its migration could not save) keeps the extra pools off Home too.
+      const legacyHidden = (window) => provider.provider === 'codex' && window?.additional === true
+        && state.settings?.showCodexAdditionalLimits === false;
+      const shown = (provider.windows || []).filter((window) => !isWindowHidden(provider.provider, window) && !legacyHidden(window));
+      return {
+        ...provider,
+        // The reset count follows the card's "Resets" usage item.
+        resetCredits: limitUsageItemsApi.hiddenUsageItemSet(state.settings?.limitProviderHiddenItems, provider.provider).has('resets')
+          ? null
+          : provider.resetCredits,
+        windows: compact
+          ? limitProviderPresentationApi.limitProviderCompactWindows(provider, shown)
+          : limitProviderPresentationApi.limitProviderHomeWindows(provider, shown)
+      };
+    }),
     providerOptions,
     enabledProviderIds: Array.from(enabled),
     hiddenProviderIds: Array.from(hiddenHomeLimitProviderSet()),
     isWindowHidden,
+    compact,
     colors: { ...clientColors, factory: clientColors.droid },
     limit: state.settings?.homeLimitAccountCount ?? 3,
     sort: hasConfiguredOrder ? 'configured' : 'remaining',
@@ -7137,6 +7162,246 @@ function homeLimitRows() {
 }
 
 function homeLimitWindowLabel(window, providerId = '', visibleWindows = []) {
+  const providerLabel = limitProviderPresentationApi.limitProviderHomeWindowLabel(providerId, window);
+  if (providerLabel) return providerLabel;
+  if (providerId === 'codex' && window?.additional === true) {
+    return limitWindowsView.codexAdditionalWindowLabel(window, visibleWindows.filter((candidate) => candidate?.additional === true));
+  }
+  const label = String(window?.label || '').trim();
+  if (window?.kind === 'billing') {
+    if (providerId === 'cursor' && label === 'Included usage') return t('home.limit.monthly');
+    if (label) return label;
+  }
+  const key = {
+    session: 'home.limit.session',
+    daily: 'home.limit.daily',
+    weekly: 'home.limit.weekly',
+    billing: 'home.limit.billing',
+    monthly: 'home.limit.monthly'
+  }[window?.kind];
+  if (!key) return window?.label;
+  const period = t(key);
+  // Every window is listed, so a second window of the same period (Claude's
+  // Fable weekly, a Kimi model quota) keeps its own name beside the period.
+  // A label that only restates the period marks the account's plain window.
+  const generic = ['', 'session', '5-hour', '5h', 'daily', 'weekly', 'monthly', 'billing', period.toLowerCase()];
+  const named = !generic.includes(label.toLowerCase());
+  const sharesPeriod = visibleWindows.some((candidate) => candidate !== window && candidate?.kind === window.kind);
+  return named && sharesPeriod ? `${label} ${period}` : period;
+}
+
+// The reset column reads as a countdown ("4h 26m") for every timed boundary,
+// expiries included, so Home rows read alike; the full sentence ("Expires in
+// 23d 1h") remains the accessible name and the Limits page keeps the wording.
+// A provider's own description has no time to count down, so it stays as is.
+function homeLimitResetText(window, nowMs = Date.now()) {
+  const full = window?.resetsAt
+    ? formatLimitBoundary(window) || ''
+    : window?.resetDescription ? t('home.reset', { value: window.resetDescription }) : '';
+  const remainingMs = full && window.resetsAt
+    ? limitProviderPresentationApi.limitResetRemainingMs(window.resetsAt, nowMs)
+    : null;
+  return { text: remainingMs ? limitProviderPresentationApi.limitDurationText(remainingMs) : full, full };
+}
+
+function renderHomeLimitModule() {
+  const rows = homeLimitRows();
+  const showUsed = Boolean(state.settings?.showLimitUsed);
+  // Readings are bare percentages, so the heading says once which way they count.
+  const { module, body } = homeModuleShell('limits', t('home.limits'), 'limits',
+    rows.length ? t(showUsed ? 'settings.limits.barsUsed' : 'settings.limits.barsRemaining') : '');
+  if (rows.length === 0) {
+    const empty = document.createElement('div');
+    empty.className = 'home-module-empty';
+    const providerOrder = state.settings?.homeLimitProviderOrder || state.settings?.limitProviderOrder;
+    const awaitingFirstData = homeOverviewApi.homeLimitsAwaitingFirstData({
+      providers: desktopLimitRecords(),
+      providerOptions: limitProviderOrderApi.orderedLimitProviders(desktopLimitProviders(), providerOrder),
+      enabledProviderIds: Array.from(enabledLimitProviderSet()),
+      hiddenProviderIds: Array.from(hiddenHomeLimitProviderSet())
+    });
+    empty.textContent = t(awaitingFirstData ? 'home.limitsInitializing' : 'home.noLimits');
+    body.append(empty);
+    return module;
+  }
+  const displayMode = homeModulePreferencesApi.resolveHomeLimitDisplayMode(state.settings?.homeLimitDisplayMode);
+  if (displayMode !== 'rows') return renderClassicHomeLimits(module, body, rows, displayMode === 'bars');
+  const vendorColors = homeVendorColorsEnabled();
+  // Low-limit colour is opt-in in every layout; the reading and meter length
+  // already show how much is left.
+  const highlightLow = state.settings?.showHomeLimitBars === true;
+  const nowMs = Date.now();
+  for (const row of rows) {
+    const item = document.createElement('div');
+    item.className = 'home-limit-account';
+    item.dataset.key = row.key;
+    // Monochrome meters reveal the account's colour while it is hovered.
+    item.style.setProperty('--home-vendor-color', homeVendorRevealColor(row.color));
+    const account = document.createElement('div');
+    account.className = 'home-limit-account-head';
+    const mark = document.createElement('span');
+    const pluginModule = state.pluginCatalog?.limits?.modules?.find(module => module.id === row.providerId);
+    if (pluginModule) mark.append(window.TokenMonitorPluginViews.navigationIcon(document, pluginModule, 14));
+    else applyHomeListMark(mark, iconKindFor({ key: row.iconId || row.providerId || row.key }, 'limits'), row.color);
+    const name = document.createElement('span');
+    name.className = 'home-list-name';
+    name.textContent = row.name;
+    if (row.resetCount) {
+      // Spare full resets belong to the account, so they sit beside its name.
+      const title = document.createElement('span');
+      title.className = 'home-limit-account-title';
+      // A reset glyph and the count; the full phrase is its accessible name.
+      const resets = document.createElement('span');
+      resets.className = 'home-limit-resets';
+      resets.setAttribute('role', 'img');
+      resets.setAttribute('aria-label', t('home.limitResets', { count: row.resetCount }));
+      const glyph = document.createElement('span');
+      glyph.className = 'home-limit-resets-icon';
+      glyph.setAttribute('aria-hidden', 'true');
+      const count = document.createElement('span');
+      count.className = 'home-limit-resets-count';
+      count.textContent = String(row.resetCount);
+      resets.append(glyph, count);
+      title.append(name, resets);
+      account.append(mark, title);
+    } else {
+      account.append(mark, name);
+    }
+    if (row.plan) {
+      const plan = document.createElement('span');
+      plan.className = 'home-limit-plan';
+      plan.textContent = row.plan;
+      plan.setAttribute('aria-label', row.plan);
+      account.append(plan);
+    }
+    // One row per window, on columns the whole card shares: name, reset,
+    // meter, reading. Rows look the same however many windows an account has.
+    const windows = document.createElement('div');
+    windows.className = 'home-limit-windows';
+    for (const window of row.windows) {
+      const metric = document.createElement('div');
+      metric.className = 'home-limit-window';
+      metric.dataset.key = `${window.kind}:${window.label || ''}`;
+      const label = document.createElement('span');
+      label.className = 'home-limit-window-label';
+      label.textContent = homeLimitWindowLabel(window, row.providerId, row.windows);
+      metric.append(label);
+      // Identifies the window across refreshes so a change can animate; the
+      // label is already unique within its account.
+      metric.setAttribute('data-limit-motion-key', `${row.key}\0${row.name}\0${label.textContent}`);
+      if (window.resetsAt) metric.setAttribute('data-limit-reset-at', String(window.resetsAt));
+      // The reset sits beside the name it belongs to.
+      const reset = homeLimitResetText(window, nowMs);
+      if (reset.text) {
+        const resetText = document.createElement('span');
+        resetText.className = 'home-limit-reset';
+        resetText.textContent = reset.text;
+        if (reset.full !== reset.text) {
+          // A plain span cannot carry a name, so the shortened countdown is
+          // exposed as an image of its full wording, like the reset count.
+          resetText.setAttribute('role', 'img');
+          resetText.setAttribute('aria-label', reset.full);
+        }
+        metric.append(resetText);
+      }
+      const value = document.createElement('span');
+      value.className = 'home-list-value';
+      value.textContent = window.value || formatHomeLimitWindowValue(window, showUsed);
+      const remainingPercent = optionalFiniteNumber(window.remainingPercent);
+      const fixedValue = Boolean(window.value) || isCreditsWindow(window);
+      if (remainingPercent != null) metric.setAttribute('data-limit-remaining-percent', String(remainingPercent));
+      const readingPercent = fixedValue ? null : limitFillPercent(window.remainingPercent, window.usedPercent, showUsed);
+      // Only a plain percentage reading rolls; plan states and amounts stay put.
+      if (readingPercent != null && value.textContent === formatPercent(readingPercent)) {
+        value.setAttribute('data-limit-motion-value', String(readingPercent));
+        value.setAttribute('data-limit-motion-text', value.textContent);
+      }
+      if (highlightLow && remainingPercent != null) {
+        const clamped = Math.max(0, Math.min(100, remainingPercent));
+        if (!vendorColors) {
+          // Red only when exhausted, amber when nearly out.
+          if (clamped === 0) {
+            value.classList.add('home-limit-value-critical');
+            metric.classList.add('is-exhausted');
+          } else if (clamped < 20) {
+            value.classList.add('home-limit-value-low');
+            metric.classList.add('is-low');
+          }
+        } else if (clamped < 20) {
+          value.classList.add('home-limit-value-critical');
+          metric.classList.add('is-critical');
+          if (clamped === 0) metric.classList.add('is-exhausted');
+        } else if (clamped < 50) {
+          value.classList.add('home-limit-value-low');
+          value.style.setProperty('--home-limit-accent', row.color);
+        }
+      }
+      // An untouched window needs no attention, so it steps back.
+      if (remainingPercent === 100 && !fixedValue) metric.classList.add('is-untouched');
+      let reading = value;
+      const info = limitWindowsView.limitDetailInfoNode(window.detailEntries);
+      if (info) {
+        reading = document.createElement('span');
+        reading.className = 'home-limit-window-value';
+        reading.append(value, info);
+      }
+      // Money and fixed labels retain a remaining meter; only percentage
+      // labels follow the global used/remaining display preference.
+      const meterPercent = window.showMeter !== false ? remainingPercent : null;
+      if (meterPercent != null) {
+        // A groove whose fill brightens toward a lit tail. The ghost is the
+        // just-used chunk while it drains (limits/homeMotion.js).
+        const track = document.createElement('div');
+        track.className = 'home-limit-track';
+        const percentUsed = showUsed && !fixedValue;
+        const fillPercent = Math.max(0, Math.min(100, limitFillPercent(meterPercent, null, percentUsed)));
+        track.setAttribute('data-limit-fill', String(fillPercent));
+        track.style.setProperty('--home-limit-fill', `${fillPercent}%`);
+        if (vendorColors) {
+          track.style.setProperty('--home-limit-bar', row.color);
+          track.style.setProperty('--home-limit-tail', row.color);
+        }
+        const meter = document.createElement('div');
+        meter.className = 'home-limit-meter';
+        meter.setAttribute('aria-hidden', 'true');
+        const ghost = document.createElement('span');
+        ghost.className = 'home-limit-ghost';
+        const fill = document.createElement('span');
+        fill.className = 'home-limit-fill';
+        meter.append(ghost, fill);
+        const tip = document.createElement('span');
+        tip.className = 'home-limit-tip';
+        tip.setAttribute('aria-hidden', 'true');
+        track.append(meter, tip);
+        // The notch marks where an even pace through the window would be now;
+        // a fill short of it (or past it, in used mode) is running fast.
+        const pace = fixedValue ? null : homeOverviewApi.limitWindowPaceRemainingPercent(window, nowMs);
+        if (pace != null) {
+          const pacePercent = percentUsed ? 100 - pace : pace;
+          track.classList.add('has-pace');
+          track.style.setProperty('--home-limit-pace', `${pacePercent}%`);
+          const tick = document.createElement('span');
+          tick.className = 'home-limit-pace';
+          tick.setAttribute('aria-hidden', 'true');
+          track.append(tick);
+          // No standing caption: it read as clutter under every card.
+          track.setAttribute('aria-description', t(percentUsed ? 'home.limitPace.used' : 'home.limitPace.remaining'));
+        }
+        metric.append(track, reading);
+      } else {
+        reading.classList.add('home-limit-reading-wide');
+        metric.append(reading);
+      }
+      windows.append(metric);
+    }
+    item.append(account, windows);
+    body.append(item);
+  }
+  return module;
+}
+
+// The classic layouts' label, for their compact pick.
+function classicHomeLimitWindowLabel(window, providerId = '', visibleWindows = []) {
   const compactLabel = limitProviderPresentationApi.limitProviderCompactWindowLabel(providerId, window, visibleWindows);
   if (compactLabel) return compactLabel;
   if (window?.kind === 'billing') {
@@ -7155,24 +7420,13 @@ function homeLimitWindowLabel(window, providerId = '', visibleWindows = []) {
   return window.label;
 }
 
-function renderHomeLimitModule() {
-  const { module, body } = homeModuleShell('limits', t('home.limits'), 'limits');
-  const rows = homeLimitRows();
-  if (rows.length === 0) {
-    const empty = document.createElement('div');
-    empty.className = 'home-module-empty';
-    const providerOrder = state.settings?.homeLimitProviderOrder || state.settings?.limitProviderOrder;
-    const awaitingFirstData = homeOverviewApi.homeLimitsAwaitingFirstData({
-      providers: desktopLimitRecords(),
-      providerOptions: limitProviderOrderApi.orderedLimitProviders(desktopLimitProviders(), providerOrder),
-      enabledProviderIds: Array.from(enabledLimitProviderSet()),
-      hiddenProviderIds: Array.from(hiddenHomeLimitProviderSet())
-    });
-    empty.textContent = t(awaitingFirstData ? 'home.limitsInitializing' : 'home.noLimits');
-    body.append(empty);
-    return module;
-  }
-  const showBars = state.settings?.homeLimitDisplayMode === 'bars';
+// The earlier Home layouts, kept as choices: each account's compact pick of
+// windows sits two to a row, a reading beside its name and the reset
+// underneath, with or without a meter.
+function renderClassicHomeLimits(module, body, rows, showBars) {
+  module.classList.add('home-module-limits-classic');
+  const showUsed = Boolean(state.settings?.showLimitUsed);
+  const highlightLow = state.settings?.showHomeLimitBars === true;
   for (const row of rows) {
     const item = document.createElement('div');
     item.className = 'home-limit-account';
@@ -7205,16 +7459,21 @@ function renderHomeLimitModule() {
       line.className = 'home-limit-window-line';
       const label = document.createElement('span');
       label.className = 'home-limit-window-label';
-      label.textContent = homeLimitWindowLabel(window, row.providerId, row.windows);
+      label.textContent = classicHomeLimitWindowLabel(window, row.providerId, row.windows);
       const value = document.createElement('span');
       value.className = 'home-list-value';
-      const showUsed = Boolean(state.settings?.showLimitUsed);
       value.textContent = window.value || formatHomeLimitWindowValue(window, showUsed);
-      if (state.settings?.showHomeLimitBars === true && window.remainingPercent != null) {
-        const remainingPercent = Math.max(0, Math.min(100, Number(window.remainingPercent) || 0));
-        if (remainingPercent < 20) {
+      const remainingPercent = optionalFiniteNumber(window.remainingPercent);
+      if (highlightLow && remainingPercent != null) {
+        const clamped = Math.max(0, Math.min(100, remainingPercent));
+        if (!homeVendorColorsEnabled()) {
+          // Same monochrome thresholds as the default rows: red only when
+          // exhausted, amber when nearly out.
+          if (clamped === 0) value.classList.add('home-limit-value-critical');
+          else if (clamped < 20) value.classList.add('home-limit-value-low');
+        } else if (clamped < 20) {
           value.classList.add('home-limit-value-critical');
-        } else if (remainingPercent < 50) {
+        } else if (clamped < 50) {
           value.classList.add('home-limit-value-low');
           value.style.setProperty('--home-limit-accent', row.color);
         }
@@ -7231,21 +7490,16 @@ function renderHomeLimitModule() {
       metric.append(line);
       // Money and fixed labels retain a remaining meter; only percentage
       // labels follow the global used/remaining display preference.
-      if (showBars && window.showMeter !== false) {
-        const remainingPercent = optionalFiniteNumber(window.remainingPercent);
-        if (remainingPercent != null) {
-          const fillPercent = limitFillPercent(remainingPercent, null, showUsed && !isCreditsWindow(window) && !window.value);
-          const tone = window.kind === 'session' || window.kind === 'daily' ? 0.95 : 0.68;
-          const meter = limitWindowsView.limitMeterNode(row.color, fillPercent, tone);
-          meter.setAttribute('aria-hidden', 'true');
-          metric.append(meter);
-        }
+      if (showBars && window.showMeter !== false && remainingPercent != null) {
+        const fillPercent = limitFillPercent(remainingPercent, null, showUsed && !isCreditsWindow(window) && !window.value);
+        const tone = window.kind === 'session' || window.kind === 'daily' ? 0.95 : 0.68;
+        const meter = limitWindowsView.limitMeterNode(row.color, fillPercent, tone);
+        meter.setAttribute('aria-hidden', 'true');
+        metric.append(meter);
       }
       const resetLabel = window.resetsAt
         ? formatLimitBoundary(window) || ''
-        : window.resetDescription
-        ? t('home.reset', { value: window.resetDescription })
-        : '';
+        : window.resetDescription ? t('home.reset', { value: window.resetDescription }) : '';
       if (resetLabel) {
         const resetText = document.createElement('span');
         resetText.className = 'home-limit-reset';
@@ -7261,6 +7515,55 @@ function renderHomeLimitModule() {
   return module;
 }
 
+function homeNearBlackColor(color) {
+  const raw = String(color || '').replace('#', '');
+  if (!/^[0-9a-f]{6}$/i.test(raw)) return false;
+  const [r, g, b] = [0, 2, 4].map((i) => parseInt(raw.slice(i, i + 2), 16) / 255);
+  return 0.2126 * r + 0.7152 * g + 0.0722 * b < 0.12;
+}
+
+// Home is monochrome unless vendor colours are switched on: list marks and
+// limit meters share one neutral ink, and colour is left to status
+// (exhausted, nearly out).
+function homeVendorColorsEnabled() {
+  return state.settings?.homeVendorColors === true;
+}
+
+// The colour a limit account reveals on hover in monochrome (and already shows
+// with vendor colours on). Near-black brand colours (Grok, Copilot) read as a
+// gap on a dark panel, so they take the theme ink instead.
+function homeVendorRevealColor(color) {
+  return homeNearBlackColor(color) ? 'rgba(var(--overlay-rgb), 0.55)' : color;
+}
+
+// A list mark without an icon: the vendor colour when vendor colours are on
+// (near-black ones take the theme ink), otherwise ink, so monochrome Home
+// keeps colour for status alone.
+function homeListMarkColor(color) {
+  return homeVendorColorsEnabled() ? homeVendorRevealColor(color) : 'rgba(var(--overlay-rgb), 0.5)';
+}
+
+// Tools and Models list their split as aligned rows; the share column carries
+// the proportion, so Home keeps horizontal bars for limits alone.
+function homeSplitRow(className, row, iconKind) {
+  const item = document.createElement('div');
+  item.className = `home-list-row ${className}`;
+  item.dataset.key = row.key;
+  const mark = document.createElement('span');
+  applyHomeListMark(mark, iconKind, homeListMarkColor(row.color));
+  const name = document.createElement('span');
+  name.className = 'home-list-name';
+  name.textContent = row.name;
+  const value = document.createElement('span');
+  value.className = 'home-list-value';
+  value.textContent = formatCompact(row.value);
+  const share = document.createElement('span');
+  share.className = 'home-list-aux';
+  share.textContent = formatPercent(row.share * 100);
+  item.append(mark, name, value, share);
+  return item;
+}
+
 function renderHomeModelModule(period) {
   const { module, body } = homeModuleShell('model', t('home.models'), 'model');
   const rows = homeOverviewApi.homeModelRows(modelRowsForPeriod(period, 'tokens'), period?.totalTokens, homeModulePreferencesApi.homeModuleCount(state.settings, 'model'));
@@ -7272,22 +7575,7 @@ function renderHomeModelModule(period) {
     return module;
   }
   for (const row of rows) {
-    const item = document.createElement('div');
-    item.className = 'home-list-row home-model-row';
-    item.dataset.key = row.key;
-    const mark = document.createElement('span');
-    applyHomeListMark(mark, iconKindFor({ key: row.key || row.name, modelSource: row.modelSource }, 'model'), row.color);
-    const name = document.createElement('span');
-    name.className = 'home-list-name';
-    name.textContent = row.name;
-    const value = document.createElement('span');
-    value.className = 'home-list-value';
-    value.textContent = formatCompact(row.value);
-    const share = document.createElement('span');
-    share.className = 'home-list-aux';
-    share.textContent = formatPercent(row.share * 100);
-    item.append(mark, name, value, share);
-    body.append(item);
+    body.append(homeSplitRow('home-model-row', row, iconKindFor({ key: row.key || row.name, modelSource: row.modelSource }, 'model')));
   }
   return module;
 }
@@ -7312,22 +7600,7 @@ function renderHomeToolModule(period) {
     return module;
   }
   for (const row of rows) {
-    const item = document.createElement('div');
-    item.className = 'home-list-row home-tool-row';
-    item.dataset.key = row.key;
-    const mark = document.createElement('span');
-    applyHomeListMark(mark, iconKindFor({ key: row.key }, 'tool'), row.color);
-    const name = document.createElement('span');
-    name.className = 'home-list-name';
-    name.textContent = row.name;
-    const value = document.createElement('span');
-    value.className = 'home-list-value';
-    value.textContent = formatCompact(row.value);
-    const share = document.createElement('span');
-    share.className = 'home-list-aux';
-    share.textContent = formatPercent(row.share * 100);
-    item.append(mark, name, value, share);
-    body.append(item);
+    body.append(homeSplitRow('home-tool-row', row, iconKindFor({ key: row.key }, 'tool')));
   }
   return module;
 }
@@ -7340,6 +7613,18 @@ function homeSessionAgo(value) {
   const hours = Math.round(minutes / 60);
   if (hours < 24) return t('edgeDock.agoHours', { count: hours });
   return t('edgeDock.agoDays', { count: Math.round(hours / 24) });
+}
+
+// The one-line form of a session's age ("28m", "3h", "2d"), in the same units
+// as the limit countdowns; the full phrase stays its accessible name.
+function homeSessionAgoShort(value) {
+  if (!Number.isFinite(value) || value <= 0) return '';
+  const minutes = Math.round(Math.max(0, Date.now() - value) / 60000);
+  if (minutes < 1) return t('edgeDock.agoNow');
+  if (minutes < 60) return `${minutes}m`;
+  const hours = Math.round(minutes / 60);
+  if (hours < 24) return `${hours}h`;
+  return `${Math.round(hours / 24)}d`;
 }
 
 function stopHomeSessionRepaint() {
@@ -7405,11 +7690,23 @@ function renderHomeSessionModule(rows) {
     body.append(empty);
     return module;
   }
-  for (const row of rows) {
-    const activityState = window.TokenMonitorEdgeDockPresentation.sessionActivityState(row);
+  // Live sessions (running, waiting) lead with their full details; the rest
+  // close the list one line each. When both are present, the first quiet row
+  // carries the Recent heading, drawn by CSS so the rows stay the module's only
+  // children. Live rows need none: their state marks say so, the module heading
+  // counts the running ones, and a "Running" heading would mislabel waiting rows.
+  const isLive = (activityState) => activityState === 'running' || activityState === 'waiting';
+  const entries = rows.map((row) => ({ row, activityState: window.TokenMonitorEdgeDockPresentation.sessionActivityState(row) }));
+  const ordered = [...entries.filter((entry) => isLive(entry.activityState)), ...entries.filter((entry) => !isLive(entry.activityState))];
+  ordered.forEach(({ row, activityState }, index) => {
+    const live = isLive(activityState);
     const item = document.createElement('div');
-    item.className = 'home-list-row home-session-row';
+    item.className = live ? 'home-list-row home-session-row' : 'home-list-row home-session-row is-compact';
     item.dataset.key = row.key;
+    if (!live && index > 0 && isLive(ordered[index - 1].activityState)) {
+      item.dataset.groupLabel = t('session.recent');
+      item.classList.add('starts-recent');
+    }
     const mark = document.createElement('span');
     applyHomeListMark(mark, iconKindFor({ client: row.client }, 'session'), clientColors[row.client] || stableColor(row.key, fallbackModelColors));
     const stateMark = document.createElement('span');
@@ -7434,9 +7731,21 @@ function renderHomeSessionModule(rows) {
     const value = document.createElement('span');
     value.className = 'home-list-value';
     value.textContent = formatCompact(row.totalTokens);
+    const age = homeSessionAgo(Date.parse(row.lastUsedAt || row.startedAt || ''));
+    if (!live) {
+      const ago = document.createElement('span');
+      ago.className = 'home-list-aux home-session-ago';
+      ago.textContent = homeSessionAgoShort(Date.parse(row.lastUsedAt || row.startedAt || ''));
+      if (age) {
+        ago.setAttribute('role', 'img');
+        ago.setAttribute('aria-label', age);
+      }
+      item.append(mark, stateMark, name, ago, value);
+      body.append(item);
+      return;
+    }
     const meta = document.createElement('div');
     meta.className = 'home-session-meta';
-    const age = homeSessionAgo(Date.parse(row.lastUsedAt || row.startedAt || ''));
     const description = document.createElement('span');
     description.className = 'home-list-sub';
     const memberLabel = row.sessionGroup && (!row.subagentGroup || row.subagentCount > 0)
@@ -7466,17 +7775,19 @@ function renderHomeSessionModule(rows) {
     if (status) meta.append(status);
     item.append(mark, stateMark, name, value, meta);
     body.append(item);
-  }
+  });
   return module;
 }
 
 function renderHomeDeviceModule() {
   const { module, body } = homeModuleShell('device', t('home.devices'), 'device');
-  const rows = homeOverviewApi.homeDeviceRows(fixedPeriodDevices(), {
+  // Shares are of every device's usage; the count setting only caps the rows.
+  const allRows = homeOverviewApi.homeDeviceRows(fixedPeriodDevices(), {
     localDeviceId: state.settings?.deviceId || '',
     period: state.period,
-    limit: homeModulePreferencesApi.homeModuleCount(state.settings, 'device')
+    limit: Infinity
   });
+  const rows = allRows.slice(0, homeModulePreferencesApi.homeModuleCount(state.settings, 'device'));
   if (rows.length === 0) {
     const empty = document.createElement('div');
     empty.className = 'home-module-empty';
@@ -7484,16 +7795,22 @@ function renderHomeDeviceModule() {
     body.append(empty);
     return module;
   }
+  // Devices take the same rows as Tools and Models, with the local device
+  // badged and offline ones muted. A lone device owns 100%, which says
+  // nothing, so a share column appears only beside another device.
+  const total = allRows.reduce((sum, row) => sum + row.value, 0);
   for (const row of rows) {
     const item = document.createElement('div');
     item.className = 'home-list-row home-device-row';
     item.dataset.key = row.key;
+    if (allRows.length > 1) item.classList.add('has-share');
     if (row.isStale) {
       item.classList.add('is-stale');
       item.setAttribute('aria-description', t('home.staleDevice'));
     }
     const mark = document.createElement('span');
-    applyHomeListMark(mark, iconKindFor({ platform: row.platform }, 'device'), row.isStale ? deviceStaleColor : deviceAccent);
+    const color = row.isStale ? deviceStaleColor : deviceAccent;
+    applyHomeListMark(mark, iconKindFor({ platform: row.platform }, 'device'), homeListMarkColor(color));
     const label = document.createElement('span');
     label.className = 'home-list-name home-device-label';
     const name = document.createElement('span');
@@ -7510,6 +7827,12 @@ function renderHomeDeviceModule() {
     value.className = 'home-list-value';
     value.textContent = formatCompact(row.value);
     item.append(mark, label, value);
+    if (allRows.length > 1) {
+      const share = document.createElement('span');
+      share.className = 'home-list-aux';
+      share.textContent = formatPercent(total > 0 ? (row.value / total) * 100 : 0);
+      item.append(share);
+    }
     body.append(item);
   }
   return module;
@@ -8097,6 +8420,7 @@ function renderHome() {
     return;
   }
   let sessionRows;
+  const limitMotion = homeLimitMotion.capture(els.homePanel);
   const nodes = moduleIds.map((id) => {
     if (id === 'limits') return renderHomeLimitModule();
     if (id === 'tool') return renderHomeToolModule(period);
@@ -8131,6 +8455,9 @@ function renderHome() {
   for (const child of [...els.homePanel.children]) {
     if (!ordered.includes(child)) child.remove();
   }
+  // Attached now, so meters and readings can measure and animate. Page entry
+  // grows the meters from zero like the other breakdowns' bars.
+  homeLimitMotion.animate(els.homePanel, limitMotion, { entry: state.animateBarsFromZero });
   if (moduleIds.includes('session')) scheduleHomeSessionRepaint(sessionRows);
   updateHomeActivity();
 }
@@ -11284,13 +11611,17 @@ function renderHomeLimitSettings() {
   displayTitle.textContent = t('settings.home.limitDisplayMode');
   displayText.append(displayTitle);
   const displayInput = document.createElement('select');
-  for (const mode of ['text', 'bars']) {
+  // `default` follows the recommended layout; `rows` joins this list once a
+  // newer layout replaces it as the recommendation.
+  for (const mode of ['default', 'text', 'bars']) {
     const option = document.createElement('option');
     option.value = mode;
     option.textContent = t(`settings.home.limitDisplayMode.${mode}`);
     displayInput.append(option);
   }
-  displayInput.value = homeModulePreferencesApi.normalizeHomeLimitDisplayMode(state.settings?.homeLimitDisplayMode);
+  const storedDisplayMode = homeModulePreferencesApi.normalizeHomeLimitDisplayMode(state.settings?.homeLimitDisplayMode);
+  // `rows` is not offered while it is the recommendation, so Default stands for it.
+  displayInput.value = storedDisplayMode === 'rows' ? 'default' : storedDisplayMode;
   displayInput.addEventListener('change', () => void saveSettings({ homeLimitDisplayMode: displayInput.value }));
   displayInput.setAttribute('aria-label', displayTitle.textContent);
   displayRow.append(displayText, displayInput);
@@ -11497,7 +11828,8 @@ function renderHomeModuleCountSettings(id) {
 
 function homeModuleSummary(id) {
   if (id === 'limits') {
-    return t(`settings.home.limitDisplayMode.${homeModulePreferencesApi.normalizeHomeLimitDisplayMode(state.settings?.homeLimitDisplayMode)}`);
+    const mode = homeModulePreferencesApi.normalizeHomeLimitDisplayMode(state.settings?.homeLimitDisplayMode);
+    return t(`settings.home.limitDisplayMode.${mode === 'rows' ? 'default' : mode}`);
   }
   if (id === 'trends') return t((state.settings?.heatmapMetric || 'cost') === 'tokens' ? 'dashboard.heatmap.tokens' : 'dashboard.heatmap.cost');
   if (HOME_MODULE_SUBGROUPS[id]) return t('settings.home.itemCountValue', { n: homeModulePreferencesApi.homeModuleCount(state.settings, id) });
@@ -11582,6 +11914,25 @@ function renderHomeSettingsList() {
       wrap.append(listContainer);
     }
   }
+  // Home is monochrome by default; this brings back each provider's colour.
+  // The row is not a <label>, so a click on its reset button does not toggle it.
+  const vendorColors = document.createElement('div');
+  vendorColors.className = 'checkbox-label settings-item';
+  const vendorColorsText = document.createElement('span');
+  vendorColorsText.className = 'settings-item-text';
+  const vendorColorsTitle = document.createElement('label');
+  vendorColorsTitle.className = 'settings-item-title';
+  vendorColorsTitle.htmlFor = 'homeVendorColorsInput';
+  vendorColorsTitle.textContent = t('settings.home.vendorColors');
+  vendorColorsText.append(vendorColorsTitle);
+  const vendorColorsInput = document.createElement('input');
+  vendorColorsInput.id = 'homeVendorColorsInput';
+  vendorColorsInput.type = 'checkbox';
+  vendorColorsInput.checked = homeVendorColorsEnabled();
+  vendorColorsInput.addEventListener('change', () => void saveSettings({ homeVendorColors: vendorColorsInput.checked }));
+  vendorColors.append(vendorColorsText, vendorColorsInput);
+  addRenderedSettingReset(vendorColors, vendorColorsText, vendorColorsTitle, 'homeVendorColors');
+  wrap.append(vendorColors);
   return wrap;
 }
 
