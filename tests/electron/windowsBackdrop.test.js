@@ -197,7 +197,7 @@ test('Windows material preferences keep transparent document hosts instead of re
   assert.match(main, /windowsBackdropFallback: windowsBackdropFallback\(mainWindow\)/);
   assert.doesNotMatch(main, /previousNativeMaterial|nextNativeMaterial|replaceDashboardWindow|function rebuildWindow/);
   assert.doesNotMatch(main, /transparent: !/);
-  assert.match(main, /dashboardWindow = win;[\s\S]*?syncWindowsBackdrop\(win, \{ enabled: nativeBlurEnabled\(\) \}\)/);
+  assert.match(main, /function createDashboardWindow\(\)[\s\S]*?transparent: true,[\s\S]*?new BrowserWindow\(windowOptions\)/);
   assert.doesNotMatch(main, /windowsBackdropChanged/);
   assert.doesNotMatch(main, /windowsLayeredBlur/);
 });
