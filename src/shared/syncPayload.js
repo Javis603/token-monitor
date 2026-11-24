@@ -232,10 +232,8 @@ function buildSyncPayload(summary, {
       payload.history = historyWithoutTokenComponents(payload.history);
     }
   }
-  // Reasonix native sessions are a local-only view. They contain provider
-  // metadata and project labels that are intentionally not part of the device
-  // wire contract, and uploading them would also make local paths/preview text
-  // a hub concern. Tokscale remains the only aggregate/session authority.
+  // Native session/project views are local-only presentation state and are
+  // intentionally not part of the device wire contract.
   delete payload.nativeSessions;
   delete payload.nativeProjects;
   // Native ranges are a local presentation of this machine's scan; the wire

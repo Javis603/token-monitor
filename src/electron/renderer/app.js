@@ -2971,11 +2971,6 @@ function updateRow(row, { name, subtitle, subtitleIdentity, subagentCountLabel, 
   if (kind !== undefined) row.dataset.kind = kind || '';
   if (sessionGroup) row.dataset.sessionGroup = sessionGroup;
   else delete row.dataset.sessionGroup;
-  if (kind === 'session' && client === 'reasonix') {
-    row.dataset.detailUnavailable = sessionDetailAvailable === true ? 'false' : 'true';
-  } else if (row.hasAttribute('data-detail-unavailable')) {
-    row.removeAttribute('data-detail-unavailable');
-  }
   const interactive = Boolean(sessionGroup) || (kind === 'session'
     && sessionRowsApi.sessionRowDetailAvailable({ client, sessionDetailAvailable }));
   const mark = row.querySelector('.row-mark');
@@ -3738,8 +3733,7 @@ function projectRowsForPeriod(period) {
     unknownClientLabel: t('projects.unknownTool'),
     unknownModelLabel: t('projects.unknownModel'),
     allowSessionModelAttribution: !projectRowsApi.projectBreakdownIncomplete(state.stats, state.period),
-    nativeProjects: state.stats?.nativeProjects?.[state.period] || {},
-    nativeSessions: state.stats?.nativeSessions?.[state.period] || {}
+    nativeProjects: state.stats?.nativeProjects?.[state.period] || {}
   });
 }
 
@@ -5750,13 +5744,11 @@ async function openSessionDetail({ client, sessionId, sessionCost, title, source
 function sessionLiveStatsEntry(request) {
   if (!request) return null;
   const periodKey = request.period || state.period;
-  return request.client === 'reasonix'
-    ? state.stats?.nativeSessions?.[periodKey]?.[request.sessionId] || null
-    : displayedSessions(periodKey)?.[`${request.client}:${request.sessionId}`] || null;
+  return displayedSessions(periodKey)?.[`${request.client}:${request.sessionId}`] || null;
 }
 
-function sessionLiveCost(entry, client) {
-  return client === 'reasonix' ? Number(entry?.reportedCostUsd || 0) : Number(entry?.costUsd || 0);
+function sessionLiveCost(entry) {
+  return Number(entry?.costUsd || 0);
 }
 
 // The dates a native-range detail reads move with the range (a new day), even
@@ -5772,7 +5764,6 @@ function sessionDetailLiveSignature() {
   return JSON.stringify([
     Number(entry.totalTokens) || 0,
     Number(entry.costUsd) || 0,
-    Number(entry.reportedCostUsd) || 0,
     ...(String(detailPeriod || '').startsWith('range:') ? [detailPeriod] : [])
   ]);
 }
@@ -5899,9 +5890,6 @@ function renderSessionDetail({ detail, loading, error, preserveScroll = false } 
 
   const rows = sessionDetailApi.exchangeRows(detail, { now: new Date(), sortBy: state.detailSort });
   if (rows.length === 0) { container.append(detailNote(t('detailEmpty') || 'No activity in this period.')); return; }
-  if (detail?.tokenDataUnavailable === true) {
-    container.append(detailNote(t('detailTokenDataUnavailable') || 'Token data is unavailable for this session.'));
-  }
 
   const sort = document.createElement('button');
   sort.className = 'detail-sort';
@@ -5955,9 +5943,7 @@ function sessionDetailTitle() {
   if (request?.returnTo?.kind === 'session-group' && request.titleFollowsSession !== true) return request.title;
   if (state.settings?.sessionTitlesEnabled === false) return '';
   const period = request?.period || state.period;
-  const session = request?.client === 'reasonix'
-    ? state.stats?.nativeSessions?.[period]?.[request.sessionId]
-    : displayedSessions(period)?.[`${request?.client}:${request?.sessionId}`];
+  const session = displayedSessions(period)?.[`${request?.client}:${request?.sessionId}`];
   const syncedRange = state.mode === 'sync' && fixedPeriodRangesApi.isDerived(period);
   return sessionRowsApi.sessionTitleForDisplay({
     client: request?.client, title: session?.title || (syncedRange ? '' : request?.title)
@@ -6086,7 +6072,7 @@ function sessionGroupRunNode(row, max, parent) {
       const sessionId = String(row.key || '').replace(/^session:[^:]+:/, '');
       openSessionDetail({
         client: row.client,
-        sessionId: row.client === 'reasonix' ? `reasonix:${sessionId}` : sessionId,
+        sessionId,
         sessionCost: Number(row.cost || 0),
         title,
         sourceDevice: row.sourceDevice,
@@ -16055,19 +16041,16 @@ els.breakdown.addEventListener('click', (event) => {
   }
   const key = rowEl.dataset.key || '';            // "session:<client>:<sessionId>"
   const client = rowEl.dataset.client || '';
-  if (client !== 'claude' && client !== 'codex' && client !== 'opencode' && client !== 'reasonix' && client !== 'dsh' && client !== 'codebuddy' && client !== 'workbuddy' && client !== 'pi' && client !== 'omp' && client !== 'senpi') return;
-  if (client === 'reasonix' && rowEl.dataset.detailUnavailable === 'true') return;
+  if (client !== 'claude' && client !== 'codex' && client !== 'opencode' && client !== 'dsh' && client !== 'codebuddy' && client !== 'workbuddy' && client !== 'pi' && client !== 'omp' && client !== 'senpi') return;
   const match = key.match(/^session:([^:]+):(.+)$/);
   if (!match) return;
-  const sessionId = client === 'reasonix' ? `reasonix:${match[2]}` : match[2];
-  const session = client === 'reasonix'
-    ? state.stats?.nativeSessions?.[state.period]?.[sessionId]
-    : displayedSessions(state.period)?.[`${client}:${sessionId}`];
+  const sessionId = match[2];
+  const session = displayedSessions(state.period)?.[`${client}:${sessionId}`];
   const { sourceDevice, sessionDetailHeading } = window.TokenMonitorDomReconcile.data(rowEl) || {};
   openSessionDetail({
     client,
     sessionId,
-    sessionCost: client === 'reasonix' ? Number(session?.reportedCostUsd || 0) : Number(session?.costUsd || 0),
+    sessionCost: Number(session?.costUsd || 0),
     sourceDevice,
     title: sessionDetailHeading || rowEl.querySelector('.row-title')?.textContent || ''
   });

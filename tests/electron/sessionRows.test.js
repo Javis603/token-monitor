@@ -369,7 +369,7 @@ test('detail identities use Codex metadata without guessing a UUID position', ()
     [`rollout-2026-09-10T02-33-00-${first}`, [first]],
     [first, [first]],
     ['ordinary · label', ['ordinary · label']],
-    ['reasonix:ABC123', ['ABC123']],
+    ['reasonix:ABC123', ['reasonix:ABC123']],
     ['reasonix-stats:/private/stats/day.jsonl', []],
     ['reasonix:reasonix-stats:/private/stats/day.jsonl', []],
     ['2026-09-10T02-33-00', []],
@@ -560,15 +560,15 @@ test('continuation summaries omit unreported cache and speed rather than inherit
   assert.equal(group.activity, '12:10 · 3 calls');
 });
 
-test('native children contribute their own cache schema and keep unavailable token counters out of family rates', () => {
+test('native children keep unavailable token counters out of family rates', () => {
   const now = new Date(2026, 9, 11, 12, 30);
   const rows = sessionRowsForPeriod({ sessions: {
     'codex:main': { client: 'codex', sessionId: 'main', title: 'Run', totalTokens: 100,
       messageCount: 2, inputTokens: 100, outputTokens: 20, timedOutputTokens: 20, timedDurationMs: 1_000,
       lastUsedAt: localIso(2026, 10, 11, 12, 5) }
   } }, { now, nativeSessions: {
-    'reasonix:child': { client: 'reasonix', sessionId: 'child', parentClient: 'codex', parentSessionId: 'main',
-      totalTokens: 200, messageCount: 3, promptTokens: 100, cacheHitTokens: 0, cacheMissTokens: 100,
+    'claude:child': { client: 'claude', sessionId: 'child', parentClient: 'codex', parentSessionId: 'main',
+      totalTokens: 200, messageCount: 3, inputTokens: 100, cacheReadTokens: 0, cacheReported: true,
       outputTokens: 30, timedOutputTokens: 30, timedDurationMs: 1_000,
       lastUsedAt: localIso(2026, 10, 11, 12, 10) },
     'codex:pending': { client: 'codex', sessionId: 'pending', parentSessionId: 'main',
@@ -617,7 +617,7 @@ function delegatedRootFixture({ titled, native, canonicalWithoutParent, relation
   const continuationId = canonicalWithoutParent ? 'aaa' : 'b2';
   const session = (id, minute, tokens, calls, extra = {}) => ({ client: 'codex', sessionId: id,
     title: titled ? 'Root conversation' : '', totalTokens: tokens, costUsd: tokens / 100,
-    reportedCostUsd: tokens / 100, messageCount: calls, models: { 'gpt-6.1-sol': tokens },
+    messageCount: calls, models: { 'gpt-6.1-sol': tokens },
     lastUsedAt: localIso(2026, 10, 11, 12, minute), ...extra });
   const family = {
     [`codex:${rootId}`]: session(rootId, 10, 20, 2, { t3ThreadId: 'conversation-b',
@@ -790,15 +790,6 @@ test('all group members pass model tooltips unchanged to the shared row renderer
   }
 });
 
-test('Reasonix group members preserve the provider detail identity', () => {
-  let opened;
-  const node = groupMemberRenderer(request => { opened = request; })({
-    key: 'session:reasonix:run-id', client: 'reasonix', sessionDetailAvailable: true, name: 'Run', value: 1
-  }, 1, { summary: { subagentGroup: true } });
-  node.click();
-  assert.equal(opened.sessionId, 'reasonix:run-id');
-});
-
 test('model name alone does not hide an ordinary Codex session in background reviews', () => {
   const rows = sessionRowsForPeriod({ sessions: {
     'codex:user-selected-review-model': {
@@ -872,164 +863,17 @@ test('breakdown row keyboard activation handles Enter and Space', () => {
   assert.equal(prevented, 2);
 });
 
-test('Reasonix native rows reuse the common session schema without a native accordion', () => {
+test('legacy Reasonix entries in nativeSessions produce no rows and legacy stats paths are stripped from sessionIdLabel', () => {
+  const leakedPath = 'REASONIX:reasonix-stats:/Users/sunricardo/.reasonix/stats/2026-08-09.jsonl';
   const rows = sessionRowsForPeriod({ sessions: {} }, {
     nativeSessions: {
       'reasonix:ABC123': {
         client: 'reasonix',
         sessionId: 'reasonix:ABC123',
-        title: '测试一下',
         model: 'deepseek/deepseek-v4-flash',
-        projectLabel: 'Qyen',
         totalTokens: 15382,
-        promptTokens: 80,
-        completionTokens: 30,
-        reasoningTokens: 10,
-        cacheHitTokens: 20,
-        cacheMissTokens: 80,
-        requestCount: 4,
-        reportedCostUsd: 0.25,
-        messageCount: 2,
-        turns: 1,
         lastUsedAt: localIso(2026, 8, 8, 14, 10)
-      }
-    },
-    clientLabels: { reasonix: 'Reasonix' },
-    clientColors: { reasonix: '#4d6bfe' },
-    now: new Date(2026, 7, 8, 14, 30)
-  });
-
-  assert.equal(rows.length, 1);
-  const [row] = rows;
-  assert.equal(row.kind, 'session');
-  assert.equal(row.key, 'session:reasonix:ABC123');
-  assert.equal(row.name, 'Reasonix · deepseek/deepseek-v4-flash');
-  assert.equal(row.subtitle, '14:10 · 2 calls · 20%');
-  assert.equal(row.detail, 'ABC123');
-  assert.equal(row.value, 15382);
-  assert.equal(row.cost, 0.25);
-  assert.equal(row.sessionDetailAvailable, false);
-  assert.equal(row.periodTokenDataUnavailable, false);
-  assert.equal(row.client, 'reasonix');
-  assert.equal(row.sortTime, new Date(localIso(2026, 8, 8, 14, 10)).getTime());
-  assert.doesNotMatch(row.name, /测试一下/);
-  assert.doesNotMatch(row.subtitle, /Qyen/);
-  assert.doesNotMatch(row.detail, /reasonix:/);
-  assert.equal(Object.hasOwn(row, 'nativeSessionBreakdown'), false);
-  assert.equal(sessionIdLabel('reasonix:ABC123'), 'ABC123');
-
-  const ordinary = sessionRowsForPeriod({
-    sessions: {
-      'codex:ordinary': {
-        client: 'codex',
-        sessionId: 'ordinary',
-        totalTokens: 10,
-        models: { 'gpt-5.6-luna': 10 },
-        messageCount: 1,
-        lastUsedAt: localIso(2026, 8, 8, 14, 9)
-      }
-    }
-  }, { clientLabels, clientColors, now: new Date(2026, 7, 8, 14, 30) })[0];
-  for (const field of ['name', 'subtitle', 'detail', 'value', 'cost', 'client', 'sortTime']) {
-    assert.ok(Object.hasOwn(row, field), `Reasonix row is missing ${field}`);
-    assert.ok(Object.hasOwn(ordinary, field), `ordinary row is missing ${field}`);
-  }
-  assert.equal(ordinary.name, 'Codex · gpt-5.6-luna');
-  assert.equal(ordinary.subtitle, '14:09 · 1 call');
-});
-
-test('Reasonix cache percentages use native hits and misses without double-counting prompt tokens', () => {
-  for (const [fields, expected] of [
-    [{ promptTokens: 1000, cacheHitTokens: 900, cacheMissTokens: 80, cacheWriteTokens: 20 }, '90%'],
-    [{ promptTokens: 1000, cacheHitTokens: 900 }, '90%'],
-    [{ promptTokens: 1000, cacheHitTokens: 900, cacheMissTokens: 0 }, '100%'],
-    [{ promptTokens: 1000, cacheHitTokens: 0, cacheMissTokens: 500, cacheWriteTokens: 500 }, '0%'],
-    [{ promptTokens: 1000, cacheHitTokens: 5, cacheMissTokens: 995 }, '<1%'],
-    [{ promptTokens: 1000, cacheHitTokens: 0, cacheMissTokens: 1000, cacheWriteTokens: 0 }, '0%'],
-    [{ promptTokens: 1000, cacheHitTokens: 0, cacheMissTokens: 0, cacheWriteTokens: 0 }, ''],
-    [{ promptTokens: 1000 }, ''],
-    [{ cacheHitTokens: 0, cacheMissTokens: 0, cacheWriteTokens: 0 }, ''],
-    [{ tokenDataUnavailable: true, cacheHitTokens: 0, cacheMissTokens: 1000 }, ''],
-    [{ tokenDataUnavailable: true, cacheHitTokens: 900, cacheMissTokens: 100 }, '']
-  ]) {
-    const [row] = sessionRowsForPeriod({ sessions: {} }, { nativeSessions: {
-      'reasonix:cache': { client: 'reasonix', sessionId: 'reasonix:cache', totalTokens: 1000, ...fields }
-    } });
-    assert.equal(row.subtitle, expected);
-    assert.equal(row.sessionDetailAvailable, false, 'cache data does not enable per-turn details');
-  }
-});
-
-test('Reasonix native rows omit turns from the compact subtitle when turns are unavailable', () => {
-  const [row] = sessionRowsForPeriod({ sessions: {} }, {
-    nativeSessions: {
-      'reasonix:no-turns': {
-        client: 'reasonix',
-        sessionId: 'reasonix:no-turns',
-        model: 'deepseek/deepseek-v4-flash',
-        totalTokens: 1,
-        lastUsedAt: localIso(2026, 8, 8, 14, 10)
-      }
-    },
-    clientLabels: { reasonix: 'Reasonix' },
-    now: new Date(2026, 7, 8, 14, 30)
-  });
-
-  assert.equal(row.subtitle, '14:10');
-  assert.doesNotMatch(row.subtitle, /request|msg|turn/i);
-});
-
-test('Reasonix native rows remain visible when official per-session tokens are unavailable', () => {
-  const [row] = sessionRowsForPeriod({ sessions: {} }, {
-    nativeSessions: {
-      'reasonix:official': {
-        client: 'reasonix',
-        sessionId: 'reasonix:official',
-        model: 'deepseek/deepseek-v4-flash',
-        tokenDataUnavailable: true,
-        messageCount: 2,
-        lastUsedAt: localIso(2026, 8, 8, 14, 10)
-      }
-    },
-    clientLabels: { reasonix: 'Reasonix' },
-    now: new Date(2026, 7, 8, 14, 30)
-  });
-
-  assert.equal(row.value, 0);
-  assert.equal(row.tokenDataUnavailable, true);
-  assert.equal(row.periodTokenDataUnavailable, false);
-  assert.equal(row.sessionDetailAvailable, false);
-  assert.equal(row.subtitle, '14:10 · 2 calls');
-});
-
-test('Reasonix native rows show cumulative totals for an unreliable bounded period', () => {
-  const [row] = sessionRowsForPeriod({ sessions: {} }, {
-    nativeSessions: {
-      'reasonix:resumed': {
-        client: 'reasonix',
-        sessionId: 'reasonix:resumed',
-        model: 'deepseek-v4-flash',
-        totalTokens: 14777,
-        reportedCostUsd: 0.00402028,
-        periodTokenDataUnavailable: true,
-        messageCount: 5,
-        lastUsedAt: localIso(2026, 8, 9, 11, 46)
-      }
-    },
-    clientLabels: { reasonix: 'Reasonix' },
-    now: new Date(2026, 7, 9, 12, 0)
-  });
-
-  assert.equal(row.value, 14777);
-  assert.equal(row.cost, 0.00402028);
-  assert.equal(row.tokenDataUnavailable, false);
-  assert.equal(row.periodTokenDataUnavailable, true);
-});
-
-test('Reasonix native rows hide legacy stats paths while keeping the compact message parameter', () => {
-  const leakedPath = 'REASONIX:reasonix-stats:/Users/sunricardo/.reasonix/stats/2026-08-09.jsonl';
-  const [row] = sessionRowsForPeriod({ sessions: {} }, {
-    nativeSessions: {
+      },
       'reasonix:legacy-path': {
         client: 'reasonix',
         sessionId: leakedPath,
@@ -1041,10 +885,9 @@ test('Reasonix native rows hide legacy stats paths while keeping the compact mes
     clientLabels: { reasonix: 'Reasonix' }
   });
 
-  assert.equal(row.subtitle, '6 calls');
-  assert.equal(row.detail, '');
-  assert.doesNotMatch(row.title, /reasonix-stats|\/Users\//i);
+  assert.deepEqual(rows, []);
   assert.equal(sessionIdLabel(leakedPath), '');
+  assert.equal(sessionIdLabel('reasonix-stats:/Users/sunricardo/.reasonix/stats/2026-08-09.jsonl'), '');
 });
 
 test('session rows label archived sessions without claiming the source was deleted', () => {

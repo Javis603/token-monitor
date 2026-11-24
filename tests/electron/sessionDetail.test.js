@@ -281,11 +281,13 @@ test('session detail renders its heading before loading, errors and empty result
   render({ detail: state.openSession.detail, preserveScroll: true });
   assert.deepEqual(state.expands, [false], 'an exchange the reader never opened stays collapsed');
 
-  state.openSession = { kind: 'session', client: 'reasonix', sessionId: 'reasonix:n', period: 'month', title: '' };
-  state.stats = { nativeSessions: { today: { 'reasonix:n': { title: 'Wrong period' } },
-    month: { 'reasonix:n': { title: 'Native session' } } } };
+  state.openSession = { kind: 'session', client: 'codex', sessionId: 'n', period: 'month', title: '' };
+  state.stats = { periods: {
+    today: { sessions: { 'codex:n': { title: 'Wrong period' } } },
+    month: { sessions: { 'codex:n': { title: 'Period session' } } }
+  } };
   context.refreshSessionDetailHeading();
-  assert.equal(els.sessionDetailHead.querySelector('.detail-heading').textContent, 'Native session');
+  assert.equal(els.sessionDetailHead.querySelector('.detail-heading').textContent, 'Period session');
   context.setSettings({ sessionTitlesEnabled: false });
   const groupOpening = context.open({ client: 'codex', sessionId: 's', title: 'gpt-5 · 12:00',
     returnTo: { kind: 'session-group' } });
@@ -652,12 +654,12 @@ test('a confirmed remote session never opens a local transcript with the same ID
   assert.equal(renders[0].detail.found, false);
 });
 
-test('Reasonix rows enter the shared detail navigation path instead of a native accordion', () => {
-  assert.match(rendererSource, /client !== 'claude' && client !== 'codex' && client !== 'opencode' && client !== 'reasonix'/);
-  assert.match(rendererSource, /const sessionId = client === 'reasonix' \? `reasonix:\$\{match\[2\]\}` : match\[2\];/);
-  assert.match(rendererSource, /state\.stats\?\.nativeSessions\?\.\[state\.period\]\?\.\[sessionId\]/);
-  assert.match(rendererSource, /client === 'reasonix' && rowEl\.dataset\.detailUnavailable === 'true'/);
-  assert.match(rendererSource, /sessionCost: client === 'reasonix' \? Number\(session\?\.reportedCostUsd \|\| 0\)/);
+test('Reasonix is excluded from Session Detail navigation', () => {
+  const { sessionRowDetailAvailable } = require('../../src/electron/renderer/sessionRows');
+  assert.equal(sessionRowDetailAvailable({ client: 'reasonix' }), false);
+  assert.equal(sessionRowDetailAvailable({ client: 'reasonix', sessionDetailAvailable: true }), false);
+  assert.doesNotMatch(rendererSource, /client === 'reasonix'/);
+  assert.doesNotMatch(rendererSource, /reportedCostUsd/);
   assert.doesNotMatch(rendererSource, /nativeSessionBreakdown/);
 });
 
@@ -693,7 +695,7 @@ for (const scenario of ['catch-up', 'hover', 'unchanged', 'hidden', 'closed', 'r
     if (shouldCatchUp) {
       const succeeded = scenario === 'catch-up' || scenario === 'hover';
       assert.equal(request.detail.marker, succeeded ? 200 : 100);
-      assert.equal(request.liveSignature, JSON.stringify(succeeded ? [200, 2, 0] : [100, 1, 0]));
+      assert.equal(request.liveSignature, JSON.stringify(succeeded ? [200, 2] : [100, 1]));
       assert.equal(request.detailLiveBusy, false);
       assert.equal(renders.at(-1).detail.marker, succeeded ? 200 : 100);
       await new Promise(resolve => setImmediate(resolve));
@@ -810,7 +812,7 @@ for (const failureMode of ['resolved', 'rejected']) {
     await new Promise(resolve => setImmediate(resolve));
     assert.equal(reads, 3, 'the successful 200 read attempts the final 300 reading once');
     assert.equal(state.openSession.detail.marker, 200);
-    assert.equal(state.openSession.liveSignature, JSON.stringify([200, 2, 0]));
+    assert.equal(state.openSession.liveSignature, JSON.stringify([200, 2]));
     assert.equal(state.openSession.sessionCost, 2);
     assert.equal(state.openSession.detailLiveBusy, false);
     assert.deepEqual(renders.filter(render => render.detail).map(render => render.detail.marker), [100, 200]);
@@ -819,7 +821,7 @@ for (const failureMode of ['resolved', 'rejected']) {
     await refreshOpenSessionDetail();
     assert.equal(reads, 4);
     assert.equal(state.openSession.detail.marker, 300);
-    assert.equal(state.openSession.liveSignature, JSON.stringify([300, 3, 0]));
+    assert.equal(state.openSession.liveSignature, JSON.stringify([300, 3]));
     assert.equal(state.openSession.sessionCost, 3);
     await refreshOpenSessionDetail();
     assert.equal(reads, 4, 'successful recovery suppresses idle reads');

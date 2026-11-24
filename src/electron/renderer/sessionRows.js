@@ -202,11 +202,8 @@
   function sessionIds(id) {
     const raw = String(id || '').trim();
     if (!raw) return [];
-    const reasonixPrefix = raw.match(/^reasonix:/i);
-    const reasonixLabel = reasonixPrefix ? raw.slice(reasonixPrefix[0].length) : raw;
-    if (reasonixLabel.toLowerCase().startsWith('reasonix-stats:')) return [];
-    if (reasonixPrefix) return [reasonixLabel];
-    if (raw.toLowerCase().startsWith('reasonix-stats:')) return [];
+    const lower = raw.toLowerCase();
+    if (lower.startsWith('reasonix-stats:') || lower.startsWith('reasonix:reasonix-stats:')) return [];
     const uuids = raw.match(/[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}/gi) || [];
     // Rollout filenames can contain multiple UUIDs. These are display labels,
     // not proof that each UUID is a conversation identity.
@@ -493,16 +490,10 @@
   }
 
   function sessionRowDetailAvailable(row) {
-    return ['claude', 'codebuddy', 'codex', 'opencode', 'dsh', 'workbuddy', 'pi', 'omp', 'senpi'].includes(row?.client)
-      || (row?.client === 'reasonix' && row?.sessionDetailAvailable === true);
+    return ['claude', 'codebuddy', 'codex', 'opencode', 'dsh', 'workbuddy', 'pi', 'omp', 'senpi'].includes(row?.client);
   }
 
   function nativeSessionRow(session, key, options, now) {
-    const periodTokenDataUnavailable = session?.periodTokenDataUnavailable === true;
-    // Native telemetry is cumulative for a resumed Branch, but it remains a
-    // trusted conversation total. Only an actually missing native total is
-    // unavailable; periodTokenDataUnavailable is reserved for aggregation so
-    // the same lifetime value is never counted as today's project usage.
     const tokenDataUnavailable = session?.tokenDataUnavailable === true;
     const value = tokenDataUnavailable ? 0 : finiteNumber(session?.totalTokens);
     if (value <= 0 && !tokenDataUnavailable) return null;
@@ -510,37 +501,26 @@
     const colors = options.clientColors || {};
     const stable = typeof options.stableColor === 'function' ? options.stableColor : stableColor;
     const palette = options.fallbackColors || fallbackColors;
-    const client = textValue(session?.client) || 'reasonix';
+    const client = textValue(session?.client);
+    if (!client) return null;
     const { clientLabel, titleParts, modelLabel } = sessionTitleParts(
       { ...session, client },
       labels,
-      client === 'codex' ? 'Codex' : client === 'claude' ? 'Claude Code' : 'Reasonix',
+      client === 'codex' ? 'Codex' : client === 'claude' ? 'Claude Code' : client,
       session?.model
     );
-    // Native Reasonix prompt totals include cache hits; explicit misses win,
-    // matching the detail reader's split without counting those hits twice.
-    const cacheRead = Math.max(0, finiteNumber(session?.cacheHitTokens));
-    const cacheInput = session?.cacheMissTokens ?? Math.max(0, finiteNumber(session?.promptTokens) - cacheRead);
-    // Positive explicit misses prove a cold-cache reading; prompt-only or
-    // all-zero counters do not prove that cache telemetry is available.
-    const cacheLabel = cacheHitLabel({
-      inputTokens: cacheInput,
-      cacheReadTokens: cacheRead,
-      cacheWriteTokens: session?.cacheWriteTokens
-    }) || (finiteNumber(session?.cacheMissTokens) > 0 ? '0%' : '');
-    const usageMetrics = sessionUsageMetrics({
-      ...session,
-      ...(tokenDataUnavailable ? { inputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0,
-        outputTokens: 0, timedOutputTokens: 0, timedDurationMs: 0 } : client === 'reasonix' ? {
-        inputTokens: cacheInput, cacheReadTokens: cacheRead,
-        cacheReported: finiteNumber(session?.cacheMissTokens) > 0
-      } : {})
-    });
+    const cacheLabel = tokenDataUnavailable ? '' : cacheHitLabel(session);
+    const usageMetrics = sessionUsageMetrics(
+      tokenDataUnavailable
+        ? { ...session, inputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0,
+            outputTokens: 0, timedOutputTokens: 0, timedDurationMs: 0 }
+        : session
+    );
     const activityTime = sessionActivityLabel(session, now);
     const subtitleParts = [
       activityTime,
       messageLabel(session),
-      tokenDataUnavailable ? '' : cacheLabel,
+      cacheLabel,
       tokenRateLabel(session)
     ].filter(Boolean);
     // One derivation, not two: the boolean is a projection of the three-state
@@ -576,11 +556,7 @@
       detail: sessionIdLabel(session?.sessionId || key),
       value,
       tokenDataUnavailable,
-      periodTokenDataUnavailable,
-      // A reported session cost is the same trusted conversation-level value
-      // as the cumulative token total. Do not hide it merely because the
-      // period cannot be split exactly.
-      cost: tokenDataUnavailable ? 0 : finiteNumber(session?.reportedCostUsd),
+      cost: tokenDataUnavailable ? 0 : finiteNumber(session?.costUsd),
       sessionDetailAvailable: session?.sessionDetailAvailable === true,
       color: colors[client] || stable(key, palette),
       stale: false,
@@ -740,6 +716,7 @@
     if (nextLabels) options.rowLabelCache.entries = nextLabels;
     const usageKeys = new Set(rows.map((row) => row.key));
     for (const [key, session] of Object.entries(options.nativeSessions || {})) {
+      if (isReasonixSyntheticSession(session, key)) continue;
       if (usageKeys.has(`session:${key}`)) continue;
       const row = nativeSessionRow(session, key, options, now);
       if (row) rows.push(row);

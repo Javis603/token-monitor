@@ -146,8 +146,7 @@ async function collectWslUsage(options = {}, deps = {}) {
   // for an untracked client must not surface in the panel.
   // Reasonix aggregate usage is supported on the host, but remains excluded
   // from WSL scans: Tokscale's Windows PathRoot::ReasonixHome conflicts with
-  // the Linux-default `.reasonix/stats` path inside WSL. Native session files
-  // are local-only as well.
+  // the Linux-default `.reasonix/stats` path inside WSL.
   const tracked = new Set(String(trackedClients).split(',').map((c) => c.trim()).filter(Boolean));
   const clientsCsv = String(clients || '').split(',').map((c) => c.trim()).filter(Boolean)
     .filter((client) => !WSL_EXCLUDED_CLIENTS.has(client))

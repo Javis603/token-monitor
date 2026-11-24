@@ -10,10 +10,13 @@
   const compactTokens = (typeof require === 'function')
     ? require('./compactTokens')
     : (root && root.TokenMonitorCompactTokens);
-  const api = factory(currency, balanceDisplay, compactTokens);
+  const reasonixGuard = (typeof require === 'function')
+    ? require('./providers/reasonix/sessionGuard')
+    : (root && root.TokenMonitorReasonixSessionGuard);
+  const api = factory(currency, balanceDisplay, compactTokens, reasonixGuard);
   if (typeof module === 'object' && module.exports) module.exports = api;
   if (root) root.TokenMonitorTrayText = api;
-})(typeof window !== 'undefined' ? window : null, function createTrayText(currency, balanceDisplay, compactTokens) {
+})(typeof window !== 'undefined' ? window : null, function createTrayText(currency, balanceDisplay, compactTokens, reasonixGuard) {
   const { formatCurrencyFromUsd } = currency;
   const BARS_TRAY_ICON_MODES = new Set(['bars', 'barsSession', 'barsWeekly', 'barsAllSessions']);
 
@@ -114,9 +117,10 @@
   function pickRecentUsageActivity(stats) {
     let latest = null;
     const considerSessions = (sessions, source) => {
-      for (const session of Object.values(sessions || {})) {
+      for (const key of Object.keys(sessions || {})) {
+        const session = sessions[key];
         const client = normalizedProviderId(session?.client);
-        if (!client) continue;
+        if (!client || (source === 'native' && reasonixGuard.isReasonixSyntheticSession(session, key))) continue;
         const lastUsedMs = usageSessionActivityTimestampMs(session, source);
         if (lastUsedMs <= 0) continue;
         if (!latest || lastUsedMs > latest.lastUsedMs || (
@@ -127,12 +131,7 @@
     for (const period of Object.values(stats?.periods || {})) {
       considerSessions(period?.sessions, 'period');
     }
-    // This helper receives one device's presentation source. Reasonix native
-    // sessions are intentionally excluded from periods.sessions, so include
-    // their trusted activity timestamps without treating telemetry as usage.
-    for (const sessions of Object.values(stats?.nativeSessions || {})) {
-      considerSessions(sessions, 'native');
-    }
+    for (const sessions of Object.values(stats?.nativeSessions || {})) considerSessions(sessions, 'native');
     return latest ? { provider: latest.client, timestampMs: latest.lastUsedMs } : null;
   }
 

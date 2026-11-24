@@ -52,9 +52,17 @@ function deviceRecordFromAnchor(saved, options = {}) {
   // window's views are dropped here rather than left to aggregation.
   const currentWindows = computePeriodWindows(now);
   const ended = ['today', 'month'].filter(period => anchorWindows[period].key !== currentWindows[period].key);
-  const nativeView = view => (ended.length && view && typeof view === 'object'
-    ? { ...view, ...Object.fromEntries(ended.map(period => [period, {}])) }
-    : view);
+  // Upgrades can reopen an anchor with Reasonix's retired native rows.
+  // Their Tokscale totals are already in the ordinary periods.
+  const nativeView = (view, cleanMap) => {
+    if (!view || typeof view !== 'object') return view;
+    const periods = Object.fromEntries(Object.entries(view).map(([period, rows]) => [period, cleanMap(rows)]));
+    for (const period of ended) periods[period] = {};
+    return periods;
+  };
+  const cleanNativeProjects = rows => (rows && typeof rows === 'object'
+    ? Object.fromEntries(Object.entries(rows).filter(([, project]) => !Object.hasOwn(project?.clients || {}, 'reasonix')))
+    : rows);
   // The seed's own rule, and the one place it is stricter than the collector.
   // A capture time the collector cannot trust only costs it a full scan, but
   // here that timestamp becomes the record's updatedAt and the instant the
@@ -137,8 +145,8 @@ function deviceRecordFromAnchor(saved, options = {}) {
     today: withWsl(saved.today, wsl?.today),
     month: withWsl(saved.month, wsl?.month),
     allTime: withWsl(saved.allTime, wsl?.allTime),
-    ...(Object.prototype.hasOwnProperty.call(saved, 'nativeSessions') ? { nativeSessions: nativeView(saved.nativeSessions) } : {}),
-    ...(Object.prototype.hasOwnProperty.call(saved, 'nativeProjects') ? { nativeProjects: nativeView(saved.nativeProjects) } : {}),
+    ...(Object.prototype.hasOwnProperty.call(saved, 'nativeSessions') ? { nativeSessions: nativeView(saved.nativeSessions, filterReasonixSyntheticSessions) } : {}),
+    ...(Object.prototype.hasOwnProperty.call(saved, 'nativeProjects') ? { nativeProjects: nativeView(saved.nativeProjects, cleanNativeProjects) } : {}),
     ...nativeRangeSnapshot,
     ...(history ? { historyAvailable: true, history } : {})
   };
