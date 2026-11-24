@@ -119,3 +119,9 @@ test('Home limits reset a layout saved before `default` existed, once', () => {
   assert.match(mainSource, /migrateHomeLimitDisplayMode\(saved\.homeLimitDisplayMode, saved\.homeLimitDisplayModeDefaulted\)/);
   assert.match(mainSource, /homeLimitDisplayModeDefaulted: true,/);
 });
+
+test('Home session display falls back to compact for anything but detailed', () => {
+  const { normalizeHomeSessionDisplayMode } = require('../../src/electron/renderer/homeModulePreferences');
+  assert.equal(normalizeHomeSessionDisplayMode('detailed'), 'detailed');
+  for (const value of [undefined, '', 'compact', 'rows', 1]) assert.equal(normalizeHomeSessionDisplayMode(value), 'compact');
+});

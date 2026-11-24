@@ -113,8 +113,38 @@ test('each Home count control saves only its own count and refreshes immediately
     assert.equal(input.value, '50');
     assert.equal(JSON.stringify(patch), JSON.stringify({ homeModuleCounts: { [id]: 50 } }));
     assert.equal(refreshed, true);
-    if (id === 'session') assert.equal(input.attributes['aria-describedby'], wrap.children[1].id);
+    if (id === 'session') {
+      assert.equal(input.attributes['aria-describedby'], wrap.children[1].id);
+      // Sessions also choose between compact and detailed rows.
+      const display = wrap.children[2].children[1];
+      assert.deepEqual(display.children.map(option => option.value), ['compact', 'detailed']);
+      assert.equal(display.value, 'compact');
+      display.value = 'detailed';
+      await display.events.change();
+      assert.equal(JSON.stringify(patch), JSON.stringify({ homeSessionDisplayMode: 'detailed' }));
+    }
   }
+});
+
+test('a failed Session display save never leaves an unhandled rejection', async () => {
+  const state = { settings: {} };
+  const wrap = vm.runInNewContext(`${source('renderHomeModuleCountSettings', 'renderHomeSettingsList')}; renderHomeModuleCountSettings('session');`, {
+    state, document: { createElement: () => new Element() }, homeModulePreferencesApi: preferences, addRenderedSettingReset() {},
+    t: key => i18n.translate('en', key),
+    saveSettings: async () => { throw new Error('Settings write failed'); }, renderHomeIfVisible() {}
+  });
+  const display = wrap.children[2].children[1];
+  display.value = 'detailed';
+  const unhandled = [];
+  const onUnhandled = reason => unhandled.push(reason);
+  process.on('unhandledRejection', onUnhandled);
+  try {
+    display.events.change();
+    await new Promise(resolve => setImmediate(resolve));
+  } finally {
+    process.off('unhandledRejection', onUnhandled);
+  }
+  assert.deepEqual(unhandled, []);
 });
 
 test('failed Home count saves restore persisted controls without rejecting the change handler', async () => {

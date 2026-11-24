@@ -7697,13 +7697,16 @@ function renderHomeSessionModule(rows) {
   // counts the running ones, and a "Running" heading would mislabel waiting rows.
   const isLive = (activityState) => activityState === 'running' || activityState === 'waiting';
   const entries = rows.map((row) => ({ row, activityState: window.TokenMonitorEdgeDockPresentation.sessionActivityState(row) }));
-  const ordered = [...entries.filter((entry) => isLive(entry.activityState)), ...entries.filter((entry) => !isLive(entry.activityState))];
+  // The Detailed setting keeps every row's details, in the order received.
+  const detailed = homeModulePreferencesApi.normalizeHomeSessionDisplayMode(state.settings?.homeSessionDisplayMode) === 'detailed';
+  const ordered = detailed ? entries
+    : [...entries.filter((entry) => isLive(entry.activityState)), ...entries.filter((entry) => !isLive(entry.activityState))];
   ordered.forEach(({ row, activityState }, index) => {
-    const live = isLive(activityState);
+    const full = detailed || isLive(activityState);
     const item = document.createElement('div');
-    item.className = live ? 'home-list-row home-session-row' : 'home-list-row home-session-row is-compact';
+    item.className = full ? 'home-list-row home-session-row' : 'home-list-row home-session-row is-compact';
     item.dataset.key = row.key;
-    if (!live && index > 0 && isLive(ordered[index - 1].activityState)) {
+    if (!full && index > 0 && isLive(ordered[index - 1].activityState)) {
       item.dataset.groupLabel = t('session.recent');
       item.classList.add('starts-recent');
     }
@@ -7732,7 +7735,7 @@ function renderHomeSessionModule(rows) {
     value.className = 'home-list-value';
     value.textContent = formatCompact(row.totalTokens);
     const age = homeSessionAgo(Date.parse(row.lastUsedAt || row.startedAt || ''));
-    if (!live) {
+    if (!full) {
       const ago = document.createElement('span');
       ago.className = 'home-list-aux home-session-ago';
       ago.textContent = homeSessionAgoShort(Date.parse(row.lastUsedAt || row.startedAt || ''));
@@ -11821,9 +11824,36 @@ function renderHomeModuleCountSettings(id) {
     note.className = 'settings-note';
     note.textContent = t('settings.home.sessionCountNote');
     input.setAttribute('aria-describedby', note.id);
-    wrap.append(note);
+    wrap.append(note, renderHomeSessionDisplaySetting());
   }
   return wrap;
+}
+
+function renderHomeSessionDisplaySetting() {
+  const row = document.createElement('div');
+  row.className = 'settings-item home-session-display-setting';
+  const text = document.createElement('span');
+  text.className = 'settings-item-text';
+  const title = document.createElement('span');
+  title.className = 'settings-item-title';
+  title.textContent = t('settings.home.sessionDisplayMode');
+  text.append(title);
+  const input = document.createElement('select');
+  for (const mode of ['compact', 'detailed']) {
+    const option = document.createElement('option');
+    option.value = mode;
+    option.textContent = t(`settings.home.sessionDisplayMode.${mode}`);
+    input.append(option);
+  }
+  input.value = homeModulePreferencesApi.normalizeHomeSessionDisplayMode(state.settings?.homeSessionDisplayMode);
+  input.addEventListener('change', () => {
+    // saveSettings reports a failed write and restores the persisted choice.
+    saveSettings({ homeSessionDisplayMode: input.value }).catch(() => {});
+  });
+  input.setAttribute('aria-label', title.textContent);
+  row.append(text, input);
+  addRenderedSettingReset(row, text, title, 'homeSessionDisplayMode');
+  return row;
 }
 
 function homeModuleSummary(id) {

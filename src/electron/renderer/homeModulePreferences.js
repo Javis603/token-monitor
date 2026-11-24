@@ -61,6 +61,12 @@
     return { mode: 'default', changed: mode !== undefined && mode !== 'default' };
   }
 
+  // `compact` keeps details for live sessions and gives the rest one line each;
+  // `detailed` gives every session its details, in the order Home received them.
+  function normalizeHomeSessionDisplayMode(value) {
+    return value === 'detailed' ? 'detailed' : 'compact';
+  }
+
   function optionIds(options) {
     return (options || []).map((option) => String(option?.id || '').trim().toLowerCase()).filter(Boolean);
   }
@@ -148,6 +154,7 @@
     normalizeHiddenHomeModules,
     migrateHomeLimitDisplayMode,
     normalizeHomeLimitDisplayMode,
+    normalizeHomeSessionDisplayMode,
     resolveHomeLimitDisplayMode,
     normalizeHomeModuleOrder,
     orderedHomeModules,

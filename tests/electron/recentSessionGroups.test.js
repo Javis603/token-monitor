@@ -168,11 +168,12 @@ function renderStatusGroup(group, metric = 'used') {
   const tooltip = { setDetailTooltip() {} };
   const home = Function('document', 'window', 'state', 'els', 'pluginContent', 'sessionTooltipShouldHoldRender',
     'renderBreakdownChange', 'VIEW_ICON_CLASSES', 't', 'applyHomeListMark', 'iconKindFor', 'clientColors', 'stableColor', 'fallbackModelColors',
-    'bindHoverMarquee', 'formatCompact', 'homeSessionAgo', 'sessionRowsApi', 'limitWindowsView',
+    'bindHoverMarquee', 'formatCompact', 'homeSessionAgo', 'sessionRowsApi', 'limitWindowsView', 'homeModulePreferencesApi',
     `${shellSource}; ${contextSource}; ${homeSource}; return renderHomeSessionModule;`)(
     document, { TokenMonitorEdgeDockPresentation: presentation, TokenMonitorSessionLive: sessionLive },
     state, { homePanel: { children: [], querySelector: () => null } }, null, () => false,
-    () => {}, {}, translate, () => {}, () => '', {}, () => '', [], () => {}, String, () => '', rowApi, tooltip
+    () => {}, {}, translate, () => {}, () => '', {}, () => '', [], () => {}, String, () => '', rowApi, tooltip,
+    require('../../src/electron/renderer/homeModulePreferences')
   )([group]);
   const dockContext = dock.slice(dock.indexOf('function contextNode('), dock.indexOf('// Last activity seen'));
   const dockSource = dock.slice(dock.indexOf('const expandedSessionGroups ='), dock.indexOf('function providerCard('));
