@@ -258,3 +258,21 @@ test('a released client alias beside its canonical row restores only the newest 
   assert.equal(Object.keys(range.sessions).length, 1);
   assert.equal(range.sessions['mimo:abc'].totalTokens, 150);
 });
+
+test('Yesterday restores a deleted session from its one retained day, never from Today', () => {
+  let archive = capture(normalizeSessionUsageArchive({}), fullTick({
+    allTime: period(row('gone', 70)),
+    days: { [dayKey(1)]: period(row('gone', 30)) }
+  }));
+  archive = capture(archive, {
+    updatedAt: NOW.toISOString(), sessionUsageArchiveFullScan: false,
+    today: period(row('gone', 40)), month: period(row('gone', 70)), allTime: period(row('gone', 70))
+  });
+  const summary = {
+    nativeRanges: { yesterday: period(), last7: period() },
+    nativeRangeWindows: { yesterday: { start: dayKey(1), end: dayKey(1) }, last7: { start: dayKey(6), end: TODAY } }
+  };
+  const ranges = applySessionDayArchive(summary, archive, { now: NOW }).nativeRanges;
+  assert.equal(ranges.yesterday.sessions['claude:gone'].totalTokens, 30);
+  assert.equal(ranges.last7.sessions['claude:gone'].totalTokens, 70);
+});
