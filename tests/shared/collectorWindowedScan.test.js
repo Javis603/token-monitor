@@ -149,19 +149,21 @@ test('a binary without windowed mode keeps the serial scans', async () => {
   assert.deepEqual(flags, [['--today'], ['--month'], ['--since', '2024-01-01']]);
 });
 
-test('an All Time start that is not a day key keeps the serial scans', async () => {
-  const flags = [];
-  const { collectUsageOnce } = freshCollector();
-  await collectUsageOnce(baseOptions({
-    allTimeSince: '2024-01',
-    runTokscaleWindows: async () => assert.fail('the windowed scan needs YYYY-MM-DD bounds'),
-    runTokscale: async (input) => {
-      flags.push(input.flags);
-      return serialReport(input.flags);
-    }
-  }));
-
-  assert.deepEqual(flags, [['--today'], ['--month'], ['--since', '2024-01']]);
+test('an All Time start that is not a calendar day keeps the serial scans', async () => {
+  // `--window` rejects both; a plain `--since` compares them as strings.
+  for (const allTimeSince of ['2024-01', '2026-02-30']) {
+    const flags = [];
+    const { collectUsageOnce } = freshCollector();
+    await collectUsageOnce(baseOptions({
+      allTimeSince,
+      runTokscaleWindows: async () => assert.fail('the windowed scan needs calendar-day bounds'),
+      runTokscale: async (input) => {
+        flags.push(input.flags);
+        return serialReport(input.flags);
+      }
+    }));
+    assert.deepEqual(flags, [['--today'], ['--month'], ['--since', allTimeSince]], allTimeSince);
+  }
 });
 
 test('the windowed binary is spawned once with the production grouping', () => withSpawn(

@@ -655,7 +655,14 @@ function runTokscale({
 // identity so later ticks go straight to the serial scans.
 const tokscaleWindowSupport = new Map();
 const TOKSCALE_WINDOW_SCHEMA_VERSION = 1;
-const TOKSCALE_WINDOW_DAY_KEY = /^\d{4}-\d{2}-\d{2}$/;
+// `--window` accepts only real calendar days. A plain `--since` compares day
+// strings, so a start such as 2026-02-30 keeps working through the serial scans.
+function isTokscaleWindowDay(value) {
+  const key = String(value);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(key)) return false;
+  const date = new Date(`${key}T00:00:00Z`);
+  return !Number.isNaN(date.getTime()) && date.toISOString().slice(0, 10) === key;
+}
 
 function isUnknownTokscaleWindowError(error) {
   return Boolean(error) && /unexpected argument '--window'/i.test(error?.tokscaleStderr || '');
@@ -1105,7 +1112,7 @@ async function collectUsageOnce(options) {
   // this collection captured. Null when the binary has no windowed mode.
   const runFullWindowsFn = async (clientsCsv) => {
     const todayKey = localTodayKey(collectedAt);
-    if (!runTokscaleWindowsScan || !TOKSCALE_WINDOW_DAY_KEY.test(String(allTimeSince))) return null;
+    if (!runTokscaleWindowsScan || !isTokscaleWindowDay(allTimeSince)) return null;
     const windows = [
       { name: 'today', since: todayKey, until: todayKey },
       { name: 'month', since: `${periodWindows.month.key}-01`, until: todayKey },
