@@ -229,7 +229,8 @@ const {
   normalizeHiddenHomeModules,
   normalizeHomeLimitDisplayMode,
   normalizeHomeModuleCounts,
-  normalizeHomeModuleOrder
+  normalizeHomeModuleOrder,
+  normalizeHomeSessionDisplayMode
 } = require('./renderer/homeModulePreferences');
 const {
   APP_UPDATE_STARTUP_DELAY_MS,
@@ -729,6 +730,7 @@ function defaultSettings() {
     homeVendorColors: false,
     homeLimitDisplayMode: 'default',
     homeLimitDisplayModeDefaulted: true,
+    homeSessionDisplayMode: 'compact',
     showHomeLimitProviderNames: false,
     projectsEnabled: parseBoolean(process.env.TOKEN_MONITOR_PROJECTS_ENABLED, true),
     projectBreakdownMode: 'tool',
@@ -823,7 +825,7 @@ function resettableSettingsDefaults() {
     'language', 'startAtLogin', 'automaticAppUpdates', 'discordRpcEnabled',
     'periodMonthMode', 'currency', 'heatmapMetric', 'homeActiveDaysWindow', 'showExactHomeTrendTokens',
     'homeModuleCounts', 'homeLimitDisplayMode', 'showHomeLimitBars', 'showHomeLimitProviderNames', 'homeLimitAccountCount',
-    'homeVendorColors',
+    'homeVendorColors', 'homeSessionDisplayMode',
     'historyIntervalMs', 'sessionContextMetric', 'limitsHistoryOpenMode', 'modelRankingMetric', 'serviceStatusRefreshMs',
     'windowBehavior', 'keepAboveTaskbar', 'floatingBubbleTrigger', 'floatingBubbleContent',
     'hideAppIcon', 'trayContent', 'showTrayProviderBadge',
@@ -2138,6 +2140,7 @@ function readSettings() {
     merged.showHomeLimitBars = parseBoolean(merged.showHomeLimitBars, false);
     merged.homeVendorColors = parseBoolean(merged.homeVendorColors, false);
     merged.homeModuleCounts = normalizeHomeModuleCounts(merged.homeModuleCounts);
+    merged.homeSessionDisplayMode = normalizeHomeSessionDisplayMode(merged.homeSessionDisplayMode);
     const homeLimitDisplay = migrateHomeLimitDisplayMode(saved.homeLimitDisplayMode, saved.homeLimitDisplayModeDefaulted);
     merged.homeLimitDisplayMode = homeLimitDisplay.mode;
     merged.homeLimitDisplayModeDefaulted = true;
@@ -8261,6 +8264,7 @@ app.whenReady().then(() => {
       showExactHomeTrendTokens: parseBoolean(patch.showExactHomeTrendTokens ?? settings.showExactHomeTrendTokens, false),
       homeVendorColors: parseBoolean(patch.homeVendorColors ?? settings.homeVendorColors, false),
       homeLimitDisplayMode: normalizeHomeLimitDisplayMode(patch.homeLimitDisplayMode ?? settings.homeLimitDisplayMode),
+      homeSessionDisplayMode: normalizeHomeSessionDisplayMode(patch.homeSessionDisplayMode ?? settings.homeSessionDisplayMode),
       showHomeLimitProviderNames: parseBoolean(patch.showHomeLimitProviderNames ?? settings.showHomeLimitProviderNames, false),
       homeLimitProviderOrder: patch.homeLimitProviderOrder !== undefined ? migrateHomeLimitProviderOrder(patch.homeLimitProviderOrder) : (settings.homeLimitProviderOrder || ''),
       hiddenHomeLimitProviders: patch.hiddenHomeLimitProviders !== undefined ? normalizeHiddenLimitProviders(patch.hiddenHomeLimitProviders) : normalizeHiddenLimitProviders(settings.hiddenHomeLimitProviders),

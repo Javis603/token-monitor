@@ -190,6 +190,7 @@ test('Home session rows expose named states and keep idle marks decorative', () 
     homeModuleShell: () => ({ module, body }), applyHomeListMark() {}, iconKindFor: () => 'codex',
     clientColors: { codex: 'blue' }, bindHoverMarquee() {}, formatCompact: String, homeSessionAgo: () => '', homeSessionAgoShort: () => '',
     limitWindowsView: {}, sessionRowsApi: require('../../src/electron/renderer/sessionRows'),
+    homeModulePreferencesApi: require('../../src/electron/renderer/homeModulePreferences'),
     window: {
       TokenMonitorSessionLive: require('../../src/shared/sessionLive'),
       TokenMonitorEdgeDockPresentation: {
@@ -222,6 +223,7 @@ test('Home sessions lead with live work, head only the recent group and keep fin
     homeModuleShell: () => ({ module, body }), applyHomeListMark() {}, iconKindFor: () => 'codex',
     clientColors: { codex: 'blue' }, bindHoverMarquee() {}, formatCompact: String, homeSessionAgo: () => '20 minutes ago', homeSessionAgoShort: () => '20m',
     limitWindowsView: {}, sessionRowsApi: require('../../src/electron/renderer/sessionRows'),
+    homeModulePreferencesApi: require('../../src/electron/renderer/homeModulePreferences'),
     window: {
       TokenMonitorSessionLive: require('../../src/shared/sessionLive'),
       TokenMonitorEdgeDockPresentation: {
@@ -256,6 +258,15 @@ test('Home sessions lead with live work, head only the recent group and keep fin
   // A single group needs no headings.
   for (const states of [['running', 'waiting'], ['idle', 'ended']]) {
     assert.deepEqual(render(states).map(row => row.dataset.groupLabel), [undefined, undefined]);
+  }
+  // Detailed gives every session its details, in the order received, under no heading.
+  context.state.settings.homeSessionDisplayMode = 'detailed';
+  const detailed = render(['idle', 'running', 'ended', 'waiting']);
+  assert.deepEqual(detailed.map(row => row.dataset.key), ['idle', 'running', 'ended', 'waiting']);
+  for (const row of detailed) {
+    assert.ok(!row.className.includes('is-compact'));
+    assert.ok(row.children.some(child => child.className === 'home-session-meta'));
+    assert.equal(row.dataset.groupLabel, undefined);
   }
 });
 
