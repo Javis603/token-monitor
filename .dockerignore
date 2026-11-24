@@ -1,0 +1,5 @@
+# The image only copies these; keep the build context to the same set.
+*
+!package.json
+!package-lock.json
+!src/

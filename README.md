@@ -365,6 +365,8 @@ cp .env.example .env
 npm run hub
 ```
 
+For a container deployment with persistent data, see the [Docker deployment guide](docs/docker.md).
+
 #### Option C — Cloudflare Worker hub (across networks, including iPhone)
 
 [![Deploy to Cloudflare](https://deploy.workers.cloudflare.com/button)](https://deploy.workers.cloudflare.com/?url=https://github.com/Javis603/token-monitor/tree/main/worker)
