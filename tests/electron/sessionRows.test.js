@@ -1274,3 +1274,14 @@ test('on-demand Reasonix rows show a session title or the client/model fallback'
   assert.equal(rows({ title: 'A local session' })[0].name, 'A local session');
   assert.equal(rows({})[0].name, 'Reasonix · reasonix-test-model');
 });
+
+test('on-demand Reasonix keeps zero-token rows when the transcript is readable', () => {
+  const rows = sessionRowsForPeriod({}, {
+    reasonixSessions: {
+      'reasonix:readable': { client: 'reasonix', totalTokens: 0, sessionDetailAvailable: true },
+      'reasonix:unreadable': { client: 'reasonix', totalTokens: 0 }
+    }
+  });
+  assert.deepEqual(rows.map(row => [row.key, row.value, row.sessionDetailAvailable]),
+    [['session:reasonix:readable', 0, true]]);
+});

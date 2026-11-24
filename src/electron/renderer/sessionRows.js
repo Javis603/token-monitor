@@ -497,7 +497,8 @@
   function nativeSessionRow(session, key, options, now) {
     const tokenDataUnavailable = session?.tokenDataUnavailable === true;
     const value = tokenDataUnavailable ? 0 : finiteNumber(session?.totalTokens);
-    if (value <= 0 && !tokenDataUnavailable) return null;
+    const hasReasonixDetail = session?.client === 'reasonix' && sessionRowDetailAvailable(session);
+    if (value <= 0 && !tokenDataUnavailable && !hasReasonixDetail) return null;
     const labels = options.clientLabels || {};
     const colors = options.clientColors || {};
     const stable = typeof options.stableColor === 'function' ? options.stableColor : stableColor;
