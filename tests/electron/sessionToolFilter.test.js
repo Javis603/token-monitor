@@ -194,12 +194,14 @@ test('hiding Sessions hides its toolbar after resolving the replacement view', (
   const end = app.indexOf('  const pluginPage =', start);
   const state = {breakdown:'session',openSession:null};
   let hidden = false;
+  let reasonixView;
   const render = Function('state', 'els', 'visibleStatsSurface', 'statsRenderScheduler', 'ensureBreakdownVisible',
-    'syncSessionSearchChrome',
+    'loadReasonixSessionList', 'syncSessionSearchChrome',
     `${app.slice(start,end)}\n}; return renderAppContent;`)(state,
     {sessionToolFilter:{classList:{add(name){hidden=name==='hidden';}}}},
-    ()=>'main', {request(){}}, ()=>{state.breakdown='tool';}, ()=>{});
+    ()=>'main', {request(){}}, ()=>{state.breakdown='tool';}, ()=>{reasonixView=state.breakdown;}, ()=>{});
   render();
   assert.equal(state.breakdown,'tool');
+  assert.equal(reasonixView,'tool');
   assert.equal(hidden,true);
 });
