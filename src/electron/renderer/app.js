@@ -5688,6 +5688,12 @@ function applySessionDetailResult(request, options) {
   renderSessionDetail(options);
 }
 
+// A native range's turns are its days; other periods keep their names.
+function sessionDetailPeriod() {
+  const range = currentNativeRangeSnapshot()?.range;
+  return range ? `range:${range.start}:${range.end}` : state.period;
+}
+
 async function openSessionDetail({ client, sessionId, sessionCost, title, sourceDevice, returnTo = null, titleFollowsSession = false }) {
   // A review run is headed by model and time; a named group run (a subagent, a
   // Grok Bot record) is headed by its session title and follows title display.
@@ -5696,7 +5702,7 @@ async function openSessionDetail({ client, sessionId, sessionCost, title, source
     title: state.settings?.sessionTitlesEnabled === false && !fixedGroupHeading ? '' : title,
     sourceDevice,
     remote: Boolean(sourceDevice && sessionRowsApi.remoteSessionDevice(sourceDevice, state.settings?.deviceId)),
-    period: state.period, detail: null, returnTo, titleFollowsSession: titleFollowsSession === true };
+    period: state.period, detailPeriod: sessionDetailPeriod(), detail: null, returnTo, titleFollowsSession: titleFollowsSession === true };
   state.openSession = request;
   if (request.remote) {
     // Transcript readers look at this machine. A matching local ID cannot
@@ -5711,7 +5717,7 @@ async function openSessionDetail({ client, sessionId, sessionCost, title, source
   // off against a response that predates it.
   const liveSignature = sessionDetailLiveSignature();
   try {
-    const detail = await window.tokenMonitor.getSessionDetail({ client, sessionId, period: request.period, sessionCost });
+    const detail = await window.tokenMonitor.getSessionDetail({ client, sessionId, period: request.detailPeriod || request.period, sessionCost });
     if (state.openSession === request) {
       request.detail = detail;
       request.liveSignature = liveSignature;
@@ -5764,7 +5770,7 @@ async function refreshOpenSessionDetail() {
   let readSucceeded = false;
   try {
     const detail = await window.tokenMonitor.getSessionDetail({
-      client: request.client, sessionId: request.sessionId, period: request.period, sessionCost
+      client: request.client, sessionId: request.sessionId, period: request.detailPeriod || request.period, sessionCost
     });
     if (state.openSession !== request) return;
     // Readers resolve filesystem failures as payloads rather than rejecting.
@@ -6620,8 +6626,36 @@ function fixedPeriodHistoryInventoriesMatch(history) {
     === fixedPeriodRangesApi.deviceInventorySignature(state.stats?.devices || []);
 }
 
+function showFixedPeriod(snapshot) {
+  if (snapshot?.status !== 'ready' || !state.stats?.periods) return;
+  const current = state.stats.periods[state.period];
+  if (current !== snapshot.period && state.stats.nativeRangeWindows?.[state.period]) {
+    const replaced = replacedNativeRangePeriods.get(state.stats) || {};
+    if (!replaced[state.period]) replacedNativeRangePeriods.set(state.stats, { ...replaced, [state.period]: current });
+  }
+  state.stats.periods[state.period] = snapshot.period;
+}
+
+function currentNativeRangeSnapshot(period = state.period) {
+  return fixedPeriodRangesApi.nativeRangeSnapshot(period, statsWithNativeRangePeriods(state.stats), {
+    todayKey: fixedPeriodTodayKey(),
+    locale: currentCalendarLocale()
+  });
+}
+
 function buildFixedPeriodSnapshot() {
   if (!fixedPeriodRangesApi.isDerived(state.period)) return { status: 'native', period: null };
+  const native = currentNativeRangeSnapshot();
+  if (native) {
+    // While History refreshes, the last snapshot for this range still holds
+    // its Trends summary and device rows.
+    const history = state.settings?.historyEnabled === false || !state.fixedPeriodHistoryRequested || state.fixedPeriodHistoryFailed
+      ? null
+      : state.fixedPeriodHistoryBusy
+        ? fixedPeriodRangesApi.readySnapshotForSelection(state.fixedPeriodSnapshot, state.period)
+        : buildFixedPeriodSourcesSnapshot();
+    return fixedPeriodRangesApi.nativeRangeWithHistory(native, history, state.settings?.deviceId);
+  }
   if (state.settings?.historyEnabled === false) {
     return { status: 'unavailable', reason: 'historyDisabled', period: null };
   }
@@ -6697,9 +6731,7 @@ async function performFixedPeriodHistoryLoad({ force = false, signature = fixedP
         }, FIXED_PERIOD_HISTORY_RETRY_MS);
       }
       state.fixedPeriodSnapshot = buildFixedPeriodSnapshot();
-      if (state.fixedPeriodSnapshot.status === 'ready' && state.stats?.periods) {
-        state.stats.periods[state.period] = state.fixedPeriodSnapshot.period;
-      }
+      showFixedPeriod(state.fixedPeriodSnapshot);
     }
   }
   return true;
@@ -8505,6 +8537,24 @@ function renderHome() {
 }
 
 let localSessionActivity = null;
+// Native range periods are part of the stats the next delta applies to. A
+// History fallback shown in their place keeps the native period here, so the
+// delta base and a later native snapshot still see every session row.
+const replacedNativeRangePeriods = new WeakMap();
+
+function statsWithNativeRangePeriods(stats) {
+  const replaced = stats ? replacedNativeRangePeriods.get(stats) : null;
+  return replaced ? { ...stats, periods: { ...stats.periods, ...replaced } } : stats;
+}
+
+// Stats derived from the current ones (an activity patch, hidden titles)
+// carry the native periods a History fallback replaced.
+function replaceDerivedStats(next) {
+  const replaced = state.stats ? replacedNativeRangePeriods.get(state.stats) : null;
+  if (replaced && next && next !== state.stats) replacedNativeRangePeriods.set(next, replaced);
+  state.stats = next;
+}
+
 function applyLocalSessionActivity(stats) {
   const incoming = localSessionActivity;
   if (!stats || !incoming || incoming.snapshot?.id !== stats.snapshot?.id
@@ -8532,7 +8582,7 @@ function setRendererSettings(next) {
     updateTotalCompact(state.currentTotal);
   }
   if (titlesChanged) {
-    if (next.sessionTitlesEnabled === false) state.stats = sessionStatsForDisplay(state.stats);
+    if (next.sessionTitlesEnabled === false) replaceDerivedStats(sessionStatsForDisplay(state.stats));
     // Main may have returned a titleless map while disabled. Pull it again
     // when re-enabled, even if no new usage snapshot has arrived.
     allTimeSessions.invalidate();
@@ -8546,7 +8596,8 @@ function periodContentAvailability() {
   return {
     fixedUnavailable: derived && state.fixedPeriodSnapshot?.status !== 'ready',
     detailUnavailable: derived && !fixedPeriodRangesApi.supportsBreakdown(state.period, state.breakdown, {
-      deviceHistoriesAvailable: Array.isArray(state.fixedPeriodHistory?.deviceHistories)
+      deviceHistoriesAvailable: Array.isArray(state.fixedPeriodHistory?.deviceHistories),
+      native: state.fixedPeriodSnapshot?.native === true
     })
   };
 }
@@ -8611,9 +8662,7 @@ function renderAppContent({ fromSearch = false } = {}) {
       void loadFixedPeriodHistory();
     }
     state.fixedPeriodSnapshot = buildFixedPeriodSnapshot();
-    if (state.fixedPeriodSnapshot.status === 'ready') {
-      state.stats.periods[state.period] = state.fixedPeriodSnapshot.period;
-    }
+    showFixedPeriod(state.fixedPeriodSnapshot);
   } else {
     state.fixedPeriodSnapshot = null;
   }
@@ -15338,6 +15387,35 @@ async function init() {
   updateTitleFit();
 }
 
+// An open session follows a period change when the new period lists sessions,
+// re-reading its detail for the new period (and range); otherwise it closes.
+function followOpenSessionToPeriod() {
+  if (state.openSession && fixedPeriodRangesApi.supportsBreakdown(state.period, 'session', {
+    native: Boolean(currentNativeRangeSnapshot())
+  })) {
+    if (state.openSession.kind === 'session-group') {
+      const period = state.stats?.periods?.[state.period];
+      const summary = sessionRowsForPeriod(period).find((row) => row.key === state.openSession.summary.key);
+      if (summary) {
+        state.openSession = { kind: 'session-group', period: state.period, summary };
+      } else {
+        state.openSession = null;
+      }
+    } else {
+      // The detail's cost is the destination period's row, like its turns;
+      // no row there means no cost to spread over its turns.
+      const entry = sessionLiveStatsEntry({ ...state.openSession, period: state.period });
+      openSessionDetail({
+        ...state.openSession,
+        sessionCost: sessionLiveCost(entry, state.openSession.client),
+        returnTo: null
+      });
+    }
+  } else if (state.openSession) {
+    state.openSession = null;
+  }
+}
+
 for (const tab of document.querySelectorAll('.tab')) {
   tab.addEventListener('click', (event) => {
     const slot = tab.dataset.periodSlot || tab.dataset.period;
@@ -15354,21 +15432,7 @@ for (const tab of document.querySelectorAll('.tab')) {
     const snapshot = captureBreakdownMotion();
     if (!setPeriod(targetPeriod)) return;
     syncPeriodTabs();
-    if (state.openSession && fixedPeriodRangesApi.supportsBreakdown(state.period, 'session')) {
-      if (state.openSession.kind === 'session-group') {
-        const period = state.stats?.periods?.[state.period];
-        const summary = sessionRowsForPeriod(period).find((row) => row.key === state.openSession.summary.key);
-        if (summary) {
-          state.openSession = { kind: 'session-group', period: state.period, summary };
-        } else {
-          state.openSession = null;
-        }
-      } else {
-        openSessionDetail({ ...state.openSession, returnTo: null });
-      }
-    } else if (state.openSession) {
-      state.openSession = null;
-    }
+    followOpenSessionToPeriod();
     state.rowSignature = '';
     state.periodMotionActive = true;
     render();
@@ -15388,6 +15452,7 @@ for (const button of els.monthPeriodMenu?.querySelectorAll('[data-fixed-period]'
     syncPeriodTabs();
     syncPeriodMenu();
     if (changed) {
+      followOpenSessionToPeriod();
       state.rowSignature = '';
       state.periodMotionActive = true;
       render();
@@ -16770,7 +16835,7 @@ const allTimeSessions = allTimeSessionsApi.createAllTimeSessionsLoader({
     ? window.TokenMonitorSessionTitleDisplay.withoutSessionTitles(sessions) : sessions,
   projectionKey: () => state.settings?.sessionTitlesEnabled !== false,
   onLoaded: () => {
-    if (state.stats) state.stats = sessionStatsForDisplay(allTimeSessions.attach(state.stats));
+    if (state.stats) replaceDerivedStats(sessionStatsForDisplay(allTimeSessions.attach(state.stats)));
     statsRenderScheduler.request();
   },
   onError: (error) => console.log(`[stats] all-time sessions failed: ${error?.message || error}`)
@@ -16813,7 +16878,7 @@ window.tokenMonitor.onStatsPush?.((payload) => {
   if (!payload) return;
   if (payload.event === 'session-activity') {
     localSessionActivity = payload.data;
-    state.stats = applyLocalSessionActivity(state.stats);
+    replaceDerivedStats(applyLocalSessionActivity(state.stats));
     statsRenderScheduler.request();
     return;
   }
@@ -16829,7 +16894,7 @@ window.tokenMonitor.onStatsPush?.((payload) => {
       incomingStats = payload.data.stats;
       state.statsDeltaResyncPending = null;
     } else if (payload.data?.statsDelta) {
-      incomingStats = window.TokenMonitorStatsDelta?.applyStatsDelta(state.stats, payload.data.statsDelta) || null;
+      incomingStats = window.TokenMonitorStatsDelta?.applyStatsDelta(statsWithNativeRangePeriods(state.stats), payload.data.statsDelta) || null;
       if (!incomingStats) {
         // Recover on the stats push channel, where a full snapshot arrives
         // before any delta based on it. The invoke reply carries no stats.

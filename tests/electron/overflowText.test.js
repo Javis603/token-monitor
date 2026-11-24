@@ -208,7 +208,8 @@ for (const className of ['detail-ex-title', 'detail-heading']) {
         requestAnimationFrame: h.window.requestAnimationFrame,
         prefersReducedMotion: () => false, homeSessionRenderPending: false,
         visibleStatsSurface: () => 'main', isRendererWindowHidden: () => false,
-        statsRenderScheduler: { request() {} }, renderSessionDetail: options => renders.push(options)
+        statsRenderScheduler: { request() {} }, renderSessionDetail: options => renders.push(options),
+        currentNativeRangeSnapshot: () => null
       });
       vm.runInContext(`${setup}\n${detail}`, context);
       context.bindHoverMarquee(h.element);

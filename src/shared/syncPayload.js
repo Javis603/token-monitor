@@ -225,6 +225,10 @@ function buildSyncPayload(summary, {
   // a hub concern. Tokscale remains the only aggregate/session authority.
   delete payload.nativeSessions;
   delete payload.nativeProjects;
+  // Native ranges are a local presentation of this machine's scan; the wire
+  // shape and every Hub keep deriving ranges from History.
+  delete payload.nativeRanges;
+  delete payload.nativeRangeWindows;
   const projectsEnabled = summary.projectsEnabled !== false;
   delete payload.allTimeProjectsOmitted;
   delete payload.allTimeProjectsIncomplete;
