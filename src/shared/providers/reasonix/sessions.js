@@ -24,6 +24,7 @@ const { normalizeModelNameForClient } = require('../../usage');
 const {
   readReasonixEventLog,
   countReasonixProviderMessages,
+  reasonixBranchId,
   reasonixSessionFileRef
 } = require('./sessionDetail');
 
@@ -214,9 +215,7 @@ function readReasonixNativeSession(metaPath, telemetryPath, options = {}) {
   const fsApi = options.fsModule || fs;
   const meta = readBoundedJson(metaPath, REASONIX_META_MAX_BYTES, fsApi);
   if (!meta) return null;
-  const branchMeta = objectValue(firstValue(meta, ['BranchMeta', 'branchMeta', 'branch_meta', 'branch']));
-  const id = textValue(firstValue(meta, ['id', 'ID']), 256)
-    || textValue(firstValue(branchMeta, ['id', 'ID']), 256);
+  const id = reasonixBranchId(meta);
   if (!id) return null;
 
   // `stats/*.jsonl` is the Tokscale aggregate authority. This native session

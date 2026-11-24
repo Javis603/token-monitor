@@ -302,6 +302,14 @@ test('Reasonix replay applies cumulative append limits before accepting the next
     replayLimits: { maxMessages: 3 }
   }).found, false);
 
+  const escapedAppend = JSON.stringify(append)
+    .replace('"type"', String.raw`"\u0074ype"`)
+    .replace('"messages"', String.raw`"\u006dessages"`);
+  fs.writeFileSync(eventsPath, `${JSON.stringify(replace)}\n${escapedAppend}\n`);
+  const escapedLimit = readReasonixEventLog(eventsPath, { replayLimits: { maxMessages: 3 } });
+  assert.equal(escapedLimit.resource, 'messages');
+  assert.equal(escapedLimit.value, 4);
+
   const collectionReplace = {
     schema_version: 1,
     type: 'replace',
@@ -508,7 +516,7 @@ test('the on-demand worker lists local sessions and reads only the requested det
   try {
     const older = new Date(now.getTime() - 3_600_000).toISOString();
     const fileFor = (directory, createdAt, text) => writeSidecarSession(stateHome, directory, 'file', {
-      id: 'demand', created_at: createdAt, updated_at: createdAt
+      id: '', BranchMeta: { ID: 'demand' }, created_at: createdAt, updated_at: createdAt
     }, [
       JSON.stringify({ type: 'user.message', ts: now.toISOString(), text }),
       JSON.stringify({ type: 'model.final', ts: now.toISOString(), usage: { prompt_tokens: 3, completion_tokens: 2 } })
