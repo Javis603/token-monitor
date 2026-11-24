@@ -15501,7 +15501,7 @@ els.monthPeriodMenu?.addEventListener('keydown', (event) => {
 async function saveDefaultUsageRange(value) {
   const selection = fixedPeriodRangesApi.normalizeMonthMode(value);
   state.settings.periodMonthMode = selection;
-  if (fixedPeriodRangesApi.slotForSelection(state.period) === 'month') setPeriod(selection);
+  if (fixedPeriodRangesApi.slotForSelection(state.period) === 'month' && setPeriod(selection)) followOpenSessionToPeriod();
   syncPeriodTabs();
   render();
   await saveSettings({ periodMonthMode: selection });

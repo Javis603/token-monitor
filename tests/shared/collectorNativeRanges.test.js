@@ -416,3 +416,17 @@ test('a Today/Month preview keeps the last native ranges until the full result',
   device.updateUsage(full({}));
   assert.equal(device.getSnapshot().nativeRanges, undefined);
 });
+
+test('device state applies live activity to sessions held in its native ranges', () => {
+  const { createDeviceState } = require('../../src/shared/usage/deviceState');
+  const observedAt = new Date().toISOString();
+  const key = 'claude:live';
+  const period = () => ({ ...emptyPeriod(), totalTokens: 5, sessions: { [key]: { client: 'claude', sessionId: 'live', totalTokens: 5 } } });
+  const device = createDeviceState({ envelope: { deviceId: 'd' }, onRecord: () => {} });
+  device.updateUsage({ updatedAt: observedAt, today: period(), month: period(), allTime: period(), nativeRanges: { last7: period() } });
+  assert.equal(device.updateActivity({ observations: [{ client: 'claude', sessionId: 'live', liveActivity: { state: 'waiting', observedAt } }] }), true);
+  const snapshot = device.getSnapshot();
+  assert.equal(snapshot.today.sessions[key].liveActivity.state, 'waiting');
+  assert.equal(snapshot.nativeRanges.last7.sessions[key].liveActivity.state, 'waiting');
+  assert.equal(snapshot.nativeRanges.last7.sessionActivity, undefined);
+});

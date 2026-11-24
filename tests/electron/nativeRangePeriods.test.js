@@ -22,3 +22,22 @@ test('native periods a History fallback replaced keep the session title policy',
   assert.equal(restored.sessions['claude:s'].title, undefined);
   assert.equal(restored.sessions['claude:s'].totalTokens, 1);
 });
+
+test('changing the default range in Settings moves an open session detail with it', async () => {
+  const start = source.indexOf('async function saveDefaultUsageRange(');
+  const end = source.indexOf('\n}\n', start) + 2;
+  const calls = [];
+  const state = { settings: {}, period: 'last7' };
+  const context = {
+    state,
+    fixedPeriodRangesApi: { normalizeMonthMode: (value) => value, slotForSelection: () => 'month' },
+    setPeriod: (value) => { calls.push(`set:${value}`); state.period = value; return true; },
+    followOpenSessionToPeriod: () => calls.push('follow'),
+    syncPeriodTabs: () => {},
+    render: () => calls.push('render'),
+    saveSettings: async () => {}
+  };
+  vm.runInNewContext(`${source.slice(start, end)}\nglobalThis.save = saveDefaultUsageRange;`, context);
+  await context.save('last30');
+  assert.deepEqual(calls, ['set:last30', 'follow', 'render']);
+});
