@@ -915,6 +915,30 @@ function propagateTodayProjects(today, periods, titleMetadata = {}) {
   }
 }
 
+// Yesterday is a closed day: it takes a session's current title, project and
+// links, but its times, context and turn state stay those of that day.
+const PAST_DAY_IDENTITY_FIELDS = Object.freeze([
+  'title', 'projectId', 'projectLabel', 'sessionKind', 'nativeSessionId', 't3ThreadId', 'parentSessionId', 'parentClient'
+]);
+
+function propagateIdentity(source, periods, titleMetadata) {
+  const scratch = Object.fromEntries(Object.entries(periods).map(([name, period]) => [name, {
+    ...period,
+    sessions: Object.fromEntries(Object.entries(period?.sessions || {}).map(([key, row]) => [key, row && { ...row }]))
+  }]));
+  propagateTodayProjects(source, scratch, titleMetadata);
+  for (const [name, period] of Object.entries(periods)) {
+    for (const [key, row] of Object.entries(period?.sessions || {})) {
+      const next = scratch[name].sessions[key];
+      if (!row || !next) continue;
+      for (const field of PAST_DAY_IDENTITY_FIELDS) {
+        if (next[field] === undefined) delete row[field];
+        else row[field] = next[field];
+      }
+    }
+  }
+}
+
 // The process-wide rationing for cursor/antigravity syncs. Deliberately a single
 // module-scoped instance with no per-call override: the tokscale cache it guards
 // is one directory on disk, so a collector rebuilt by a settings change must
@@ -1492,7 +1516,9 @@ async function collectUsageOnce(options) {
     }
     // Project, title and parent links come from the decorated All Time rows,
     // so a range never reads transcripts the full scan already resolved.
-    propagateTodayProjects(allTime, periods, { ...localSessionMetadataDeps, projectsFromToday: true });
+    const { yesterday, ...current } = periods;
+    propagateTodayProjects(allTime, current, { ...localSessionMetadataDeps, projectsFromToday: true });
+    propagateIdentity(allTime, { yesterday }, { ...localSessionMetadataDeps, projectsFromToday: true });
     nativePastRanges = { todayKey, weekStartsOn, starts, periods };
   }
 
@@ -1658,7 +1684,10 @@ async function collectUsageOnce(options) {
     }
     // A session active on past days and Today takes Today's fresh title and
     // project, exactly as the delta-derived Month does on a watch tick.
-    propagateTodayProjects(today, nativeRanges, { ...localSessionMetadataDeps, t3Titles: anchor?.t3Titles, scanTitleClears });
+    const { yesterday, ...current } = nativeRanges;
+    const titleMetadata = { ...localSessionMetadataDeps, t3Titles: anchor?.t3Titles, scanTitleClears };
+    propagateTodayProjects(today, current, titleMetadata);
+    propagateIdentity(today, { yesterday }, titleMetadata);
   }
 
   // One filesystem probe per tick, shared by the legacy status and the health
