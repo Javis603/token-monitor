@@ -1434,3 +1434,109 @@ test('later calendar activations cannot change which observation a past date dis
   assert.equal(previousDay('America/Los_Angeles', '2026-11-10'), 200);
   assert.equal(previousDay('Asia/Taipei', '2026-11-10'), 200);
 });
+
+// A stored day holds one snapshot per model. When an older build stored the
+// same model under another spelling, normalizing must not add the two up.
+function storedDay(date, rows, extra = {}) {
+  const observations = {};
+  for (const row of rows) {
+    observations[JSON.stringify([row.client, row.modelId])] = {
+      cost: 0, messages: 1, ...row
+    };
+  }
+  return { version: 1, days: { [date]: { date, activeTimeMs: 0, ...extra, observations } } };
+}
+
+function onlyObservation(archive, date) {
+  const observations = Object.values(archive.days[date].observations);
+  assert.equal(observations.length, 1);
+  return observations[0];
+}
+
+test('Cursor auto stored beside cursor-auto counts once and drops the stale component summary', () => {
+  const date = '2026-10-30';
+  const archive = normalizeDailyHistoryArchive(storedDay(date, [
+    { client: 'cursor', modelId: 'cursor-auto', tokens: 1200, cost: 0.5, messages: 4, outputTokens: 200, tokenComponentsAvailable: true, cacheReadTokens: 1000 },
+    { client: 'cursor', modelId: 'auto', tokens: 1200, cost: 0.5, messages: 4, outputTokens: 200, tokenComponentsAvailable: true, cacheReadTokens: 1000 }
+  ], {
+    componentSummary: {
+      tokenComponentsAvailable: true,
+      cacheReadTokens: 2000,
+      outputTokens: 400,
+      perClient: { cursor: { cacheReadTokens: 2000, outputTokens: 400 } },
+      perModel: {
+        auto: { cacheReadTokens: 1000, outputTokens: 200 },
+        'cursor-auto': { cacheReadTokens: 1000, outputTokens: 200 }
+      }
+    }
+  }));
+  const observation = onlyObservation(archive, date);
+  assert.equal(observation.modelId, 'cursor-auto');
+  assert.equal(observation.tokens, 1200);
+  assert.equal(observation.cost, 0.5);
+  assert.equal(observation.messages, 4);
+  assert.equal(observation.cacheReadTokens, 1000);
+  assert.equal(observation.outputTokens, 200);
+  assert.equal(archive.days[date].componentSummary, undefined);
+});
+
+test('colliding stored spellings keep the larger snapshot, whichever comes first', () => {
+  const date = '2026-10-31';
+  const small = { client: 'cursor', modelId: 'auto', providerId: 'cursor', tokens: 800, cost: 0.25, messages: 2 };
+  const large = { client: 'cursor', modelId: 'cursor-auto', tokens: 1500, cost: 0.75, messages: 5 };
+  for (const rows of [[small, large], [large, small]]) {
+    const observation = onlyObservation(normalizeDailyHistoryArchive(storedDay(date, rows)), date);
+    assert.equal(observation.tokens, 1500);
+    assert.equal(observation.cost, 0.75);
+    assert.equal(observation.messages, 5);
+    assert.equal(observation.providerId, 'cursor');
+  }
+});
+
+test('aliased or differently cased stored client spellings count once', () => {
+  const aliasedDate = '2026-10-29';
+  const aliased = normalizeDailyHistoryArchive(storedDay(aliasedDate, [
+    { client: 'micode', modelId: 'mimo-v2', tokens: 300, cost: 0.1, messages: 3 },
+    { client: 'mimo', modelId: 'mimo-v2', tokens: 300, cost: 0.1, messages: 3 }
+  ]));
+  const aliasedObservation = onlyObservation(aliased, aliasedDate);
+  assert.equal(aliasedObservation.client, 'mimo');
+  assert.equal(aliasedObservation.tokens, 300);
+
+  const casedDate = '2026-10-28';
+  const cased = normalizeDailyHistoryArchive(storedDay(casedDate, [
+    { client: 'Claude', modelId: 'claude-sonnet-4-6', tokens: 400, cost: 0.2, messages: 2 },
+    { client: 'claude', modelId: 'claude-sonnet-4-6', tokens: 400, cost: 0.2, messages: 2 }
+  ]));
+  const casedObservation = onlyObservation(cased, casedDate);
+  assert.equal(casedObservation.client, 'claude');
+  assert.equal(casedObservation.tokens, 400);
+});
+
+test('one scan\'s rows for two spellings of the same model still add up', () => {
+  const date = '2026-11-01';
+  const archive = normalizeDailyHistoryArchive({ version: 1, days: { [date]: { date, activeTimeMs: 0, observations: [
+    { client: 'cursor', modelId: 'auto', tokens: 100, cost: 0.1, messages: 1 },
+    { client: 'cursor', modelId: 'cursor-auto', tokens: 50, cost: 0.05, messages: 1 }
+  ] } } });
+  const observation = onlyObservation(archive, date);
+  assert.equal(observation.tokens, 150);
+  assert.equal(observation.messages, 2);
+});
+
+test('a rescan of a day stored under both spellings neither doubles nor lowers it', () => {
+  const date = '2026-11-02';
+  const stored = storedDay(date, [
+    { client: 'cursor', modelId: 'cursor-auto', tokens: 1200, cost: 0.5, messages: 4 },
+    { client: 'cursor', modelId: 'default', tokens: 1200, cost: 0.5, messages: 4 }
+  ]);
+  for (const tokens of [1200, 900]) {
+    const archive = captureDailyHistoryArchive(stored, graph(date, [client('cursor', 'default', tokens, 0.5, 4)]), { todayKey: '2026-11-05' });
+    assert.equal(onlyObservation(archive, date).tokens, 1200);
+    const rows = graphFromDailyHistoryArchive([], archive, { todayKey: '2026-11-05' }).contributions
+      .find(row => row.date === date).clients;
+    assert.equal(rows.length, 1);
+    assert.equal(rows[0].messages, 4);
+    assert.equal(rows[0].cost, 0.5);
+  }
+});
