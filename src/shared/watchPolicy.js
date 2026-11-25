@@ -963,7 +963,16 @@ function openWatch(chokidar, config = {}, onEvent) {
     error.code = WATCH_POLLING_LIMIT_CODE;
     throw error;
   }
-  const watcher = chokidar.watch(config.dirs, watcherOptions(usePolling, ignored));
+  // Chokidar 4 treats an empty override as unset. Chokidar 6 reads the
+  // environment synchronously and rejects the zero it gets from an empty string.
+  const emptyInterval = process.env.CHOKIDAR_INTERVAL === '';
+  if (emptyInterval) delete process.env.CHOKIDAR_INTERVAL;
+  let watcher;
+  try {
+    watcher = chokidar.watch(config.dirs, watcherOptions(usePolling, ignored));
+  } finally {
+    if (emptyInterval) process.env.CHOKIDAR_INTERVAL = '';
+  }
   if (onEvent) watcher.on('all', (event, filePath) => {
     // Reuse the matcher that saw initial discovery. Keep the reported path so
     // the collector can still apply every other client's own source policy.

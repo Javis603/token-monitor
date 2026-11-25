@@ -27,6 +27,27 @@ const { installSourceEnvGuard } = require('../helpers/sourceEnv');
 
 installSourceEnvGuard(test);
 
+test('Chokidar 6 starts native watching with an empty interval override', { timeout: 15_000 }, async (t) => {
+  const { once } = require('node:events');
+  const { openWatch } = require('../../src/shared/watchPolicy');
+  const dir = withTmpDir();
+  const previousInterval = process.env.CHOKIDAR_INTERVAL;
+  let watcher;
+  try {
+    process.env.CHOKIDAR_INTERVAL = '';
+    watcher = openWatch(require('chokidar').default, { dirs: [dir], usePolling: false });
+    assert.strictEqual(process.env.CHOKIDAR_INTERVAL, '');
+  } finally {
+    if (previousInterval === undefined) delete process.env.CHOKIDAR_INTERVAL;
+    else process.env.CHOKIDAR_INTERVAL = previousInterval;
+    t.after(async () => {
+      await watcher?.close();
+      fs.rmSync(dir, { recursive: true, force: true });
+    });
+  }
+  await once(watcher, 'ready', { signal: t.signal });
+});
+
 test('the shared native watcher delivers activity-only registry and T3 WAL writes', async (t) => {
   const { openWatch } = require('../../src/shared/collector');
   const { activityWatchSources } = require('../../src/shared/sessionActivityWatch');
