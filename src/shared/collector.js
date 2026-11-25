@@ -1874,6 +1874,15 @@ async function collectUsageOnce(options) {
         ...past[key],
         sessions: Object.fromEntries(Object.entries(past[key].sessions).map(([id, row]) => [id, { ...row }]))
       }]));
+      const { metadataCache, revokedT3ThreadKeys } = localSessionMetadataDeps;
+      for (const period of Object.values(days)) {
+        for (const [key, row] of Object.entries(period.sessions)) {
+          if (!(row.t3ThreadId || row.t3ParentLink)) continue;
+          if (!revokedT3ThreadKeys.has(key) && !metadataCache.get(key)?.t3ThreadRevoked) continue;
+          revokeT3SessionLinks(row);
+          revokedT3ThreadKeys.add(key);
+        }
+      }
       propagateIdentity(allTime, days, { ...localSessionMetadataDeps, projectsFromToday: true });
       summary.dailySessionPeriods = { ...days, [todayKey]: today };
     }
@@ -3013,6 +3022,12 @@ function startCollector(options) {
         const revokedLinks = captured.revokedT3ThreadKeys || [];
         const changedLinks = captured.changedT3ThreadKeys || [];
         if (revokedLinks.length || changedLinks.length) {
+          for (const period of Object.values(anchor.dailySessionPastDays || {})) {
+            for (const key of revokedLinks) {
+              const row = period?.sessions?.[key];
+              if (row) revokeT3SessionLinks(row);
+            }
+          }
           for (const period of ['today', 'month', 'allTime']) {
             for (const key of revokedLinks) {
               const row = anchor[period]?.sessions?.[key];
