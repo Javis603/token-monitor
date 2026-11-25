@@ -5,8 +5,9 @@ const os = require('node:os');
 const path = require('node:path');
 const { fileURLToPath } = require('node:url');
 const { antigravityDataRoots } = require('./selfSync');
+const { discoverAntigravityAcpPaths } = require('./acpPaths');
 const { antigravityCliDataDir } = require('../../clientSources');
-const { readT3SessionRelationResult } = require('../../t3SessionMetadata');
+const { readT3SessionRelationResult } = require('../../t3/sessionMetadata');
 
 // Deferred like cursor: importing this resolver must not emit Node's
 // experimental node:sqlite warning for collectors that never see an Antigravity row.
@@ -43,7 +44,7 @@ function cleanTitle(value) {
     : '';
 }
 
-function antigravityConversationSummaryCandidates({ home = os.homedir(), env = process.env } = {}) {
+function antigravityConversationSummaryCandidates({ home = os.homedir(), env = process.env, useEnvRoot = true, antigravityAcpPaths } = {}) {
   const candidates = [];
   const explicit = typeof env.ANTIGRAVITY_HOME === 'string' ? env.ANTIGRAVITY_HOME.trim() : '';
   if (explicit) {
@@ -57,6 +58,12 @@ function antigravityConversationSummaryCandidates({ home = os.homedir(), env = p
     candidates.push(path.join(root, 'conversation_summaries.db'));
   }
   candidates.push(path.join(path.dirname(antigravityCliDataDir({ homeDir: home, env })), 'conversation_summaries.db'));
+  const acpDirs = Array.isArray(antigravityAcpPaths)
+    ? antigravityAcpPaths
+    : discoverAntigravityAcpPaths({ homeDir: home, env, useEnvRoot });
+  for (const dir of acpDirs) {
+    candidates.push(path.join(path.dirname(dir), 'conversation_summaries.db'));
+  }
   return [...new Set(candidates)];
 }
 
@@ -149,7 +156,12 @@ function resolveSessionMetadata(sessionIds, context = {}) {
 
   const home = context.home || os.homedir();
   const env = context.deps?.scopedHome ? {} : (context.deps?.env || process.env);
-  const candidates = antigravityConversationSummaryCandidates({ home, env });
+  const candidates = antigravityConversationSummaryCandidates({
+    home,
+    env,
+    useEnvRoot: !context.deps?.scopedHome,
+    antigravityAcpPaths: context.deps?.antigravityAcpPaths
+  });
   const cache = context.deps?.antigravityTitleCache || titleCache;
   const unresolved = new Set();
   const unresolvedNativeSources = new Set();

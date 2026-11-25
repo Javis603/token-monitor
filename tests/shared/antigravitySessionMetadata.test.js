@@ -1291,3 +1291,70 @@ for (const removal of ['deletion', 'blanking']) {
     } finally { handle?.stop(); handle = null; }
   });
 }
+
+test('Antigravity reads and watches T3 Code ACP conversation_summaries.db without leaking T3CODE_HOME in scopedHome', { skip: !sqlite }, (t) => {
+  const {
+    watchClientRootsForClients,
+    watchAttributionRootsForClients,
+    watchIgnoreMatcher,
+    clientsForWatchPath
+  } = require('../../src/shared/watchPolicy');
+  const temp = fs.realpathSync.native(os.tmpdir());
+  const home = fs.mkdtempSync(path.join(temp, 'antigravity-acp-meta-'));
+  const t3Home = path.join(home, 'custom-t3');
+  const acpRoot = path.join(t3Home, 'userdata', 'providers', 'antigravity', 'profile-a', 'antigravity-acp');
+  const convDir = path.join(acpRoot, 'conversations');
+  const workspaceDir = path.join(home, 'my-t3-repo');
+  fs.mkdirSync(convDir, { recursive: true });
+  fs.mkdirSync(workspaceDir, { recursive: true });
+  const dbPath = path.join(acpRoot, 'conversation_summaries.db');
+  const db = new sqlite.DatabaseSync(dbPath);
+  t.after(() => {
+    try { db.close(); } catch (_) {}
+    fs.rmSync(home, { recursive: true, force: true });
+  });
+  db.exec('PRAGMA journal_mode = WAL');
+  db.exec(`CREATE TABLE conversation_summaries (
+    conversation_id TEXT PRIMARY KEY, title TEXT, preview TEXT,
+    workspace_uris TEXT, last_modified_time TEXT,
+    parent_conversation_id TEXT, agent_name TEXT
+  )`);
+  const put = db.prepare('INSERT INTO conversation_summaries VALUES (?, ?, ?, ?, ?, ?, ?)');
+  const workspaceUri = pathToFileURL(workspaceDir).href;
+  put.run('acp-parent', 'T3 ACP Task', '', JSON.stringify([workspaceUri]), '2026-11-25T08:00:00Z', '', '');
+  put.run('acp-child', '', '', JSON.stringify([workspaceUri]), '2026-11-25T08:05:00Z', 'acp-parent', 'self');
+
+  const env = { T3CODE_HOME: t3Home };
+  const projectIdentity = (dir) => ({ projectId: `proj:${path.basename(dir)}`, projectLabel: path.basename(dir) });
+  const resolved = resolveSessionMetadata(new Set(['acp-parent', 'acp-child']), {
+    home,
+    deps: { sqlite, env, antigravityTitleCache: new Map() },
+    resolveProjects: true,
+    projectIdentity
+  });
+  assert.equal(resolved.get('acp-parent')?.title, 'T3 ACP Task');
+  assert.equal(resolved.get('acp-parent')?.projectLabel, 'my-t3-repo');
+  assert.equal(resolved.get('acp-child')?.parentSessionId, 'acp-parent');
+  assert.equal(resolved.get('acp-child')?.title, 'self');
+
+  // Scoped lookups (e.g. WSL) must not inherit host T3CODE_HOME.
+  const scoped = resolveSessionMetadata(new Set(['acp-parent']), {
+    home,
+    deps: { sqlite, scopedHome: true, env, antigravityTitleCache: new Map() },
+    resolveProjects: true,
+    projectIdentity
+  });
+  assert.equal(scoped.size, 0);
+
+  // Watch attribution admits conversation_summaries.db(-wal) and conversations/*.db-wal,
+  // but ignores unrelated files inside antigravity-acp/.
+  const watchOpts = { homeDir: home, env };
+  const roots = watchClientRootsForClients('antigravity', watchOpts);
+  assert.ok(roots.antigravity.includes(convDir));
+  assert.ok(roots.antigravity.includes(acpRoot));
+  const attribution = watchAttributionRootsForClients('antigravity', roots, watchOpts);
+  const ignore = watchIgnoreMatcher('antigravity', watchOpts);
+  assert.deepEqual(clientsForWatchPath(`${dbPath}-wal`, attribution, { antigravity: ignore }), ['antigravity']);
+  assert.deepEqual(clientsForWatchPath(path.join(convDir, 'acp-parent.db-wal'), attribution, { antigravity: ignore }), ['antigravity']);
+  assert.deepEqual(clientsForWatchPath(path.join(acpRoot, 'jetski_state.pbtxt'), attribution, { antigravity: ignore }), []);
+});

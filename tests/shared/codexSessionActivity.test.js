@@ -885,7 +885,7 @@ test('a historical rollout absent from the catalog is located on demand and clea
 test('T3 driver observations share one server validation while retaining per-driver scope', async t => {
   const f = fixture(t); f.write([started]);
   let probes = 0;
-  const results = await require('../../src/shared/t3SessionActivity').readT3Activities({ ...f.options,
+  const results = await require('../../src/shared/t3/sessionActivity').readT3Activities({ ...f.options,
     readProcessStarts: async (...args) => { probes += 1; return f.options.readProcessStarts(...args); } });
   assert.equal(probes, 1);
   assert.equal(results.get('codex').get(nativeId).state, 'waiting');

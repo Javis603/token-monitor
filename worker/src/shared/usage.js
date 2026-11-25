@@ -189,7 +189,7 @@ function applyParentLink(target, source) {
   const parentSessionId = normalizeParentSessionId(source.parentSessionId ?? source.parent_session_id, target.sessionId, parentClient, target.client);
   if (!parentSessionId) return;
   target.parentSessionId = parentSessionId;
-  if (target.client === 'antigravity' && source.t3ParentLink === true) target.t3ParentLink = true;
+  if (source.t3ParentLink === true) target.t3ParentLink = true;
   else delete target.t3ParentLink;
   if (parentClient !== target.client) target.parentClient = parentClient;
   else delete target.parentClient;

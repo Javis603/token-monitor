@@ -95,7 +95,9 @@ function selfSyncSourceRootsForClients(clientsCsv, options = {}) {
 function antigravitySummaryWatchSources(options = {}) {
   return antigravityConversationSummaryCandidates({
     home: options.homeDir || os.homedir(),
-    env: options.env || process.env
+    env: options.env || process.env,
+    useEnvRoot: options.useEnvRoot !== false,
+    antigravityAcpPaths: options.antigravityAcpPaths
   }).map((candidate) => {
     const file = canonicalWatchFilePath(candidate);
     return { file, dir: path.dirname(file) };

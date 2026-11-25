@@ -770,7 +770,7 @@ if (require.main === module) {
     });
   }
   hub.start().then(() => {
-    console.log(`Token Monitor hub listening on http://${hub.bindHost}:${port}`);
+    console.log(`Token Monitor hub listening on http://${hub.bindHost}:${hub.server.address().port}`);
     console.log(`Data file: ${dataFile}`);
     console.log(`Persistence interval: ${persistIntervalMs}ms`);
     if (!secret) {

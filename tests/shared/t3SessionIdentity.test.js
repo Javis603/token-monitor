@@ -5,7 +5,7 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const test = require('node:test');
-const { nativeAccountingId, readT3IdentityBindings, supportsT3SessionClient, t3AccountingClient } = require('../../src/shared/t3SessionIdentity');
+const { nativeAccountingId, readT3IdentityBindings, supportsT3SessionClient, t3AccountingClient } = require('../../src/shared/t3/sessionIdentity');
 
 function settingsFile(t) {
   const home = fs.mkdtempSync(path.join(os.tmpdir(), 'tm-t3-bindings-'));
@@ -34,11 +34,14 @@ test('historical Codex and Claude IDs require UUIDs while opaque ACP IDs retain 
 
 test('built-in drivers use explicit accounting clients and never inherit object properties', () => {
   const bindings = new Map([['codex', 'devin']]);
-  for (const [driver, client] of Object.entries({ codex: 'codex', claudeAgent: 'claude', cursor: 'cursor', opencode: 'opencode', grok: 'grok', muse: 'muse' })) {
+  for (const [driver, client] of Object.entries({
+    codex: 'codex', claudeAgent: 'claude', antigravity: 'antigravity',
+    kiro: 'kiro', cursor: 'cursor', opencode: 'opencode', grok: 'grok', muse: 'muse'
+  })) {
     assert.equal(t3AccountingClient(driver, 'codex', bindings), client);
     assert.equal(supportsT3SessionClient(client), true);
   }
-  for (const driver of ['unknown', 'constructor', 'toString', '__proto__']) {
+  for (const driver of ['unknown', 'pi', 'constructor', 'toString', '__proto__']) {
     assert.equal(t3AccountingClient(driver, 'codex', bindings), null);
     assert.equal(supportsT3SessionClient(driver), false);
   }

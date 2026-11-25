@@ -6,7 +6,7 @@ const os = require('node:os');
 const path = require('node:path');
 const test = require('node:test');
 const sqlite = require('node:sqlite');
-const { readT3SessionParents, readT3SessionRelations, readT3SessionRelationResult } = require('../../src/shared/t3SessionMetadata');
+const { readT3SessionParents, readT3SessionRelations, readT3SessionRelationResult } = require('../../src/shared/t3/sessionMetadata');
 const { applySessionMetadata, applyT3SessionParents, applySessionIdentities } = require('../../src/shared/sessionMetadata');
 const { normalizePeriod, mergePeriods, extractUsageFromTokscale, stripSessionTextFromPeriod } = require('../../src/shared/usage');
 
@@ -354,6 +354,7 @@ test('app parent enrichment is independent of titles and resolves period-specifi
   }
   periods.today.sessions['claude:child-native'].parentSessionId = 'native-authoritative';
   delete periods.today.sessions['claude:child-native'].parentClient;
+  delete periods.today.sessions['claude:child-native'].t3ParentLink;
   applyT3SessionParents(periods, s.home, { env: {} });
   assert.equal(periods.today.sessions['claude:child-native'].parentSessionId, 'native-authoritative');
   assert.equal(periods.today.sessions['claude:child-native'].parentClient, undefined);
@@ -929,6 +930,163 @@ for (const change of ['corrupt', 'locked', 'reassigned', 'parent removed', 'inco
   else assert.deepEqual(new Set(captured.revokedT3ThreadKeys), new Set([key, nativeKey]));
 });
 
+for (const [client, driver, change] of [
+  ['claude', 'claudeAgent', 'delete parent'],
+  ['codex', 'codex', 'delete parent'],
+  ['claude', 'acpRegistry', 'unreadable settings'],
+  ['claude', 'claudeAgent', 'replace with unaccounted parent'],
+  ['antigravity', 'antigravity', 'replace with unaccounted parent'],
+  ['codex', 'codex', 'delete parent with fresh native parent'],
+  ['codex', 'codex', 'delete child with fresh native parent'],
+  ['codex', 'codex', 'delete parent with unrelated unreadable ACP settings'],
+]) {
+  test(`retained ${client} delegation follows T3 evidence: ${change}`, async t => {
+    const { collectUsageOnce, localTodayKey } = require('../../src/shared/collector');
+    const s = store(t);
+    pair(s, driver, 'antigravity');
+    if (driver === 'acpRegistry') {
+      registry(s, { agent: { driver, config: { agentId: 'claude-acp' } } });
+      s.db.exec(`UPDATE orchestration_v2_projection_provider_threads SET payload_json =
+        json_set(payload_json, '$.providerInstanceId', 'agent') WHERE provider_thread_id = 'child-provider'`);
+    }
+    const key = `${client}:child-native`;
+    const keepLink = change === 'unreadable settings';
+    const unrelatedAcp = change.endsWith('unrelated unreadable ACP settings');
+    if (unrelatedAcp) {
+      s.thread('devin');
+      s.provider('devin-provider', 'devin', 'devin-native', 'acpRegistry', 'strong', 'other');
+      fs.writeFileSync(path.join(path.dirname(s.file), 'settings.json'), '{');
+    }
+    const childRemoved = change.startsWith('delete child');
+    const nativeParent = change.endsWith('fresh native parent') ? 'unaccounted-native-parent' : undefined;
+    let refreshed = false;
+    let captured;
+    const scan = () => ({ entries: [
+      ...(unrelatedAcp ? [{ client: 'devin', sessionId: 'devin-native', model: 'm', input: 10 }] : []),
+      { client: 'antigravity', sessionId: 'parent-native', model: 'm', input: 30 },
+      { client, sessionId: 'child-native', parentSessionId: refreshed ? nativeParent : undefined, model: 'm', input: 20 }
+    ] });
+    const options = { clients: [...new Set(['antigravity', client, ...(unrelatedAcp ? ['devin'] : [])])].join(','), homeDir: s.home, env: {}, osInfo: {},
+      historyEnabled: false, limitsEnabled: false, wslScanEnabled: false,
+      nativeRangesEnabled: true, allTimeSince: '2024-01-01',
+      onAnchorComputed: value => { captured = value; },
+      runTokscale: async () => scan(),
+      runTokscaleWindows: async ({ windows }) => Object.fromEntries(windows.map(({ name }) => [name, scan()])) };
+    const before = await collectUsageOnce(options);
+    assert.equal(before.month.sessions[key].parentSessionId, 'parent-native');
+    if (keepLink) {
+      fs.writeFileSync(path.join(path.dirname(s.file), 'settings.json'), '{');
+      assert.deepEqual(readT3SessionRelationResult(['child-native'], {
+        homeDir: s.home, env: {}, includeOwnershipStatus: true
+      }).incompleteNativeIds, new Set(['child-native']));
+    } else if (change === 'replace with unaccounted parent') {
+      s.thread('replacement');
+      s.provider('replacement-provider', 'replacement', 'unaccounted-t3-parent', 'antigravity');
+      s.db.exec(`UPDATE orchestration_v2_projection_threads SET payload_json =
+        json_set(payload_json, '$.lineage.parentThreadId', 'replacement') WHERE thread_id = 'child'`);
+      s.delegation('child-provider', 'replacement-provider', 'replacement', 'replacement');
+    } else {
+      s.db.prepare("UPDATE orchestration_v2_projection_threads SET deleted_at = '2026-11-25' WHERE thread_id = ?")
+        .run(childRemoved ? 'child' : 'parent');
+    }
+    refreshed = true;
+    const after = await collectUsageOnce({ ...options, todayOnlyAnchor: { dateKey: localTodayKey(),
+      today: before.today, month: before.month, allTime: before.allTime, todayPartitions: captured.todayPartitions,
+      sessionIdentityVersion: captured.sessionIdentityVersion, nativePastRanges: captured.nativePastRanges } });
+    assert.deepEqual(captured.revokedT3ThreadKeys, childRemoved ? [key] : change.startsWith('delete parent') ? ['antigravity:parent-native'] : []);
+    assert.deepEqual(captured.changedT3ThreadKeys, keepLink || childRemoved ? [] : [key]);
+    for (const name of ['today', 'month', 'allTime']) {
+      const row = after[name].sessions[key];
+      const retained = keepLink && name !== 'today';
+      assert.equal(row.t3ThreadId, childRemoved || (keepLink && !retained) ? undefined : 'child', name);
+      assert.equal(row.parentSessionId, retained ? 'parent-native' : nativeParent, name);
+      assert.equal(row.parentClient, retained ? 'antigravity' : undefined, name);
+      assert.equal(row.t3ParentLink, retained ? true : undefined, name);
+      assert.equal(row.totalTokens, 20, name);
+    }
+    for (const period of [after.nativeRanges.yesterday, captured.nativePastRanges.periods.yesterday]) {
+      assert.equal(period.sessions[key].parentSessionId, keepLink ? 'parent-native' : nativeParent);
+      assert.equal(period.sessions[key].totalTokens, 20);
+    }
+  });
+}
+
+
+test('a targeted tick cannot restore a cleared T3 parent from another client partition', async t => {
+  const { collectUsageOnce, localTodayKey } = require('../../src/shared/collector');
+  const s = store(t);
+  pair(s, 'claudeAgent', 'antigravity');
+  const key = 'claude:child-native';
+  const entries = [
+    { client: 'antigravity', sessionId: 'parent-native', model: 'm', input: 30 },
+    { client: 'claude', sessionId: 'child-native', model: 'm', input: 20 }
+  ];
+  const targets = [];
+  let captured;
+  const options = { clients: 'antigravity,claude', homeDir: s.home, env: {}, osInfo: {},
+    historyEnabled: false, limitsEnabled: false, wslScanEnabled: false,
+    onAnchorComputed: value => { captured = value; },
+    runTokscale: async ({ clients, flags }) => {
+      targets.push(clients);
+      const found = entries.filter(row => clients.split(',').includes(row.client));
+      if (flags.includes('--today')) return { entries: found };
+      return { entries: [
+        ...found.map(row => row.client === 'claude' ? { ...row, parentSessionId: 'native-parent' } : row),
+        { client: 'claude', sessionId: 'native-parent', model: 'm', input: 10 }
+      ] };
+    } };
+  const anchor = () => ({ ...captured.windowsPeriods, dateKey: localTodayKey(),
+    todayPartitions: captured.todayPartitions, sessionIdentityVersion: captured.sessionIdentityVersion });
+  await collectUsageOnce(options);
+  assert.equal(captured.todayPartitions.claude.sessions[key].parentSessionId, 'parent-native');
+  assert.equal(captured.windowsPeriods.month.sessions[key].parentSessionId, 'native-parent');
+  assert.equal(captured.windowsPeriods.allTime.sessions[key].parentSessionId, 'native-parent');
+  targets.length = 0;
+
+  s.db.exec("UPDATE orchestration_v2_projection_threads SET deleted_at = '2026-11-25' WHERE thread_id = 'parent'");
+  const tick = () => collectUsageOnce({ ...options, targetClients: ['antigravity'], todayOnlyAnchor: anchor() });
+  const first = await tick();
+  assert.equal(first.today.sessions[key].parentSessionId, undefined);
+  assert.equal(captured.todayPartitions.claude.sessions[key].t3ParentLink, undefined);
+  assert.equal(captured.todayPartitions.claude.sessions[key].parentSessionId, undefined);
+  assert.equal(first.month.sessions[key].parentSessionId, 'native-parent');
+  assert.equal(first.allTime.sessions[key].parentSessionId, 'native-parent');
+  assert.deepEqual(captured.changedT3ThreadKeys, [key]);
+
+  // The incomplete read permits retaining an old verified edge, but must not
+  // bring one back from the frozen Claude portion of the Today scan.
+  s.db.exec('DROP TABLE orchestration_v2_projection_nodes');
+  const second = await tick();
+  assert.deepEqual(targets, ['antigravity', 'antigravity']);
+  assert.equal(second.today.sessions[key].parentSessionId, undefined);
+  assert.equal(second.today.sessions[key].t3ThreadId, 'child');
+  assert.equal(second.today.sessions[key].totalTokens, 20);
+});
+
+test('unreadable ACP bindings make only the affected parent relationship incomplete', t => {
+  const s = store(t);
+  s.thread('parent');
+  s.thread('child', 'parent');
+  registry(s, { agent: { driver: 'acpRegistry', config: { agentId: 'claude-acp' } } });
+  s.provider('launch-provider', 'parent', 'parent-native', 'acpRegistry', 'strong', 'agent');
+  s.provider('child-provider', 'child', 'child-native');
+  s.delegation('child-provider', 'launch-provider', 'parent');
+  const periods = { today: extractUsageFromTokscale({ entries: [
+    { client: 'claude', sessionId: 'parent-native', model: 'm', input: 10 },
+    { client: 'codex', sessionId: 'child-native', model: 'm', input: 20 }
+  ] }) };
+  const row = periods.today.sessions['codex:child-native'];
+  applyT3SessionParents(periods, s.home, { env: {} });
+  assert.equal(row.parentSessionId, 'parent-native');
+
+  fs.writeFileSync(path.join(path.dirname(s.file), 'settings.json'), '{');
+  const result = readT3SessionRelationResult(['child-native'], { homeDir: s.home, env: {}, includeOwnershipStatus: true });
+  assert.equal(result.ownershipComplete, true);
+  assert.deepEqual(result.incompleteNativeIds, new Set());
+  assert.deepEqual(result.incompleteParentThreads, new Set(['child']));
+  applyT3SessionParents(periods, s.home, { env: {} });
+  assert.equal(row.parentSessionId, 'parent-native');
+});
 
 test('a saved Antigravity range gains the first verified T3 thread and parent', async t => {
   const { collectUsageOnce, localTodayKey } = require('../../src/shared/collector');
@@ -1044,4 +1202,27 @@ test('later store query failures discard partial facts without suppressing compl
   assert.equal(result.facts.get('claude:child-native').parentNativeId, 'parent-native', 'completed healthy store still supplies facts');
   errorCode = 6;
   assert.deepEqual(readT3SessionRelationResult(['child-native'], { ...deps, t3DbPaths: [copied, s.file] }), { facts: new Map(), status: 'retryable' }, 'later success cannot mask LOCKED');
+});
+
+test('built-in antigravity and kiro drivers group within T3 threads and across delegated tasks', t => {
+  const s = store(t);
+  s.thread('parent');
+  s.thread('child-kiro', 'parent');
+  s.provider('parent-agy', 'parent', '32964522-c967-4d55-9c35-eca7059ff0dd', 'antigravity');
+  s.provider('child-kiro-p', 'child-kiro', 'sess_50d40b40-c470-4fd3-8f5d-1a0c1f57cfce', 'kiro');
+  s.delegation('child-kiro-p', 'parent-agy', 'parent', 'k');
+  const periods = {
+    today: normalizePeriod({
+      sessions: {
+        a: { client: 'antigravity', sessionId: '32964522-c967-4d55-9c35-eca7059ff0dd', totalTokens: 100, costUsd: 1 },
+        k: { client: 'kiro', sessionId: 'sess_50d40b40-c470-4fd3-8f5d-1a0c1f57cfce', totalTokens: 50, costUsd: 0.5 }
+      }
+    })
+  };
+  applyT3SessionParents(periods, s.home, { env: {} });
+  const ss = periods.today.sessions;
+  assert.equal(ss['antigravity:32964522-c967-4d55-9c35-eca7059ff0dd'].t3ThreadId, 'parent');
+  assert.equal(ss['kiro:sess_50d40b40-c470-4fd3-8f5d-1a0c1f57cfce'].t3ThreadId, 'child-kiro');
+  assert.equal(ss['kiro:sess_50d40b40-c470-4fd3-8f5d-1a0c1f57cfce'].parentSessionId, '32964522-c967-4d55-9c35-eca7059ff0dd');
+  assert.equal(ss['kiro:sess_50d40b40-c470-4fd3-8f5d-1a0c1f57cfce'].parentClient, 'antigravity');
 });

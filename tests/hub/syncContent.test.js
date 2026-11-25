@@ -420,8 +420,8 @@ test('Node CLI: camel/kebab flags override server environment with explicit fals
         });
         break;
       } catch (error) {
-        // The child CLI reports its requested port, so port=0 cannot reveal its
-        // actual listener here. Retry only the bind race, with a bounded budget.
+        // Retry only the race between releasing the probe port and binding
+        // the child CLI, with a bounded budget.
         if (error.code !== 'EADDRINUSE' || attempt === 2) throw error;
       }
     }
