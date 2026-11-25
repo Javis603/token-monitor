@@ -1,9 +1,10 @@
 // @ts-check
 'use strict';
 
-const { normalizePeriod, stripSessionTextFromPeriod } = require('./usage');
+const { mergePeriods, normalizePeriod, stripSessionTextFromPeriod } = require('./usage');
 
 const FIXED_RANGE_NAMES = Object.freeze(['yesterday', 'week', 'last7', 'last30']);
+const DAILY_RANGE_DAYS = 31;
 const encoder = new TextEncoder();
 const DAY_MS = 86_400_000;
 const FIXED_RANGE_HEADER = 'x-token-monitor-fixed-ranges';
@@ -11,6 +12,7 @@ const FIXED_RANGE_VERSION = '1';
 const SYNC_WEEK_STARTS_ON = 1;
 const FIXED_RANGE_PAGE_BYTES = 512 * 1024;
 const MAX_FIXED_RANGE_PAGES = 32;
+const MAX_DAILY_RANGE_PAGES = 64;
 
 /** @typedef {Record<string, any>} JsonRecord */
 /** @typedef {[string, string, string, JsonRecord]} DetailRow */
@@ -38,6 +40,87 @@ function dateKey(value) {
   return Number.isFinite(date.getTime()) && date.toISOString().slice(0, 10) === value ? value : '';
 }
 
+/** @param {string} key @param {number} days */
+function shiftDay(key, days) {
+  return new Date(Date.parse(key) + days * DAY_MS).toISOString().slice(0, 10);
+}
+
+/** @param {string} name */
+function detailRangeName(name) {
+  return FIXED_RANGE_NAMES.includes(name) || Boolean(dateKey(name));
+}
+
+/**
+ * Dates themselves key daily entries, so overlap between requested periods
+ * does not require multiple copies of a session's contribution.
+ * @param {{ start: string, end: string }} window
+ */
+function dailyRangeKeys(window) {
+  const start = dateKey(window?.start);
+  const end = dateKey(window?.end);
+  const length = (Date.parse(end) - Date.parse(start)) / DAY_MS + 1;
+  if (!Number.isInteger(length) || length < 1 || length > DAILY_RANGE_DAYS) return [];
+  return Array.from({ length }, (_, i) => shiftDay(start, i));
+}
+
+/**
+ * Only a tracked-client removal needs the previous revision's rows on ingest.
+ * @param {JsonRecord | undefined} existing
+ * @param {JsonRecord} incoming
+ */
+function removedPagedClients(existing, incoming) {
+  if (!existing?.sessionDetailsOmitted || !existing.trackedClients || !Array.isArray(incoming.trackedClients)) return [];
+  const active = new Set(incoming.trackedClients);
+  return existing.trackedClients.filter((/** @type {string} */ client) => !active.has(client));
+}
+
+/**
+ * Lift only sessions that normal ingest will preserve as untracked usage.
+ * @param {JsonRecord} existing
+ * @param {JsonRecord} index
+ * @param {DetailRow[][]} pages
+ * @param {string[]} removed
+ */
+function restorePagedClientSessions(existing, index, pages, removed) {
+  const today = existing.periodWindows?.today?.key;
+  if (!today || !Object.hasOwn(index, today)) return existing;
+  const periods = { ...existing.periods };
+  const removedSet = new Set(removed);
+  for (const name of ['today', 'month']) {
+    if (!existing.sessionDetailsOmitted?.[name]) continue;
+    const start = name === 'month' ? today.slice(0, 7) + '-01' : today;
+    const slices = [];
+    for (const key of dailyRangeKeys({ start, end: today })) {
+      const range = index[key];
+      if (!range) continue;
+      const period = decodeFixedRangePeriod(index, pages.slice(range.firstPage, range.firstPage + range.pageCount), key);
+      if (period) slices.push({ sessions: Object.fromEntries(Object.entries(period.sessions)
+        .filter(([, session]) => removedSet.has(session.client))) });
+    }
+    const retained = mergePeriods(...slices).sessions;
+    periods[name] = { ...periods[name], sessions: { ...periods[name].sessions, ...retained } };
+  }
+  return { ...existing, periods };
+}
+
+/**
+ * Keep the accounted rows while invalidating cached titles and the old revision.
+ * @param {JsonRecord} snapshot
+ * @param {string | undefined} day
+ */
+function redactDailyRangeSnapshot(snapshot, day) {
+  if (!day || !Object.hasOwn(snapshot.ranges || {}, day) || !Array.isArray(snapshot.pages)) return null;
+  const pages = snapshot.pages.map(page => admitFixedRangePage(page));
+  if (pages.some(page => !page)) return null;
+  const { titleGeneration: _revoked, ...rest } = snapshot;
+  return {
+    ...rest,
+    pages,
+    revision: globalThis.crypto.randomUUID(),
+    retiredRevisions: [...(snapshot.retiredRevisions || []), snapshot.revision]
+  };
+}
+
 /**
  * Convert a device's scan to an upload index and bounded detail pages. The
  * index carries exact totals independently of how many pages the range needs.
@@ -52,9 +135,11 @@ function encodeFixedRangeSnapshot(record, { maxPageBytes, preserveSessionTitles 
   /** @type {DetailRow[]} */
   let page = [];
   let pageBytes = 2;
-  for (const name of FIXED_RANGE_NAMES) {
-    const window = record.nativeRangeWindows?.[name];
-    const period = record.nativeRanges?.[name];
+  const days = record.dailySessionPeriods;
+  const names = days ? Object.keys(days).sort() : FIXED_RANGE_NAMES;
+  for (const name of names) {
+    const window = days ? { start: name, end: name } : record.nativeRangeWindows?.[name];
+    const period = days ? days[name] : record.nativeRanges?.[name];
     const start = dateKey(window?.start);
     const end = dateKey(window?.end);
     if (!start || !end || end < start || !Number.isSafeInteger(period?.totalTokens)
@@ -102,7 +187,7 @@ function encodeFixedRangeSnapshot(record, { maxPageBytes, preserveSessionTitles 
  * @param {string} name
  */
 function decodeFixedRangePeriod(index, pages, name) {
-  if (!FIXED_RANGE_NAMES.includes(name) || !Object.hasOwn(index, name)) return null;
+  if (!detailRangeName(name) || !Object.hasOwn(index, name)) return null;
   const metadata = index[name];
   if (pages.length !== metadata.pageCount) return null;
   const details = { sessions: new Map(), projects: new Map() };
@@ -121,6 +206,36 @@ function decodeFixedRangePeriod(index, pages, name) {
   };
 }
 
+/**
+ * Project a daily publication into the four names understood by older readers.
+ * The compatibility pages are derived in memory, never stored alongside it.
+ * @param {JsonRecord} index
+ * @param {DetailRow[][]} pages
+ * @param {string} today
+ */
+function legacyFixedRangeView(index, pages, today) {
+  const yesterday = shiftDay(today, -1);
+  const weekday = new Date(today + 'T00:00:00Z').getUTCDay();
+  const windows = {
+    yesterday: { start: yesterday, end: yesterday },
+    week: { start: shiftDay(today, -((weekday - SYNC_WEEK_STARTS_ON + 7) % 7)), end: today },
+    last7: { start: shiftDay(today, -6), end: today },
+    last30: { start: shiftDay(today, -29), end: today }
+  };
+  /** @type {JsonRecord} */
+  const nativeRanges = {};
+  const decoded = Object.fromEntries(Object.entries(index).map(([key, range]) => [
+    key, decodeFixedRangePeriod(index, pages.slice(range.firstPage, range.firstPage + range.pageCount), key)
+  ]));
+  for (const [name, window] of Object.entries(windows)) {
+    const days = dailyRangeKeys(window);
+    if (days.length && days.every(key => decoded[key])) nativeRanges[name] = mergePeriods(...days.map(key => decoded[key]));
+  }
+  return encodeFixedRangeSnapshot({ nativeRanges, nativeRangeWindows: windows }, {
+    maxPageBytes: FIXED_RANGE_PAGE_BYTES, preserveSessionTitles: true
+  });
+}
+
 /** @param {unknown} value */
 function isObject(value) {
   return value !== null && typeof value === 'object' && !Array.isArray(value);
@@ -133,11 +248,14 @@ function isObject(value) {
  * @param {number} totalPages
  */
 function validFixedRangeIndex(ranges, totalPages) {
-  if (!isObject(ranges) || !Object.keys(ranges).length
-    || !Number.isInteger(totalPages) || totalPages < 0 || totalPages > MAX_FIXED_RANGE_PAGES
-    || Object.keys(ranges).some(name => !FIXED_RANGE_NAMES.includes(name))) return false;
+  if (!isObject(ranges)) return false;
+  const names = Object.keys(ranges);
+  const daily = names.every(name => Boolean(dateKey(name)));
+  if (!names.length || names.length > (daily ? DAILY_RANGE_DAYS : FIXED_RANGE_NAMES.length)
+    || !Number.isInteger(totalPages) || totalPages < 0 || totalPages > (daily ? MAX_DAILY_RANGE_PAGES : MAX_FIXED_RANGE_PAGES)
+    || (!daily && names.some(name => !FIXED_RANGE_NAMES.includes(name)))) return false;
   let nextPage = 0;
-  for (const name of FIXED_RANGE_NAMES) {
+  for (const name of daily ? names.sort() : FIXED_RANGE_NAMES) {
     if (!Object.hasOwn(ranges, name)) continue;
     const metadata = ranges[name];
     if (!isObject(metadata) || !dateKey(metadata.start) || !dateKey(metadata.end)
@@ -160,6 +278,11 @@ function rangesMatchDeviceDay(ranges, today) {
   const key = dateKey(today);
   if (!key) return false;
   const todayMs = Date.parse(key);
+  if (Object.keys(ranges).some(name => dateKey(name))) {
+    const days = dailyRangeKeys({ start: shiftDay(key, 1 - DAILY_RANGE_DAYS), end: key });
+    return Object.keys(ranges).length === days.length
+      && days.every(day => ranges[day]?.start === day && ranges[day].end === day);
+  }
   return Object.entries(ranges).every(([name, range]) => {
     const end = Date.parse(range.end);
     const start = Date.parse(range.start);
@@ -186,7 +309,7 @@ function admitFixedRangePage(value, { preserveSessionTitles = false, projectsEna
   for (const input of value) {
     if (!Array.isArray(input) || input.length !== 4) return null;
     const [name, rawKind, key, row] = input;
-    if (!FIXED_RANGE_NAMES.includes(name) || typeof key !== 'string' || !key || !isObject(row)) return null;
+    if (typeof name !== 'string' || !detailRangeName(name) || typeof key !== 'string' || !key || !isObject(row)) return null;
     if (rawKind !== 'sessions' && rawKind !== 'projects') return null;
     const kind = /** @type {'sessions' | 'projects'} */ (rawKind);
     if (kind === 'projects' && !projectsEnabled) return null;
@@ -218,6 +341,8 @@ function admitFixedRangeIndex(ranges, totalPages) {
 }
 
 module.exports = {
-  FIXED_RANGE_HEADER, FIXED_RANGE_VERSION, SYNC_WEEK_STARTS_ON, FIXED_RANGE_PAGE_BYTES, MAX_FIXED_RANGE_PAGES, encodeFixedRangeSnapshot, decodeFixedRangePeriod,
+  FIXED_RANGE_HEADER, FIXED_RANGE_VERSION, SYNC_WEEK_STARTS_ON, FIXED_RANGE_PAGE_BYTES, MAX_FIXED_RANGE_PAGES,
+  MAX_DAILY_RANGE_PAGES, DAILY_RANGE_DAYS, dailyRangeKeys, encodeFixedRangeSnapshot, decodeFixedRangePeriod, legacyFixedRangeView,
+  removedPagedClients, restorePagedClientSessions, redactDailyRangeSnapshot,
   admitFixedRangeIndex, admitFixedRangePage, rangesMatchDeviceDay, fixedRangeRowKey, compareFixedRangeRows
 };

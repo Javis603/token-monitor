@@ -723,8 +723,8 @@ function composeNativeRanges(pastRanges, today, { allTimeSince, wslAllTime, code
   return { nativeRanges, nativeRangeWindows };
 }
 
-function nativeRangePastDays(todayKey) {
-  return Array.from({ length: NATIVE_RANGE_PAST_DAYS }, (_, index) => dayKeyAddDays(todayKey, -(index + 1)));
+function nativeRangePastDays(todayKey, includeMonth = false) {
+  return Array.from({ length: NATIVE_RANGE_PAST_DAYS + Number(includeMonth) }, (_, index) => dayKeyAddDays(todayKey, -(index + 1)));
 }
 
 function nativeDayWindow(key) {
@@ -733,12 +733,12 @@ function nativeDayWindow(key) {
 
 // Today, Month and All Time for one windowed scan, plus each native-range day
 // when the caller shows native ranges (standalone Electron only).
-function fullTickWindows(todayKey, allTimeSince, includeDays) {
+function fullTickWindows(todayKey, allTimeSince, includeDays, includeMonth = false) {
   return [
     { name: 'today', since: todayKey, until: todayKey },
     { name: 'month', since: `${todayKey.slice(0, 7)}-01`, until: todayKey },
     { name: 'allTime', since: String(allTimeSince), until: '' },
-    ...(includeDays ? nativeRangePastDays(todayKey).map((key) => ({ name: nativeDayWindow(key), since: key, until: key })) : [])
+    ...(includeDays ? nativeRangePastDays(todayKey, includeMonth).map((key) => ({ name: nativeDayWindow(key), since: key, until: key })) : [])
   ];
 }
 
@@ -1291,7 +1291,7 @@ async function collectUsageOnce(options) {
   const runFullWindowsFn = async (clientsCsv) => {
     const todayKey = localTodayKey(collectedAt);
     if (!runTokscaleWindowsScan || !isTokscaleWindowDay(allTimeSince)) return null;
-    const windows = fullTickWindows(todayKey, allTimeSince, options.nativeRangesEnabled === true);
+    const windows = fullTickWindows(todayKey, allTimeSince, options.nativeRangesEnabled === true, options.dailySessionSyncEnabled === true);
     const includesCursor = cursorSnapshot && normalizeClientsCsv(clientsCsv).split(',').includes('cursor');
     const scanClients = includesCursor ? withoutCursor(clientsCsv) : clientsCsv;
     const reports = scanClients
@@ -1310,11 +1310,12 @@ async function collectUsageOnce(options) {
     // The days only feed native ranges. A missing one (an older Cursor
     // snapshot, say) leaves those ranges on their History fallback instead of
     // failing the periods every surface shows.
-    for (const key of result.daysComplete ? nativeRangePastDays(todayKey) : []) {
+    for (const key of result.daysComplete ? nativeRangePastDays(todayKey, options.dailySessionSyncEnabled === true) : []) {
       const name = nativeDayWindow(key);
       const cursorDay = includesCursor ? cursorSnapshot.days?.[name] : undefined;
       if (!Array.isArray(reports[name]?.entries) || (includesCursor && !cursorDay)) {
-        result.daysComplete = false;
+        // The extra Month boundary is optional for the four legacy ranges.
+        if (key >= dayKeyAddDays(todayKey, -NATIVE_RANGE_PAST_DAYS)) result.daysComplete = false;
         continue;
       }
       result.days[key] = finishScanJson(reports[name], name, includesCursor, cursorDay);
@@ -1863,6 +1864,19 @@ async function collectUsageOnce(options) {
       ? { nativeRangeDays: Object.fromEntries(Object.entries(nativeDays).map(([key, period]) => [key, { sessions: period.sessions }])) }
       : {})
   };
+  if (options.dailySessionSyncEnabled === true && nativeRangeSnapshot) {
+    const past = nativeDays || anchor?.dailySessionPastDays;
+    const dayKeys = nativeRangePastDays(todayKey, true);
+    if (past && dayKeys.every(key => Object.hasOwn(past, key))
+      && String(allTimeSince) <= dayKeys[dayKeys.length - 1]) {
+      const days = Object.fromEntries(dayKeys.map(key => [key, {
+        ...past[key],
+        sessions: Object.fromEntries(Object.entries(past[key].sessions).map(([id, row]) => [id, { ...row }]))
+      }]));
+      propagateTodayProjects(allTime, days, { ...localSessionMetadataDeps, projectsFromToday: true });
+      summary.dailySessionPeriods = { ...days, [todayKey]: today };
+    }
+  }
   // The request ledger is this source's archive. A second per-session archive
   // would resurrect its contribution after a native rollout takes precedence.
   if (codexLocalView) summary.codexLocalSessionKeys = codexLocalView.sessionKeys;
@@ -1922,7 +1936,8 @@ async function collectUsageOnce(options) {
         nativePastRanges: { ...nativePastRanges, codexDotsUsage: codexLocalView ? codexDotsUsage : undefined }
       } : {}),
       ...(summary.nativeSessions ? { nativeSessions: summary.nativeSessions } : {}),
-      ...(summary.nativeProjects ? { nativeProjects: summary.nativeProjects } : {})
+      ...(summary.nativeProjects ? { nativeProjects: summary.nativeProjects } : {}),
+      ...(options.dailySessionSyncEnabled === true && nativeDays ? { dailySessionPastDays: nativeDays } : {})
     });
   }
   assertCollectionCalendar();
@@ -2501,7 +2516,7 @@ function startCollector(options) {
       // windowed scan also supplies the native-range days; an injected or
       // older scanner keeps the three serial scans and no days.
       const windows = !options.runTokscale && isTokscaleWindowDay(allTimeSince) && isTokscaleWindowDay(context.day)
-        ? fullTickWindows(context.day, allTimeSince, options.nativeRangesEnabled === true)
+        ? fullTickWindows(context.day, allTimeSince, options.nativeRangesEnabled === true, options.dailySessionSyncEnabled === true)
         : null;
       const reports = windows
         ? await runTokscaleWindows({ ...input, windows, commandTimeoutMs: allTimeScanTimeoutMs(options) })
@@ -2975,6 +2990,7 @@ function startCollector(options) {
           ...(captured.nativeSessions ? { nativeSessions: captured.nativeSessions } : {}),
           ...(captured.nativeProjects ? { nativeProjects: captured.nativeProjects } : {}),
           ...(captured.nativePastRanges ? { nativePastRanges: captured.nativePastRanges } : {}),
+          ...(captured.dailySessionPastDays ? { dailySessionPastDays: captured.dailySessionPastDays } : {}),
           ...(cursorSnapshotKey ? { cursorSnapshotKey } : {})
         };
         wslAnchor = captured.wslBundle;

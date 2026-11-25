@@ -1421,6 +1421,15 @@ function normalizeRecordHistoryFields(record, nowIso = new Date().toISOString())
   return fields;
 }
 
+// History recovery follows an already accepted usage publication. It must
+// never reprocess that record's usage rows or their admitted titles.
+function restoreDeviceHistory(record, incoming) {
+  if (!record || !hasOwn(incoming, 'history') || record.historyAvailable === false) return record;
+  const { history } = normalizeRecordHistoryFields({ history: incoming.history });
+  if (!history?.summary?.activeDaysComplete || !Array.isArray(history.dailyTotals)) return record;
+  return { ...record, history };
+}
+
 // `options.normalizePeriod` lets a caller that sees the same period object in
 // several records reuse its normalization. It must return what normalizePeriod
 // would, and whatever it returns is read, never mutated.
@@ -2436,6 +2445,7 @@ module.exports = {
   applyProjectRollups,
   canonicalProjectKey,
   carryDeviceHistory,
+  restoreDeviceHistory,
   emptyPeriod,
   extractUsageBundleFromTokscale,
   extractUsageFromTokscale,

@@ -1,6 +1,6 @@
 'use strict';
 
-const { addPeriodInto, emptyPeriod, normalizePeriod } = require('../shared/usage');
+const { addPeriodInto, emptyPeriod, isPeriodExpired, mergePeriods, normalizePeriod } = require('../shared/usage');
 const {
   deviceDayState, fixedPeriodSnapshotFromDevices, rangeForSelection
 } = require('./renderer/fixedPeriodRanges');
@@ -115,6 +115,31 @@ async function resolveSyncedFixedPeriod(selection, devices, revisions, options) 
   };
 }
 
+async function resolveSyncedSessionPeriod(selection, devices, revisions, options) {
+  let incomplete = false;
+  const rows = await Promise.all(devices.filter(device => !isPeriodExpired(device, selection, options.now)).map(async device => {
+    const inline = device.periods?.[selection];
+    const omitted = device.sessionDetailsOmitted?.[selection] > 0;
+    if (!omitted) return { ...device, [selection]: inline };
+    const day = device.periodWindows?.today?.key;
+    const revision = Object.hasOwn(revisions, device.deviceId) && revisions[device.deviceId];
+    let paged;
+    if (day && revision) {
+      const start = selection === 'month' ? day.slice(0, 7) + '-01' : day;
+      try { paged = await options.read(device.deviceId, selection, { start, end: day }, revision); }
+      catch (_) { /* retain the inline rows when pages are temporarily unavailable */ }
+    }
+    if (!paged) incomplete = true;
+    return { ...device, [selection]: paged ? { ...inline, sessions: { ...paged.sessions, ...inline?.sessions } } : inline };
+  }));
+  const period = mergePeriods(...rows.map(row => row[selection]));
+  const sessions = projectSessionDeviceSessions(period.sessions, rows, [selection]);
+  for (const [key, session] of Object.entries(sessions)) {
+    if (!session.sourceDevice) sessions[key] = { ...session, sourceDevice: { ambiguous: true } };
+  }
+  return { period: { ...period, sessions }, detailsAvailable: !incomplete, devices: [] };
+}
+
 function historyFallbackForDevices(selection, devices, histories, options) {
   const byId = new Map(histories.map(source => [source.deviceId, source]));
   const sources = devices.map(device => {
@@ -130,4 +155,4 @@ function historyFallbackForDevices(selection, devices, histories, options) {
   return snapshot.status === 'ready' ? snapshot.devices : null;
 }
 
-module.exports = { createFixedRangeReadCache, resolveSyncedFixedPeriod, historyFallbackForDevices };
+module.exports = { createFixedRangeReadCache, resolveSyncedFixedPeriod, resolveSyncedSessionPeriod, historyFallbackForDevices };

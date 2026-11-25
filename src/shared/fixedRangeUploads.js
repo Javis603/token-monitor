@@ -2,7 +2,7 @@
 'use strict';
 
 const { applyStatsPatch } = require('./hubDelta');
-const { admitFixedRangeIndex, admitFixedRangePage, decodeFixedRangePeriod, MAX_FIXED_RANGE_PAGES, rangesMatchDeviceDay, fixedRangeRowKey, compareFixedRangeRows } = require('./fixedRangeSync');
+const { admitFixedRangeIndex, admitFixedRangePage, decodeFixedRangePeriod, MAX_DAILY_RANGE_PAGES, rangesMatchDeviceDay, fixedRangeRowKey, compareFixedRangeRows } = require('./fixedRangeSync');
 
 /** @typedef {Record<string, any>} JsonRecord */
 const MAX_STAGED_UPLOADS = 4;
@@ -89,9 +89,22 @@ function applyFixedRangePageDelta(delta, baseRows) {
  */
 function fixedRangeRequestPages(payload) {
   if (payload?.pages === undefined) return [payload];
-  if (!Array.isArray(payload.pages) || payload.pages.length < 2 || payload.pages.length > MAX_FIXED_RANGE_PAGES) return null;
+  if (payload.firstPage !== undefined) {
+    const { firstPage, revision, observedAt, sessionTitleSyncGeneration, baseRevision, pages } = payload;
+    if (!Array.isArray(pages) || !pages.length || !Number.isSafeInteger(firstPage) || firstPage < 0
+      || firstPage + pages.length > MAX_DAILY_RANGE_PAGES) return null;
+    const expanded = pages.map((entry, offset) => {
+      if (Number.isSafeInteger(entry) && entry >= 0 && typeof baseRevision === 'string') {
+        entry = { delta: { baseRevision, basePage: entry, upsert: [], remove: [] } };
+      }
+      if (!entry || typeof entry !== 'object' || Array.isArray(entry)) return null;
+      return { ...entry, page: firstPage + offset, revision, observedAt, sessionTitleSyncGeneration };
+    });
+    return expanded.every(Boolean) ? expanded : null;
+  }
+  if (!Array.isArray(payload.pages) || payload.pages.length < 2 || payload.pages.length > MAX_DAILY_RANGE_PAGES) return null;
   const [first] = payload.pages;
-  if (!Number.isSafeInteger(first?.page) || first.page < 0 || first.page + payload.pages.length > MAX_FIXED_RANGE_PAGES) return null;
+  if (!Number.isSafeInteger(first?.page) || first.page < 0 || first.page + payload.pages.length > MAX_DAILY_RANGE_PAGES) return null;
   return payload.pages.every((page, offset) => page?.page === first.page + offset
     && page.revision === first.revision && page.observedAt === first.observedAt
     && page.sessionTitleSyncGeneration === first.sessionTitleSyncGeneration) ? payload.pages : null;

@@ -3703,8 +3703,13 @@ function sessionPresentationOptions() {
   };
 }
 
+function displayedSessions(periodKey, period = state.stats?.periods?.[periodKey]) {
+  const paged = periodKey === state.period ? syncedSessionPeriod() : null;
+  return paged?.period.sessions ?? period?.sessions;
+}
+
 function rawSessionRowsForPeriod(period, options = sessionPresentationOptions()) {
-  return sessionRowsApi.sessionRowsForPeriod(period, options);
+  return sessionRowsApi.sessionRowsForPeriod({ ...period, sessions: displayedSessions(state.period, period) }, options);
 }
 
 const sessionRowLabelCache = {};
@@ -5745,7 +5750,7 @@ function sessionLiveStatsEntry(request) {
   const periodKey = request.period || state.period;
   return request.client === 'reasonix'
     ? state.stats?.nativeSessions?.[periodKey]?.[request.sessionId] || null
-    : state.stats?.periods?.[periodKey]?.sessions?.[`${request.client}:${request.sessionId}`] || null;
+    : displayedSessions(periodKey)?.[`${request.client}:${request.sessionId}`] || null;
 }
 
 function sessionLiveCost(entry, client) {
@@ -5950,7 +5955,7 @@ function sessionDetailTitle() {
   const period = request?.period || state.period;
   const session = request?.client === 'reasonix'
     ? state.stats?.nativeSessions?.[period]?.[request.sessionId]
-    : state.stats?.periods?.[period]?.sessions?.[`${request?.client}:${request?.sessionId}`];
+    : displayedSessions(period)?.[`${request?.client}:${request?.sessionId}`];
   return sessionRowsApi.sessionTitleForDisplay({
     client: request?.client, title: session?.title || request?.title
   });
@@ -6668,9 +6673,15 @@ function canRenderNativeDevices() {
 
 function syncedFixedPeriodKey() {
   const stats = state.stats;
-  const revisions = Object.entries(stats?.fixedRangeRevisions || {}).sort();
-  if (state.settings?.hubMode === 'local' || (!revisions.length && !stats?.localFixedRangeRevision) || !stats?.snapshot
-    || !fixedPeriodRangesApi.isDerived(state.period)) return '';
+  const revisionMap = stats?.fixedRangeRevisions || {};
+  const revisions = Object.entries(revisionMap).sort();
+  if (state.settings?.hubMode === 'local' || (!revisions.length && !stats?.localFixedRangeRevision) || !stats?.snapshot) return '';
+  if (!fixedPeriodRangesApi.isDerived(state.period)) {
+    if (!needsPagedSessions()) return '';
+    const canReadPages = stats.devices?.some(device => device.sessionDetailsOmitted?.[state.period] > 0
+      && device.periodWindows?.today?.key && Object.hasOwn(revisionMap, device.deviceId) && revisionMap[device.deviceId]);
+    if (!canReadPages) return '';
+  }
   // A fallback device can update live Today without a range or History revision.
   const deviceObservations = (stats.devices || []).map(device => [
     device.deviceId, device.updatedAt, fixedPeriodRangesApi.deviceDayState(device)?.currentKey || ''
@@ -6680,6 +6691,24 @@ function syncedFixedPeriodKey() {
     stats.localFixedRangeRevision, stats.deviceHistoryRevision, state.settings?.historyEnabled, state.settings?.sessionTitlesEnabled,
     state.settings?.modelAliases, state.settings?.modelAliasGrouping
   ]);
+}
+
+function needsPagedSessions() {
+  return state.breakdown === 'session' && (state.period === 'today' || state.period === 'month')
+    && state.stats?.sessionDetailsOmitted?.[state.period] > 0;
+}
+
+function syncedSessionPeriod() {
+  if (!needsPagedSessions()) return null;
+  const request = state.syncedFixedPeriod;
+  return request?.key === syncedFixedPeriodKey() ? request.snapshot : null;
+}
+
+function pagedSessionsPending() {
+  const key = needsPagedSessions() && syncedFixedPeriodKey();
+  if (!key || !window.tokenMonitor.getSyncedFixedPeriod) return false;
+  const request = state.syncedFixedPeriod;
+  return request?.key !== key || request.pending || Number.isFinite(request.retryAt);
 }
 
 function requestSyncedFixedPeriod() {
@@ -8775,6 +8804,7 @@ function renderAppContent({ fromSearch = false } = {}) {
     showFixedPeriod(state.fixedPeriodSnapshot);
   } else {
     state.fixedPeriodSnapshot = null;
+    if (needsPagedSessions()) requestSyncedFixedPeriod();
   }
   if (state.openSession && state.breakdown !== 'session') { state.openSession = null; els.sessionDetail.classList.add('hidden'); rendererDom.clear(els.sessionDetail); els.sessionDetailHead.classList.add('hidden'); rendererDom.clear(els.sessionDetailHead); }
   if (state.openSession) { els.sessionDetail.classList.remove('hidden'); els.sessionDetailHead.classList.remove('hidden'); } else { els.sessionDetail.classList.add('hidden'); els.sessionDetailHead.classList.add('hidden'); }
@@ -8875,8 +8905,11 @@ function renderAppContent({ fromSearch = false } = {}) {
     els.breakdown.classList.add('hidden');
     if (state.openSession.kind === 'session-group') {
       const latest = sessionRowsForPeriod(period).find((row) => row.key === state.openSession.summary.key);
-      if (!latest) { closeSessionDetail(); return; }
-      state.openSession.summary = latest;
+      if (!latest && !pagedSessionsPending()) {
+        closeSessionDetail();
+        return;
+      }
+      if (latest) state.openSession.summary = latest;
       // Update group readings while retaining the controls being read.
       renderSessionGroupDetail(state.openSession);
     }
@@ -8900,7 +8933,8 @@ function renderAppContent({ fromSearch = false } = {}) {
     let incompleteHint = '';
     if (state.breakdown === 'project' && projectRowsApi.projectBreakdownIncomplete(state.stats, state.period)) {
       incompleteHint = 'projects.incomplete';
-    } else if (state.breakdown === 'session' && sessionRowsApi.sessionBreakdownIncomplete(state.stats, state.period)) {
+    } else if (state.breakdown === 'session' && !syncedSessionPeriod()?.detailsAvailable
+      && sessionRowsApi.sessionBreakdownIncomplete(state.stats, state.period)) {
       incompleteHint = 'sessions.incomplete';
     }
     renderRows(rows, { incompleteHint, fromSearch });
@@ -15776,8 +15810,8 @@ function followOpenSessionToPeriod() {
     if (state.openSession.kind === 'session-group') {
       const period = state.stats?.periods?.[state.period];
       const summary = sessionRowsForPeriod(period).find((row) => row.key === state.openSession.summary.key);
-      if (summary) {
-        state.openSession = { kind: 'session-group', period: state.period, summary };
+      if (summary || pagedSessionsPending()) {
+        state.openSession = { kind: 'session-group', period: state.period, summary: summary || state.openSession.summary };
       } else {
         state.openSession = null;
       }
@@ -15905,10 +15939,9 @@ els.breakdown.addEventListener('click', (event) => {
   const match = key.match(/^session:([^:]+):(.+)$/);
   if (!match) return;
   const sessionId = client === 'reasonix' ? `reasonix:${match[2]}` : match[2];
-  const period = state.stats?.periods?.[state.period];
   const session = client === 'reasonix'
     ? state.stats?.nativeSessions?.[state.period]?.[sessionId]
-    : period?.sessions?.[`${client}:${sessionId}`];
+    : displayedSessions(state.period)?.[`${client}:${sessionId}`];
   const { sourceDevice, sessionDetailHeading } = window.TokenMonitorDomReconcile.data(rowEl) || {};
   openSessionDetail({
     client,

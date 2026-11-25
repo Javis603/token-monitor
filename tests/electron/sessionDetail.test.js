@@ -67,6 +67,7 @@ test('session detail renders its heading before loading, errors and empty result
   let render;
   const context = {
     rendererDom,
+    displayedSessions: key => state.stats?.periods?.[key]?.sessions,
     els, state, document: { createElement: element, querySelectorAll: () => [els.sessionDetailHead.querySelector('.detail-heading')].filter(Boolean) }, window: { addEventListener() {} }, t: (key, params) => translate('en', key, params),
     sessionDetailBack() { state.backClicked = true; },
     detailNote: text => ({ textContent: text }),
@@ -455,6 +456,7 @@ function sessionDetailHarness(getSessionDetail) {
   const context = {
     rendererDom,
     state,
+    displayedSessions: key => state.stats?.periods?.[key]?.sessions,
     sessionRowsApi: require('../../src/electron/renderer/sessionRows'),
     visibleStatsSurface: () => 'main',
     isRendererWindowHidden: () => false,
