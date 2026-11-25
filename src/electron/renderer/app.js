@@ -6657,6 +6657,10 @@ function currentNativeRangeSnapshot(period = state.period) {
   });
 }
 
+function canRenderNativeDevices() {
+  return state.breakdown === 'device' && Boolean(currentNativeRangeSnapshot());
+}
+
 function buildFixedPeriodSnapshot() {
   if (!fixedPeriodRangesApi.isDerived(state.period)) return { status: 'native', period: null };
   const native = currentNativeRangeSnapshot();
@@ -8970,6 +8974,7 @@ async function refreshStats(options = {}) {
     applyCodexActiveAccountFromStats();
     const forceFixedPeriodHistory = options.forceHistory === true;
     if (fixedPeriodRangesApi.isDerived(state.period)) {
+      if (canRenderNativeDevices()) statsRenderScheduler.request();
       await warmFixedPeriodHistory({
         force: forceFixedPeriodHistory,
         retryFailed: forceFixedPeriodHistory,
@@ -17008,6 +17013,7 @@ window.tokenMonitor.onStatsPush?.((payload) => {
       // fetched; repaint once with the coherent snapshot instead of flashing an
       // intermediate loading layout.
       if (fixedPeriodHistoryNeedsWarmup()) {
+        if (canRenderNativeDevices()) statsRenderScheduler.request();
         void warmFixedPeriodHistory({ renderOnComplete: true });
       } else {
         statsRenderScheduler.request();

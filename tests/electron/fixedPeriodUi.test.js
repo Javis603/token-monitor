@@ -127,3 +127,36 @@ test('a pending local scan shows loading copy for missing range details', () => 
   assert.equal(context.fixedPeriodMessage(ready, 'session'), 'periodRange.sessionUnavailable');
   assert.equal(context.fixedPeriodMessage(ready, 'project'), 'periodRange.projectUnavailable');
 });
+
+test('refresh renders native Devices before the pending History read completes', async () => {
+  const source = read('app.js');
+  const state = { period: 'last7', breakdown: 'device' };
+  const stats = { nativeRangeWindows: { last7: {} } };
+  let resolveHistory;
+  const history = new Promise(resolve => { resolveHistory = resolve; });
+  let rendered = 0;
+  const context = {
+    state,
+    window: { tokenMonitor: { getStats: async () => stats } },
+    observeLiveTokenRate() {},
+    observeDisplayLiveTokenRates() {},
+    allTimeSessions: { invalidate() {}, attach: value => value },
+    sessionStatsForDisplay: value => value,
+    applyCodexActiveAccountFromStats() {},
+    currentNativeRangeSnapshot: () => state.stats === stats,
+    fixedPeriodRangesApi: { isDerived: () => true },
+    statsRenderScheduler: { request() { rendered++; } },
+    warmFixedPeriodHistory: () => history,
+    maybeUpdateBarsIcon() {}
+  };
+  const gate = source.match(/function canRenderNativeDevices\(\) \{[^}]+\}/)?.[0];
+  if (gate) vm.runInNewContext(gate, context);
+  vm.runInNewContext(source.slice(source.indexOf('async function refreshStats('),
+    source.indexOf('async function refreshStatusViewManually(')), context);
+  const refresh = context.refreshStats();
+  await new Promise(setImmediate);
+  assert.equal(rendered, 1);
+  resolveHistory();
+  await refresh;
+  assert.equal(rendered, 2);
+});
