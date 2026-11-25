@@ -7,7 +7,7 @@ const path = require('node:path');
 // a strong native reference must still match an existing session exactly.
 const DRIVER_CLIENTS = Object.freeze({
   codex: 'codex', claudeAgent: 'claude', cursor: 'cursor',
-  opencode: 'opencode', grok: 'grok', muse: 'muse'
+  opencode: 'opencode', grok: 'grok', muse: 'muse', antigravity: 'antigravity'
 });
 const REGISTRY_CLIENTS = Object.freeze({
   'codex-acp': 'codex', 'claude-acp': 'claude', cursor: 'cursor',
