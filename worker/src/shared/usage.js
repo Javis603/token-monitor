@@ -189,6 +189,8 @@ function applyParentLink(target, source) {
   const parentSessionId = normalizeParentSessionId(source.parentSessionId ?? source.parent_session_id, target.sessionId, parentClient, target.client);
   if (!parentSessionId) return;
   target.parentSessionId = parentSessionId;
+  if (target.client === 'antigravity' && source.t3ParentLink === true) target.t3ParentLink = true;
+  else delete target.t3ParentLink;
   if (parentClient !== target.client) target.parentClient = parentClient;
   else delete target.parentClient;
 }
@@ -1681,6 +1683,7 @@ function mergeDeviceRecord(existing, incoming) {
   }
   if (incoming?.limitsOnly === true) {
     normalizedIncoming.periods = normalizedExisting.periods;
+    normalizedIncoming.updatedAt = normalizedExisting.updatedAt;
     delete normalizedIncoming.allTimeTokensUnavailable;
     if (normalizedExisting.allTimeTokensUnavailable === true) normalizedIncoming.allTimeTokensUnavailable = true;
     // The three attribution fields describe the usage this branch is carrying
@@ -2398,6 +2401,7 @@ function deltaValue(base, fresh, anchor, key) {
 
       delete result.parentSessionId;
       delete result.parentClient;
+      delete result.t3ParentLink;
       applyParentLink(result, base?.parentSessionId ? base : fresh || {});
       const freshModelAt = timestampMs(fresh?.lastUsedAt);
       const retainedModelAt = timestampMs(base?.lastUsedAt);

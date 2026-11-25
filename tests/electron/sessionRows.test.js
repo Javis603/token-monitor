@@ -16,6 +16,7 @@ const {
   sessionBreakdownIncomplete,
   sessionIdLabel,
   sessionDetailIdLabel,
+  sessionListRows,
   sessionModelTooltipEntries,
   sessionRowsForPeriod
 } = require('../../src/electron/renderer/sessionRows');
@@ -79,6 +80,35 @@ test('archived usage joins only matching active native state while retaining its
 
 const clientLabels = { claude: 'Claude Code', codex: 'Codex' };
 const clientColors = { claude: '#cc7c5e', codex: '#49a3b0', default: '#6ab4f0' };
+
+test('session rows prefer the title, then the project name, and refresh cached project labels', () => {
+  const rowLabelCache = {};
+  const session = { client: 'antigravity', sessionId: 'conversation', totalTokens: 100, messageCount: 2,
+    models: { 'gemini-pro': 60, 'gemini-flash': 40 } };
+  const row = (metadata) => sessionListRows(sessionRowsForPeriod({
+    sessions: { 'antigravity:conversation': { ...session, ...metadata } }
+  }, { rowLabelCache, clientLabels: { antigravity: 'Antigravity' } }))[0];
+
+  assert.equal(row({ title: 'Add session titles', projectLabel: 'Token Monitor' }).name, 'Add session titles');
+  const fallback = row({ title: ' ', projectLabel: 'Token Monitor' });
+  assert.equal(fallback.name, 'Token Monitor');
+  assert.equal(fallback.subtitle, 'Antigravity · 2 models');
+  assert.equal(fallback.activity, '2 calls');
+  assert.equal(fallback.sessionDetailHeading, 'Antigravity · 2 models');
+  assert.equal(row({ title: ' ', projectLabel: 'Renamed project' }).name, 'Renamed project');
+  assert.equal(row({ title: ' ' }).name, 'Antigravity · 2 models');
+});
+
+test('project names leave the subagent summary and member headings alone', () => {
+  const parent = { client: 'codex', sessionId: 'parent', projectLabel: 'Token Monitor', totalTokens: 100,
+    models: { 'gpt-5': 100 } };
+  const child = { ...parent, sessionId: 'child', parentSessionId: 'parent' };
+  const [summary] = sessionListRows(sessionRowsForPeriod({
+    sessions: { 'codex:parent': parent, 'codex:child': child }
+  }, { clientLabels }));
+  assert.equal(summary.name, 'Codex · gpt-5');
+  assert.deepEqual(summary.groupRows.map(row => row.name), ['Codex · gpt-5', 'Codex · gpt-5']);
+});
 
 function localIso(year, month, day, hour, minute) {
   return new Date(year, month - 1, day, hour, minute).toISOString();

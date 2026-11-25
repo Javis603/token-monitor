@@ -85,6 +85,142 @@ test('ACP agent identity comes from its configured instance, with mixed-provider
   assert.equal(ss['devin:bird-notebook'].parentSessionId, 'like-paperback', 'visible main provider switch is a proven parent');
 });
 
+test('T3 Antigravity ACP displays its thread title and groups same-thread runs and delegated usage', t => {
+  const s = store(t);
+  const main = '1349661f-2212-4dae-b0b5-000000000001';
+  const second = '1349661f-2212-4dae-b0b5-000000000002';
+  s.thread('parent');
+  s.thread('child', 'parent');
+  s.thread('unverified');
+  s.provider('launch-provider', 'parent', main, 'antigravity');
+  s.db.exec(`CREATE TABLE orchestration_v2_projection_run_attempts (
+    thread_id TEXT, provider_thread_id TEXT, root_node_id TEXT, status TEXT, payload_json TEXT)`);
+  s.db.prepare('INSERT INTO orchestration_v2_projection_nodes VALUES (?, ?, ?, ?, ?)')
+    .run('old-root', 'parent', 'old-root', 'root_turn', 'launch-provider');
+  s.db.prepare('INSERT INTO orchestration_v2_projection_run_attempts VALUES (?, ?, ?, ?, ?)')
+    .run('parent', 'launch-provider', 'old-root', 'superseded', JSON.stringify({ nativeThreadId: second }));
+  s.provider('child-provider', 'child', 'child-native', 'claudeAgent');
+  s.provider('weak-provider', 'unverified', 'weak-id', 'antigravity', 'weak');
+  s.provider('wrong-provider', 'unverified', 'wrong-id', 'codex');
+  s.delegation('child-provider', 'launch-provider', 'parent');
+  s.db.exec("UPDATE orchestration_v2_projection_threads SET title = 'T3 ACP title' WHERE thread_id = 'parent'");
+  s.db.exec("UPDATE orchestration_v2_projection_threads SET title = 'Wrong title' WHERE thread_id = 'unverified'");
+  const nativeDir = path.join(s.home, '.gemini', 'antigravity');
+  fs.mkdirSync(nativeDir, { recursive: true });
+  const catalog = new sqlite.DatabaseSync(path.join(nativeDir, 'conversation_summaries.db'));
+  try {
+    catalog.exec('CREATE TABLE conversation_summaries (conversation_id TEXT PRIMARY KEY, title TEXT, preview TEXT, workspace_uris TEXT)');
+    catalog.prepare('INSERT INTO conversation_summaries VALUES (?, ?, NULL, ?)').run(
+      main, 'Native Antigravity title', JSON.stringify([require('node:url').pathToFileURL(s.home).href]));
+  } finally {
+    catalog.close();
+  }
+  const makeRow = (client, sessionId, value) => ({ client, sessionId, totalTokens: value, costUsd: value / 10 });
+  const periods = { today: normalizePeriod({ sessions: {
+    a: makeRow('antigravity', main, 10),
+    b: makeRow('antigravity', second, 20),
+    c: makeRow('claude', 'child-native', 30),
+    d: makeRow('antigravity', 'weak-id', 40),
+    e: makeRow('antigravity', 'wrong-id', 50)
+  } }) };
+  const deps = { env: {}, metadataCache: new Map(), catalogProjectRows: new WeakSet(), catalogProjects: { today: {} } };
+  applySessionMetadata(periods, s.home, deps);
+  const sessions = periods.today.sessions;
+  const launch = sessions[`antigravity:${main}`];
+  assert.equal(launch.title, 'T3 ACP title');
+  assert.ok(launch.projectId);
+  const projectId = launch.projectId;
+  const catalogTitleSource = deps.metadataCache.get(`antigravity:${main}`).catalogTitleSource;
+  const nativeDb = path.join(nativeDir, 'conversation_summaries.db');
+  const otherDir = path.join(s.home, '.gemini', 'antigravity-ide');
+  fs.mkdirSync(otherDir, { recursive: true });
+  fs.copyFileSync(nativeDb, path.join(otherDir, 'conversation_summaries.db'));
+  const otherCatalog = new sqlite.DatabaseSync(path.join(otherDir, 'conversation_summaries.db'));
+  try { otherCatalog.exec('UPDATE conversation_summaries SET title = NULL, workspace_uris = NULL'); } finally { otherCatalog.close(); }
+  fs.renameSync(nativeDb, nativeDb + '.moved');
+  const coldDeps = { env: {}, metadataCache: new Map(), antigravityTitleCache: new Map(),
+    t3Titles: { [`antigravity:${main}`]: launch.title },
+    catalogTitleSources: { [`antigravity:${main}`]: catalogTitleSource },
+    catalogProjects: { today: { [`antigravity:${main}`]: projectId } } };
+  applySessionMetadata(periods, s.home, coldDeps);
+  assert.equal(coldDeps.metadataCache.get(`antigravity:${main}`).catalogProjectResolved, undefined);
+  fs.renameSync(nativeDb + '.moved', nativeDb);
+  assert.equal(launch.t3ThreadId, 'parent');
+  assert.equal(sessions[`antigravity:${second}`].t3ThreadId, 'parent');
+  assert.equal(sessions[`antigravity:${second}`].title, 'T3 ACP title', 'historical runs share the verified thread title');
+  assert.equal(sessions['claude:child-native'].parentClient, 'antigravity');
+  assert.equal(sessions['claude:child-native'].parentSessionId, main);
+  for (const id of ['weak-id', 'wrong-id']) {
+    assert.equal(sessions[`antigravity:${id}`].title, '');
+    assert.equal(sessions[`antigravity:${id}`].t3ThreadId, undefined);
+  }
+  const { sessionRowsForPeriod, groupSessionRows } = require('../../src/electron/renderer/sessionRows');
+  const group = groupSessionRows(sessionRowsForPeriod(periods.today)).find(row => row.groupRows?.length === 3);
+  assert.equal(group?.subagentCount, 1);
+  assert.equal(group?.value, 60);
+  assert.equal(group?.cost, 6);
+
+  s.db.exec("UPDATE orchestration_v2_projection_threads SET title = 'Renamed T3 ACP title' WHERE thread_id = 'parent'");
+  applySessionMetadata(periods, s.home, deps);
+  assert.equal(launch.title, 'Renamed T3 ACP title');
+  const unrelated = store(t);
+  applySessionMetadata(periods, s.home, { ...deps, t3DbPaths: [unrelated.file] });
+  assert.equal(launch.title, 'Renamed T3 ACP title', 'a miss in another store does not revoke the cached title');
+  s.db.exec("UPDATE orchestration_v2_projection_threads SET title = 'New thread' WHERE thread_id = 'parent'");
+  applySessionMetadata(periods, s.home, deps);
+  assert.equal(launch.title, 'Native Antigravity title', 'the T3 placeholder does not replace the native title');
+  s.db.exec("UPDATE orchestration_v2_projection_threads SET title = 'Renamed T3 ACP title' WHERE thread_id = 'parent'");
+  applySessionMetadata(periods, s.home, deps);
+  assert.equal(launch.title, 'Renamed T3 ACP title');
+  const strength = s.db.prepare("UPDATE orchestration_v2_projection_provider_threads SET payload_json = json_set(payload_json, '$.nativeThreadRef.strength', ?) WHERE provider_thread_id = 'launch-provider'");
+  strength.run('weak');
+  applySessionMetadata(periods, s.home, deps);
+  assert.equal(launch.title, 'Native Antigravity title');
+  strength.run('strong');
+  applySessionMetadata(periods, s.home, deps);
+  assert.equal(launch.title, 'Renamed T3 ACP title');
+  s.thread('ambiguous');
+  s.provider('ambiguous-provider', 'ambiguous', second, 'antigravity');
+  s.db.exec("UPDATE orchestration_v2_projection_threads SET title = 'Conflicting title' WHERE thread_id = 'ambiguous'");
+  applySessionMetadata(periods, s.home, deps);
+  assert.equal(sessions[`antigravity:${second}`].title, undefined, 'a current claim conflicting with a historical run clears the override');
+  const native = new sqlite.DatabaseSync(path.join(nativeDir, 'conversation_summaries.db'));
+  try { native.exec('DELETE FROM conversation_summaries'); } finally { native.close(); }
+  applySessionMetadata(periods, s.home, deps);
+  assert.equal(launch.title, 'Renamed T3 ACP title');
+  assert.equal(launch.projectId, undefined);
+  assert.equal(deps.catalogProjects.today[`antigravity:${main}`], undefined);
+});
+
+for (const schema of [
+  'DROP TABLE orchestration_v2_projection_nodes',
+  'CREATE TABLE orchestration_v2_projection_run_attempts (thread_id TEXT)'
+]) test(`incomplete T3 ownership retains the cached Antigravity title: ${schema}`, t => {
+  const s = store(t);
+  s.thread('thread');
+  s.provider('provider', 'thread', 'conversation', 'antigravity');
+  s.db.exec("UPDATE orchestration_v2_projection_threads SET title = 'T3 title'");
+  const key = 'antigravity:conversation';
+  const periods = () => ({ today: normalizePeriod({ sessions: {
+    [key]: { client: 'antigravity', sessionId: 'conversation', totalTokens: 10 }
+  } }) });
+  const deps = { env: {}, metadataCache: new Map() };
+  const before = periods();
+  applySessionMetadata(before, s.home, deps);
+  assert.equal(before.today.sessions[key].title, 'T3 title');
+  s.db.exec(schema + '; DELETE FROM orchestration_v2_projection_provider_threads');
+  const incomplete = periods();
+  applySessionMetadata(incomplete, s.home, deps);
+  assert.equal(incomplete.today.sessions[key].title, 'T3 title', 'a missing historical schema makes absence inconclusive');
+  assert.equal(deps.metadataCache.get(key).t3ThreadRevoked, undefined);
+  s.provider('provider', 'thread', 'conversation', 'antigravity');
+  s.db.exec('ALTER TABLE orchestration_v2_projection_threads DROP COLUMN title');
+  const after = periods();
+  applySessionMetadata(after, s.home, deps);
+  assert.equal(after.today.sessions[key].title, '');
+  assert.equal(after.today.sessions[key].t3ThreadId, 'thread');
+});
+
 for (const driver of ['cursor', 'opencode', 'grok', 'muse']) {
   test(`T3 ${driver} uses shared delegation without changing the accounting client`, t => {
     const s = store(t); pair(s, driver, driver);
@@ -719,6 +855,113 @@ test('anchored SQLite metadata preserves the resolvable Month parent pair across
   assert.equal(groups.length, 1); assert.equal(groups[0].groupRows.length, 2);
 });
 
+for (const change of ['corrupt', 'locked', 'reassigned', 'parent removed', 'incomplete delegation schema']) test(`an Antigravity relationship change refreshes retained grouping: ${change}`, async t => {
+  const { collectUsageOnce, localTodayKey } = require('../../src/shared/collector');
+  const s = store(t);
+  const key = 'antigravity:acp-conversation';
+  const nativeKey = 'antigravity:native-child';
+  s.thread('parent');
+  s.thread('original', 'parent');
+  s.thread('native', 'parent');
+  s.provider('parent-provider', 'parent', 'acp-parent', 'antigravity');
+  s.provider('original-provider', 'original', 'acp-conversation', 'antigravity');
+  s.provider('native-provider', 'native', 'native-child', 'antigravity');
+  s.delegation('original-provider', 'parent-provider', 'parent');
+  let captured;
+  const options = { clients: 'antigravity', homeDir: s.home, env: {}, osInfo: {},
+    historyEnabled: false, limitsEnabled: false, wslScanEnabled: false,
+    onAnchorComputed: value => { captured = value; },
+    runTokscale: async () => ({ entries: [
+      { client: 'antigravity', sessionId: 'acp-parent', model: 'm', input: 30 },
+      { client: 'antigravity', sessionId: 'new-parent', model: 'm', input: 15 },
+      { client: 'antigravity', sessionId: 'acp-conversation', model: 'm', input: 20 },
+      { client: 'antigravity', sessionId: 'native-child', parentSessionId: 'acp-parent', model: 'm', input: 10 }
+    ] }) };
+  const full = await collectUsageOnce(options);
+  assert.equal(full.month.sessions[key].t3ThreadId, 'original');
+  assert.equal(full.month.sessions[key].parentSessionId, 'acp-parent');
+  assert.equal(full.month.sessions[nativeKey].parentSessionId, 'acp-parent');
+  const parentRemoved = change === 'parent removed';
+  const incomplete = change === 'incomplete delegation schema';
+  if (!parentRemoved && !incomplete) {
+    s.thread('competing');
+    s.provider('competing-provider', 'competing', 'acp-conversation', 'antigravity');
+    s.provider('competing-native-provider', 'competing', 'native-child', 'antigravity');
+  }
+  const legacyPath = path.join(path.dirname(s.file), 'state.sqlite');
+  const reassigned = change === 'reassigned';
+  let legacy;
+  let next;
+  try {
+    if (reassigned) {
+      s.db.exec("UPDATE orchestration_v2_projection_threads SET deleted_at = '2026-11-25' WHERE thread_id IN ('original', 'native')");
+      s.thread('new-parent-thread');
+      s.provider('new-parent-provider', 'new-parent-thread', 'new-parent', 'antigravity');
+      s.db.exec(`UPDATE orchestration_v2_projection_threads SET payload_json =
+        json_set(payload_json, '$.lineage.parentThreadId', 'new-parent-thread', '$.lineage.relationshipToParent', 'subagent')
+        WHERE thread_id = 'competing'`);
+      s.delegation('competing-provider', 'new-parent-provider', 'new-parent-thread');
+    } else if (change === 'locked') {
+      legacy = new sqlite.DatabaseSync(legacyPath);
+      legacy.exec('CREATE TABLE legacy (id TEXT); BEGIN EXCLUSIVE');
+    } else if (parentRemoved) {
+      s.db.exec("UPDATE orchestration_v2_projection_threads SET deleted_at = '2026-11-25' WHERE thread_id = 'parent'");
+    } else if (incomplete) {
+      s.db.exec('DROP TABLE orchestration_v2_projection_nodes');
+    } else {
+      fs.writeFileSync(legacyPath, 'corrupt unrelated legacy store');
+    }
+    next = await collectUsageOnce({ ...options, todayOnlyAnchor: { dateKey: localTodayKey(),
+      today: full.today, month: full.month, allTime: full.allTime, todayPartitions: captured.todayPartitions,
+      sessionIdentityVersion: captured.sessionIdentityVersion } });
+  } finally {
+    legacy?.close();
+  }
+  for (const name of ['today', 'month', 'allTime']) {
+    assert.equal(next[name].sessions[key].t3ThreadId, reassigned ? 'competing' : parentRemoved || incomplete ? 'original' : undefined);
+    assert.equal(next[name].sessions[key].parentSessionId, reassigned ? 'new-parent' : incomplete && name !== 'today' ? 'acp-parent' : undefined);
+    assert.equal(next[name].sessions[nativeKey].parentSessionId, 'acp-parent');
+    assert.equal(next[name].sessions[key].totalTokens, 20);
+  }
+  if (reassigned) assert.deepEqual(new Set(captured.changedT3ThreadKeys), new Set([key, nativeKey, 'antigravity:new-parent']));
+  else if (parentRemoved) assert.deepEqual(captured.changedT3ThreadKeys, [key]);
+  else if (incomplete) assert.deepEqual(captured.changedT3ThreadKeys, []);
+  else assert.deepEqual(new Set(captured.revokedT3ThreadKeys), new Set([key, nativeKey]));
+});
+
+
+test('a saved Antigravity range gains the first verified T3 thread and parent', async t => {
+  const { collectUsageOnce, localTodayKey } = require('../../src/shared/collector');
+  const s = store(t);
+  const key = 'antigravity:child-native';
+  let captured;
+  const options = { clients: 'antigravity', homeDir: s.home, env: {}, osInfo: {},
+    allTimeSince: '2024-01-01', historyEnabled: false, limitsEnabled: false, wslScanEnabled: false,
+    nativeRangesEnabled: true,
+    onAnchorComputed: value => { captured = value; },
+    runTokscale: async () => ({ entries: ['parent-native', 'parent-local', 'child-native'].map(sessionId =>
+      ({ client: 'antigravity', sessionId, model: 'm', input: 20 })) }) };
+  const full = await collectUsageOnce(options);
+  assert.equal(full.month.sessions[key].t3ThreadId, undefined);
+  const todayKey = localTodayKey();
+  const date = new Date(todayKey);
+  const daysAgo = days => new Date(date.getTime() - days * 86400000).toISOString().slice(0, 10);
+  const starts = { yesterday: daysAgo(1), week: daysAgo((date.getUTCDay() + 6) % 7), last7: daysAgo(6), last30: daysAgo(29) };
+  const nativePastRanges = { todayKey, weekStartsOn: 1, starts,
+    periods: Object.fromEntries(Object.keys(starts).map(name => [name, extractUsageFromTokscale({ entries: ['parent-local', 'child-native'].map(sessionId =>
+      ({ client: 'antigravity', sessionId, model: 'm', input: 20 })) })])) };
+  pair(s, 'antigravity', 'antigravity');
+  s.provider('parent-local-provider', 'parent', 'parent-local', 'antigravity');
+  const next = await collectUsageOnce({ ...options, todayOnlyAnchor: { dateKey: todayKey,
+    today: full.today, month: full.month, allTime: full.allTime, todayPartitions: captured.todayPartitions,
+    sessionIdentityVersion: captured.sessionIdentityVersion, nativePastRanges } });
+  assert.equal(next.allTime.sessions[key].parentSessionId, 'parent-native');
+  for (const range of [next.nativeRanges.yesterday, captured.nativePastRanges.periods.yesterday]) {
+    assert.equal(range.sessions[key].t3ThreadId, 'child');
+    assert.equal(range.sessions[key].parentSessionId, 'parent-local');
+    assert.equal(range.totalTokens, 40);
+  }
+});
 
 test('relationship queries retain every requested child across the 400-ID query boundary', t => {
   const s = store(t);
@@ -767,6 +1010,8 @@ test('relationship read status distinguishes legal emptiness from retryable and 
   const unsupported = new sqlite.DatabaseSync(emptyPath);
   unsupported.exec('CREATE TABLE unrelated (id TEXT)'); unsupported.close();
   assert.equal(read({ t3DbPaths: [emptyPath] }).status, 'unavailable');
+  assert.equal(read({ includeOwnershipStatus: true }).ownershipComplete, true);
+  assert.equal(read({ includeOwnershipStatus: true, t3DbPaths: [s.file, emptyPath] }).ownershipComplete, false);
   const corrupt = path.join(s.home, 'corrupt.sqlite');
   fs.writeFileSync(corrupt, 'not sqlite');
   assert.equal(read({ t3DbPaths: [corrupt] }).status, 'unavailable');

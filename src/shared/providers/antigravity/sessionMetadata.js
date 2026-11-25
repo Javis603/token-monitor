@@ -7,6 +7,7 @@ const { fileURLToPath } = require('node:url');
 const { antigravityDataRoots } = require('./selfSync');
 const { discoverAntigravityAcpPaths } = require('./acpPaths');
 const { antigravityCliDataDir } = require('../../clientSources');
+const { readT3SessionRelationResult } = require('../../t3SessionMetadata');
 
 // Deferred like cursor: importing this resolver must not emit Node's
 // experimental node:sqlite warning for collectors that never see an Antigravity row.
@@ -163,14 +164,22 @@ function resolveSessionMetadata(sessionIds, context = {}) {
   });
   const cache = context.deps?.antigravityTitleCache || titleCache;
   const unresolved = new Set();
+  const unresolvedNativeSources = new Set();
   const priorities = new Map();
+  const sourceFor = key => context.metadata?.get(key)?.catalogTitleSource || context.deps?.catalogTitleSources?.[key];
+  const nativeSourceFor = key => {
+    const source = sourceFor(key);
+    return typeof source === 'string' ? source : source?.native;
+  };
 
   for (const dbPath of candidates) {
     const stamp = databaseStamp(dbPath);
     let cached = cache.get(dbPath);
     if (!stamp) {
       for (const id of sessionIds) {
-        if (cached || stamp === null || context.deps?.catalogTitleSources?.[`antigravity:${id}`] === dbPath) unresolved.add(id);
+        const previouslySelected = nativeSourceFor(`antigravity:${id}`) === dbPath;
+        if (previouslySelected) unresolvedNativeSources.add(id);
+        if (cached || stamp === null || previouslySelected) unresolved.add(id);
       }
       if (!cached) continue;
     }
@@ -199,7 +208,10 @@ function resolveSessionMetadata(sessionIds, context = {}) {
     cache.set(dbPath, cached);
 
     for (const id of wanted) {
-      if (stamp && !cached.validatedIds.has(id) && !cached.misses.has(id)) unresolved.add(id);
+      if (stamp && !cached.validatedIds.has(id) && !cached.misses.has(id)) {
+        unresolved.add(id);
+        if (nativeSourceFor(`antigravity:${id}`) === dbPath) unresolvedNativeSources.add(id);
+      }
     }
 
     for (const sessionId of sessionIds) {
@@ -208,7 +220,7 @@ function resolveSessionMetadata(sessionIds, context = {}) {
       if (!row) continue;
       const title = cleanTitle(row?.title) || cleanTitle(row?.preview) || cleanTitle(row?.agent_name);
       const key = `antigravity:${sessionId}`;
-      const selectedSource = context.metadata?.get(key)?.catalogTitleSource || context.deps?.catalogTitleSources?.[key];
+      const selectedSource = nativeSourceFor(key);
       const validated = stamp && cached.validatedIds.has(sessionId);
       // Candidate order regains priority only with a validated row. If both
       // reads are stale, keep the source that last supplied the chosen value.
@@ -232,14 +244,23 @@ function resolveSessionMetadata(sessionIds, context = {}) {
     }
   }
 
+  const { facts: t3Relations, status: t3Status, completedStores, ambiguous, ownershipComplete } = readT3SessionRelationResult(sessionIds, {
+    ...context.deps,
+    includeAntigravityTitles: true,
+    includeOwnershipStatus: true,
+    homeDir: home,
+    useEnvRoot: !context.deps?.scopedHome
+  });
   for (const sessionId of sessionIds) {
     const key = `antigravity:${sessionId}`;
     const previous = context.metadata?.get(key);
     const anchored = context.deps?.t3Titles?.[key];
     const retained = previous && Object.prototype.hasOwnProperty.call(previous, 'catalogTitle')
       ? previous.catalogTitle : anchored;
+    const previousT3Store = sourceFor(key)?.t3;
     const hasAnchoredProject = Boolean(context.deps?.catalogProjects?.today?.[key]);
-    if (result.get(sessionId)?.catalogTitle === null && unresolved.has(sessionId) && retained) {
+    if (result.get(sessionId)?.catalogTitle === null && unresolved.has(sessionId) && retained
+      && !previousT3Store) {
       const meta = result.get(sessionId);
       meta.catalogTitle = retained;
       meta.title = retained;
@@ -259,10 +280,36 @@ function resolveSessionMetadata(sessionIds, context = {}) {
           if (cached?.misses.has(sessionId)) cached.summaries.set(sessionId, null);
         }
         result.set(sessionId, { catalogOnly: true, catalogTitle: null, catalogProjectResolved: true });
-      } else if (typeof retained === 'string' && retained) {
+      } else if (typeof retained === 'string' && retained && !previousT3Store) {
         result.set(sessionId, { catalogOnly: true, catalogTitle: retained, title: retained });
       } else if (retained === null) result.set(sessionId, { catalogOnly: true, catalogTitle: null });
       else if (hasAnchoredProject) result.set(sessionId, { catalogOnly: true });
+    }
+    const nativeMeta = result.get(sessionId);
+    const previousNativeSource = nativeSourceFor(key);
+    if (nativeMeta && previousNativeSource && unresolvedNativeSources.has(sessionId) && !nativeMeta.projectId
+      && nativeMeta.catalogTitleSource !== previousNativeSource) {
+      delete nativeMeta.catalogProjectResolved;
+      nativeMeta.catalogTitleSource = previousNativeSource;
+    }
+    const previousT3Title = previousT3Store ? retained : null;
+    const match = t3Relations.get(key);
+    const retainT3Title = previousT3Title && !ambiguous?.has(key)
+      && (t3Status === 'retryable' || (match?.titleStore !== previousT3Store && !completedStores?.has(previousT3Store)));
+    const t3Title = match?.title || (retainT3Title ? previousT3Title : null);
+    if (t3Title) {
+      result.set(sessionId, {
+        ...nativeMeta,
+        catalogOnly: true,
+        catalogTitle: t3Title,
+        catalogTitleSource: { native: nativeMeta?.catalogTitleSource || nativeSourceFor(key), t3: match?.title ? match.titleStore : previousT3Store },
+        title: t3Title
+      });
+    } else if (previousT3Title && !nativeMeta?.title) {
+      result.set(sessionId, { ...nativeMeta, catalogOnly: true, catalogTitle: null });
+    }
+    if (ambiguous?.has(key) || (ownershipComplete && !match && (!previousT3Store || completedStores?.has(previousT3Store)))) {
+      result.set(sessionId, { catalogOnly: true, ...result.get(sessionId), t3ThreadRevoked: true });
     }
     const meta = result.get(sessionId);
     if (meta && previous && Object.prototype.hasOwnProperty.call(previous, 'titleFallback')) meta.titleFallback = previous.titleFallback;
