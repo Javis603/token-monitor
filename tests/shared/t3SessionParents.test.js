@@ -930,33 +930,75 @@ for (const change of ['corrupt', 'locked', 'reassigned', 'parent removed', 'inco
   else assert.deepEqual(new Set(captured.revokedT3ThreadKeys), new Set([key, nativeKey]));
 });
 
-for (const [client, driver] of [['claude', 'claudeAgent'], ['codex', 'codex']]) {
-  test(`an Antigravity parent deletion refreshes retained ${client} delegation`, async t => {
+for (const [client, driver, change] of [
+  ['claude', 'claudeAgent', 'delete parent'],
+  ['codex', 'codex', 'delete parent'],
+  ['claude', 'acpRegistry', 'unreadable settings'],
+  ['claude', 'claudeAgent', 'replace with unaccounted parent'],
+  ['antigravity', 'antigravity', 'replace with unaccounted parent'],
+  ['codex', 'codex', 'delete parent with fresh native parent'],
+  ['codex', 'codex', 'delete child with fresh native parent'],
+]) {
+  test(`retained ${client} delegation follows T3 evidence: ${change}`, async t => {
     const { collectUsageOnce, localTodayKey } = require('../../src/shared/collector');
     const s = store(t);
     pair(s, driver, 'antigravity');
+    if (driver === 'acpRegistry') {
+      registry(s, { agent: { driver, config: { agentId: 'claude-acp' } } });
+      s.db.exec(`UPDATE orchestration_v2_projection_provider_threads SET payload_json =
+        json_set(payload_json, '$.providerInstanceId', 'agent') WHERE provider_thread_id = 'child-provider'`);
+    }
     const key = `${client}:child-native`;
+    const keepLink = change === 'unreadable settings';
+    const childRemoved = change.startsWith('delete child');
+    const nativeParent = change.endsWith('fresh native parent') ? 'unaccounted-native-parent' : undefined;
+    let refreshed = false;
     let captured;
-    const options = { clients: `antigravity,${client}`, homeDir: s.home, env: {}, osInfo: {},
+    const scan = () => ({ entries: [
+      { client: 'antigravity', sessionId: 'parent-native', model: 'm', input: 30 },
+      { client, sessionId: 'child-native', parentSessionId: refreshed ? nativeParent : undefined, model: 'm', input: 20 }
+    ] });
+    const options = { clients: [...new Set(['antigravity', client])].join(','), homeDir: s.home, env: {}, osInfo: {},
       historyEnabled: false, limitsEnabled: false, wslScanEnabled: false,
+      nativeRangesEnabled: true, allTimeSince: '2024-01-01',
       onAnchorComputed: value => { captured = value; },
-      runTokscale: async () => ({ entries: [
-        { client: 'antigravity', sessionId: 'parent-native', model: 'm', input: 30 },
-        { client, sessionId: 'child-native', model: 'm', input: 20 }
-      ] }) };
+      runTokscale: async () => scan(),
+      runTokscaleWindows: async ({ windows }) => Object.fromEntries(windows.map(({ name }) => [name, scan()])) };
     const before = await collectUsageOnce(options);
     assert.equal(before.month.sessions[key].parentSessionId, 'parent-native');
-    s.db.exec("UPDATE orchestration_v2_projection_threads SET deleted_at = '2026-11-25' WHERE thread_id = 'parent'");
+    if (keepLink) {
+      fs.writeFileSync(path.join(path.dirname(s.file), 'settings.json'), '{');
+      assert.equal(readT3SessionRelationResult(['child-native'], {
+        homeDir: s.home, env: {}, includeOwnershipStatus: true
+      }).ownershipComplete, false);
+    } else if (change === 'replace with unaccounted parent') {
+      s.thread('replacement');
+      s.provider('replacement-provider', 'replacement', 'unaccounted-t3-parent', 'antigravity');
+      s.db.exec(`UPDATE orchestration_v2_projection_threads SET payload_json =
+        json_set(payload_json, '$.lineage.parentThreadId', 'replacement') WHERE thread_id = 'child'`);
+      s.delegation('child-provider', 'replacement-provider', 'replacement', 'replacement');
+    } else {
+      s.db.prepare("UPDATE orchestration_v2_projection_threads SET deleted_at = '2026-11-25' WHERE thread_id = ?")
+        .run(childRemoved ? 'child' : 'parent');
+    }
+    refreshed = true;
     const after = await collectUsageOnce({ ...options, todayOnlyAnchor: { dateKey: localTodayKey(),
       today: before.today, month: before.month, allTime: before.allTime, todayPartitions: captured.todayPartitions,
-      sessionIdentityVersion: captured.sessionIdentityVersion } });
-    assert.deepEqual(captured.changedT3ThreadKeys, [key]);
+      sessionIdentityVersion: captured.sessionIdentityVersion, nativePastRanges: captured.nativePastRanges } });
+    assert.deepEqual(captured.revokedT3ThreadKeys, childRemoved ? [key] : change.startsWith('delete parent') ? ['antigravity:parent-native'] : []);
+    assert.deepEqual(captured.changedT3ThreadKeys, keepLink || childRemoved ? [] : [key]);
     for (const name of ['today', 'month', 'allTime']) {
       const row = after[name].sessions[key];
-      assert.equal(row.t3ThreadId, 'child');
-      assert.equal(row.parentSessionId, undefined);
-      assert.equal(row.parentClient, undefined);
-      assert.equal(row.totalTokens, 20);
+      const retained = keepLink && name !== 'today';
+      assert.equal(row.t3ThreadId, childRemoved || (keepLink && !retained) ? undefined : 'child', name);
+      assert.equal(row.parentSessionId, retained ? 'parent-native' : nativeParent, name);
+      assert.equal(row.parentClient, retained ? 'antigravity' : undefined, name);
+      assert.equal(row.t3ParentLink, retained ? true : undefined, name);
+      assert.equal(row.totalTokens, 20, name);
+    }
+    for (const period of [after.nativeRanges.yesterday, captured.nativePastRanges.periods.yesterday]) {
+      assert.equal(period.sessions[key].parentSessionId, keepLink ? 'parent-native' : nativeParent);
+      assert.equal(period.sessions[key].totalTokens, 20);
     }
   });
 }

@@ -469,7 +469,14 @@ function applyT3SessionParents(periods, home = os.homedir(), deps = {}, targets,
         fallback ||= index([...Object.values(evidencePeriods || {}), ...Object.values(periods || {})]);
         parent = fallback.native.get(key) || fallback.app.get(link.parentThreadId);
       }
-      if (!parent || (parent.client === session.client && parent.sessionId === session.sessionId)) continue;
+      if (!parent || (parent.client === session.client && parent.sessionId === session.sessionId)) {
+        if (ownershipComplete && session.t3ParentLink) {
+          delete session.parentSessionId;
+          delete session.parentClient;
+          delete session.t3ParentLink;
+        }
+        continue;
+      }
       session.parentSessionId = parent.sessionId;
       if (parent.client !== session.client) session.parentClient = parent.client;
       else delete session.parentClient;

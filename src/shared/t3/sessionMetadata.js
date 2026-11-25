@@ -262,7 +262,12 @@ function readT3SessionRelationResult(nativeIds, deps = {}) {
         }
         continue;
       }
-      const bindings = readT3IdentityBindings(file);
+      let bindingsUnavailable = false;
+      const bindings = readT3IdentityBindings(file, () => { bindingsUnavailable = true; });
+      const accountingClient = (driver, instanceId) => {
+        if (driver === 'acpRegistry' && bindingsUnavailable) ownershipIncomplete = true;
+        return t3AccountingClient(driver, instanceId, bindings);
+      };
       const instance = alias => {
         const payloadId = `json_extract(${json(alias)}, '$.providerInstanceId')`;
         return columns.p.has('provider_instance_id')
@@ -273,7 +278,7 @@ function readT3SessionRelationResult(nativeIds, deps = {}) {
       const titleColumn = readTitle ? ', t.title AS title' : '';
       const strong = `${native('p', 'driver')} = p.driver AND ${native('p', 'strength')} = 'strong'`;
       const add = row => {
-        const client = t3AccountingClient(row.driver, row.instanceId, bindings);
+        const client = accountingClient(row.driver, row.instanceId);
         const id = nativeAccountingId(client, row.nativeId, row.historical);
         const threadId = cleanText(row.threadId);
         if (!client || !id || !threadId || (!requested.has(id)
@@ -363,7 +368,7 @@ function readT3SessionRelationResult(nativeIds, deps = {}) {
             AND ${native('pp', 'driver')} = pp.driver AND ${native('pp', 'strength')} = 'strong'
             AND cp.thread_id IN (${chunk.map(() => '?').join(',')})`;
         for (const row of db.prepare(sql).all(...chunk)) {
-          const parentClient = t3AccountingClient(row.parentDriver, row.parentInstanceId, bindings);
+          const parentClient = accountingClient(row.parentDriver, row.parentInstanceId);
           const parentNativeId = nativeAccountingId(parentClient, row.parentId);
           if (!parentClient || !parentNativeId || row.childThreadId === row.parentThreadId) continue;
           const link = { parentThreadId: row.parentThreadId, parentClient, parentNativeId };

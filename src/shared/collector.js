@@ -1005,11 +1005,12 @@ function t3SessionLinksChanged(session, resolved) {
         || Boolean(session.t3ParentLink) !== Boolean(resolved.t3ParentLink)))));
 }
 
-function refreshT3SessionLinks(session, resolved) {
-  if (!t3SessionLinksChanged(session, resolved)) return;
+function refreshT3SessionLinks(session, resolved, revoked = false) {
+  if (!revoked && !t3SessionLinksChanged(session, resolved)) return;
+  const hadT3Parent = session.t3ParentLink;
   revokeT3SessionLinks(session);
-  session.t3ThreadId = resolved.t3ThreadId;
-  if (session.parentSessionId || !resolved?.parentSessionId) return;
+  if (!revoked) session.t3ThreadId = resolved.t3ThreadId;
+  if (session.parentSessionId || !resolved?.parentSessionId || (revoked && (!hadT3Parent || resolved.t3ParentLink))) return;
   session.parentSessionId = resolved.parentSessionId;
   if (resolved.parentClient) session.parentClient = resolved.parentClient;
   if (resolved.t3ParentLink) session.t3ParentLink = true;
@@ -1569,24 +1570,35 @@ async function collectUsageOnce(options) {
       sessionIdentitiesComplete = applyT3SessionParents({ today, month, allTime }, options.homeDir || os.homedir(), localSessionMetadataDeps, targets);
       // A verified conflict can revoke a link even when another store is locked.
       for (const key of Object.keys(today.sessions || {})) {
+        const currentToday = today.sessions[key];
         const metadata = localSessionMetadataDeps.metadataCache.get(key);
-        if (!metadata?.t3ThreadRevoked && !localSessionMetadataDeps.revokedT3ThreadKeys.has(key)) {
-          const savedToday = anchor.today?.sessions?.[key];
-          const currentToday = today.sessions[key];
-          if (supportsT3SessionClient(currentToday.client)
-            && ((savedToday && currentToday.t3ThreadId && savedToday.t3ThreadId !== currentToday.t3ThreadId)
-            || [[anchor.month, month], [anchor.allTime, allTime]].some(([saved, current]) => {
-              const retained = saved?.sessions?.[key];
-              return retained && t3SessionLinksChanged(retained, current.sessions?.[key]);
-            }))) localSessionMetadataDeps.changedT3ThreadKeys.add(key);
-          continue;
+        const revoked = metadata?.t3ThreadRevoked || localSessionMetadataDeps.revokedT3ThreadKeys.has(key);
+        if (revoked) {
+          for (const period of [today, month, allTime, ...Object.values(todayPartitions)]) {
+            const retained = period.sessions?.[key];
+            if (!retained?.t3ThreadId && !retained?.t3ParentLink) continue;
+            revokeT3SessionLinks(retained);
+            localSessionMetadataDeps.revokedT3ThreadKeys.add(key);
+          }
         }
-        for (const period of [today, month, allTime, ...Object.values(todayPartitions)]) {
-          const retained = period.sessions?.[key];
-          if (!retained?.t3ThreadId && !retained?.t3ParentLink) continue;
-          revokeT3SessionLinks(retained);
-          localSessionMetadataDeps.revokedT3ThreadKeys.add(key);
+        const broader = [[anchor.month, month], [anchor.allTime, allTime]];
+        // A period-local T3 alias can keep its place while it is verified.
+        // If reconciliation removed it, fall back to the native observation.
+        if (currentToday.parentSessionId && !currentToday.t3ParentLink) {
+          for (const [saved, current] of broader) {
+            const retained = current.sessions?.[key];
+            if (!saved?.sessions?.[key]?.t3ParentLink || !retained || retained.parentSessionId) continue;
+            retained.parentSessionId = currentToday.parentSessionId;
+            if (currentToday.parentClient) retained.parentClient = currentToday.parentClient;
+          }
         }
+        const savedToday = anchor.today?.sessions?.[key];
+        if (!revoked && supportsT3SessionClient(currentToday.client)
+          && ((savedToday && currentToday.t3ThreadId && savedToday.t3ThreadId !== currentToday.t3ThreadId)
+          || broader.some(([saved, current]) => {
+            const retained = saved?.sessions?.[key];
+            return retained && t3SessionLinksChanged(retained, current.sessions?.[key]);
+          }))) localSessionMetadataDeps.changedT3ThreadKeys.add(key);
       }
     } else {
       sessionIdentitiesComplete = decorateLocalPeriods({ today, month, allTime }, { retryMisses: true });
@@ -1630,7 +1642,7 @@ async function collectUsageOnce(options) {
       for (const period of Object.values(periods)) {
         if (upgradeRangeLinks) copySessionLinks(allTime, period, { preserveRangeParents: true });
         for (const key of revokedLinks) {
-          if (period.sessions[key]) revokeT3SessionLinks(period.sessions[key]);
+          if (period.sessions[key]) refreshT3SessionLinks(period.sessions[key], allTime.sessions?.[key], true);
         }
         for (const key of changedT3ThreadKeys) {
           const session = period.sessions[key];
@@ -2974,7 +2986,7 @@ function startCollector(options) {
           for (const period of ['today', 'month', 'allTime']) {
             for (const key of revokedLinks) {
               const row = anchor[period]?.sessions?.[key];
-              if (row) revokeT3SessionLinks(row);
+              if (row) refreshT3SessionLinks(row, captured.windowsPeriods[period]?.sessions?.[key], true);
             }
             for (const key of changedLinks) {
               const row = anchor[period]?.sessions?.[key];
