@@ -255,7 +255,10 @@ function readT3SessionRelationResult(nativeIds, deps = {}) {
       if (!has('t', ['thread_id', 'deleted_at', 'payload_json'])
         || !has('p', ['provider_thread_id', 'thread_id', 'driver', 'payload_json'])) {
         const tables = db.prepare("SELECT name FROM sqlite_master WHERE type = 'table'").all();
-        if (tables.length && status === 'complete') status = 'unavailable';
+        if (tables.length) {
+          ownershipIncomplete = true;
+          if (status === 'complete') status = 'unavailable';
+        }
         continue;
       }
       const bindings = readT3IdentityBindings(file);

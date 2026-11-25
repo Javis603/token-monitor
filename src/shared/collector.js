@@ -976,13 +976,15 @@ function propagateIdentity(source, periods, titleMetadata) {
   }
 }
 
-function copySessionLinks(source, target) {
+function copySessionLinks(source, target, { preserveRangeParents = false } = {}) {
   for (const [key, session] of Object.entries(target?.sessions || {})) {
     const resolved = source?.sessions?.[key];
     for (const field of ['nativeSessionId', 't3ThreadId']) {
       if (resolved?.[field]) session[field] = resolved[field];
     }
     if (resolved?.parentSessionId) {
+      if (preserveRangeParents
+        && sessionHasPeriodUsage(target, session.parentClient || session.client, session.parentSessionId)) continue;
       session.parentSessionId = resolved.parentSessionId;
       if (resolved.t3ParentLink) session.t3ParentLink = true;
       else delete session.t3ParentLink;
@@ -1582,7 +1584,7 @@ async function collectUsageOnce(options) {
         sessions: Object.fromEntries(Object.entries(period.sessions || {}).map(([key, row]) => [key, { ...row }]))
       }]));
       for (const period of Object.values(periods)) {
-        if (upgradeRangeLinks) copySessionLinks(allTime, period);
+        if (upgradeRangeLinks) copySessionLinks(allTime, period, { preserveRangeParents: true });
         for (const key of revokedLinks) {
           if (period.sessions[key]) revokeT3SessionLinks(period.sessions[key]);
         }

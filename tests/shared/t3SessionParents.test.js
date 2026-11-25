@@ -922,6 +922,8 @@ test('relationship read status distinguishes legal emptiness from retryable and 
   const unsupported = new sqlite.DatabaseSync(emptyPath);
   unsupported.exec('CREATE TABLE unrelated (id TEXT)'); unsupported.close();
   assert.equal(read({ t3DbPaths: [emptyPath] }).status, 'unavailable');
+  assert.equal(read({ includeOwnershipStatus: true }).ownershipComplete, true);
+  assert.equal(read({ includeOwnershipStatus: true, t3DbPaths: [s.file, emptyPath] }).ownershipComplete, false);
   const corrupt = path.join(s.home, 'corrupt.sqlite');
   fs.writeFileSync(corrupt, 'not sqlite');
   assert.equal(read({ t3DbPaths: [corrupt] }).status, 'unavailable');

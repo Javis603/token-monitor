@@ -896,6 +896,13 @@ for (const scenario of ['cross-client', 'antigravity', 'antigravity-disabled-ran
   const starts = { yesterday: daysAgo(1), week: daysAgo((todayDate.getUTCDay() + 7 - weekStartsOn) % 7), last7: daysAgo(6), last30: daysAgo(29) };
   const nativePastRanges = { todayKey, weekStartsOn, starts,
     periods: Object.fromEntries(Object.keys(starts).map(name => [name, period(true)])) };
+  if (antigravityChild) {
+    const rangeSessions = nativePastRanges.periods.yesterday.sessions;
+    rangeSessions['codex:range-parent'] = { ...rangeSessions['codex:today'], sessionId: 'range-parent' };
+    delete rangeSessions['codex:today'];
+    rangeSessions[childKey].parentSessionId = 'range-parent';
+    rangeSessions[childKey].parentClient = 'codex';
+  }
   fs.writeFileSync(file, JSON.stringify({ dateKey: localTodayKey(), ...anchorPeriods,
     calendarKey: collectionCalendarKey(),
     configFingerprint: configFingerprint('codex', '2024-01-01', false), fullScanAt: capturedAt,
@@ -988,6 +995,7 @@ for (const scenario of ['cross-client', 'antigravity', 'antigravity-disabled-ran
   assert.equal(saved.month.sessions['codex:historical'].t3ThreadId, unavailable ? undefined : 'app-thread');
   assert.equal(saved.month.sessions[childKey].t3ThreadId, unavailable ? undefined : 'devin-app', 'version-one anchors receive the child app identity');
   if (antigravityChild) {
+    assert.equal(saved.nativePastRanges.periods.yesterday.sessions[childKey].parentSessionId, 'range-parent');
     for (const name of ['yesterday', 'last7']) {
       assert.equal(saved.nativePastRanges.periods[name].sessions[childKey].t3ThreadId, 'devin-app');
       if (disabledRanges) assert.equal(updates[0].nativeRanges, undefined);
