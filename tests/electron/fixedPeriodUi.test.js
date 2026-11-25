@@ -250,3 +250,51 @@ for (const hubMode of ['icloud', 'client']) test(`${hubMode} retries incomplete 
   assert.equal(reads, 6);
   assert.equal(context.state.syncedFixedPeriod.snapshot.detailsAvailable, true);
 });
+
+test('a new fallback device observation invalidates a completed synchronized range', async () => {
+  const source = read('app.js');
+  const context = {
+    state: {
+      period: 'week',
+      stats: {
+        snapshot: { id: 'snapshot-1', source: 1 },
+        fixedRangeRevisions: { native: 'range-1' },
+        deviceHistoryRevision: 'history-1',
+        devices: [
+          { deviceId: 'native', updatedAt: '2026-11-25T01:00:00Z' },
+          { deviceId: 'legacy', updatedAt: '2026-11-25T01:00:00Z', periods: { today: { totalTokens: 0 } } }
+        ]
+      }
+    },
+    fixedPeriodRangesApi: { isDerived: () => true, deviceDayState: () => ({ currentKey: '2026-11-25' }) },
+    currentCalendarLocale: () => 'en-GB',
+    fixedPeriodTodayKey: () => '2026-11-25',
+    statsRenderScheduler: { request() {} },
+    FIXED_PERIOD_HISTORY_RETRY_MS: 4000,
+    FIXED_PERIOD_HISTORY_MAX_RETRIES: 3,
+    setTimeout,
+    clearTimeout
+  };
+  const reads = [];
+  context.window = { tokenMonitor: { getSyncedFixedPeriod: async id => {
+    reads.push(id);
+    return { detailsAvailable: true };
+  } } };
+  const extract = name => source.match(new RegExp('function ' + name + '\\(\\) \\{[\\s\\S]*?\\n\\}'))[0];
+  vm.runInNewContext(extract('syncedFixedPeriodKey') + '\n' + extract('requestSyncedFixedPeriod'), context);
+
+  context.requestSyncedFixedPeriod();
+  await Promise.resolve();
+  assert.equal(context.state.syncedFixedPeriod.retryAt, Infinity);
+
+  context.state.stats.snapshot = { id: 'snapshot-2', source: 1 };
+  context.requestSyncedFixedPeriod();
+  assert.deepEqual(reads, ['snapshot-1'], 'a new snapshot ID alone leaves the cache intact');
+
+  const legacy = context.state.stats.devices[1];
+  legacy.updatedAt = '2026-11-25T02:00:00Z';
+  legacy.periods.today.totalTokens = 25;
+  context.requestSyncedFixedPeriod();
+  await Promise.resolve();
+  assert.deepEqual(reads, ['snapshot-1', 'snapshot-2']);
+});

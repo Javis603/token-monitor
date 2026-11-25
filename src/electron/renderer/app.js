@@ -6670,11 +6670,12 @@ function syncedFixedPeriodKey() {
   const revisions = Object.entries(stats?.fixedRangeRevisions || {}).sort();
   if (state.settings?.hubMode === 'local' || (!revisions.length && !stats?.localFixedRangeRevision) || !stats?.snapshot
     || !fixedPeriodRangesApi.isDerived(state.period)) return '';
-  const calendarDays = (stats.devices || []).map(device => [
-    device.deviceId, fixedPeriodRangesApi.deviceDayState(device)?.currentKey || ''
+  // A fallback device can update live Today without a range or History revision.
+  const deviceObservations = (stats.devices || []).map(device => [
+    device.deviceId, device.updatedAt, fixedPeriodRangesApi.deviceDayState(device)?.currentKey || ''
   ]);
   return JSON.stringify([
-    stats.snapshot.source, state.settings?.hubMode, state.period, currentCalendarLocale(), fixedPeriodTodayKey(), calendarDays, revisions,
+    stats.snapshot.source, state.settings?.hubMode, state.period, currentCalendarLocale(), fixedPeriodTodayKey(), deviceObservations, revisions,
     stats.localFixedRangeRevision, stats.deviceHistoryRevision, state.settings?.historyEnabled, state.settings?.sessionTitlesEnabled,
     state.settings?.modelAliases, state.settings?.modelAliasGrouping
   ]);
