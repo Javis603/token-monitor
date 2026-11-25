@@ -844,7 +844,10 @@ function resettableSettingsDefaults() {
   ];
   return {
     ...Object.fromEntries(keys.map(key => [key, defaults[key]])),
-    limitsRefresh: defaults.limitsRefreshMode === 'adaptive' ? 'adaptive' : String(defaults.limitsRefreshMs)
+    limitsRefresh: defaults.limitsRefreshMode === 'adaptive' ? 'adaptive' : String(defaults.limitsRefreshMs),
+    // The cloud monitor is a service, not a stored setting: its default is the
+    // service not running, and Settings resets it by stopping that service.
+    cloudSessionsEnabled: false
   };
 }
 
@@ -9011,6 +9014,10 @@ app.whenReady().then(() => {
     }
     actionWindowForEvent(BrowserWindow, event, mainWindow)?.close();
   });
+  require('./cloudUsageBridge').registerCloudUsageIpc({
+    ipcMain, getWindows: () => [mainWindow, dashboardWindow],
+    rendererDir: path.join(__dirname, 'renderer'), open: () => openViewFromTray('session')
+  });
   ipcMain.handle('dashboard:open', () => {
     if (screenUiSuspended) return false;
     createDashboardWindow();
@@ -9133,11 +9140,17 @@ app.whenReady().then(() => {
       console.warn(`[plugins] runtime failed to start: ${error.message}`);
     }
   }
+  if (process.argv.includes('--cloud-usage') || process.argv.includes('--sessions')) openViewFromTray('session');
   scheduleStartupAppUpdateCheck();
   startAppUpdateBackgroundChecks();
 });
 
-app.on('second-instance', focusExistingWindow);
+app.on('second-instance', (_event, argv) => {
+  // A second launch that names a view opens it; every other second launch just
+  // focuses the window that is already running.
+  if (argv?.includes('--cloud-usage') || argv?.includes('--sessions')) openViewFromTray('session');
+  else focusExistingWindow();
+});
 app.on('window-all-closed', () => {
   if (process.platform !== 'darwin' && !mainWindowHibernated) app.quit();
 });

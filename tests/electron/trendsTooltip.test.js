@@ -332,6 +332,8 @@ test('opening Settings dismisses focused Home trend details before refreshing th
   context.els.settingsPanel = new Element();
   context.els.shell = new Element();
   context.syncPluginLimitsDemand = () => {};
+  context.syncCloudSessionsActivity = () => {};
+  context.renderCloudSessionSettings = () => {};
   context.syncSettingsForm = () => assert.equal(tooltip.dataset.visible, 'false');
   context.ensureServiceStatusTicker = () => {};
   context.requestAnimationFrame = callback => callback();

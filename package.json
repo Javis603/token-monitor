@@ -36,7 +36,8 @@
     "lint": "eslint .",
     "verify": "npm run lint && npm run typecheck && npm test",
     "verify:plugins": "electron scripts/test-plugin-icons.cjs && electron scripts/test-plugin-trusted.cjs && electron scripts/test-plugin-trusted-runtime.cjs && electron scripts/test-plugin-trusted-app.cjs && electron scripts/test-plugin-trusted-surfaces.cjs",
-    "typecheck": "tsc --project tsconfig.json"
+    "typecheck": "tsc --project tsconfig.json",
+    "codex:usage:auto": "node scripts/codex-cloud-auto-watch.js"
   },
   "build": {
     "beforePack": "scripts/build-windows-dock.js",
