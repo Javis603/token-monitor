@@ -3538,8 +3538,12 @@ function stableColor(value, colors) {
 }
 
 function fixedPeriodDevices() {
-  if (!fixedPeriodRangesApi.isDerived(state.period)) return state.stats?.devices || [];
-  return fixedPeriodRangesApi.devicesForReadySnapshot(state.fixedPeriodSnapshot, state.period);
+  const devices = state.stats?.devices || [];
+  if (!fixedPeriodRangesApi.isDerived(state.period)) return devices;
+  const localDevice = state.fixedPeriodSnapshot?.native
+    ? devices.find(device => device.deviceId === state.settings?.deviceId)
+    : undefined;
+  return fixedPeriodRangesApi.devicesForReadySnapshot(state.fixedPeriodSnapshot, state.period, localDevice);
 }
 
 function fixedPeriodSources() {
@@ -8614,7 +8618,8 @@ function periodContentAvailability() {
   return {
     fixedUnavailable: derived && state.fixedPeriodSnapshot?.status !== 'ready',
     detailUnavailable: derived && !fixedPeriodRangesApi.supportsBreakdown(state.period, state.breakdown, {
-      deviceHistoriesAvailable: Array.isArray(state.fixedPeriodHistory?.deviceHistories),
+      deviceRowsAvailable: Array.isArray(state.fixedPeriodHistory?.deviceHistories)
+        || (state.breakdown === 'device' && fixedPeriodDevices().length > 0),
       native: state.fixedPeriodSnapshot?.native === true
     })
   };

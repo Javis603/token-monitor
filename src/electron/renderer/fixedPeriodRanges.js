@@ -442,8 +442,13 @@
     return snapshot?.status === 'ready' && snapshot.selection === selection ? snapshot : null;
   }
 
-  function devicesForReadySnapshot(snapshot, selection) {
+  function devicesForReadySnapshot(snapshot, selection, localDevice) {
     const ready = readySnapshotForSelection(snapshot, selection);
+    // Native snapshots describe this machine alone. Build its row from the
+    // stats inventory even if History has no rows for the selected range.
+    if (ready?.native && localDevice) {
+      return [{ ...localDevice, periods: { ...localDevice.periods, [selection]: ready.period } }];
+    }
     return (ready?.devices || []).map((source) => ({
       ...source,
       periods: {
@@ -729,7 +734,7 @@
   function supportsBreakdown(selection, breakdown, options = {}) {
     if (!isDerived(selection)) return true;
     if (breakdown === 'session' || breakdown === 'project') return options.native === true;
-    if (breakdown === 'device') return options.deviceHistoriesAvailable === true;
+    if (breakdown === 'device') return options.deviceRowsAvailable === true;
     return true;
   }
 

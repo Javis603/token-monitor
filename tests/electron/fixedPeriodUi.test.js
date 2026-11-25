@@ -43,7 +43,7 @@ test('fixed-period menu follows the glass theme and keeps labels left aligned', 
   assert.match(app, /button\.classList\.toggle\('is-current', active\)/);
   assert.match(app, /handlePeriodMenuNavigation\(event/);
   assert.match(app, /setPeriodMenuOpen\(true, \{ focus: event\.key === 'ArrowUp' \? 'last' : 'first' \}\)/);
-  assert.match(app, /deviceHistoriesAvailable: Array\.isArray\(state\.fixedPeriodHistory\?\.deviceHistories\)/);
+  assert.match(app, /deviceRowsAvailable: Array\.isArray\(state\.fixedPeriodHistory\?\.deviceHistories\)/);
   assert.match(app, /getDashboardHistory\(\{ includeDevices: true \}\)/);
   assert.match(app, /state\.stats\?\.deviceHistoryRevision \|\| state\.stats\?\.historyRevision/);
   assert.match(app, /deviceInventorySignature\(state\.stats\?\.devices \|\| \[\]\)/);
@@ -67,7 +67,7 @@ test('fixed-period menu follows the glass theme and keeps labels left aligned', 
   assert.match(app, /fixedPeriodHistorySignature !== signature[\s\S]*?\|\| state\.fixedPeriodHistoryBusy\) \{[\s\S]*?void loadFixedPeriodHistory\(\);/);
   assert.match(boot, /\['today', 'month', 'yesterday', 'week', 'last7', 'last30', 'allTime'\]\.includes\(period\)/);
   assert.match(app, /function fixedPeriodDevices\(\)/);
-  assert.match(app, /devicesForReadySnapshot\(state\.fixedPeriodSnapshot, state\.period\)/);
+  assert.match(app, /devicesForReadySnapshot\(state\.fixedPeriodSnapshot, state\.period, localDevice\)/);
   assert.match(app, /fixedPeriodSnapshotFromDevices\(state\.period, fixedPeriodSources\(\)/);
   const snapshotBuilder = app.slice(app.indexOf('function buildFixedPeriodSnapshot()'), app.indexOf('async function loadFixedPeriodHistory'));
   assert.ok(snapshotBuilder.indexOf('historyEnabled === false') < snapshotBuilder.indexOf('fixedPeriodHistoryRequested'));

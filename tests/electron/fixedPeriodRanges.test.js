@@ -679,8 +679,8 @@ test('fixed periods fail closed without History and for unsupported detail views
   }).reason, 'historyDisabled');
   assert.equal(ranges.supportsBreakdown('last7', 'session'), false);
   assert.equal(ranges.supportsBreakdown('last7', 'project'), false);
-  assert.equal(ranges.supportsBreakdown('last7', 'device', { deviceHistoriesAvailable: true }), true);
-  assert.equal(ranges.supportsBreakdown('last7', 'device', { deviceHistoriesAvailable: false }), false);
+  assert.equal(ranges.supportsBreakdown('last7', 'device', { deviceRowsAvailable: true }), true);
+  assert.equal(ranges.supportsBreakdown('last7', 'device', { deviceRowsAvailable: false }), false);
   assert.equal(ranges.supportsBreakdown('last7', 'model'), true);
 });
 
@@ -743,4 +743,19 @@ test('latest request coordinator catches up revisions and upgrades a background 
   await Promise.resolve();
   assert.deepEqual(settled, [{ render: true }]);
   assert.equal(coordinator.active(), false);
+});
+
+test('a ready native range gives its local device the headline period before History loads', () => {
+  const period = { totalTokens: 70, clients: { claude: 70 } };
+  const localDevice = { deviceId: 'mac', hostname: 'Mac', periods: { today: { totalTokens: 10 } } };
+  for (const selection of ['yesterday', 'week', 'last7', 'last30']) {
+    const snapshot = { status: 'ready', selection, native: true, period };
+    const [device] = ranges.devicesForReadySnapshot(snapshot, selection, localDevice);
+    assert.equal(device.deviceId, 'mac');
+    assert.equal(device.hostname, 'Mac');
+    assert.equal(device.periods[selection], period);
+    assert.deepEqual(localDevice.periods, { today: { totalTokens: 10 } });
+    assert.deepEqual(ranges.devicesForReadySnapshot(snapshot, selection), []);
+    assert.deepEqual(ranges.devicesForReadySnapshot({ ...snapshot, native: false }, selection, localDevice), []);
+  }
 });
