@@ -2947,7 +2947,7 @@ function updateRowLive(row, activityState, activityAt) {
   dot.classList.add('pulse');
 }
 
-function updateRow(row, { name, subtitle, subtitleIdentity, subagentCountLabel, activity, detail, value, cost, unpricedTokens, barValue, max, color, barBackground, accordionRows, deviceDetail, stale, platform, local, client, clientLabel, sourceDevice, kind, modelSource, cacheReadTokens, outputTokens, unclassifiedTokens, modelRows, modelLabel, modelTooltipEntries, titleModelLabel, reasoningEffort, tokenDataUnavailable, sessionDetailAvailable, sessionGroup, running, activityState, context, promptCache, contextSnapshot, sortTime }) {
+function updateRow(row, { name, subtitle, subtitleIdentity, subagentCountLabel, activity, detail, sessionDetailHeading, value, cost, unpricedTokens, barValue, max, color, barBackground, accordionRows, deviceDetail, stale, platform, local, client, clientLabel, sourceDevice, kind, modelSource, cacheReadTokens, outputTokens, unclassifiedTokens, modelRows, modelLabel, modelTooltipEntries, titleModelLabel, reasoningEffort, tokenDataUnavailable, sessionDetailAvailable, sessionGroup, running, activityState, context, promptCache, contextSnapshot, sortTime }) {
   const width = rowWidth(barValue, max);
   const isExpanded = row.classList.contains('expanded');
   // `running` still drives the row class for layout, but the mark's own state
@@ -3054,7 +3054,7 @@ function updateRow(row, { name, subtitle, subtitleIdentity, subagentCountLabel, 
   // Local sessions keep their usual density; only a confirmed remote source
   // adds a separate line below the session's activity.
   const deviceEl = row.querySelector('.row-device');
-  if (kind === 'session') window.TokenMonitorDomReconcile.data(row, { sourceDevice });
+  if (kind === 'session') window.TokenMonitorDomReconcile.data(row, { sourceDevice, sessionDetailHeading });
   const remoteDevice = sessionRowsApi.remoteSessionDevice(sourceDevice, state.settings?.deviceId);
   setHoverMarqueeText(deviceEl, remoteDevice?.name || '');
   deviceEl.classList.toggle('hidden', !remoteDevice);
@@ -3068,10 +3068,9 @@ function updateRow(row, { name, subtitle, subtitleIdentity, subagentCountLabel, 
     if (!existingIcon) content.prepend(icon);
     overflowText.update(deviceEl);
   }
-  // A titled session already has name, client/model and activity lines. Move
-  // its ID into Details, but keep the ID when only two lines remain so untitled
-  // sessions can still be distinguished (including when titles are disabled).
-  const shownDetail = kind === 'session' && interactive && activity ? '' : detail;
+  // Move the ID into Details for named sessions. A project can label several
+  // untitled sessions, so keep their IDs visible to distinguish them.
+  const shownDetail = kind === 'session' && interactive && activity && !sessionDetailHeading ? '' : detail;
   const detailEl = row.querySelector('.row-detail');
   setHoverMarqueeText(detailEl, shownDetail);
   detailEl.classList.toggle('hidden', !shownDetail);
@@ -3712,7 +3711,7 @@ function sessionRowsForPeriod(period) {
   const options = sessionPresentationOptions();
   if (state.breakdown === 'session') options.rowLabelCache = sessionRowLabelCache;
   const rows = rawSessionRowsForPeriod(period, options);
-  if (rows.length > 0) return sessionRowsApi.groupSessionRows(rows, { ...options, sortBy: state.sessionSort });
+  if (rows.length > 0) return sessionRowsApi.sessionListRows(rows, { ...options, sortBy: state.sessionSort });
   if (Number(period?.totalTokens || 0) === 0) return [];
   return modelRowsForPeriod(period);
 }
@@ -15834,12 +15833,13 @@ els.breakdown.addEventListener('click', (event) => {
   const session = client === 'reasonix'
     ? state.stats?.nativeSessions?.[state.period]?.[sessionId]
     : period?.sessions?.[`${client}:${sessionId}`];
+  const { sourceDevice, sessionDetailHeading } = window.TokenMonitorDomReconcile.data(rowEl) || {};
   openSessionDetail({
     client,
     sessionId,
     sessionCost: client === 'reasonix' ? Number(session?.reportedCostUsd || 0) : Number(session?.costUsd || 0),
-    sourceDevice: window.TokenMonitorDomReconcile.data(rowEl)?.sourceDevice,
-    title: rowEl.querySelector('.row-title')?.textContent || ''
+    sourceDevice,
+    title: sessionDetailHeading || rowEl.querySelector('.row-title')?.textContent || ''
   });
 });
 
