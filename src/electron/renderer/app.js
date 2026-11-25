@@ -6674,7 +6674,7 @@ function syncedFixedPeriodKey() {
     device.deviceId, fixedPeriodRangesApi.deviceDayState(device)?.currentKey || ''
   ]);
   return JSON.stringify([
-    stats.snapshot.source, state.period, currentCalendarLocale(), fixedPeriodTodayKey(), calendarDays, revisions,
+    stats.snapshot.source, state.settings?.hubMode, state.period, currentCalendarLocale(), fixedPeriodTodayKey(), calendarDays, revisions,
     stats.localFixedRangeRevision, stats.deviceHistoryRevision, state.settings?.historyEnabled, state.settings?.sessionTitlesEnabled,
     state.settings?.modelAliases, state.settings?.modelAliasGrouping
   ]);
@@ -6685,19 +6685,35 @@ function requestSyncedFixedPeriod() {
   if (!key || !window.tokenMonitor.getSyncedFixedPeriod) return;
   const previous = state.syncedFixedPeriod;
   if (previous?.key === key && (previous.pending || Date.now() < previous.retryAt)) return;
+  clearTimeout(previous?.retryTimer);
   const { id, source } = state.stats.snapshot;
-  const request = { key, pending: true, snapshot: previous?.key === key ? previous.snapshot : null };
+  const sameKey = previous?.key === key;
+  const request = {
+    key, pending: true, snapshot: sameKey ? previous.snapshot : null,
+    retries: sameKey ? previous.retries : 0
+  };
   state.syncedFixedPeriod = request;
   const finish = (snapshot) => {
     if (state.syncedFixedPeriod !== request) return;
+    if (key !== syncedFixedPeriodKey()) {
+      state.syncedFixedPeriod = null;
+      return;
+    }
     request.snapshot = snapshot;
     request.pending = false;
     // iCloud may deliver the device document before all of its pages.
     request.retryAt = snapshot?.detailsAvailable ? Infinity : Date.now() + FIXED_PERIOD_HISTORY_RETRY_MS;
-    if (key === syncedFixedPeriodKey()) {
-      state.sessionRowsCache = null;
-      statsRenderScheduler.request();
+    if (!snapshot?.detailsAvailable && state.settings?.hubMode === 'icloud'
+      && request.retries < FIXED_PERIOD_HISTORY_MAX_RETRIES) {
+      request.retryTimer = setTimeout(() => {
+        if (state.syncedFixedPeriod !== request || key !== syncedFixedPeriodKey()) return;
+        request.retries += 1;
+        request.retryAt = 0;
+        requestSyncedFixedPeriod();
+      }, FIXED_PERIOD_HISTORY_RETRY_MS);
     }
+    state.sessionRowsCache = null;
+    statsRenderScheduler.request();
   };
   void window.tokenMonitor.getSyncedFixedPeriod(id, source, state.period)
     .then(finish, () => finish(null));

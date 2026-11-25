@@ -192,3 +192,61 @@ test('fixed Week History and Trends use the synchronized calendar even with a di
   context.state.mode = 'local';
   assert.equal(context.buildFixedPeriodSourcesSnapshot().period.totalTokens, 36);
 });
+
+test('iCloud retries incomplete fixed range details without another stats event', async () => {
+  const source = read('app.js').match(/function requestSyncedFixedPeriod\(\) \{[\s\S]*?\n\}/)[0];
+  let key = 'week';
+  let reads = 0;
+  const responses = [null, { detailsAvailable: false }, { detailsAvailable: true }, null, null, { detailsAvailable: true }];
+  const timers = new Set();
+  const context = {
+    state: { settings: { hubMode: 'icloud' }, stats: { snapshot: { id: 'a' } } },
+    window: { tokenMonitor: { getSyncedFixedPeriod: async () => responses[reads++] } },
+    syncedFixedPeriodKey: () => key,
+    statsRenderScheduler: { request() {} },
+    FIXED_PERIOD_HISTORY_RETRY_MS: 4000,
+    FIXED_PERIOD_HISTORY_MAX_RETRIES: 3,
+    setTimeout: (callback, delay) => {
+      assert.equal(delay, 4000);
+      timers.add(callback);
+      return callback;
+    },
+    clearTimeout: callback => timers.delete(callback)
+  };
+  vm.runInNewContext(source, context);
+  const fireRetry = async () => {
+    assert.equal(timers.size, 1);
+    const [callback] = timers;
+    timers.delete(callback);
+    callback();
+    await Promise.resolve();
+  };
+  context.requestSyncedFixedPeriod();
+  await Promise.resolve();
+  context.requestSyncedFixedPeriod();
+  assert.equal(reads, 1);
+  await fireRetry();
+  await fireRetry();
+  assert.equal(reads, 3);
+  assert.equal(context.state.syncedFixedPeriod.snapshot.detailsAvailable, true);
+  assert.equal(timers.size, 0);
+
+  key = 'last7';
+  context.requestSyncedFixedPeriod();
+  await Promise.resolve();
+  key = 'today';
+  await fireRetry();
+  assert.equal(reads, 4);
+  assert.equal(timers.size, 0);
+
+  key = 'yesterday';
+  context.requestSyncedFixedPeriod();
+  key = 'today';
+  await Promise.resolve();
+  assert.equal(timers.size, 0);
+  key = 'yesterday';
+  context.requestSyncedFixedPeriod();
+  await Promise.resolve();
+  assert.equal(reads, 6);
+  assert.equal(context.state.syncedFixedPeriod.snapshot.detailsAvailable, true);
+});
