@@ -2523,8 +2523,7 @@ function startCollector(options) {
         : null;
       throwIfAborted(signal);
       if (reports) {
-        // The days only feed native ranges. A missing one publishes the
-        // periods without days, which keeps those ranges on History.
+        // Keep available days. The collector checks each range's coverage.
         assertWindowReports(reports, windows.slice(0, 3));
         const days = {};
         for (const { name } of windows) {
@@ -2533,7 +2532,7 @@ function startCollector(options) {
           if (name === 'today' || name === 'month' || name === 'allTime') next[name] = reports[name];
           else days[name] = reports[name];
         }
-        if (windows.length > 3 && Object.keys(days).length === windows.length - 3) next.days = days;
+        if (Object.keys(days).length > 0) next.days = days;
       } else {
         for (const [period, flags] of [['today', ['--today']], ['month', ['--month']], ['allTime', ['--since', allTimeSince]]]) {
           next[period] = await scan({ ...input, flags, commandTimeoutMs: period === 'allTime' ? allTimeScanTimeoutMs(options) : commandTimeoutMs });

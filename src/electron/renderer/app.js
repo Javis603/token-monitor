@@ -3325,7 +3325,7 @@ function updateSessionSearchQuery(value) {
   const cache = state.sessionRowsCache;
   if (state.breakdown === 'session' && cache?.stats === state.stats && cache?.period === state.period) {
     syncSessionSearchChrome();
-    const incompleteHint = sessionRowsApi.sessionBreakdownIncomplete(state.stats, state.period)
+    const incompleteHint = sessionBreakdownIncomplete()
       ? 'sessions.incomplete' : '';
     overflowText.batch(() => renderRows(cache.rows, { incompleteHint, fromSearch: true, reuseToolFilter: true }));
     return;
@@ -5985,7 +5985,11 @@ function refreshSessionDetailHeading() {
       // would keep quoting titles the current stats no longer carry, so return
       // to whichever group holds this session now, or to Sessions when none does.
       const holder = rows.find(holds);
-      state.openSession.returnTo = holder ? { kind: 'session-group', period: group.period, summary: holder } : null;
+      if (holder) {
+        state.openSession.returnTo = { kind: 'session-group', period: group.period, summary: holder };
+      } else if (state.settings?.sessionTitlesEnabled === false || !pagedSessionsPending()) {
+        state.openSession.returnTo = null;
+      }
     }
   }
   const head = els.sessionDetailHead;
@@ -6702,6 +6706,10 @@ function syncedSessionPeriod() {
   if (!needsPagedSessions()) return null;
   const request = state.syncedFixedPeriod;
   return request?.key === syncedFixedPeriodKey() ? request.snapshot : null;
+}
+
+function sessionBreakdownIncomplete() {
+  return sessionRowsApi.sessionBreakdownIncomplete(state.stats, state.period) && !syncedSessionPeriod()?.detailsAvailable;
 }
 
 function pagedSessionsPending() {
@@ -8933,8 +8941,7 @@ function renderAppContent({ fromSearch = false } = {}) {
     let incompleteHint = '';
     if (state.breakdown === 'project' && projectRowsApi.projectBreakdownIncomplete(state.stats, state.period)) {
       incompleteHint = 'projects.incomplete';
-    } else if (state.breakdown === 'session' && !syncedSessionPeriod()?.detailsAvailable
-      && sessionRowsApi.sessionBreakdownIncomplete(state.stats, state.period)) {
+    } else if (state.breakdown === 'session' && sessionBreakdownIncomplete()) {
       incompleteHint = 'sessions.incomplete';
     }
     renderRows(rows, { incompleteHint, fromSearch });

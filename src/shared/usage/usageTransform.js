@@ -33,23 +33,35 @@ function dailySessionsCoverSummary(days, summary) {
   const today = summary.periodWindows?.today?.key;
   const windows = {
     ...summary.nativeRangeWindows,
+    today: { start: today, end: today },
     month: { start: today?.slice(0, 7) + '-01', end: today }
   };
+  // Hub aggregates expose USD to six decimal places. Allow sub-resolution
+  // noise from summing the same observations in different orders.
+  const costsMatch = (left, right) => Math.abs((left || 0) - (right || 0)) <= 0.0000005;
   for (const [name, window] of Object.entries(windows)) {
-    const expected = name === 'month' ? summary.month : summary.nativeRanges?.[name];
+    const expected = name === 'today' || name === 'month' ? summary[name] : summary.nativeRanges?.[name];
     if (!expected || !window.end) return false;
     const totals = new Map();
     let tokens = 0;
+    let cost = 0;
     for (const [day, period] of Object.entries(days)) {
       if (day < window.start || day > window.end) continue;
       tokens += period.totalTokens;
+      cost += period.costUsd || 0;
       for (const [key, row] of Object.entries(period.sessions || {})) {
-        totals.set(key, (totals.get(key) || 0) + row.totalTokens);
+        const total = totals.get(key) || { tokens: 0, cost: 0 };
+        total.tokens += row.totalTokens;
+        total.cost += row.costUsd || 0;
+        totals.set(key, total);
       }
     }
     const sessions = Object.entries(expected.sessions || {});
-    if (tokens !== expected.totalTokens || totals.size !== sessions.length
-      || sessions.some(([key, row]) => totals.get(key) !== row.totalTokens)) return false;
+    if (tokens !== expected.totalTokens || !costsMatch(cost, expected.costUsd) || totals.size !== sessions.length
+      || sessions.some(([key, row]) => {
+        const total = totals.get(key);
+        return !total || total.tokens !== row.totalTokens || !costsMatch(total.cost, row.costUsd);
+      })) return false;
   }
   return true;
 }

@@ -522,6 +522,8 @@ for (const kind of ['Node', 'Worker']) test(`${kind} preserves the calendar and 
   assert.equal(actual.sessions['claude:0'].title, 'shared title');
   const { serializeSyncPayload } = require('../../src/shared/syncPayload');
   const legacyBody = serializeSyncPayload(summary, { syncSessionTitles: true, sessionTitleSyncGeneration: generation }).payload;
+  delete legacyBody.month.sessions['claude:89'];
+  legacyBody.sessionDetailsOmitted = { month: 1 };
   const completeHistory = legacyBody.history;
   legacyBody.history = { ...completeHistory, dailyTotalsOmitted: 31, summary: { ...completeHistory.summary, activeDaysComplete: false } };
   delete legacyBody.history.dailyTotals;
@@ -539,6 +541,7 @@ for (const kind of ['Node', 'Worker']) test(`${kind} preserves the calendar and 
   const restoredStats = (await compact.json()).stats;
   assert.equal(restoredStats.historyPreview.summary.activeDaysComplete, true);
   assert.equal(restoredStats.devices[0].periods.month.sessions['claude:0'].title, 'shared title');
+  assert.equal(Object.keys(restoredStats.devices[0].periods.month.sessions).length, 89, 'the old reader keeps its accepted inline rows');
   const revoked = await send(titleUrl, { method: 'PUT', headers, body: JSON.stringify({ enabled: false }) });
   assert.equal(revoked.status, 200);
   assert.equal(await fetchFixedRange(send, base, summary.deviceId, 'month', window, headers, revision), null);
@@ -554,6 +557,8 @@ for (const kind of ['Node', 'Worker']) test(`${kind} preserves the calendar and 
   const retained = (await (await send(base + '/api/stats', { headers })).json()).devices[0].periods.month;
   assert.equal(retained.totalTokens, 27_900);
   assert.equal(retained.sessions['claude:0'].totalTokens, 310);
+  assert.equal(retained.sessions['claude:89'].totalTokens, 310, 'the Hub restores the omitted session before untracking');
+  assert.equal(Object.keys(retained.sessions).length, 90);
 
   const legacyAck = async (url, init) => {
     const response = await send(url, init);

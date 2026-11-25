@@ -320,15 +320,18 @@ test('Cursor days from its snapshot join the native ranges', async () => {
   const scanned = [];
   const summary = await collectUsageOnce(baseOptions({
     clients: 'claude,cursor',
+    dailySessionSyncEnabled: true,
     cursorSnapshot: cursorSnapshot(),
     runTokscaleWindows: async ({ clients, windows }) => {
       scanned.push(clients);
+      assert.ok(windows.some(({ name }) => name === `d${dayKey(30)}`));
       return windowReports(windows);
     }
   }));
   assert.deepEqual(scanned, ['claude']);
   assert.equal(summary.nativeRanges.last7.clients.cursor, 10 + 7);
   assert.equal(summary.nativeRanges.week.clients.cursor, 10);
+  assert.equal(summary.dailySessionPeriods, undefined, 'the missing extra day only disables daily publication');
 });
 
 test('a Cursor snapshot without days keeps the ranges on History', async () => {
