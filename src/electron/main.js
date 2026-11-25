@@ -595,6 +595,7 @@ function normalizeProjectBreakdownMode(value) {
 }
 
 function normalizeBillingCycleStartDay(value) {
+  if (typeof value !== 'number' && typeof value !== 'string') return 1;
   const day = Number(value);
   return Number.isInteger(day) && day >= 1 && day <= 31 ? day : 1;
 }
@@ -657,6 +658,7 @@ function defaultSettings() {
     sessionTitlesEnabled: true,
     periodMonthMode: 'month',
     billingCycleStartDay: 1,
+    periodTabOrder: [],
     themeColors: {},
     vendorColors: {},
     textSize: 'standard',
@@ -948,12 +950,9 @@ function electronUsageConfig(errorPrefix, { nativeRangesEnabled = false } = {}) 
     // No watchUsePolling on purpose. The widget states no preference so the
     // shared default in resolveWatchUsePolling() governs and the widget cannot
     // drift from the headless agent, which has never passed one. That default
-    // is native events on every platform: chokidar 4 dropped the bundled
-    // fsevents backend, so every platform now watches through the same
-    // per-directory fs.watch path, and the earlier attempt that observed missed
-    // events ran on the chokidar 3 backend that no longer exists. Where the
-    // kernel cannot supply watch descriptors the collector degrades to polling
-    // by itself; TOKEN_MONITOR_WATCH_POLLING overrides in both directions.
+    // is native events on every platform. Where the kernel cannot supply watch
+    // descriptors the collector degrades to polling by itself;
+    // TOKEN_MONITOR_WATCH_POLLING overrides in both directions.
     watchTriggersCollection: collectorWatchTriggersCollection(),
     intervalRequiresActivity: collectorIntervalRequiresActivity(),
     watchDebounceMs: 1500,
@@ -2184,6 +2183,7 @@ function readSettings() {
     merged.homeLimitAccountCount = normalizeHomeLimitAccountCount(merged.homeLimitAccountCount);
     merged.periodMonthMode = normalizePeriodMonthMode(merged.periodMonthMode);
     merged.billingCycleStartDay = normalizeBillingCycleStartDay(merged.billingCycleStartDay);
+    merged.periodTabOrder = fixedPeriodRangesApi.normalizePeriodTabOrder(merged.periodTabOrder);
     if (saved.historyEnabled !== undefined) {
       merged.historyEnabled = parseBoolean(saved.historyEnabled, false);
     }
@@ -4960,6 +4960,9 @@ function primeLocalStatsFromAnchor(usageOptions, widgetProducerOwner) {
       projectsEnabled: usageOptions.projectsEnabled,
       customScanPaths: usageOptions.customScanPaths,
       wslScanEnabled: usageOptions.wslScanEnabled,
+      nativeRangesEnabled: usageOptions.nativeRangesEnabled,
+      weekStartsOn: usageOptions.weekStartsOn,
+      codexDotsVisible: usageOptions.codexDotsVisible,
       wslSupported: process.platform === 'win32',
       historyEnabled: usageOptions.historyEnabled,
       dailyHistoryArchiveEnabled: usageOptions.dailyHistoryArchiveEnabled,
@@ -4986,7 +4989,7 @@ function primeLocalStatsFromAnchor(usageOptions, widgetProducerOwner) {
   }
   anchorSeedDevice = visible;
   localDevice = visible;
-  localStats = withHistoryPreview(aggregateDevices([visible], 0), [visible]);
+  localStats = coldLocalStats(visible);
   // Through the normal publisher, not straight to the renderer: the tray reads
   // what sendPush sets, and in tray mode the window is hidden, so a seed that
   // only reached the renderer would leave the one visible surface on zero.
@@ -5000,6 +5003,12 @@ function primeLocalStatsFromAnchor(usageOptions, widgetProducerOwner) {
   }, { skipExport: true, deferToRenderer: true, widgetProducerOwner });
 }
 
+function coldLocalStats(device) {
+  const stats = withHistoryPreview(aggregateDevices([device], 0), [device]);
+  stats.nativeRangesPending = true;
+  return attachLocalNativeRanges(stats, device);
+}
+
 // The first scan holds its record back until all-time is in, which on a long
 // history is minutes after Today was ready. Show each window as it lands, over
 // the seed's last known values when there is one. Display only: nothing here is
@@ -5008,7 +5017,7 @@ function publishColdPreview(preview, reason, widgetProducerOwner) {
   if (lastCollectedDevice) return;
   const device = seedWithColdPreview(anchorSeedDevice || preview, preview);
   localDevice = device;
-  localStats = withHistoryPreview(aggregateDevices([device], 0), [device]);
+  localStats = coldLocalStats(device);
   sendPush({
     event: 'stats',
     data: { type: 'stats', reason, stats: localStats, at: new Date().toISOString() }
@@ -8295,6 +8304,8 @@ app.whenReady().then(() => {
       homeLimitAccountCount: normalizeHomeLimitAccountCount(patch.homeLimitAccountCount ?? settings.homeLimitAccountCount),
       periodMonthMode: normalizePeriodMonthMode(patch.periodMonthMode ?? settings.periodMonthMode),
       billingCycleStartDay: normalizeBillingCycleStartDay(patch.billingCycleStartDay ?? settings.billingCycleStartDay),
+      periodTabOrder: patch.periodTabOrder === undefined ? settings.periodTabOrder
+        : fixedPeriodRangesApi.normalizePeriodTabOrder(patch.periodTabOrder),
       modelRankingMetric: normalizeRankingMetric(patch.modelRankingMetric ?? settings.modelRankingMetric),
       sessionTitlesEnabled: parseBoolean(patch.sessionTitlesEnabled ?? settings.sessionTitlesEnabled, true),
       sessionContextMetric: normalizeSessionContextMetric(patch.sessionContextMetric ?? settings.sessionContextMetric),

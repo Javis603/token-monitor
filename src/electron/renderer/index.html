@@ -18,11 +18,11 @@
         </div>
         <div class="title-controls">
           <div id="pluginPageActions" class="plugin-page-actions hidden"></div>
-          <nav class="tabs" aria-label="Period tabs">
+          <nav id="periodTabs" class="tabs" aria-label="Period tabs" data-i18n-aria-label="periodRange.tabsTitle">
             <span class="tab-indicator" aria-hidden="true"></span>
-            <button class="tab active" data-period="today" data-period-slot="today">DAY</button>
-            <button id="monthPeriodTab" class="tab" data-period="month" data-period-slot="month" aria-haspopup="menu" aria-expanded="false">MONTH</button>
-            <button class="tab" data-period="allTime" data-period-slot="allTime">TOTAL</button>
+            <button class="tab active" data-period="today" data-period-slot="today">Day</button>
+            <button id="monthPeriodTab" class="tab" data-period="month" data-period-slot="month" aria-haspopup="menu" aria-expanded="false">Month</button>
+            <button class="tab" data-period="allTime" data-period-slot="allTime">Total</button>
           </nav>
           <div id="monthPeriodMenu" class="view-switcher-menu period-menu hidden" popover="manual" role="menu" aria-labelledby="monthPeriodTab">
             <button class="view-switcher-menu-item" type="button" role="menuitemradio" data-fixed-period="month"><span class="view-switcher-menu-label" data-i18n="periodRange.month">This month</span></button>
@@ -218,6 +218,16 @@
             </div>
             <div class="settings-subgroup main-numbers-group">
               <div class="main-numbers-title" data-i18n="settings.main.statsCurrency">Stats &amp; currency</div>
+              <div id="periodTabSettings" class="period-tab-settings">
+                <div class="edge-dock-composer-heading">
+                  <span id="periodTabsLabel" data-i18n="periodRange.tabsTitle">Usage range buttons</span>
+                  <button id="resetPeriodTabs" class="edge-dock-composer-reset" type="button" data-i18n="settings.edgeDock.reset" hidden>Reset</button>
+                </div>
+                <div id="shownPeriodTabs" class="period-tab-list period-tab-list-shown" role="group" aria-labelledby="periodTabsLabel" aria-describedby="periodTabsHint"></div>
+                <div id="availablePeriodTabs" class="period-tab-list" role="group" aria-label="Not shown" data-i18n-aria-label="settings.views.hiddenGroup" aria-describedby="periodTabsHint"></div>
+                <p id="periodTabsHint" class="settings-note" data-i18n="periodRange.tabsHint">Choose 3–6 ranges. Drag between rows to show or hide, and within the top row to reorder. You can also click to show or hide.</p>
+                <p id="periodTabsError" class="settings-note hidden" role="alert"></p>
+              </div>
               <div class="settings-item period-default-setting">
                 <span class="settings-item-text" data-reset-setting="periodMonthMode">
                   <label for="periodMonthModeInput" class="settings-item-title" data-i18n="periodRange.settingsTitle">Default usage range</label>

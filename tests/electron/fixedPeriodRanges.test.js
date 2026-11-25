@@ -7,6 +7,16 @@ const ranges = require('../../src/electron/renderer/fixedPeriodRanges');
 const { resolveRegionalLocale } = require('../../src/electron/renderer/i18n');
 const { aggregateHistory, extractUsageFromTokscale, normalizePeriod } = require('../../src/shared/usage');
 
+test('custom period tabs keep a unique supported order or fall back to the legacy layout', () => {
+  assert.deepEqual(ranges.normalizePeriodTabOrder(undefined), []);
+  assert.deepEqual(ranges.normalizePeriodTabOrder(['today', 'today', 'month', 'invalid']), []);
+  assert.deepEqual(ranges.normalizePeriodTabOrder(['week', 'week', 'invalid', 'cycle', 'yesterday']),
+    ['week', 'cycle', 'yesterday']);
+  assert.deepEqual(ranges.normalizePeriodTabOrder(['allTime', 'month', 'week', 'today', 'last30', 'last7', 'cycle', 'yesterday']),
+    ['allTime', 'month', 'week', 'today', 'last30', 'last7']);
+  assert.deepEqual(ranges.PERIOD_TAB_OPTIONS.map(ranges.displayLabel), ['Day', 'YDAY', 'Week', '7D', 'Month', '30D', 'Cycle', 'Total']);
+});
+
 function day(date, tokens, client = 'claude', model = 'opus') {
   return {
     date,
@@ -207,8 +217,12 @@ test('billing cycle starts on the configured day and clamps to short months', ()
   assert.equal(ranges.normalizeCycleStartDay('9'), 9);
   assert.equal(ranges.normalizeCycleStartDay(31.5), 1);
   assert.equal(ranges.normalizeCycleStartDay('15.5'), 1);
+  assert.equal(ranges.normalizeCycleStartDay({ valueOf: null, toString: null }), 1);
+  assert.equal(ranges.normalizeCycleStartDay(Object.create(null)), 1);
+  assert.equal(ranges.normalizeCycleStartDay(Symbol('day')), 1);
+  assert.equal(ranges.normalizeCycleStartDay([15]), 1);
   assert.equal(ranges.slotForSelection('cycle'), 'month');
-  assert.equal(ranges.displayLabel('cycle'), 'CYCLE');
+  assert.equal(ranges.displayLabel('cycle'), 'Cycle');
   assert.equal(ranges.isDerived('cycle'), true);
 });
 
@@ -662,7 +676,7 @@ test('a ready Billing cycle snapshot is not reused after the start day changes',
   assert.equal(snapshot.cycleStartDay, 10);
   assert.equal(ranges.readySnapshotForSelection(snapshot, 'cycle', { cycleStartDay: 10 }), snapshot);
   assert.equal(ranges.readySnapshotForSelection(snapshot, 'cycle', { cycleStartDay: 5 }), null);
-  assert.deepEqual(ranges.devicesForReadySnapshot({ ...snapshot, devices: [{ deviceId: 'mac', period: {} }] }, 'cycle', { cycleStartDay: 5 }), []);
+  assert.deepEqual(ranges.devicesForReadySnapshot({ ...snapshot, devices: [{ deviceId: 'mac', period: {} }] }, 'cycle', undefined, { cycleStartDay: 5 }), []);
 });
 
 test('device rows come from the same ready presentation snapshot as the headline', () => {
@@ -728,8 +742,8 @@ test('fixed periods fail closed without History and for unsupported detail views
   }).reason, 'historyDisabled');
   assert.equal(ranges.supportsBreakdown('last7', 'session'), false);
   assert.equal(ranges.supportsBreakdown('last7', 'project'), false);
-  assert.equal(ranges.supportsBreakdown('last7', 'device', { deviceHistoriesAvailable: true }), true);
-  assert.equal(ranges.supportsBreakdown('last7', 'device', { deviceHistoriesAvailable: false }), false);
+  assert.equal(ranges.supportsBreakdown('last7', 'device', { deviceRowsAvailable: true }), true);
+  assert.equal(ranges.supportsBreakdown('last7', 'device', { deviceRowsAvailable: false }), false);
   assert.equal(ranges.supportsBreakdown('last7', 'model'), true);
 });
 
@@ -792,4 +806,19 @@ test('latest request coordinator catches up revisions and upgrades a background 
   await Promise.resolve();
   assert.deepEqual(settled, [{ render: true }]);
   assert.equal(coordinator.active(), false);
+});
+
+test('a ready native range gives its local device the headline period before History loads', () => {
+  const period = { totalTokens: 70, clients: { claude: 70 } };
+  const localDevice = { deviceId: 'mac', hostname: 'Mac', periods: { today: { totalTokens: 10 } } };
+  for (const selection of ['yesterday', 'week', 'last7', 'last30']) {
+    const snapshot = { status: 'ready', selection, native: true, period };
+    const [device] = ranges.devicesForReadySnapshot(snapshot, selection, localDevice);
+    assert.equal(device.deviceId, 'mac');
+    assert.equal(device.hostname, 'Mac');
+    assert.equal(device.periods[selection], period);
+    assert.deepEqual(localDevice.periods, { today: { totalTokens: 10 } });
+    assert.deepEqual(ranges.devicesForReadySnapshot(snapshot, selection), []);
+    assert.deepEqual(ranges.devicesForReadySnapshot({ ...snapshot, native: false }, selection, localDevice), []);
+  }
 });

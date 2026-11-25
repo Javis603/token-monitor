@@ -38,24 +38,24 @@ test('period switches keep the same group and return to Sessions when that group
   const state = { period: 'today', stats: { periods: { today: period(20), month: period(50), allTime: period(0) } },
     openSession: { kind: 'session-group', summary: rowsForPeriod(period(20)).find(row => row.sessionGroup === 'cursor-grok-bot') } };
   let activate;
-  const tab = { dataset: { period: 'month', periodSlot: 'month' }, addEventListener(_type, callback) { activate = callback; } };
+  const tab = { dataset: { period: 'month' } };
+  const periodTabs = { addEventListener(_type, callback) { activate = callback; } };
   let renders = 0;
   const noop = () => {};
-  // The tab loop and the open-session follow-up it shares with the range menu.
+  // The tab handler and the open-session follow-up it shares with the range menu.
   const start = source.indexOf('function followOpenSessionToPeriod()');
   const end = source.indexOf('\nfor (const button of els.monthPeriodMenu', start);
-  vm.runInNewContext(source.slice(start, end), { state, document: { querySelectorAll: () => [tab] },
-    fixedPeriodRangesApi: { slotForSelection: value => value, normalizeMonthMode: () => 'month', supportsBreakdown: () => true },
+  vm.runInNewContext(source.slice(start, end), { state, periodTabs, els: { monthPeriodTab: tab },
+    fixedPeriodRangesApi: { slotForSelection: value => value, supportsBreakdown: () => true },
     currentNativeRangeSnapshot: () => null,
     captureBreakdownMotion: noop, setPeriod: value => { state.period = value; return true; }, syncPeriodTabs: noop,
     setPeriodMenuOpen: noop, sessionRowsForPeriod: rowsForPeriod, render: () => { renders += 1; },
     periodBreakdownMotionDuration: () => 800, animateBreakdownFrom: noop });
-  activate({ stopPropagation: noop });
+  activate({ target: { closest: () => tab }, stopPropagation: noop });
   assert.equal(state.openSession.summary.key, 'session-group:cursor-grok-bot');
   assert.equal(state.openSession.summary.value, 50);
   assert.equal(state.openSession.period, 'month');
-  tab.dataset = { period: 'allTime', periodSlot: 'allTime' };
-  activate({ stopPropagation: noop });
+  activate({ target: { closest: () => ({ dataset: { period: 'allTime' } }) }, stopPropagation: noop });
   assert.equal(state.period, 'allTime');
   assert.equal(state.openSession, null, 'the remaining Codex group does not replace a missing Grok group');
   assert.equal(renders, 2);
@@ -174,7 +174,7 @@ test('an open session follows a period change with that period\'s row cost', () 
     openSession: { kind: 'session', client: 'claude', sessionId: 's1', sessionCost: 20, period: 'month' } };
   const opened = [];
   const start = source.indexOf('function followOpenSessionToPeriod()');
-  const end = source.indexOf("for (const tab of document.querySelectorAll('.tab'))", start);
+  const end = source.indexOf("periodTabs.addEventListener('click'", start);
   const sessionStart = source.indexOf('function sessionLiveStatsEntry(');
   const sessionEnd = source.indexOf('function sessionDetailLiveSignature(', sessionStart);
   const context = { state, fixedPeriodRangesApi: { supportsBreakdown: () => true },
