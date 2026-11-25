@@ -6,7 +6,7 @@ const path = require('node:path');
 const { fileURLToPath } = require('node:url');
 const { antigravityDataRoots } = require('./selfSync');
 const { antigravityCliDataDir } = require('../../clientSources');
-const { readT3SessionMeta } = require('../../t3SessionMetadata');
+const { readT3SessionRelationResult } = require('../../t3SessionMetadata');
 
 // Deferred like cursor: importing this resolver must not emit Node's
 // experimental node:sqlite warning for collectors that never see an Antigravity row.
@@ -222,14 +222,11 @@ function resolveSessionMetadata(sessionIds, context = {}) {
     }
   }
 
-  const t3Invalidated = new Set();
-  const t3Titles = readT3SessionMeta(sessionIds, {
+  const { facts: t3Relations, status: t3Status, titleStoreRead } = readT3SessionRelationResult(sessionIds, {
     ...context.deps,
-    driver: 'antigravity',
+    includeAntigravityTitles: true,
     homeDir: home,
-    useEnvRoot: !context.deps?.scopedHome,
-    cleanTitle,
-    invalidatedSessionIds: t3Invalidated
+    useEnvRoot: !context.deps?.scopedHome
   });
   for (const sessionId of sessionIds) {
     const key = `antigravity:${sessionId}`;
@@ -249,21 +246,6 @@ function resolveSessionMetadata(sessionIds, context = {}) {
       delete meta.projectId;
       delete meta.projectLabel;
     }
-    const nativeMeta = result.get(sessionId);
-    // Match the T3 sidebar even when the native catalog has its own title.
-    const t3Title = t3Titles.get(sessionId)?.title
-      || (previousSource === T3_TITLE_SOURCE && !t3Invalidated.has(sessionId) ? retained : null);
-    if (t3Title) {
-      result.set(sessionId, {
-        ...nativeMeta,
-        catalogOnly: true,
-        catalogTitle: t3Title,
-        catalogTitleSource: T3_TITLE_SOURCE,
-        title: t3Title
-      });
-    } else if (!nativeMeta && previousSource === T3_TITLE_SOURCE && t3Invalidated.has(sessionId)) {
-      result.set(sessionId, { catalogOnly: true, catalogTitle: null });
-    }
     if (!result.has(sessionId)) {
       // A successful missing-row query can revoke a persisted override even
       // on a cold cache. Check all candidate stores before deciding absence.
@@ -275,10 +257,25 @@ function resolveSessionMetadata(sessionIds, context = {}) {
           if (cached?.misses.has(sessionId)) cached.summaries.set(sessionId, null);
         }
         result.set(sessionId, { catalogOnly: true, catalogTitle: null, catalogProjectResolved: true });
-      } else if (typeof retained === 'string' && retained) {
+      } else if (typeof retained === 'string' && retained && previousSource !== T3_TITLE_SOURCE) {
         result.set(sessionId, { catalogOnly: true, catalogTitle: retained, title: retained });
       } else if (retained === null) result.set(sessionId, { catalogOnly: true, catalogTitle: null });
       else if (hasAnchoredProject) result.set(sessionId, { catalogOnly: true });
+    }
+    const nativeMeta = result.get(sessionId);
+    const previousT3Title = previousSource === T3_TITLE_SOURCE ? retained : null;
+    const t3Title = t3Relations.get(key)?.title
+      || (!titleStoreRead || t3Status === 'retryable' ? previousT3Title : null);
+    if (t3Title) {
+      result.set(sessionId, {
+        ...nativeMeta,
+        catalogOnly: true,
+        catalogTitle: t3Title,
+        catalogTitleSource: T3_TITLE_SOURCE,
+        title: t3Title
+      });
+    } else if (previousT3Title && !nativeMeta?.title) {
+      result.set(sessionId, { ...nativeMeta, catalogOnly: true, catalogTitle: null });
     }
     const meta = result.get(sessionId);
     if (meta && previous && Object.prototype.hasOwnProperty.call(previous, 'titleFallback')) meta.titleFallback = previous.titleFallback;

@@ -973,6 +973,20 @@ function propagateIdentity(source, periods, titleMetadata) {
   }
 }
 
+function copySessionLinks(source, target) {
+  for (const [key, session] of Object.entries(target?.sessions || {})) {
+    const resolved = source?.sessions?.[key];
+    for (const field of ['nativeSessionId', 't3ThreadId']) {
+      if (resolved?.[field]) session[field] = resolved[field];
+    }
+    if (resolved?.parentSessionId) {
+      session.parentSessionId = resolved.parentSessionId;
+      if (resolved.parentClient && resolved.parentClient !== session.client) session.parentClient = resolved.parentClient;
+      else delete session.parentClient;
+    }
+  }
+}
+
 // The process-wide rationing for cursor/antigravity syncs. Deliberately a single
 // module-scoped instance with no per-call override: the tokscale cache it guards
 // is one directory on disk, so a collector rebuilt by a settings change must
@@ -1528,13 +1542,22 @@ async function collectUsageOnce(options) {
     ? options.weekStartsOn
     : 1;
   const todayKey = localTodayKey(collectedAt);
-  if (options.nativeRangesEnabled !== true) {
+  const upgradeRangeLinks = anchorUsed && sessionIdentitiesComplete && anchor.sessionIdentityVersion !== SESSION_IDENTITY_VERSION;
+  if (options.nativeRangesEnabled !== true && !upgradeRangeLinks) {
     // Another collector may share this anchor; only one that shows native
     // ranges reuses or publishes them.
   } else if (anchorUsed) {
     // The anchor belongs to this date (see anchorUsed). Its past days are over.
     // A persisted copy is checked like any other saved input.
     nativePastRanges = matchingNativePastRanges(anchor.nativePastRanges, todayKey, weekStartsOn);
+    if (upgradeRangeLinks && nativePastRanges) {
+      const periods = Object.fromEntries(Object.entries(nativePastRanges.periods).map(([name, period]) => [name, {
+        ...period,
+        sessions: Object.fromEntries(Object.entries(period.sessions || {}).map(([key, row]) => [key, { ...row }]))
+      }]));
+      for (const period of Object.values(periods)) copySessionLinks(allTime, period);
+      nativePastRanges = { ...nativePastRanges, periods };
+    }
   } else if (nativeDays) {
     const periods = {};
     const starts = {};
@@ -1688,12 +1711,12 @@ async function collectUsageOnce(options) {
   }
 
   const codexDotsUsage = Boolean(codexLocalView?.sessionKeys?.length && periodHasUsage(codexLocalView.allTime));
-  const nativeRangeSnapshot = composeNativeRanges(nativePastRanges, today, {
+  const nativeRangeSnapshot = options.nativeRangesEnabled === true ? composeNativeRanges(nativePastRanges, today, {
     allTimeSince,
     wslAllTime: wslBundle.allTime,
     codexDotsUsage,
     titleMetadata: { ...localSessionMetadataDeps, t3Titles: anchor?.t3Titles, scanTitleClears }
-  });
+  }) : null;
 
   // One filesystem probe per tick, shared by the legacy status and the health
   // record below. Probing twice cost a second pass over every client's roots —
@@ -2856,20 +2879,9 @@ function startCollector(options) {
         const identitiesUpgraded = anchor.sessionIdentityVersion !== captured.sessionIdentityVersion;
         if (identitiesUpgraded) {
           for (const period of ['today', 'month', 'allTime']) {
-            for (const [key, session] of Object.entries(anchor[period]?.sessions || {})) {
-              const resolved = captured.windowsPeriods[period]?.sessions?.[key];
-              for (const field of ['nativeSessionId', 't3ThreadId']) {
-                if (resolved?.[field]) session[field] = resolved[field];
-              }
-              // Commit the confirmed link with its namespace before advancing
-              // the migration version; later watch ticks do not revisit history.
-              if (resolved?.parentSessionId) {
-                session.parentSessionId = resolved.parentSessionId;
-                if (resolved.parentClient && resolved.parentClient !== session.client) session.parentClient = resolved.parentClient;
-                else delete session.parentClient;
-              }
-            }
+            copySessionLinks(captured.windowsPeriods[period], anchor[period]);
           }
+          if (captured.nativePastRanges) anchor.nativePastRanges = captured.nativePastRanges;
           anchor.sessionIdentityVersion = captured.sessionIdentityVersion;
         }
         // Keep the rolling per-client today partitions fresh for targeted

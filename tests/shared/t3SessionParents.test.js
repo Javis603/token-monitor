@@ -93,7 +93,12 @@ test('T3 Antigravity ACP displays its thread title and groups same-thread runs a
   s.thread('child', 'parent');
   s.thread('unverified');
   s.provider('launch-provider', 'parent', main, 'antigravity');
-  s.provider('second-provider', 'parent', second, 'antigravity');
+  s.db.exec(`CREATE TABLE orchestration_v2_projection_run_attempts (
+    thread_id TEXT, provider_thread_id TEXT, root_node_id TEXT, status TEXT, payload_json TEXT)`);
+  s.db.prepare('INSERT INTO orchestration_v2_projection_nodes VALUES (?, ?, ?, ?, ?)')
+    .run('old-root', 'parent', 'old-root', 'root_turn', 'launch-provider');
+  s.db.prepare('INSERT INTO orchestration_v2_projection_run_attempts VALUES (?, ?, ?, ?, ?)')
+    .run('parent', 'launch-provider', 'old-root', 'superseded', JSON.stringify({ nativeThreadId: second }));
   s.provider('child-provider', 'child', 'child-native', 'claudeAgent');
   s.provider('weak-provider', 'unverified', 'weak-id', 'antigravity', 'weak');
   s.provider('wrong-provider', 'unverified', 'wrong-id', 'codex');
@@ -105,7 +110,8 @@ test('T3 Antigravity ACP displays its thread title and groups same-thread runs a
   const catalog = new sqlite.DatabaseSync(path.join(nativeDir, 'conversation_summaries.db'));
   try {
     catalog.exec('CREATE TABLE conversation_summaries (conversation_id TEXT PRIMARY KEY, title TEXT, preview TEXT, workspace_uris TEXT)');
-    catalog.prepare('INSERT INTO conversation_summaries VALUES (?, ?, NULL, NULL)').run(main, 'Native Antigravity title');
+    catalog.prepare('INSERT INTO conversation_summaries VALUES (?, ?, NULL, ?)').run(
+      main, 'Native Antigravity title', JSON.stringify([require('node:url').pathToFileURL(s.home).href]));
   } finally {
     catalog.close();
   }
@@ -117,13 +123,15 @@ test('T3 Antigravity ACP displays its thread title and groups same-thread runs a
     d: makeRow('antigravity', 'weak-id', 40),
     e: makeRow('antigravity', 'wrong-id', 50)
   } }) };
-  const deps = { env: {}, metadataCache: new Map() };
+  const deps = { env: {}, metadataCache: new Map(), catalogProjectRows: new WeakSet(), catalogProjects: { today: {} } };
   applySessionMetadata(periods, s.home, deps);
   const sessions = periods.today.sessions;
   const launch = sessions[`antigravity:${main}`];
   assert.equal(launch.title, 'T3 ACP title');
+  assert.ok(launch.projectId);
   assert.equal(launch.t3ThreadId, 'parent');
   assert.equal(sessions[`antigravity:${second}`].t3ThreadId, 'parent');
+  assert.equal(sessions[`antigravity:${second}`].title, 'T3 ACP title', 'historical runs share the verified thread title');
   assert.equal(sessions['claude:child-native'].parentClient, 'antigravity');
   assert.equal(sessions['claude:child-native'].parentSessionId, main);
   for (const id of ['weak-id', 'wrong-id']) {
@@ -145,10 +153,24 @@ test('T3 Antigravity ACP displays its thread title and groups same-thread runs a
   s.db.exec("UPDATE orchestration_v2_projection_threads SET title = 'Renamed T3 ACP title' WHERE thread_id = 'parent'");
   applySessionMetadata(periods, s.home, deps);
   assert.equal(launch.title, 'Renamed T3 ACP title');
-  s.thread('ambiguous');
-  s.provider('ambiguous-provider', 'ambiguous', main, 'antigravity');
+  const strength = s.db.prepare("UPDATE orchestration_v2_projection_provider_threads SET payload_json = json_set(payload_json, '$.nativeThreadRef.strength', ?) WHERE provider_thread_id = 'launch-provider'");
+  strength.run('weak');
   applySessionMetadata(periods, s.home, deps);
-  assert.equal(launch.title, 'Native Antigravity title', 'ambiguous ownership falls back to the native title');
+  assert.equal(launch.title, 'Native Antigravity title');
+  strength.run('strong');
+  applySessionMetadata(periods, s.home, deps);
+  assert.equal(launch.title, 'Renamed T3 ACP title');
+  s.thread('ambiguous');
+  s.provider('ambiguous-provider', 'ambiguous', second, 'antigravity');
+  s.db.exec("UPDATE orchestration_v2_projection_threads SET title = 'Conflicting title' WHERE thread_id = 'ambiguous'");
+  applySessionMetadata(periods, s.home, deps);
+  assert.equal(sessions[`antigravity:${second}`].title, undefined, 'a current claim conflicting with a historical run clears the override');
+  const native = new sqlite.DatabaseSync(path.join(nativeDir, 'conversation_summaries.db'));
+  try { native.exec('DELETE FROM conversation_summaries'); } finally { native.close(); }
+  applySessionMetadata(periods, s.home, deps);
+  assert.equal(launch.title, 'Renamed T3 ACP title');
+  assert.equal(launch.projectId, undefined);
+  assert.equal(deps.catalogProjects.today[`antigravity:${main}`], undefined);
 });
 
 for (const driver of ['cursor', 'opencode', 'grok', 'muse']) {

@@ -79,7 +79,6 @@ function discoverT3DbPaths(options = {}) {
 // session ids are not native conversation identities.
 function t3TitleQueries(db, tables, providerDriver) {
   const queries = [];
-  const antigravity = providerDriver === 'antigravity';
   const columnsFor = (table) => new Set(db.prepare(`PRAGMA table_info(${table})`).all().map((column) => String(column.name)));
   const v2Threads = 'orchestration_v2_projection_threads';
   const v2Providers = 'orchestration_v2_projection_provider_threads';
@@ -91,26 +90,20 @@ function t3TitleQueries(db, tables, providerDriver) {
       const driver = providerColumns.has('driver')
         ? (providerColumns.has('provider') ? 'COALESCE(r.driver, r.provider)' : 'r.driver')
         : 'r.provider';
-      // One malformed payload must not hide every other title in the batch.
-      const payload = "(CASE WHEN json_valid(r.payload_json) THEN r.payload_json END)";
-      const threadId = `json_extract(${payload}, '$.nativeThreadRef.nativeId')`;
-      const deleted = columns.has('deleted_at') ? '(t.deleted_at IS NOT NULL)' : '0';
       queries.push({
         authoritative: true,
-        threadId,
+        // One malformed payload must not hide every other title in the batch.
+        threadId: "(CASE WHEN json_valid(r.payload_json) THEN json_extract(r.payload_json, '$.nativeThreadRef.nativeId') END)",
         from: `FROM ${v2Threads} t JOIN ${v2Providers} r ON r.thread_id = t.thread_id`,
         // Tombstones still own the native id and suppress retained V1 titles.
-        deleted: antigravity ? `(COUNT(DISTINCT t.thread_id) > 1 OR ${deleted})` : deleted,
-        where: `${driver} = ? AND ${antigravity
-          ? `json_extract(${payload}, '$.nativeThreadRef.driver') = 'antigravity' AND json_extract(${payload}, '$.nativeThreadRef.strength') = 'strong' AND `
-          : ''}`,
+        deleted: columns.has('deleted_at') ? '(t.deleted_at IS NOT NULL)' : '0',
+        where: `${driver} = ? AND `,
         params: [providerDriver],
-        order: antigravity ? ` GROUP BY ${threadId}`
-          : (columns.has('updated_at') ? ' ORDER BY t.updated_at DESC, t.thread_id' : '')
+        order: columns.has('updated_at') ? ' ORDER BY t.updated_at DESC, t.thread_id' : ''
       });
     }
   }
-  if (!antigravity && tables.has('projection_threads') && tables.has('provider_session_runtime')) {
+  if (tables.has('projection_threads') && tables.has('provider_session_runtime')) {
     const columns = columnsFor('projection_threads');
     const runtimeColumns = columnsFor('provider_session_runtime');
     if (columns.has('title') && runtimeColumns.has('resume_cursor_json')
@@ -131,7 +124,7 @@ function t3TitleQueries(db, tables, providerDriver) {
 
 function readT3SessionMeta(sessionIds, deps = {}) {
   const providerDriver = deps.driver;
-  if (!['codex', 'claudeAgent', 'antigravity'].includes(providerDriver)) return new Map();
+  if (!['codex', 'claudeAgent'].includes(providerDriver)) return new Map();
   const cleanTitle = deps.cleanTitle || cleanT3Title;
   const candidatesForId = deps.candidatesForId || ((id) => [id]);
   const ids = [...new Set(Array.from(sessionIds || []).map(String).filter(Boolean))];
@@ -147,8 +140,8 @@ function readT3SessionMeta(sessionIds, deps = {}) {
     try { return fs.statSync(dbPath).isFile(); } catch (_) { return false; }
   });
   if (dbPaths.length === 0) return out;
-  // Codex supplies rollout-id expansion; Claude and Antigravity match native
-  // session ids exactly. T3 app ids and shared runtime sessions are not aliases.
+  // Codex supplies rollout-id expansion; Claude matches its native session id
+  // exactly. Neither provider may match a T3 app id or shared runtime session.
   const candidatesBySession = new Map(ids.map((id) => [id, candidatesForId(id)]));
   const candidateIds = [...new Set([...candidatesBySession.values()].flat())];
   const titleByThreadId = new Map();
@@ -233,6 +226,7 @@ function readT3SessionRelationResult(nativeIds, deps = {}) {
   if (!ids.length) return { facts: out, status: 'complete' };
   if (!sqlite) return { facts: out, status: 'unavailable' };
   let status = 'complete';
+  let titleStoreRead = false;
   const names = {
     t: 'orchestration_v2_projection_threads',
     p: 'orchestration_v2_projection_provider_threads',
@@ -245,6 +239,7 @@ function readT3SessionRelationResult(nativeIds, deps = {}) {
   for (const file of discoverT3DbPaths(deps)) {
     let db;
     let complete = false;
+    let readTitle = false;
     const facts = new Map();
     const conflicts = new Set();
     const parentConflicts = new Set();
@@ -268,6 +263,8 @@ function readT3SessionRelationResult(nativeIds, deps = {}) {
           ? `(CASE WHEN ${payloadId} IS NULL OR ${payloadId} = ${alias}.provider_instance_id THEN ${alias}.provider_instance_id END)`
           : payloadId;
       };
+      readTitle = deps.includeAntigravityTitles && has('t', ['title']);
+      const titleColumn = readTitle ? ', t.title AS title' : '';
       const strong = `${native('p', 'driver')} = p.driver AND ${native('p', 'strength')} = 'strong'`;
       const add = row => {
         const client = t3AccountingClient(row.driver, row.instanceId, bindings);
@@ -279,14 +276,18 @@ function readT3SessionRelationResult(nativeIds, deps = {}) {
         if (conflicts.has(key)) return;
         if (facts.has(key) && facts.get(key).threadId !== threadId) {
           facts.delete(key); conflicts.add(key);
-        } else if (!facts.has(key)) facts.set(key, { threadId });
+        } else if (!facts.has(key)) {
+          const title = client === 'antigravity' && readTitle ? cleanT3Title(row.title) : '';
+          facts.set(key, { threadId, ...(client === 'antigravity' && readTitle
+            ? { title: title && !T3_DEFAULT_TITLES.has(title.toLowerCase()) ? title : null } : {}) });
+        }
       };
       // IDs live in unindexed JSON in current T3 schemas. One candidate pass
       // per table avoids rescanning all providers for every 400-ID batch. The
       // target filters precede the indexed ownership joins.
       const idJson = JSON.stringify(ids);
       const uuidJson = JSON.stringify(uuidIds);
-      const sql = `SELECT p.driver, ${instance('p')} AS instanceId, ${native('p', 'nativeId')} AS nativeId, p.thread_id AS threadId
+      const sql = `SELECT p.driver, ${instance('p')} AS instanceId, ${native('p', 'nativeId')} AS nativeId, p.thread_id AS threadId${titleColumn}
         FROM ${names.p} p CROSS JOIN ${names.t} t ON t.thread_id = p.thread_id
         WHERE (${native('p', 'nativeId')} IN (SELECT value FROM json_each(?))
           OR lower(${native('p', 'nativeId')}) IN (SELECT value FROM json_each(?)))
@@ -300,7 +301,7 @@ function readT3SessionRelationResult(nativeIds, deps = {}) {
       if (has('a', ['thread_id', 'provider_thread_id', 'root_node_id', 'status', 'payload_json'])
           && has('n', ['node_id', 'thread_id', 'provider_thread_id', 'kind'])) {
         const history = `SELECT p.driver, 1 AS historical, ${instance('p')} AS instanceId,
-            json_extract(${json('a')}, '$.nativeThreadId') AS nativeId, p.thread_id AS threadId
+            json_extract(${json('a')}, '$.nativeThreadId') AS nativeId, p.thread_id AS threadId${titleColumn}
           FROM ${names.a} a
           CROSS JOIN ${names.p} p ON p.provider_thread_id = a.provider_thread_id AND p.thread_id = a.thread_id
           CROSS JOIN ${names.t} t ON t.thread_id = p.thread_id
@@ -381,6 +382,7 @@ function readT3SessionRelationResult(nativeIds, deps = {}) {
     } finally {
       if (db) { try { db.close(); } catch (_) {} }
       if (complete) {
+        if (readTitle) titleStoreRead = true;
         for (const key of conflicts) { out.delete(key); ambiguous.add(key); }
         for (const key of parentConflicts) ambiguousParents.add(key);
         for (const [key, fact] of facts) {
@@ -393,13 +395,14 @@ function readT3SessionRelationResult(nativeIds, deps = {}) {
           if (previous?.parentThreadId && fact.parentThreadId && (previous.parentThreadId !== fact.parentThreadId
             || previous.parentClient !== fact.parentClient || previous.parentNativeId !== fact.parentNativeId)) ambiguousParents.add(key);
           const merged = { ...previous, ...fact };
+          if (previous && Object.hasOwn(previous, 'title')) merged.title = previous.title;
           if (ambiguousParents.has(key)) for (const field of ['parentThreadId', 'parentClient', 'parentNativeId']) delete merged[field];
           out.set(key, merged);
         }
       }
     }
   }
-  return { facts: status === 'retryable' ? new Map() : out, status };
+  return { facts: status === 'retryable' ? new Map() : out, status, ...(deps.includeAntigravityTitles ? { titleStoreRead } : {}) };
 }
 
 function readT3SessionRelations(nativeIds, deps = {}) {

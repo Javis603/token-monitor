@@ -888,9 +888,16 @@ for (const scenario of ['cross-client', 'antigravity', 'native', 'locked', 'part
   const capturedAt = new Date().toISOString();
   const anchorPeriods = { today: period(), month: period(true), allTime: period(true) };
   if (nativeChild) for (const period of ['month', 'allTime']) anchorPeriods[period].sessions[childKey].parentClient = 'codex';
+  const todayKey = localTodayKey();
+  const todayDate = new Date(todayKey);
+  const daysAgo = days => new Date(todayDate.getTime() - days * 86400000).toISOString().slice(0, 10);
+  const starts = { yesterday: daysAgo(1), week: daysAgo((todayDate.getUTCDay() + 6) % 7), last7: daysAgo(6), last30: daysAgo(29) };
+  const nativePastRanges = { todayKey, weekStartsOn: 1, starts,
+    periods: Object.fromEntries(Object.keys(starts).map(name => [name, period(true)])) };
   fs.writeFileSync(file, JSON.stringify({ dateKey: localTodayKey(), ...anchorPeriods,
     calendarKey: collectionCalendarKey(),
-    configFingerprint: configFingerprint('codex', '2024-01-01', false), fullScanAt: capturedAt, sessionIdentityVersion: antigravityChild ? 2 : 1 }));
+    configFingerprint: configFingerprint('codex', '2024-01-01', false), fullScanAt: capturedAt,
+    sessionIdentityVersion: antigravityChild ? 2 : 1, ...(antigravityChild ? { nativePastRanges } : {}) }));
   const scans = [], resolved = [], updates = [];
   let relationReads = 0;
   let failLater = scenario === 'partial';
@@ -909,6 +916,7 @@ for (const scenario of ['cross-client', 'antigravity', 'native', 'locked', 'part
     }
   }
   const options = { ...baseOptions, clients: 'codex', homeDir: home, projectsEnabled: false,
+    nativeRangesEnabled: antigravityChild,
     intervalMs: 3600000, watchEnabled: false, wslScanEnabled: false, sessionActivityPolling: false,
     runTokscale: async ({ flags }) => {
       scans.push(flags);
@@ -977,6 +985,13 @@ for (const scenario of ['cross-client', 'antigravity', 'native', 'locked', 'part
   assert.equal(saved.month.sessions['codex:historical'].nativeSessionId, native);
   assert.equal(saved.month.sessions['codex:historical'].t3ThreadId, unavailable ? undefined : 'app-thread');
   assert.equal(saved.month.sessions[childKey].t3ThreadId, unavailable ? undefined : 'devin-app', 'version-one anchors receive the child app identity');
+  if (antigravityChild) {
+    for (const name of ['yesterday', 'last7']) {
+      assert.equal(saved.nativePastRanges.periods[name].sessions[childKey].t3ThreadId, 'devin-app');
+      assert.equal(updates[0].nativeRanges[name].sessions[childKey].t3ThreadId, 'devin-app');
+      assert.equal(saved.nativePastRanges.periods[name].totalTokens, 40);
+    }
+  }
   for (const period of ['month', 'allTime']) {
     assert.equal(saved[period].sessions[childKey].parentSessionId, updates.at(-1)[period].sessions[childKey].parentSessionId);
     assert.equal(saved[period].sessions[childKey].parentClient, nativeChild || unavailable ? undefined : 'codex', 'same-client links remove the redundant old namespace');
