@@ -192,6 +192,26 @@ test('T3 Antigravity ACP displays its thread title and groups same-thread runs a
   assert.equal(deps.catalogProjects.today[`antigravity:${main}`], undefined);
 });
 
+test('a readable T3 store without a title column clears its cached Antigravity title', t => {
+  const s = store(t);
+  s.thread('thread');
+  s.provider('provider', 'thread', 'conversation', 'antigravity');
+  s.db.exec("UPDATE orchestration_v2_projection_threads SET title = 'T3 title'");
+  const key = 'antigravity:conversation';
+  const periods = () => ({ today: normalizePeriod({ sessions: {
+    [key]: { client: 'antigravity', sessionId: 'conversation', totalTokens: 10 }
+  } }) });
+  const deps = { env: {}, metadataCache: new Map() };
+  const before = periods();
+  applySessionMetadata(before, s.home, deps);
+  assert.equal(before.today.sessions[key].title, 'T3 title');
+  s.db.exec('ALTER TABLE orchestration_v2_projection_threads DROP COLUMN title');
+  const after = periods();
+  applySessionMetadata(after, s.home, deps);
+  assert.equal(after.today.sessions[key].title, '');
+  assert.equal(after.today.sessions[key].t3ThreadId, 'thread');
+});
+
 for (const driver of ['cursor', 'opencode', 'grok', 'muse']) {
   test(`T3 ${driver} uses shared delegation without changing the accounting client`, t => {
     const s = store(t); pair(s, driver, driver);

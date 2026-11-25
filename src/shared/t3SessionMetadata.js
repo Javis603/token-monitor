@@ -226,7 +226,7 @@ function readT3SessionRelationResult(nativeIds, deps = {}) {
   if (!ids.length) return { facts: out, status: 'complete' };
   if (!sqlite) return { facts: out, status: 'unavailable' };
   let status = 'complete';
-  const titleStoresRead = new Set();
+  const completedStores = new Set();
   let ownershipRead = false;
   let ownershipIncomplete = false;
   const names = {
@@ -389,7 +389,7 @@ function readT3SessionRelationResult(nativeIds, deps = {}) {
       if (db) { try { db.close(); } catch (_) {} }
       if (complete) {
         ownershipRead = true;
-        if (readTitle) titleStoresRead.add(file);
+        if (deps.includeAntigravityTitles) completedStores.add(file);
         for (const key of conflicts) { out.delete(key); ambiguous.add(key); }
         for (const key of parentConflicts) ambiguousParents.add(key);
         for (const [key, fact] of facts) {
@@ -412,7 +412,7 @@ function readT3SessionRelationResult(nativeIds, deps = {}) {
       }
     }
   }
-  return { facts: status === 'retryable' ? new Map() : out, status, ...(deps.includeAntigravityTitles ? { titleStoresRead } : {}),
+  return { facts: status === 'retryable' ? new Map() : out, status, ...(deps.includeAntigravityTitles ? { completedStores } : {}),
     ...(deps.includeOwnershipStatus ? { ambiguous, ownershipComplete: ownershipRead && !ownershipIncomplete } : {}) };
 }
 
