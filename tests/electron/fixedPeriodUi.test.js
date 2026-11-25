@@ -9,11 +9,37 @@ const vm = require('node:vm');
 const rendererDir = path.join(__dirname, '..', '..', 'src', 'electron', 'renderer');
 const read = (name) => fs.readFileSync(path.join(rendererDir, name), 'utf8');
 
+test('reset restores the configured middle range from a custom selection', () => {
+  const source = read('app.js');
+  const start = source.indexOf('function setRendererSettings(next)');
+  const end = source.indexOf('function periodContentAvailability()', start);
+  const fixedPeriodRangesApi = require('../../src/electron/renderer/fixedPeriodRanges');
+  for (const [active, configured, expected] of [
+    ['last7', 'month', 'month'],
+    ['last30', 'week', 'week'],
+    ['today', 'month', 'today'],
+    ['allTime', 'month', 'allTime']
+  ]) {
+    const state = { period: active, settings: { periodTabOrder: ['today', 'month', 'last7', 'last30', 'allTime'], periodMonthMode: configured } };
+    let followed = 0;
+    const context = {
+      state, fixedPeriodRangesApi, tokenNumberAnimationApi: { normalize: value => value },
+      setPeriod(period) { state.period = period; return true; },
+      followOpenSessionToPeriod() { followed++; }
+    };
+    vm.runInNewContext(source.slice(start, end), context);
+    context.setRendererSettings({ periodTabOrder: [], periodMonthMode: configured });
+    context.setRendererSettings({ periodTabOrder: [], periodMonthMode: configured });
+    assert.equal(state.period, expected);
+    assert.equal(followed, Number(active !== expected));
+  }
+});
+
 test('fixed periods reuse the existing three-slot control', () => {
   const html = read('index.html');
   const slots = [...html.matchAll(/data-period-slot="([^"]+)"/g)].map((match) => match[1]);
   assert.deepEqual(slots, ['today', 'month', 'allTime']);
-  assert.match(html, /id="monthPeriodTab"[^>]*aria-haspopup="menu"[^>]*>MONTH<\/button>/);
+  assert.match(html, /id="monthPeriodTab"[^>]*aria-haspopup="menu"[^>]*>Month<\/button>/);
   assert.doesNotMatch(html, /id="monthPeriodTab"[^>]*>[^<]*(?:▼|▾|⌄)/);
 });
 
