@@ -112,3 +112,18 @@ test('cold-start boot restores every fixed middle-slot selection', () => {
     );
   }
 });
+
+test('a pending local scan shows loading copy for missing range details', () => {
+  const source = read('app.js');
+  const state = { stats: { nativeRangesPending: true } };
+  const context = { state, t: (key) => key };
+  vm.runInNewContext(source.slice(source.indexOf('function fixedPeriodMessage('),
+    source.indexOf('function hidePeriodContentForMessage(')), context);
+  const ready = { status: 'ready' };
+  assert.equal(context.fixedPeriodMessage(ready, 'session'), 'periodRange.sessionLoading');
+  assert.equal(context.fixedPeriodMessage(ready, 'project'), 'periodRange.projectLoading');
+  assert.equal(context.fixedPeriodMessage({ status: 'loading' }), 'periodRange.loading');
+  state.stats = {};
+  assert.equal(context.fixedPeriodMessage(ready, 'session'), 'periodRange.sessionUnavailable');
+  assert.equal(context.fixedPeriodMessage(ready, 'project'), 'periodRange.projectUnavailable');
+});

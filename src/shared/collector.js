@@ -688,6 +688,40 @@ function nativeRangeStart(name, todayKey, weekStartsOn = 1) {
   return dayKeyAddDays(todayKey, -((weekday - weekStartsOn + 7) % 7));
 }
 
+function matchingNativePastRanges(saved, todayKey, weekStartsOn) {
+  if (saved?.todayKey !== todayKey || saved.weekStartsOn !== weekStartsOn) return null;
+  return NATIVE_RANGE_NAMES.every((name) =>
+    saved.periods?.[name] && typeof saved.periods[name] === 'object'
+    && saved.starts?.[name] === nativeRangeStart(name, todayKey, weekStartsOn)
+  ) ? saved : null;
+}
+
+function composeNativeRanges(pastRanges, today, { allTimeSince, wslAllTime, codexDotsUsage, titleMetadata = {} }) {
+  // WSL and Dots lack day windows. A source bounded by All Time also cannot
+  // establish a range starting before that boundary.
+  if (!pastRanges || String(allTimeSince) > pastRanges.starts.last30
+    || periodHasUsage(wslAllTime) || codexDotsUsage) return null;
+  const nativeRanges = {};
+  const nativeRangeWindows = {};
+  for (const name of NATIVE_RANGE_NAMES) {
+    const start = pastRanges.starts[name];
+    const past = pastRanges.periods[name];
+    const end = name === 'yesterday' ? start : pastRanges.todayKey;
+    // Yesterday does not include Today. Copy its rows because the live
+    // collector decorates the published rows, and the anchor is reused.
+    nativeRanges[name] = name === 'yesterday'
+      ? { ...past, sessions: Object.fromEntries(Object.entries(past.sessions || {}).map(([key, row]) => [key, row && { ...row }])) }
+      : mergeNormalizedPeriods(past, today);
+    nativeRangeWindows[name] = { start, end };
+  }
+  // Current ranges take metadata from Today. Yesterday takes identity only,
+  // so its timestamps and context still describe that closed day.
+  const { yesterday, ...current } = nativeRanges;
+  propagateTodayProjects(today, current, titleMetadata);
+  propagateIdentity(today, { yesterday }, titleMetadata);
+  return { nativeRanges, nativeRangeWindows };
+}
+
 function nativeRangePastDays(todayKey) {
   return Array.from({ length: NATIVE_RANGE_PAST_DAYS }, (_, index) => dayKeyAddDays(todayKey, -(index + 1)));
 }
@@ -1500,12 +1534,7 @@ async function collectUsageOnce(options) {
   } else if (anchorUsed) {
     // The anchor belongs to this date (see anchorUsed). Its past days are over.
     // A persisted copy is checked like any other saved input.
-    const saved = anchor.nativePastRanges;
-    if (saved?.todayKey === todayKey && saved.weekStartsOn === weekStartsOn
-      && NATIVE_RANGE_NAMES.every((name) => saved.periods?.[name] && typeof saved.periods[name] === 'object'
-        && saved.starts?.[name] === nativeRangeStart(name, todayKey, weekStartsOn))) {
-      nativePastRanges = saved;
-    }
+    nativePastRanges = matchingNativePastRanges(anchor.nativePastRanges, todayKey, weekStartsOn);
   } else if (nativeDays) {
     const periods = {};
     const starts = {};
@@ -1658,37 +1687,13 @@ async function collectUsageOnce(options) {
     }
   }
 
-  // Native ranges hold only scanned usage. WSL and Codex Dots report Today,
-  // Month and All Time but no days, and a range can reach back past this
-  // month, so any usage from either leaves the ranges on their History
-  // fallback rather than undercounting them.
-  let nativeRanges = null;
-  let nativeRangeWindows = null;
-  // Those sources stop at allTimeSince, so their All Time proves nothing about
-  // a range that starts earlier.
-  if (nativePastRanges && String(allTimeSince) <= nativePastRanges.starts.last30
-    && !periodHasUsage(wslBundle.allTime)
-    && !(codexLocalView?.sessionKeys?.length && periodHasUsage(codexLocalView.allTime))) {
-    nativeRanges = {};
-    nativeRangeWindows = {};
-    for (const name of NATIVE_RANGE_NAMES) {
-      // Yesterday is over: it is its past day alone. Every other range ends today.
-      // Its rows are copied because propagateTodayProjects() below writes into
-      // published rows, and these belong to the anchor watch ticks reuse.
-      const end = name === 'yesterday' ? nativePastRanges.starts[name] : todayKey;
-      const past = nativePastRanges.periods[name];
-      nativeRanges[name] = end === todayKey
-        ? mergeNormalizedPeriods(past, today)
-        : { ...past, sessions: Object.fromEntries(Object.entries(past.sessions || {}).map(([key, row]) => [key, row && { ...row }])) };
-      nativeRangeWindows[name] = { start: nativePastRanges.starts[name], end };
-    }
-    // A session active on past days and Today takes Today's fresh title and
-    // project, exactly as the delta-derived Month does on a watch tick.
-    const { yesterday, ...current } = nativeRanges;
-    const titleMetadata = { ...localSessionMetadataDeps, t3Titles: anchor?.t3Titles, scanTitleClears };
-    propagateTodayProjects(today, current, titleMetadata);
-    propagateIdentity(today, { yesterday }, titleMetadata);
-  }
+  const codexDotsUsage = Boolean(codexLocalView?.sessionKeys?.length && periodHasUsage(codexLocalView.allTime));
+  const nativeRangeSnapshot = composeNativeRanges(nativePastRanges, today, {
+    allTimeSince,
+    wslAllTime: wslBundle.allTime,
+    codexDotsUsage,
+    titleMetadata: { ...localSessionMetadataDeps, t3Titles: anchor?.t3Titles, scanTitleClears }
+  });
 
   // One filesystem probe per tick, shared by the legacy status and the health
   // record below. Probing twice cost a second pass over every client's roots —
@@ -1725,9 +1730,9 @@ async function collectUsageOnce(options) {
     month,
     allTime,
     // Local only: syncPayload keeps these off the wire.
-    ...(nativeRanges ? { nativeRanges, nativeRangeWindows } : {}),
+    ...nativeRangeSnapshot,
     // A full tick's past days, for the session archive only (usageTransform).
-    ...(nativeRanges && nativeDays && !anchorUsed
+    ...(nativeRangeSnapshot && nativeDays && !anchorUsed
       ? { nativeRangeDays: Object.fromEntries(Object.entries(nativeDays).map(([key, period]) => [key, { sessions: period.sessions }])) }
       : {})
   };
@@ -1781,7 +1786,12 @@ async function collectUsageOnce(options) {
       catalogProjects,
       wslBundle,
       wslStatus,
-      ...(nativePastRanges ? { nativePastRanges } : {}),
+      ...(nativePastRanges ? {
+        // A cold seed cannot check the Dots ledger. Record whether this
+        // observation included Dots, leaving it unknown if the ledger was
+        // hidden or could not be read.
+        nativePastRanges: { ...nativePastRanges, codexDotsUsage: codexLocalView ? codexDotsUsage : undefined }
+      } : {}),
       ...(summary.nativeSessions ? { nativeSessions: summary.nativeSessions } : {}),
       ...(summary.nativeProjects ? { nativeProjects: summary.nativeProjects } : {})
     });
@@ -3699,6 +3709,8 @@ module.exports = {
   computePeriodWindows,
   collectionCalendarKey,
   collectorAnchorTrust,
+  matchingNativePastRanges,
+  composeNativeRanges,
   pricingFingerprint,
   configFingerprint,
   deriveClientHealth,
