@@ -1,7 +1,7 @@
 'use strict';
 
 const fs = require('node:fs');
-const { execFile, execFileSync } = require('node:child_process');
+const childProcess = require('node:child_process');
 const { throwIfAborted } = require('./abortSignal');
 const { emptyPeriod, extractUsageFromTokscale, mergePeriods } = require('./usage');
 const { REASONIX_CLIENT } = require('./providers/reasonix/paths');
@@ -12,18 +12,28 @@ const WSL_EXCLUDED_CLIENTS = new Set([REASONIX_CLIENT, 'catpaw']);
 
 const LXSS_KEY = 'HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Lxss';
 
-// Default command runner. reg output is ANSI/utf8; wsl.exe output is UTF-16LE.
 // stdin is NUL ('ignore') so a non-WSL wsl.exe stub cannot block on "press any
 // key to install"; a timeout backstops any hang.
 function defaultExec(cmd, args) {
-  const isWsl = /wsl(\.exe)?$/i.test(cmd);
-  const out = execFileSync(cmd, args, {
+  return childProcess.execFileSync(cmd, args, {
     stdio: ['ignore', 'pipe', 'ignore'],
     timeout: 5000,
     windowsHide: true,
     encoding: 'buffer'
   });
-  return Buffer.from(out).toString(isWsl ? 'utf16le' : 'utf8');
+}
+
+function parseRunningWslDistros(output) {
+  if (Buffer.isBuffer(output)) {
+    // wsl.exe emits UTF-16LE by default and may emit UTF-8 with WSL_UTF8=1.
+    // UTF-16LE line endings contain NUL bytes, which cannot occur in UTF-8 distro names.
+    const utf16 = output.includes(0) || (output[0] === 0xff && output[1] === 0xfe);
+    output = output.toString(utf16 ? 'utf16le' : 'utf8');
+  }
+  return String(output)
+    .split(/\r?\n/)
+    .map((line) => line.replace(/\u0000/g, '').trim())
+    .filter(Boolean);
 }
 
 function emptyWslBundle() {
@@ -53,10 +63,7 @@ function listRunningWslDistros(deps = {}) {
   } catch (_) {
     return [];
   }
-  return String(out)
-    .split(/\r?\n/)
-    .map((line) => line.replace(/\u0000/g, '').trim())
-    .filter(Boolean);
+  return parseRunningWslDistros(out);
 }
 
 // Returns the tracked-client ids whose marker is present in this home (deduped).
@@ -182,15 +189,14 @@ async function collectWslUsage(options = {}, deps = {}) {
 }
 
 function defaultExecAsync(cmd, args) {
-  const isWsl = /wsl(\.exe)?$/i.test(cmd);
   return new Promise((resolve, reject) => {
-    const child = execFile(cmd, args, {
+    const child = childProcess.execFile(cmd, args, {
       timeout: 5000,
       windowsHide: true,
       encoding: 'buffer'
     }, (error, stdout) => {
       if (error) reject(error);
-      else resolve(Buffer.from(stdout).toString(isWsl ? 'utf16le' : 'utf8'));
+      else resolve(stdout);
     });
     child.stdin?.end();
   });
@@ -224,10 +230,7 @@ async function detectWslClientsAsync(deps = {}) {
   } catch (_) {
     return [];
   }
-  const distros = String(out)
-    .split(/\r?\n/)
-    .map((line) => line.replace(/\u0000/g, '').trim())
-    .filter(Boolean);
+  const distros = parseRunningWslDistros(out);
   const ids = new Set();
   const wants = (client) => Boolean(client) && !ids.has(client) && (!target || target.has(client));
   for (const distro of distros) {
