@@ -43,7 +43,7 @@ test('fixed-period menu follows the glass theme and keeps labels left aligned', 
   assert.match(app, /button\.classList\.toggle\('is-current', active\)/);
   assert.match(app, /handlePeriodMenuNavigation\(event/);
   assert.match(app, /setPeriodMenuOpen\(true, \{ focus: event\.key === 'ArrowUp' \? 'last' : 'first' \}\)/);
-  assert.match(app, /deviceHistoriesAvailable: Array\.isArray\(state\.fixedPeriodHistory\?\.deviceHistories\)/);
+  assert.match(app, /deviceRowsAvailable: Array\.isArray\(state\.fixedPeriodHistory\?\.deviceHistories\)/);
   assert.match(app, /getDashboardHistory\(\{ includeDevices: true \}\)/);
   assert.match(app, /state\.stats\?\.deviceHistoryRevision \|\| state\.stats\?\.historyRevision/);
   assert.match(app, /deviceInventorySignature\(state\.stats\?\.devices \|\| \[\]\)/);
@@ -67,7 +67,7 @@ test('fixed-period menu follows the glass theme and keeps labels left aligned', 
   assert.match(app, /fixedPeriodHistorySignature !== signature[\s\S]*?\|\| state\.fixedPeriodHistoryBusy\) \{[\s\S]*?void loadFixedPeriodHistory\(\);/);
   assert.match(boot, /\['today', 'month', 'yesterday', 'week', 'last7', 'last30', 'allTime'\]\.includes\(period\)/);
   assert.match(app, /function fixedPeriodDevices\(\)/);
-  assert.match(app, /devicesForReadySnapshot\(state\.fixedPeriodSnapshot, state\.period\)/);
+  assert.match(app, /devicesForReadySnapshot\(state\.fixedPeriodSnapshot, state\.period, localDevice\)/);
   assert.match(app, /fixedPeriodSnapshotFromDevices\(state\.period, fixedPeriodSources\(\)/);
   const snapshotBuilder = app.slice(app.indexOf('function buildFixedPeriodSnapshot()'), app.indexOf('async function loadFixedPeriodHistory'));
   assert.ok(snapshotBuilder.indexOf('historyEnabled === false') < snapshotBuilder.indexOf('fixedPeriodHistoryRequested'));
@@ -126,4 +126,37 @@ test('a pending local scan shows loading copy for missing range details', () => 
   state.stats = {};
   assert.equal(context.fixedPeriodMessage(ready, 'session'), 'periodRange.sessionUnavailable');
   assert.equal(context.fixedPeriodMessage(ready, 'project'), 'periodRange.projectUnavailable');
+});
+
+test('refresh renders native Devices before the pending History read completes', async () => {
+  const source = read('app.js');
+  const state = { period: 'last7', breakdown: 'device' };
+  const stats = { nativeRangeWindows: { last7: {} } };
+  let resolveHistory;
+  const history = new Promise(resolve => { resolveHistory = resolve; });
+  let rendered = 0;
+  const context = {
+    state,
+    window: { tokenMonitor: { getStats: async () => stats } },
+    observeLiveTokenRate() {},
+    observeDisplayLiveTokenRates() {},
+    allTimeSessions: { invalidate() {}, attach: value => value },
+    sessionStatsForDisplay: value => value,
+    applyCodexActiveAccountFromStats() {},
+    currentNativeRangeSnapshot: () => state.stats === stats,
+    fixedPeriodRangesApi: { isDerived: () => true },
+    statsRenderScheduler: { request() { rendered++; } },
+    warmFixedPeriodHistory: () => history,
+    maybeUpdateBarsIcon() {}
+  };
+  const gate = source.match(/function canRenderNativeDevices\(\) \{[^}]+\}/)?.[0];
+  if (gate) vm.runInNewContext(gate, context);
+  vm.runInNewContext(source.slice(source.indexOf('async function refreshStats('),
+    source.indexOf('async function refreshStatusViewManually(')), context);
+  const refresh = context.refreshStats();
+  await new Promise(setImmediate);
+  assert.equal(rendered, 1);
+  resolveHistory();
+  await refresh;
+  assert.equal(rendered, 2);
 });
