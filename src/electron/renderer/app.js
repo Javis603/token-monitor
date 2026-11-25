@@ -275,7 +275,7 @@ const VIEW_DISPLAY_OPTIONS = [
   { id: 'trends', labelKey: 'views.trends' },
   { id: 'status', labelKey: 'views.status' }
 ];
-const viewPeriodValues = new Set(['today', 'month', 'yesterday', 'week', 'last7', 'last30', 'allTime']);
+const viewPeriodValues = new Set(fixedPeriodRangesApi.PERIOD_TAB_OPTIONS);
 const viewBreakdownValues = new Set(['home', ...baseBreakdownOrder, 'status', 'limits', 'trends']);
 const HOME_MODULE_OPTIONS = [
   { id: 'limits', labelKey: 'home.limits', viewId: 'limits' },
@@ -6871,10 +6871,14 @@ function setPeriodMenuOpen(open, { restoreFocus = false, focus = '' } = {}) {
   if (!state.periodMenuOpen && restoreFocus) els.monthPeriodTab?.focus();
 }
 
-function syncPeriodMenu() {
-  const mode = fixedPeriodRangesApi.slotForSelection(state.period) === 'month'
+function legacyMiddlePeriod() {
+  return fixedPeriodRangesApi.slotForSelection(state.period) === 'month'
     ? fixedPeriodRangesApi.normalizeMonthMode(state.period)
     : fixedPeriodRangesApi.normalizeMonthMode(state.settings?.periodMonthMode);
+}
+
+function syncPeriodMenu() {
+  const mode = legacyMiddlePeriod();
   for (const button of periodMenuButtons()) {
     const active = button.dataset.fixedPeriod === mode;
     button.classList.toggle('is-current', active);
@@ -8599,6 +8603,7 @@ function setRendererSettings(next) {
   const animationChanged = tokenNumberAnimationApi.normalize(state.settings?.tokenNumberAnimation)
     !== tokenNumberAnimationApi.normalize(next.tokenNumberAnimation);
   state.settings = next;
+  if (next.periodTabOrder?.length) ensureVisiblePeriod(next.periodTabOrder);
   if (animationChanged) {
     pluginViewHost?.refreshMotion();
     cancelNumberAnimation();
@@ -10653,24 +10658,221 @@ async function refreshHubBuildStatus() {
   renderHubBuildStatus();
 }
 
-function syncPeriodTabs() {
-  const tabs = Array.from(document.querySelectorAll('.tab'));
-  const activeSlot = fixedPeriodRangesApi.slotForSelection(state.period);
-  const activeIndex = Math.max(0, tabs.findIndex((tab) => tab.dataset.periodSlot === activeSlot));
-  document.querySelector('.tabs')?.style.setProperty('--period-index', String(activeIndex));
-  for (const tab of tabs) {
-    const active = tab.dataset.periodSlot === activeSlot;
-    tab.classList.toggle('active', active);
-    tab.setAttribute('aria-pressed', String(active));
+const periodTabs = document.getElementById('periodTabs');
+const legacyPeriodTabs = Array.from(periodTabs.querySelectorAll('.tab'));
+let periodTabSignature = '';
+const shownPeriodTabs = document.getElementById('shownPeriodTabs');
+const availablePeriodTabs = document.getElementById('availablePeriodTabs');
+const resetPeriodTabs = document.getElementById('resetPeriodTabs');
+const periodTabsError = document.getElementById('periodTabsError');
+let periodOrderSaving = false;
+
+let draggedPeriod = '';
+let periodDropMarker = null;
+
+function clearPeriodDropMarker() {
+  periodDropMarker?.removeAttribute('data-period-drop');
+  periodDropMarker = null;
+}
+
+for (const list of [shownPeriodTabs, availablePeriodTabs]) {
+  function dropOrder(event) {
+    if (!draggedPeriod || periodOrderSaving) return null;
+    const order = shownPeriodOrder();
+    const shown = order.includes(draggedPeriod);
+    const next = order.filter(period => period !== draggedPeriod);
+    if (list === availablePeriodTabs) {
+      return shown && order.length > fixedPeriodRangesApi.MIN_PERIOD_TABS ? next : null;
+    }
+    if (!shown && order.length >= fixedPeriodRangesApi.MAX_PERIOD_TABS) return null;
+    const target = event.target.closest('.period-tab-chip');
+    if (target?.dataset.period === draggedPeriod) return null;
+    const rect = target?.getBoundingClientRect();
+    const after = rect && event.clientX >= rect.left + rect.width / 2;
+    const index = target ? next.indexOf(target.dataset.period) + Number(after) : next.length;
+    next.splice(index, 0, draggedPeriod);
+    return next;
   }
-  if (els.monthPeriodTab) {
-    const mode = activeSlot === 'month'
-      ? fixedPeriodRangesApi.normalizeMonthMode(state.period)
-      : fixedPeriodRangesApi.normalizeMonthMode(state.settings?.periodMonthMode);
+
+  list.addEventListener('dragover', event => {
+    clearPeriodDropMarker();
+    if (!dropOrder(event)) return;
+    event.preventDefault();
+    event.dataTransfer.dropEffect = 'move';
+    const chip = list === shownPeriodTabs ? event.target.closest('.period-tab-chip') : null;
+    periodDropMarker = chip || list;
+    const rect = chip?.getBoundingClientRect();
+    periodDropMarker.dataset.periodDrop = rect ? (event.clientX < rect.left + rect.width / 2 ? 'before' : 'after') : 'list';
+  });
+  list.addEventListener('dragleave', event => {
+    if (!list.contains(event.relatedTarget)) clearPeriodDropMarker();
+  });
+  list.addEventListener('drop', event => {
+    const next = dropOrder(event);
+    clearPeriodDropMarker();
+    if (!next) return;
+    event.preventDefault();
+    const period = draggedPeriod;
+    draggedPeriod = '';
+    const current = shownPeriodOrder();
+    if (next.length !== current.length || next.some((id, index) => id !== current[index])) {
+      void savePeriodTabOrder(next, period);
+    }
+  });
+}
+
+function shownPeriodOrder() {
+  const custom = state.settings?.periodTabOrder;
+  if (custom?.length) return custom;
+  return ['today', legacyMiddlePeriod(), 'allTime'];
+}
+
+function periodLabelKey(period) {
+  return period === 'today' || period === 'allTime' ? `trayComposer.period.${period}` : `periodRange.${period}`;
+}
+
+function syncPeriodButtonName(button, period, { tooltip = false } = {}) {
+  const name = t(periodLabelKey(period));
+  if (button.getAttribute('aria-label') === name) return;
+  if (tooltip) limitWindowsView.setDetailTooltip(button, [{ full: name }], { centered: true });
+  else button.setAttribute('aria-label', name);
+}
+
+function placePeriodChips(list, order) {
+  if (Array.from(list.children).every((chip, index) => chip.dataset.period === order[index])
+    && list.children.length === order.length) return;
+  const focused = document.activeElement;
+  list.append(...order.map(period => periodChips.get(period)));
+  if (list.contains(focused) && document.activeElement !== focused) focused.focus({ preventScroll: true });
+}
+
+async function savePeriodTabOrder(order, focusPeriod) {
+  periodOrderSaving = true;
+  shownPeriodTabs.setAttribute('aria-busy', 'true');
+  periodTabsError.classList.add('hidden');
+  try {
+    await saveSettings({ periodTabOrder: order });
+  } catch (_) {
+    periodTabsError.textContent = t('periodRange.tabsSaveFailed');
+    periodTabsError.classList.remove('hidden');
+  } finally {
+    periodOrderSaving = false;
+    shownPeriodTabs.removeAttribute('aria-busy');
+    const restoreFocus = document.activeElement === resetPeriodTabs;
+    preserveSettingsPanelScroll(syncPeriodTabSettings);
+    if (restoreFocus && resetPeriodTabs.hidden) periodChips.get(focusPeriod)?.focus({ preventScroll: true });
+  }
+}
+
+const periodChips = new Map(fixedPeriodRangesApi.PERIOD_TAB_OPTIONS.map(period => {
+  const chip = document.createElement('button');
+  chip.type = 'button';
+  chip.className = 'tab period-tab-chip';
+  chip.dataset.period = period;
+  chip.append(document.createElement('span'));
+  chip.draggable = true;
+  chip.addEventListener('dragstart', event => {
+    if (periodOrderSaving || (chip.parentElement === availablePeriodTabs && chip.getAttribute('aria-disabled') === 'true')) {
+      event.preventDefault();
+      return;
+    }
+    draggedPeriod = period;
+    event.dataTransfer.effectAllowed = 'move';
+    event.dataTransfer.setData('text/plain', period);
+    chip.querySelector('.limit-detail-tooltip:popover-open')?.hidePopover();
+    chip.classList.add('dragging');
+  });
+  chip.addEventListener('dragend', () => {
+    chip.classList.remove('dragging');
+    draggedPeriod = '';
+    clearPeriodDropMarker();
+    syncPeriodTabSettings();
+  });
+  chip.addEventListener('click', () => {
+    if (periodOrderSaving || chip.getAttribute('aria-disabled') === 'true') return;
+    const order = shownPeriodOrder();
+    const next = order.includes(period) ? order.filter(id => id !== period) : [...order, period];
+    void savePeriodTabOrder(next, period);
+  });
+  chip.addEventListener('keydown', event => {
+    if (!event.altKey || periodOrderSaving || chip.parentElement !== shownPeriodTabs) return;
+    const offset = event.key === 'ArrowLeft' ? -1 : event.key === 'ArrowRight' ? 1 : 0;
+    if (!offset) return;
+    event.preventDefault();
+    const order = [...shownPeriodOrder()];
+    const index = order.indexOf(period);
+    const target = index + offset;
+    if (target < 0 || target >= order.length) return;
+    order.splice(target, 0, ...order.splice(index, 1));
+    void savePeriodTabOrder(order, period);
+  });
+  return [period, chip];
+}));
+
+function syncPeriodTabSettings() {
+  if (periodOrderSaving || draggedPeriod) return;
+  const order = shownPeriodOrder();
+  const available = fixedPeriodRangesApi.PERIOD_TAB_OPTIONS.filter(period => !order.includes(period));
+  placePeriodChips(shownPeriodTabs, order);
+  placePeriodChips(availablePeriodTabs, available);
+  resetPeriodTabs.hidden = !state.settings.periodTabOrder?.length;
+  for (const [period, chip] of periodChips) {
+    const shown = order.includes(period);
+    const countLimit = shown ? fixedPeriodRangesApi.MIN_PERIOD_TABS : fixedPeriodRangesApi.MAX_PERIOD_TABS;
+    chip.firstElementChild.textContent = fixedPeriodRangesApi.displayLabel(period);
+    syncPeriodButtonName(chip, period, { tooltip: true });
+    chip.setAttribute('aria-pressed', String(shown));
+    chip.setAttribute('aria-disabled', String(order.length === countLimit));
+    if (shown) chip.setAttribute('aria-keyshortcuts', 'Alt+ArrowLeft Alt+ArrowRight');
+    else chip.removeAttribute('aria-keyshortcuts');
+  }
+}
+
+resetPeriodTabs.addEventListener('click', () => {
+  if (!periodOrderSaving && !draggedPeriod) void savePeriodTabOrder([], 'today');
+});
+
+function ensureVisiblePeriod(order) {
+  if (!order.includes(state.period) && setPeriod(order[0])) followOpenSessionToPeriod();
+}
+
+function syncPeriodTabs() {
+  const order = state.settings?.periodTabOrder || [];
+  const custom = order.length > 0;
+  const signature = order.join(',');
+  if (signature !== periodTabSignature) {
+    if (state.periodMenuOpen) setPeriodMenuOpen(false);
+    periodTabSignature = signature;
+    const buttons = custom ? order.map(period => {
+      const button = document.createElement('button');
+      button.type = 'button';
+      button.className = 'tab';
+      button.dataset.period = period;
+      button.textContent = fixedPeriodRangesApi.displayLabel(period);
+      return button;
+    }) : legacyPeriodTabs;
+    for (const tab of periodTabs.querySelectorAll('.tab')) tab.remove();
+    periodTabs.append(...buttons);
+    periodTabs.style.setProperty('--period-count', String(buttons.length));
+    periodTabs.parentElement.style.setProperty('--period-width', `${Math.max(148, buttons.length * 44)}px`);
+    periodTabs.classList.toggle('custom-period-tabs', custom);
+  }
+  const tabs = Array.from(periodTabs.querySelectorAll('.tab'));
+  const activeSlot = custom ? state.period : fixedPeriodRangesApi.slotForSelection(state.period);
+  const activeIndex = Math.max(0, tabs.findIndex(tab => (tab.dataset.periodSlot || tab.dataset.period) === activeSlot));
+  periodTabs.style.setProperty('--period-index', String(activeIndex));
+  if (!custom) {
+    const mode = legacyMiddlePeriod();
     els.monthPeriodTab.textContent = fixedPeriodRangesApi.displayLabel(mode);
     els.monthPeriodTab.dataset.period = mode;
+    syncPeriodMenu();
   }
-  syncPeriodMenu();
+  for (const tab of tabs) {
+    const active = (tab.dataset.periodSlot || tab.dataset.period) === activeSlot;
+    tab.classList.toggle('active', active);
+    tab.setAttribute('aria-pressed', String(active));
+    syncPeriodButtonName(tab, tab.dataset.period);
+  }
 }
 
 function applyInitialBreakdownPreference() {
@@ -11126,7 +11328,9 @@ function syncSettingsForm() {
   if (els.languageInput) els.languageInput.value = currentLanguage();
   if (els.periodMonthModeInput) {
     els.periodMonthModeInput.value = fixedPeriodRangesApi.normalizeMonthMode(state.settings?.periodMonthMode);
+    els.periodMonthModeInput.closest('.period-default-setting').classList.toggle('hidden', Boolean(state.settings.periodTabOrder?.length));
   }
+  syncPeriodTabSettings();
   if (els.currencyInput) els.currencyInput.value = currentCurrency();
   syncCurrencyRateControls();
   syncNetworkProxyControls();
@@ -15387,6 +15591,7 @@ async function init() {
   if (!systemUiThemeSeeded) state.systemDarkUi = state.appInfo?.systemDarkUi === true;
   if (els.aboutVersion) els.aboutVersion.textContent = state.appInfo?.version ? `v${state.appInfo.version}` : '—';
   state.settings = await window.tokenMonitor.getSettings();
+  if (state.settings.periodTabOrder?.length) ensureVisiblePeriod(state.settings.periodTabOrder);
   await refreshAccountSlotPanels();
   // Local appearance is sufficient for first reveal. Plugin discovery, sync,
   // updater and stats queries below must not hold the window off screen.
@@ -15485,30 +15690,25 @@ function followOpenSessionToPeriod() {
   }
 }
 
-for (const tab of document.querySelectorAll('.tab')) {
-  tab.addEventListener('click', (event) => {
-    const slot = tab.dataset.periodSlot || tab.dataset.period;
-    const activeSlot = fixedPeriodRangesApi.slotForSelection(state.period);
-    if (slot === 'month' && activeSlot === 'month') {
-      event.stopPropagation();
-      setPeriodMenuOpen(!state.periodMenuOpen, { focus: state.periodMenuOpen ? '' : 'current' });
-      return;
-    }
-    setPeriodMenuOpen(false);
-    const targetPeriod = slot === 'month'
-      ? fixedPeriodRangesApi.normalizeMonthMode(state.settings?.periodMonthMode)
-      : tab.dataset.period;
-    const snapshot = captureBreakdownMotion();
-    if (!setPeriod(targetPeriod)) return;
-    syncPeriodTabs();
-    followOpenSessionToPeriod();
-    state.rowSignature = '';
-    state.periodMotionActive = true;
-    render();
-    state.periodMotionActive = false;
-    animateBreakdownFrom(snapshot, { duration: periodBreakdownMotionDuration(), synchronized: true });
-  });
-}
+periodTabs.addEventListener('click', (event) => {
+  const tab = event.target.closest('.tab');
+  if (!tab) return;
+  if (tab === els.monthPeriodTab && fixedPeriodRangesApi.slotForSelection(state.period) === 'month') {
+    event.stopPropagation();
+    setPeriodMenuOpen(!state.periodMenuOpen, { focus: state.periodMenuOpen ? '' : 'current' });
+    return;
+  }
+  setPeriodMenuOpen(false);
+  const snapshot = captureBreakdownMotion();
+  if (!setPeriod(tab.dataset.period)) return;
+  syncPeriodTabs();
+  followOpenSessionToPeriod();
+  state.rowSignature = '';
+  state.periodMotionActive = true;
+  render();
+  state.periodMotionActive = false;
+  animateBreakdownFrom(snapshot, { duration: periodBreakdownMotionDuration(), synchronized: true });
+});
 
 for (const button of els.monthPeriodMenu?.querySelectorAll('[data-fixed-period]') || []) {
   button.addEventListener('click', async (event) => {
@@ -15519,7 +15719,6 @@ for (const button of els.monthPeriodMenu?.querySelectorAll('[data-fixed-period]'
     const changed = setPeriod(selection);
     state.settings.periodMonthMode = selection;
     syncPeriodTabs();
-    syncPeriodMenu();
     if (changed) {
       followOpenSessionToPeriod();
       state.rowSignature = '';

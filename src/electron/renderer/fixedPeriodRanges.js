@@ -4,12 +4,15 @@
   if (root) root.TokenMonitorFixedPeriodRanges = api;
 })(typeof window !== 'undefined' ? window : null, function createFixedPeriodRangesApi() {
   const MONTH_MODES = Object.freeze(['month', 'yesterday', 'week', 'last7', 'last30']);
+  const PERIOD_TAB_OPTIONS = Object.freeze(['today', 'yesterday', 'week', 'last7', 'month', 'last30', 'allTime']);
+  const MIN_PERIOD_TABS = 3;
+  const MAX_PERIOD_TABS = 6;
   const LABELS = Object.freeze({
-    today: 'DAY',
-    month: 'MONTH',
-    allTime: 'TOTAL',
+    today: 'Day',
+    month: 'Month',
+    allTime: 'Total',
     yesterday: 'YDAY',
-    week: 'WEEK',
+    week: 'Week',
     last7: '7D',
     last30: '30D'
   });
@@ -96,6 +99,13 @@
 
   function displayLabel(value) {
     return LABELS[value] || LABELS.today;
+  }
+
+  function normalizePeriodTabOrder(value) {
+    if (!Array.isArray(value)) return [];
+    const order = [...new Set(value.filter(id => PERIOD_TAB_OPTIONS.includes(id)))];
+    // An empty order retains the legacy three-button layout and its range menu.
+    return order.length < MIN_PERIOD_TABS ? [] : order.slice(0, MAX_PERIOD_TABS);
   }
 
   function rangeForSelection(selection, options = {}) {
@@ -740,6 +750,9 @@
 
   return {
     MONTH_MODES,
+    PERIOD_TAB_OPTIONS,
+    MIN_PERIOD_TABS,
+    MAX_PERIOD_TABS,
     createLatestRequestCoordinator,
     dailyForRange,
     dayKeyAddDays,
@@ -757,6 +770,7 @@
     nativeRangeWithHistory,
     handlePeriodMenuNavigation,
     normalizeMonthMode,
+    normalizePeriodTabOrder,
     periodMenuTargetIndex,
     readySnapshotForSelection,
     rangeForSelection,
