@@ -888,7 +888,7 @@ function propagateTodayProjects(today, periods, titleMetadata = {}) {
       // stays; one whose parent has no usage left there (its rollout was
       // deleted, say) yields to the fresh link when that one resolves.
       if (session.nativeSessionId) target.nativeSessionId = session.nativeSessionId;
-      if (session.t3ThreadId) target.t3ThreadId = session.t3ThreadId;
+      if (session.t3ThreadId && !target.t3ParentLink) target.t3ThreadId = session.t3ThreadId;
       const parentClient = session.parentClient || session.client;
       const targetParentClient = target.parentClient || target.client;
       if (session.parentSessionId && ((target.t3ParentLink && !session.t3ParentLink)
@@ -1000,6 +1000,16 @@ function revokeT3SessionLinks(session) {
   delete session.parentSessionId;
   delete session.parentClient;
   delete session.t3ParentLink;
+}
+
+function refreshT3SessionLinks(session, resolved) {
+  if (!resolved?.t3ThreadId || session.t3ThreadId === resolved.t3ThreadId) return;
+  revokeT3SessionLinks(session);
+  session.t3ThreadId = resolved.t3ThreadId;
+  if (session.parentSessionId || !resolved?.parentSessionId) return;
+  session.parentSessionId = resolved.parentSessionId;
+  if (resolved.parentClient) session.parentClient = resolved.parentClient;
+  if (resolved.t3ParentLink) session.t3ParentLink = true;
 }
 
 // The process-wide rationing for cursor/antigravity syncs. Deliberately a single
@@ -1323,6 +1333,7 @@ async function collectUsageOnce(options) {
     t3Titles: {},
     catalogTitleSources: {},
     revokedT3ThreadKeys: new Set(),
+    changedT3ThreadKeys: new Set(),
     catalogProjects: { today: {}, month: {}, allTime: {}, labels: {} },
     catalogProjectRows: new WeakSet()
     // dshSessionFileCache is deliberately NOT reset here: it's module-level
@@ -1538,7 +1549,16 @@ async function collectUsageOnce(options) {
       sessionIdentitiesComplete = applyT3SessionParents({ today, month, allTime }, options.homeDir || os.homedir(), localSessionMetadataDeps, targets);
       // A verified conflict can revoke a link even when another store is locked.
       for (const key of Object.keys(today.sessions || {})) {
-        if (!localSessionMetadataDeps.metadataCache.get(key)?.t3ThreadRevoked) continue;
+        const metadata = localSessionMetadataDeps.metadataCache.get(key);
+        if (!metadata?.t3ThreadRevoked) {
+          const threadId = today.sessions[key].t3ThreadId;
+          if (today.sessions[key].client === 'antigravity' && threadId
+            && [anchor.today, anchor.month, anchor.allTime].some(period => {
+              const retainedId = period?.sessions?.[key]?.t3ThreadId;
+              return retainedId && retainedId !== threadId;
+            })) localSessionMetadataDeps.changedT3ThreadKeys.add(key);
+          continue;
+        }
         for (const period of [today, month, allTime, ...Object.values(todayPartitions)]) {
           const retained = period.sessions?.[key];
           if (!retained?.t3ThreadId && !retained?.t3ParentLink) continue;
@@ -1569,7 +1589,9 @@ async function collectUsageOnce(options) {
     : 1;
   const todayKey = localTodayKey(collectedAt);
   const upgradeRangeLinks = anchorUsed && sessionIdentitiesComplete && anchor.sessionIdentityVersion !== SESSION_IDENTITY_VERSION;
-  if (options.nativeRangesEnabled !== true && !upgradeRangeLinks && !localSessionMetadataDeps.revokedT3ThreadKeys.size) {
+  const changedT3ThreadKeys = localSessionMetadataDeps.changedT3ThreadKeys;
+  const refreshRangeLinks = changedT3ThreadKeys.size || localSessionMetadataDeps.revokedT3ThreadKeys.size;
+  if (options.nativeRangesEnabled !== true && !upgradeRangeLinks && !refreshRangeLinks) {
     // Another collector may share this anchor; only one that shows native
     // ranges reuses or publishes them.
   } else if (anchorUsed) {
@@ -1577,8 +1599,8 @@ async function collectUsageOnce(options) {
     // A persisted copy is checked like any other saved input.
     const revokedLinks = localSessionMetadataDeps.revokedT3ThreadKeys;
     nativePastRanges = matchingNativePastRanges(anchor.nativePastRanges, todayKey,
-      upgradeRangeLinks || revokedLinks.size ? anchor.nativePastRanges?.weekStartsOn : weekStartsOn);
-    if ((upgradeRangeLinks || revokedLinks.size) && nativePastRanges) {
+      upgradeRangeLinks || refreshRangeLinks ? anchor.nativePastRanges?.weekStartsOn : weekStartsOn);
+    if ((upgradeRangeLinks || refreshRangeLinks) && nativePastRanges) {
       const periods = Object.fromEntries(Object.entries(nativePastRanges.periods).map(([name, period]) => [name, {
         ...period,
         sessions: Object.fromEntries(Object.entries(period.sessions || {}).map(([key, row]) => [key, { ...row }]))
@@ -1587,6 +1609,9 @@ async function collectUsageOnce(options) {
         if (upgradeRangeLinks) copySessionLinks(allTime, period, { preserveRangeParents: true });
         for (const key of revokedLinks) {
           if (period.sessions[key]) revokeT3SessionLinks(period.sessions[key]);
+        }
+        for (const key of changedT3ThreadKeys) {
+          if (period.sessions[key]) refreshT3SessionLinks(period.sessions[key], allTime.sessions?.[key]);
         }
       }
       nativePastRanges = { ...nativePastRanges, periods };
@@ -1841,6 +1866,7 @@ async function collectUsageOnce(options) {
       t3Titles,
       catalogTitleSources,
       revokedT3ThreadKeys: [...localSessionMetadataDeps.revokedT3ThreadKeys],
+      changedT3ThreadKeys: [...changedT3ThreadKeys],
       catalogProjects,
       wslBundle,
       wslStatus,
@@ -2920,11 +2946,16 @@ function startCollector(options) {
           anchor.sessionIdentityVersion = captured.sessionIdentityVersion;
         }
         const revokedLinks = captured.revokedT3ThreadKeys || [];
-        if (revokedLinks.length) {
+        const changedLinks = captured.changedT3ThreadKeys || [];
+        if (revokedLinks.length || changedLinks.length) {
           for (const period of ['today', 'month', 'allTime']) {
             for (const key of revokedLinks) {
               const row = anchor[period]?.sessions?.[key];
               if (row) revokeT3SessionLinks(row);
+            }
+            for (const key of changedLinks) {
+              const row = anchor[period]?.sessions?.[key];
+              if (row) refreshT3SessionLinks(row, captured.windowsPeriods[period]?.sessions?.[key]);
             }
           }
           if (captured.nativePastRanges) anchor.nativePastRanges = captured.nativePastRanges;
@@ -2977,7 +3008,7 @@ function startCollector(options) {
           wslAnchor = captured.wslBundle;
           wslStatusAnchor = captured.wslStatus || null;
         }
-        if (titlesChanged || projectsChanged || sourcesChanged || identitiesUpgraded || revokedLinks.length) {
+        if (titlesChanged || projectsChanged || sourcesChanged || identitiesUpgraded || revokedLinks.length || changedLinks.length) {
           persistAnchor(tickPricingRevision, tickSourceRevision);
         }
       }

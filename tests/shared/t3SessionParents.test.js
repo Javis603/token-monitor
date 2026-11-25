@@ -826,7 +826,7 @@ test('anchored SQLite metadata preserves the resolvable Month parent pair across
   assert.equal(groups.length, 1); assert.equal(groups[0].groupRows.length, 2);
 });
 
-for (const sibling of ['corrupt', 'locked']) test(`a newly conflicting Antigravity ID loses its retained T3 grouping with a ${sibling} sibling store`, async t => {
+for (const change of ['corrupt', 'locked', 'reassigned']) test(`an Antigravity ownership change refreshes retained grouping: ${change}`, async t => {
   const { collectUsageOnce, localTodayKey } = require('../../src/shared/collector');
   const s = store(t);
   const key = 'antigravity:acp-conversation';
@@ -844,6 +844,7 @@ for (const sibling of ['corrupt', 'locked']) test(`a newly conflicting Antigravi
     onAnchorComputed: value => { captured = value; },
     runTokscale: async () => ({ entries: [
       { client: 'antigravity', sessionId: 'acp-parent', model: 'm', input: 30 },
+      { client: 'antigravity', sessionId: 'new-parent', model: 'm', input: 15 },
       { client: 'antigravity', sessionId: 'acp-conversation', model: 'm', input: 20 },
       { client: 'antigravity', sessionId: 'native-child', parentSessionId: 'acp-parent', model: 'm', input: 10 }
     ] }) };
@@ -855,10 +856,19 @@ for (const sibling of ['corrupt', 'locked']) test(`a newly conflicting Antigravi
   s.provider('competing-provider', 'competing', 'acp-conversation', 'antigravity');
   s.provider('competing-native-provider', 'competing', 'native-child', 'antigravity');
   const legacyPath = path.join(path.dirname(s.file), 'state.sqlite');
+  const reassigned = change === 'reassigned';
   let legacy;
   let next;
   try {
-    if (sibling === 'locked') {
+    if (reassigned) {
+      s.db.exec("UPDATE orchestration_v2_projection_threads SET deleted_at = '2026-11-25' WHERE thread_id IN ('original', 'native')");
+      s.thread('new-parent-thread');
+      s.provider('new-parent-provider', 'new-parent-thread', 'new-parent', 'antigravity');
+      s.db.exec(`UPDATE orchestration_v2_projection_threads SET payload_json =
+        json_set(payload_json, '$.lineage.parentThreadId', 'new-parent-thread', '$.lineage.relationshipToParent', 'subagent')
+        WHERE thread_id = 'competing'`);
+      s.delegation('competing-provider', 'new-parent-provider', 'new-parent-thread');
+    } else if (change === 'locked') {
       legacy = new sqlite.DatabaseSync(legacyPath);
       legacy.exec('CREATE TABLE legacy (id TEXT); BEGIN EXCLUSIVE');
     } else {
@@ -871,12 +881,13 @@ for (const sibling of ['corrupt', 'locked']) test(`a newly conflicting Antigravi
     legacy?.close();
   }
   for (const name of ['today', 'month', 'allTime']) {
-    assert.equal(next[name].sessions[key].t3ThreadId, undefined);
-    assert.equal(next[name].sessions[key].parentSessionId, undefined);
+    assert.equal(next[name].sessions[key].t3ThreadId, reassigned ? 'competing' : undefined);
+    assert.equal(next[name].sessions[key].parentSessionId, reassigned ? 'new-parent' : undefined);
     assert.equal(next[name].sessions[nativeKey].parentSessionId, 'acp-parent');
     assert.equal(next[name].sessions[key].totalTokens, 20);
   }
-  assert.deepEqual(new Set(captured.revokedT3ThreadKeys), new Set([key, nativeKey]));
+  if (reassigned) assert.deepEqual(new Set(captured.changedT3ThreadKeys), new Set([key, nativeKey]));
+  else assert.deepEqual(new Set(captured.revokedT3ThreadKeys), new Set([key, nativeKey]));
 });
 
 

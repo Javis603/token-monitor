@@ -404,7 +404,14 @@ function applyT3SessionParents(periods, home = os.homedir(), deps = {}, targets,
   for (const session of children) {
     const matches = ids.get(session).map(id => relations.get(`${session.client}:${id}`)).filter(Boolean);
     const link = matches[0];
-    if (link && matches.every(fact => fact.threadId === link.threadId)) session.t3ThreadId = link.threadId;
+    if (link && matches.every(fact => fact.threadId === link.threadId)) {
+      if (session.t3ParentLink && session.t3ThreadId !== link.threadId) {
+        delete session.parentSessionId;
+        delete session.parentClient;
+        delete session.t3ParentLink;
+      }
+      session.t3ThreadId = link.threadId;
+    }
     // Native links, including Codex reviews, take precedence over app links.
     if (!session.parentSessionId && link?.parentThreadId
       && matches.every(fact => fact.parentThreadId === link.parentThreadId)) links.set(session, link);
