@@ -338,7 +338,7 @@ test('standalone SIGTERM saves an accepted upload before exiting', { skip: proce
   const port = await new Promise((resolve, reject) => {
     child.stdout.on('data', (chunk) => {
       output += chunk;
-      const match = output.match(/hub listening on http:\/\/127\.0\.0\.1:(\d+)/);
+      const match = output.match(/hub listening on http:\/\/127\.0\.0\.1:(\d+)\r?\n/);
       if (match) resolve(Number(match[1]));
     });
     child.once('error', reject);
