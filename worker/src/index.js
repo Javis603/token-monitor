@@ -718,6 +718,7 @@ export class HubDO {
           // budget exposed to existing producers.
           fixedRangeUploads.rememberFixedRangeObservation(next, existing);
           const projectsChanged = (existing?.projectsEnabled !== false) !== (next.projectsEnabled !== false);
+          const dayChanged = existing?.periodWindows?.today?.key !== next.periodWindows?.today?.key;
           const revisionKey = `fixedRangeRevision:${deviceId}`;
           if (projectsChanged) {
             await this.withStorageTransaction(async storage => {
@@ -733,7 +734,7 @@ export class HubDO {
           } else {
             await this.state.storage.put(storageKey, next);
           }
-          if (existing?.updatedAt !== next.updatedAt || projectsChanged) this.fixedRangeUploads.discard(deviceId);
+          if (existing?.updatedAt !== next.updatedAt || dayChanged || projectsChanged) this.fixedRangeUploads.discard(deviceId);
           if (!projectsChanged && request.headers.get(FIXED_RANGE_HEADER) === FIXED_RANGE_VERSION
             && fixedRangeUploads.hasCurrentFixedRangeObservation(next)) {
             const stamp = await this.state.storage.get(revisionKey);

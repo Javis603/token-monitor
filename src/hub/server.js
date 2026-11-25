@@ -320,7 +320,8 @@ function createHub({
     });
     rememberFixedRangeObservation(record, previous);
     const projectsChanged = (previous?.projectsEnabled !== false) !== (record.projectsEnabled !== false);
-    if (previous?.updatedAt !== record.updatedAt || projectsChanged) fixedRangeUploads.discard(deviceId);
+    const dayChanged = previous?.periodWindows?.today?.key !== record.periodWindows?.today?.key;
+    if (previous?.updatedAt !== record.updatedAt || dayChanged || projectsChanged) fixedRangeUploads.discard(deviceId);
     const snapshot = store.fixedRanges[deviceId];
     if (projectsChanged && snapshot?.revision) store.fixedRanges[deviceId] = retireFixedRangeSnapshot(snapshot);
     store.devices[record.deviceId] = record;

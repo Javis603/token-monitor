@@ -285,6 +285,46 @@ for (const kind of ['Node', 'Worker']) test(`${kind} cannot publish project rows
   assert.equal(await uploadFixedRanges(send, base, { ...rangeRecord, projectsEnabled: false }, headers), true);
 });
 
+for (const kind of ['Node', 'Worker']) test(`${kind} discards staged fixed ranges when the device day changes at the same usage timestamp`, async (t) => {
+  const { base, send } = await backend(kind, t);
+  const headers = { authorization: 'Bearer fixture', 'content-type': 'application/json', 'x-token-monitor-fixed-ranges': '1' };
+  const deviceId = 'day-change';
+  const observedAt = '2026-11-25T23:30:00.000Z';
+  const record = {
+    deviceId, updatedAt: observedAt, today: { totalTokens: 10 },
+    periodWindows: { today: { key: '2026-11-25', endsAt: '2026-11-26T00:00:00.000Z' }, timeZone: 'UTC' },
+    nativeRangeWindows: { yesterday: { start: '2026-11-24', end: '2026-11-24' } },
+    nativeRanges: { yesterday: { totalTokens: 10, sessions: { 'claude:a': {
+      client: 'claude', sessionId: 'a', totalTokens: 10, projectLabel: 'Project'
+    } } } }
+  };
+  const ingest = summary => send(base + '/api/ingest', { method: 'POST', headers, body: JSON.stringify(summary) });
+  assert.equal((await ingest(record)).status, 200);
+  const { ranges, pages } = encodeFixedRangeSnapshot(record, { maxPageBytes: 4096 });
+  const endpoint = base + '/api/fixed-ranges?deviceId=day-change';
+  const put = payload => send(endpoint, { method: 'PUT', headers, body: JSON.stringify({
+    observedAt, revision: '00000000-0000-0000-0000-000000000001', ...payload
+  }) });
+  const rows = pages.flat();
+  ranges.yesterday.pageCount = 2;
+  const staged = await put({ page: 0, rows: rows.slice(0, 1), ranges, totalPages: 2 });
+  assert.equal(staged.status, 200);
+  assert.deepEqual(await staged.json(), { complete: false });
+
+  const shifted = { ...record,
+    periodWindows: { today: { key: '2026-11-26', endsAt: '2026-11-26T23:00:00.000Z' }, timeZone: 'Europe/Paris' },
+    nativeRangeWindows: { yesterday: { start: '2026-11-25', end: '2026-11-25' } }
+  };
+  const moved = await ingest(shifted);
+  assert.equal(moved.status, 200);
+  assert.equal((await put({ page: 1, rows: rows.slice(1) })).status, 409);
+  const repeated = await ingest(shifted);
+  assert.equal(repeated.status, 200);
+  assert.equal((await repeated.json()).fixedRangeRevision, null);
+  assert.equal(await uploadFixedRanges(send, base, shifted, headers), true);
+  assert.equal((await fetchFixedRange(send, base, deviceId, 'yesterday', shifted.nativeRangeWindows.yesterday, headers)).totalTokens, 10);
+});
+
 for (const kind of ['Node', 'Worker']) test(`${kind} synchronizes changed fixed-range rows and recovers from a stale baseline`, async (t) => {
   const { base, send } = await backend(kind, t);
   const headers = { authorization: 'Bearer fixture', 'content-type': 'application/json' };
