@@ -89,9 +89,10 @@ function createFixedRangeUploads() {
     if (!Number.isFinite(observationTime)) return { status: 400 };
     if (publishedTime > observationTime) return { status: 409 };
     const titleGeneration = preserveSessionTitles ? payload.sessionTitleSyncGeneration : null;
+    const projectsEnabled = device.projectsEnabled !== false;
     const admitPage = (/** @type {number} */ totalPages) => {
       if (totalPages === 0) return Array.isArray(payload.rows) && payload.rows.length === 0 ? [] : null;
-      return admitFixedRangePage(payload.rows, { projectsEnabled: device.projectsEnabled !== false, preserveSessionTitles });
+      return admitFixedRangePage(payload.rows, { projectsEnabled, preserveSessionTitles });
     };
     const indexMatches = (/** @type {JsonRecord} */ ranges, /** @type {number} */ totalPages) => (
       payload.page !== 0 || (payload.totalPages === totalPages
@@ -119,11 +120,11 @@ function createFixedRangeUploads() {
       if (!ranges || !rangesMatchDeviceDay(ranges, device.periodWindows.today.key)) return { status: 400 };
       if (!stage && stages.size >= MAX_STAGED_UPLOADS) return { status: 429 };
       stage = { observedAt, revision, ranges, totalPages: payload.totalPages, pages: [],
-        titleGeneration };
+        titleGeneration, projectsEnabled };
     }
     if (!stage || stage.revision !== revision || stage.observedAt !== observedAt
       || payload.page > stage.pages.length
-      || stage.titleGeneration !== titleGeneration) {
+      || stage.titleGeneration !== titleGeneration || stage.projectsEnabled !== projectsEnabled) {
       return { status: 409 };
     }
     const page = admitPage(stage.totalPages);

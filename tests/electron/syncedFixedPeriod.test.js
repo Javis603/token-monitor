@@ -120,3 +120,14 @@ test('an idle legacy device with empty History leaves the exact range and detail
   assert.equal(result.detailsAvailable, true);
   assert.deepEqual(result.devices.map(row => row.deviceId), ['a']);
 });
+
+test('mismatched History cannot make a missing device contribution look like zero', () => {
+  const b = { ...device('b'), historyAvailable: true };
+  const fetched = { ...b, updatedAt: day + 'T08:00:00.000Z',
+    history: { daily: [{ date: windows.yesterday.start, tokens: 9 }] } };
+  assert.equal(historyFallbackForDevices('yesterday', [b], [fetched], options), null);
+
+  const owned = { ...b, history: { daily: [{ date: windows.yesterday.start, tokens: 12 }] } };
+  const result = historyFallbackForDevices('yesterday', [owned], [fetched], options);
+  assert.equal(result[0].period.totalTokens, 12);
+});

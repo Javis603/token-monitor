@@ -6701,10 +6701,10 @@ function requestSyncedFixedPeriod() {
     }
     request.snapshot = snapshot;
     request.pending = false;
-    // iCloud may deliver the device document before all of its pages.
+    // Pages can arrive late, and a transient transport failure can also leave
+    // the selected revision without details until the next read.
     request.retryAt = snapshot?.detailsAvailable ? Infinity : Date.now() + FIXED_PERIOD_HISTORY_RETRY_MS;
-    if (!snapshot?.detailsAvailable && state.settings?.hubMode === 'icloud'
-      && request.retries < FIXED_PERIOD_HISTORY_MAX_RETRIES) {
+    if (!snapshot?.detailsAvailable && request.retries < FIXED_PERIOD_HISTORY_MAX_RETRIES) {
       request.retryTimer = setTimeout(() => {
         if (state.syncedFixedPeriod !== request || key !== syncedFixedPeriodKey()) return;
         request.retries += 1;

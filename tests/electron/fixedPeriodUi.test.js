@@ -193,14 +193,14 @@ test('fixed Week History and Trends use the synchronized calendar even with a di
   assert.equal(context.buildFixedPeriodSourcesSnapshot().period.totalTokens, 36);
 });
 
-test('iCloud retries incomplete fixed range details without another stats event', async () => {
+for (const hubMode of ['icloud', 'client']) test(`${hubMode} retries incomplete fixed range details without another stats event`, async () => {
   const source = read('app.js').match(/function requestSyncedFixedPeriod\(\) \{[\s\S]*?\n\}/)[0];
   let key = 'week';
   let reads = 0;
   const responses = [null, { detailsAvailable: false }, { detailsAvailable: true }, null, null, { detailsAvailable: true }];
   const timers = new Set();
   const context = {
-    state: { settings: { hubMode: 'icloud' }, stats: { snapshot: { id: 'a' } } },
+    state: { settings: { hubMode }, stats: { snapshot: { id: 'a' } } },
     window: { tokenMonitor: { getSyncedFixedPeriod: async () => responses[reads++] } },
     syncedFixedPeriodKey: () => key,
     statsRenderScheduler: { request() {} },

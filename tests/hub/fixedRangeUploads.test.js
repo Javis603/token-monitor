@@ -226,3 +226,40 @@ test('Worker keeps its device budget unchanged when it stores a delayed observat
   assert.equal((await upload(delayed)).status, 200);
   assert.equal((await upload({ ...delayed, hostname: delayed.hostname + 'a' })).status, 413);
 });
+
+for (const kind of ['Node', 'Worker']) test(`${kind} cannot publish project rows staged before Projects was disabled`, async (t) => {
+  const { base, send } = await backend(kind, t);
+  const headers = { authorization: 'Bearer fixture', 'content-type': 'application/json' };
+  const record = {
+    deviceId: 'projects-setting', updatedAt: '2026-11-25T01:00:00.000Z',
+    periodWindows: { today: { key: '2026-11-25', endsAt: '2026-11-26T00:00:00.000Z' }, timeZone: 'UTC' },
+    today: { totalTokens: 10 }
+  };
+  const ingest = fields => send(base + '/api/ingest', { method: 'POST', headers, body: JSON.stringify({ ...record, ...fields }) });
+  assert.equal((await ingest({})).status, 200);
+
+  const rangeRecord = {
+    ...record, nativeRangeWindows: { yesterday: { start: '2026-11-24', end: '2026-11-24' } },
+    nativeRanges: { yesterday: { totalTokens: 10, sessions: { 'claude:a': {
+      client: 'claude', sessionId: 'a', totalTokens: 10, projectLabel: 'Project'
+    } } } }
+  };
+  const { ranges, pages } = encodeFixedRangeSnapshot(rangeRecord, { maxPageBytes: 4096 });
+  const endpoint = base + '/api/fixed-ranges?deviceId=projects-setting';
+  const common = { revision: '00000000-0000-0000-0000-000000000001', observedAt: record.updatedAt };
+  const put = (page, rows, fields = {}) => send(endpoint, {
+    method: 'PUT', headers, body: JSON.stringify({ ...common, page, rows, ...fields })
+  });
+  const rows = pages.flat();
+  ranges.yesterday.pageCount = 2;
+
+  assert.equal(rows.filter(row => row[1] === 'projects').length, 1);
+  const staged = await put(0, rows.filter(row => row[1] === 'projects'), { ranges, totalPages: 2 });
+  assert.equal(staged.status, 200);
+  assert.deepEqual(await staged.json(), { complete: false });
+
+  assert.equal((await ingest({ limitsOnly: true, projectsEnabled: false })).status, 200);
+  assert.equal((await put(1, rows.filter(row => row[1] === 'sessions'))).status, 409);
+  assert.equal((await send(endpoint, { headers })).status, 404);
+  assert.equal(await uploadFixedRanges(send, base, { ...rangeRecord, projectsEnabled: false }, headers), true);
+});

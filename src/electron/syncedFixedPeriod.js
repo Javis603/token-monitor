@@ -66,10 +66,13 @@ async function resolveSyncedFixedPeriod(selection, devices, revisions, options) 
 function historyFallbackForDevices(selection, devices, histories, options) {
   const byId = new Map(histories.map(source => [source.deviceId, source]));
   const sources = devices.map(device => {
-    const history = byId.get(device.deviceId);
-    return history?.updatedAt === device.updatedAt
-      ? { ...device, history: history.history, historyAvailable: history.historyAvailable }
-      : device;
+    const fetched = byId.get(device.deviceId);
+    const source = fetched && fetched.updatedAt === device.updatedAt ? fetched : device;
+    return {
+      ...device,
+      history: source.history,
+      historyAvailable: source.historyAvailable === true && Array.isArray(source.history?.daily)
+    };
   });
   const snapshot = fixedPeriodSnapshotFromDevices(selection, sources, { ...options, historyAvailable: true });
   return snapshot.status === 'ready' ? snapshot.devices : null;
