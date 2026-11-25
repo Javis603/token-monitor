@@ -80,6 +80,8 @@
     { id: 'hark', portableAccountKey: true, label: 'Hark' },
     // Workspace IDs are portable across devices.
     { id: 'opendesign', portableAccountKey: true, label: 'OpenDesign' },
+    // Keys hash the console session's user id, identically on every device.
+    { id: 'codingpass', portableAccountKey: true, label: 'CodingPass' },
     { id: 'thirdparty', portableAccountKey: true, label: 'Third-party APIs' }
   ].map((provider) => Object.freeze({ ...provider })));
 

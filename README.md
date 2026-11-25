@@ -30,7 +30,7 @@
 
 ## What is Token Monitor?
 
-A desktop app that shows live token usage and AI Tool Limits across 56+ AI coding tools — Claude Code, Codex, Cursor, GitHub Copilot, Cherry Studio, and more — with real-time multi-device sync, historical usage trends, and breakdowns by tool, device, model, session, or project. It lives wherever you look: the main window, the MacBook notch, the menu bar or system tray, the edge of the screen, a floating bubble, and native macOS widgets.
+A desktop app that shows live token usage and AI Tool Limits across 57+ AI coding tools — Claude Code, Codex, Cursor, GitHub Copilot, Cherry Studio, and more — with real-time multi-device sync, historical usage trends, and breakdowns by tool, device, model, session, or project. It lives wherever you look: the main window, the MacBook notch, the menu bar or system tray, the edge of the screen, a floating bubble, and native macOS widgets.
 
 ## Supported Tools
 
@@ -92,6 +92,7 @@ Token usage, AI Tool Limits and session details from the AI coding tools and pro
     <img src=".github/assets/tools-icon/manus.png" width="40" alt="Manus" title="Manus" />
     <img src=".github/assets/tools-icon/hark.png" width="40" alt="Hark" title="Hark" />
     <img src=".github/assets/tools-icon/opendesign.png" width="40" alt="OpenDesign" title="OpenDesign" />
+    <img src=".github/assets/tools-icon/codingpass.png" width="40" alt="CodingPass" title="CodingPass" />
     <img src=".github/assets/tools-icon/thirdparty.gif" width="40" alt="Third-party APIs" title="Third-party APIs" />
 </p>
 
@@ -174,7 +175,7 @@ Launch the app to start tracking this device locally, with no hub setup required
 
 ### Limits, trends & export
 
-- **AI Tool Limits detection** — provider-specific session, daily, weekly, billing, and credits windows for Claude Code, Codex, Cursor, OpenRouter, third-party APIs, GLM, Kimi, and 34+ providers, including multiple OpenRouter/third-party profiles and balance-style accounts (Claude credits, DeepSeek prepaid balance and spend history, third-party balances)
+- **AI Tool Limits detection** — provider-specific session, daily, weekly, billing, and credits windows for Claude Code, Codex, Cursor, OpenRouter, third-party APIs, GLM, Kimi, and 35+ providers, including multiple OpenRouter/third-party profiles and balance-style accounts (Claude credits, DeepSeek prepaid balance and spend history, third-party balances)
 - **Multiple accounts & Codex switching** — track several accounts per provider, each with its own limits; a tracked Codex account can be switched as the active local account in one click, without re-authenticating
 - **Quota history** — hover or click an account in the Limits view for its current-cycle trend and the last 14 days of measured usage; history is recorded locally and never uploaded
 - **Network proxy** — route AI Tool Limits and account requests through a proxy set in Settings → General
@@ -276,6 +277,7 @@ Token Monitor supports token usage, account-limit checks, and session details se
 | <img src=".github/assets/tools-icon/manus.png" width="28" alt="Manus" /> | Manus | Manus credits (monthly + daily/periodic refresh + balance); desktop session (macOS/Windows) or manual web session (all OSes) | — | ✅ | — |
 | <img src=".github/assets/tools-icon/hark.png" width="28" alt="Hark" /> | Hark | Hark Pro daily and monthly token pools; macOS desktop session or pasted session cookie | — | ✅ | — |
 | <img src=".github/assets/tools-icon/opendesign.png" width="28" alt="OpenDesign" /> | OpenDesign | Five-hour / weekly subscription allowance for the current workspace; manual Cookie | — | ✅ | — |
+| <img src=".github/assets/tools-icon/codingpass.png" width="28" alt="CodingPass" /> | CodingPass | Five-hour / weekly / monthly USD plan allowance and PAYG wallet; manual console Cookie | — | ✅ | — |
 | <img src=".github/assets/tools-icon/thirdparty.gif" width="28" alt="Third-party APIs" /> | Third-party APIs | New API / Sub2API-compatible account presets (including compatible One API forks), a New API API-key preset, and a Custom balance endpoint | — | ✅ | — |
 
 <details>

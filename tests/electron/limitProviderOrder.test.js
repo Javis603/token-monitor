@@ -63,6 +63,7 @@ test('default provider order follows tracked tools, named services, then third-p
     'manus',
     'hark',
     'opendesign',
+    'codingpass',
     'thirdparty'
   ]);
 });

@@ -107,6 +107,7 @@ const supportedToolOrder = [
   'Manus',
   'Hark',
   'OpenDesign',
+  'CodingPass',
   'Third-party APIs'
 ];
 
@@ -166,6 +167,7 @@ const supportedToolIdOrder = [
   'manus',
   'hark',
   'opendesign',
+  'codingpass',
   'thirdparty'
 ];
 

@@ -73,7 +73,7 @@ test('slot dispatch distinguishes generic slots from provider-owned account life
   assert.deepEqual(LIMIT_PROVIDER_REGISTRY.filter(e => e.accountSlots && !e.accountSlotOwner).map(e => e.id).sort(), ['copilot', 'openrouter', 'qoder', 'deepseek', 'factory', 'cline', 'hark', 'manus', 'zai', ...special, ...Object.keys(fixtures)].sort());
 });
 
-for (const id of ['opendesign', 'commandcode', 'notion']) {
+for (const id of ['opendesign', 'codingpass', 'commandcode', 'notion']) {
   test(`${id}: verified identity changes separate aliases and quota history; provisional identity still adopts`, async t => {
     const { createLimitsHistoryStore } = require('../../src/electron/limits/historyStore');
     const fixture = fixtures[id], entry = limitProviderEntry(id), values = fixture.values('a');
@@ -100,7 +100,8 @@ for (const id of ['opendesign', 'commandcode', 'notion']) {
     const first = await LIMIT_PROVIDER_FETCHERS[id]({ [`${id}AccountSlots`]: [{ ...slot, accountKey: provisional, serverIdentity: false }] }, { env: {}, fetch });
     assert.ok(first.find(r => !r.removed).accountKeyAliases.includes(provisional));
     if (id !== 'notion') {
-      const fallback = id === 'opendesign' ? hashKey(id, values.opendesignCookie) : hashKey(id, 'a');
+      const fallback = id === 'opendesign' ? hashKey(id, values.opendesignCookie)
+        : id === 'codingpass' ? hashKey(id, values.codingpassCookie) : hashKey(id, 'a');
       assert.equal(entry.limits[entry.serverAccountKey](fallback, values), false);
       if (id === 'commandcode') {
         const fallbackRows = await LIMIT_PROVIDER_FETCHERS[id]({ [`${id}AccountSlots`]: [slot] }, { env: {},
