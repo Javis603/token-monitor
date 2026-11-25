@@ -397,7 +397,10 @@ function applyT3SessionParents(periods, home = os.homedir(), deps = {}, targets,
   const ids = new Map(children.map(session => [session, candidates(session)]));
   const nativeIds = [...new Set([...ids.values()].flat())];
   if (!nativeIds.length) return true;
-  const { facts: relations, status } = readT3SessionRelationResult(nativeIds, { ...deps, homeDir: home, useEnvRoot: deps.scopedHome !== true });
+  const { facts: relations, status, delegationComplete } = readT3SessionRelationResult(nativeIds, {
+    ...deps, homeDir: home, useEnvRoot: deps.scopedHome !== true,
+    includeOwnershipStatus: children.some(session => session.t3ParentLink)
+  });
   if (status === 'retryable') return false;
   if (!relations.size) return true;
   const links = new Map();
@@ -405,7 +408,7 @@ function applyT3SessionParents(periods, home = os.homedir(), deps = {}, targets,
     const matches = ids.get(session).map(id => relations.get(`${session.client}:${id}`)).filter(Boolean);
     const link = matches[0];
     if (link && matches.every(fact => fact.threadId === link.threadId)) {
-      if (session.t3ParentLink && session.t3ThreadId !== link.threadId) {
+      if (session.t3ParentLink && (session.t3ThreadId !== link.threadId || delegationComplete)) {
         delete session.parentSessionId;
         delete session.parentClient;
         delete session.t3ParentLink;
@@ -413,7 +416,7 @@ function applyT3SessionParents(periods, home = os.homedir(), deps = {}, targets,
       session.t3ThreadId = link.threadId;
     }
     // Native links, including Codex reviews, take precedence over app links.
-    if (!session.parentSessionId && link?.parentThreadId
+    if ((!session.parentSessionId || session.t3ParentLink) && link?.parentThreadId
       && matches.every(fact => fact.parentThreadId === link.parentThreadId)) links.set(session, link);
   }
   if (!links.size) return true;

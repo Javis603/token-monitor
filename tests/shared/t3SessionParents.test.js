@@ -846,7 +846,7 @@ test('anchored SQLite metadata preserves the resolvable Month parent pair across
   assert.equal(groups.length, 1); assert.equal(groups[0].groupRows.length, 2);
 });
 
-for (const change of ['corrupt', 'locked', 'reassigned']) test(`an Antigravity ownership change refreshes retained grouping: ${change}`, async t => {
+for (const change of ['corrupt', 'locked', 'reassigned', 'parent removed', 'incomplete delegation schema']) test(`an Antigravity relationship change refreshes retained grouping: ${change}`, async t => {
   const { collectUsageOnce, localTodayKey } = require('../../src/shared/collector');
   const s = store(t);
   const key = 'antigravity:acp-conversation';
@@ -872,9 +872,13 @@ for (const change of ['corrupt', 'locked', 'reassigned']) test(`an Antigravity o
   assert.equal(full.month.sessions[key].t3ThreadId, 'original');
   assert.equal(full.month.sessions[key].parentSessionId, 'acp-parent');
   assert.equal(full.month.sessions[nativeKey].parentSessionId, 'acp-parent');
-  s.thread('competing');
-  s.provider('competing-provider', 'competing', 'acp-conversation', 'antigravity');
-  s.provider('competing-native-provider', 'competing', 'native-child', 'antigravity');
+  const parentRemoved = change === 'parent removed';
+  const incomplete = change === 'incomplete delegation schema';
+  if (!parentRemoved && !incomplete) {
+    s.thread('competing');
+    s.provider('competing-provider', 'competing', 'acp-conversation', 'antigravity');
+    s.provider('competing-native-provider', 'competing', 'native-child', 'antigravity');
+  }
   const legacyPath = path.join(path.dirname(s.file), 'state.sqlite');
   const reassigned = change === 'reassigned';
   let legacy;
@@ -891,6 +895,10 @@ for (const change of ['corrupt', 'locked', 'reassigned']) test(`an Antigravity o
     } else if (change === 'locked') {
       legacy = new sqlite.DatabaseSync(legacyPath);
       legacy.exec('CREATE TABLE legacy (id TEXT); BEGIN EXCLUSIVE');
+    } else if (parentRemoved) {
+      s.db.exec("UPDATE orchestration_v2_projection_threads SET deleted_at = '2026-11-25' WHERE thread_id = 'parent'");
+    } else if (incomplete) {
+      s.db.exec('DROP TABLE orchestration_v2_projection_nodes');
     } else {
       fs.writeFileSync(legacyPath, 'corrupt unrelated legacy store');
     }
@@ -901,12 +909,14 @@ for (const change of ['corrupt', 'locked', 'reassigned']) test(`an Antigravity o
     legacy?.close();
   }
   for (const name of ['today', 'month', 'allTime']) {
-    assert.equal(next[name].sessions[key].t3ThreadId, reassigned ? 'competing' : undefined);
-    assert.equal(next[name].sessions[key].parentSessionId, reassigned ? 'new-parent' : undefined);
+    assert.equal(next[name].sessions[key].t3ThreadId, reassigned ? 'competing' : parentRemoved || incomplete ? 'original' : undefined);
+    assert.equal(next[name].sessions[key].parentSessionId, reassigned ? 'new-parent' : incomplete && name !== 'today' ? 'acp-parent' : undefined);
     assert.equal(next[name].sessions[nativeKey].parentSessionId, 'acp-parent');
     assert.equal(next[name].sessions[key].totalTokens, 20);
   }
   if (reassigned) assert.deepEqual(new Set(captured.changedT3ThreadKeys), new Set([key, nativeKey]));
+  else if (parentRemoved) assert.deepEqual(captured.changedT3ThreadKeys, [key]);
+  else if (incomplete) assert.deepEqual(captured.changedT3ThreadKeys, []);
   else assert.deepEqual(new Set(captured.revokedT3ThreadKeys), new Set([key, nativeKey]));
 });
 

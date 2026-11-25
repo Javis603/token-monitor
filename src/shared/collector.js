@@ -1002,8 +1002,15 @@ function revokeT3SessionLinks(session) {
   delete session.t3ParentLink;
 }
 
+function t3SessionLinksChanged(session, resolved) {
+  return Boolean(resolved?.t3ThreadId && (session.t3ThreadId !== resolved.t3ThreadId
+    || ((session.t3ParentLink || resolved.t3ParentLink)
+      && (session.parentSessionId !== resolved.parentSessionId || session.parentClient !== resolved.parentClient
+        || Boolean(session.t3ParentLink) !== Boolean(resolved.t3ParentLink)))));
+}
+
 function refreshT3SessionLinks(session, resolved) {
-  if (!resolved?.t3ThreadId || session.t3ThreadId === resolved.t3ThreadId) return;
+  if (!t3SessionLinksChanged(session, resolved)) return;
   revokeT3SessionLinks(session);
   session.t3ThreadId = resolved.t3ThreadId;
   if (session.parentSessionId || !resolved?.parentSessionId) return;
@@ -1551,12 +1558,13 @@ async function collectUsageOnce(options) {
       for (const key of Object.keys(today.sessions || {})) {
         const metadata = localSessionMetadataDeps.metadataCache.get(key);
         if (!metadata?.t3ThreadRevoked) {
-          const threadId = today.sessions[key].t3ThreadId;
-          if (today.sessions[key].client === 'antigravity' && threadId
-            && [anchor.today, anchor.month, anchor.allTime].some(period => {
-              const retainedId = period?.sessions?.[key]?.t3ThreadId;
-              return retainedId && retainedId !== threadId;
-            })) localSessionMetadataDeps.changedT3ThreadKeys.add(key);
+          if (today.sessions[key].client === 'antigravity'
+            && ((anchor.today?.sessions?.[key]?.t3ThreadId && today.sessions[key].t3ThreadId
+              && anchor.today.sessions[key].t3ThreadId !== today.sessions[key].t3ThreadId)
+            || [[anchor.month, month], [anchor.allTime, allTime]].some(([saved, current]) => {
+              const retained = saved?.sessions?.[key];
+              return retained?.t3ThreadId && t3SessionLinksChanged(retained, current.sessions?.[key]);
+            }))) localSessionMetadataDeps.changedT3ThreadKeys.add(key);
           continue;
         }
         for (const period of [today, month, allTime, ...Object.values(todayPartitions)]) {

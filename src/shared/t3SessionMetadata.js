@@ -229,6 +229,7 @@ function readT3SessionRelationResult(nativeIds, deps = {}) {
   const completedStores = new Set();
   let ownershipRead = false;
   let ownershipIncomplete = false;
+  let delegationIncomplete = false;
   const names = {
     t: 'orchestration_v2_projection_threads',
     p: 'orchestration_v2_projection_provider_threads',
@@ -320,6 +321,7 @@ function readT3SessionRelationResult(nativeIds, deps = {}) {
         for (const row of db.prepare(history).all(idJson, uuidJson)) add(row);
       }
       if (!has('n', ['node_id', 'thread_id', 'root_node_id', 'kind', 'provider_thread_id'])) {
+        if (facts.size) delegationIncomplete = true;
         complete = true;
         continue;
       }
@@ -413,7 +415,10 @@ function readT3SessionRelationResult(nativeIds, deps = {}) {
     }
   }
   return { facts: status === 'retryable' ? new Map() : out, status, ...(deps.includeAntigravityTitles ? { completedStores } : {}),
-    ...(deps.includeOwnershipStatus ? { ambiguous, ownershipComplete: ownershipRead && !ownershipIncomplete } : {}) };
+    ...(deps.includeOwnershipStatus ? {
+      ambiguous, ownershipComplete: ownershipRead && !ownershipIncomplete,
+      delegationComplete: ownershipRead && !ownershipIncomplete && !delegationIncomplete
+    } : {}) };
 }
 
 function readT3SessionRelations(nativeIds, deps = {}) {
