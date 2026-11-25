@@ -397,11 +397,13 @@ function applyT3SessionParents(periods, home = os.homedir(), deps = {}, targets,
   const ids = new Map(children.map(session => [session, candidates(session)]));
   const nativeIds = [...new Set([...ids.values()].flat())];
   if (!nativeIds.length) return true;
-  const { facts: relations, status, ownershipComplete, ambiguous } = readT3SessionRelationResult(nativeIds, {
+  const { facts: relations, status, ownershipComplete, ambiguous, incompleteNativeIds, incompleteParentThreads } = readT3SessionRelationResult(nativeIds, {
     ...deps, homeDir: home, useEnvRoot: deps.scopedHome !== true,
     includeOwnershipStatus: children.some(session => session.t3ThreadId || session.t3ParentLink)
   });
   const links = new Map();
+  const ownershipIsComplete = session =>
+    ownershipComplete && !ids.get(session).some(id => incompleteNativeIds.has(id));
   for (const session of children) {
     const nativeKeys = ids.get(session).map(id => `${session.client}:${id}`);
     const matches = nativeKeys.map(key => relations.get(key)).filter(Boolean);
@@ -409,14 +411,15 @@ function applyT3SessionParents(periods, home = os.homedir(), deps = {}, targets,
     const conflict = nativeKeys.some(key => ambiguous?.has(key))
       || matches.some(fact => fact.threadId !== link.threadId);
     if ((session.t3ThreadId || session.t3ParentLink)
-      && (conflict || (session.client !== 'antigravity' && ownershipComplete && nativeKeys.length && !link))) {
+      && (conflict || (session.client !== 'antigravity' && nativeKeys.length && !link && ownershipIsComplete(session)))) {
       revokeT3SessionLinks(session);
       deps.revokedT3ThreadKeys?.add(`${session.client}:${session.sessionId}`);
       continue;
     }
     if (conflict) continue;
     if (link && matches.every(fact => fact.threadId === link.threadId)) {
-      if (session.t3ParentLink && (session.t3ThreadId !== link.threadId || (ownershipComplete && !link.parentThreadId))) {
+      if (session.t3ParentLink && (session.t3ThreadId !== link.threadId
+        || (!link.parentThreadId && ownershipIsComplete(session) && !incompleteParentThreads.has(link.threadId)))) {
         delete session.parentSessionId;
         delete session.parentClient;
         delete session.t3ParentLink;
@@ -470,7 +473,7 @@ function applyT3SessionParents(periods, home = os.homedir(), deps = {}, targets,
         parent = fallback.native.get(key) || fallback.app.get(link.parentThreadId);
       }
       if (!parent || (parent.client === session.client && parent.sessionId === session.sessionId)) {
-        if (ownershipComplete && session.t3ParentLink) {
+        if (session.t3ParentLink && ownershipIsComplete(session) && !incompleteParentThreads.has(link.threadId)) {
           delete session.parentSessionId;
           delete session.parentClient;
           delete session.t3ParentLink;

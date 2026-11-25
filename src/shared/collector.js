@@ -1592,6 +1592,10 @@ async function collectUsageOnce(options) {
             if (currentToday.parentClient) retained.parentClient = currentToday.parentClient;
           }
         }
+        // An untouched client partition can still carry a stale T3 edge
+        // into the next targeted tick when the lookup becomes inconclusive.
+        const partitionRow = todayPartitions[currentToday.client]?.sessions?.[key];
+        if (partitionRow && !revoked) refreshT3SessionLinks(partitionRow, currentToday);
         const savedToday = anchor.today?.sessions?.[key];
         if (!revoked && supportsT3SessionClient(currentToday.client)
           && ((savedToday && currentToday.t3ThreadId && savedToday.t3ThreadId !== currentToday.t3ThreadId)

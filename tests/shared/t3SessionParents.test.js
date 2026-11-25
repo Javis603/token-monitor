@@ -938,6 +938,7 @@ for (const [client, driver, change] of [
   ['antigravity', 'antigravity', 'replace with unaccounted parent'],
   ['codex', 'codex', 'delete parent with fresh native parent'],
   ['codex', 'codex', 'delete child with fresh native parent'],
+  ['codex', 'codex', 'delete parent with unrelated unreadable ACP settings'],
 ]) {
   test(`retained ${client} delegation follows T3 evidence: ${change}`, async t => {
     const { collectUsageOnce, localTodayKey } = require('../../src/shared/collector');
@@ -950,15 +951,22 @@ for (const [client, driver, change] of [
     }
     const key = `${client}:child-native`;
     const keepLink = change === 'unreadable settings';
+    const unrelatedAcp = change.endsWith('unrelated unreadable ACP settings');
+    if (unrelatedAcp) {
+      s.thread('devin');
+      s.provider('devin-provider', 'devin', 'devin-native', 'acpRegistry', 'strong', 'other');
+      fs.writeFileSync(path.join(path.dirname(s.file), 'settings.json'), '{');
+    }
     const childRemoved = change.startsWith('delete child');
     const nativeParent = change.endsWith('fresh native parent') ? 'unaccounted-native-parent' : undefined;
     let refreshed = false;
     let captured;
     const scan = () => ({ entries: [
+      ...(unrelatedAcp ? [{ client: 'devin', sessionId: 'devin-native', model: 'm', input: 10 }] : []),
       { client: 'antigravity', sessionId: 'parent-native', model: 'm', input: 30 },
       { client, sessionId: 'child-native', parentSessionId: refreshed ? nativeParent : undefined, model: 'm', input: 20 }
     ] });
-    const options = { clients: [...new Set(['antigravity', client])].join(','), homeDir: s.home, env: {}, osInfo: {},
+    const options = { clients: [...new Set(['antigravity', client, ...(unrelatedAcp ? ['devin'] : [])])].join(','), homeDir: s.home, env: {}, osInfo: {},
       historyEnabled: false, limitsEnabled: false, wslScanEnabled: false,
       nativeRangesEnabled: true, allTimeSince: '2024-01-01',
       onAnchorComputed: value => { captured = value; },
@@ -968,9 +976,9 @@ for (const [client, driver, change] of [
     assert.equal(before.month.sessions[key].parentSessionId, 'parent-native');
     if (keepLink) {
       fs.writeFileSync(path.join(path.dirname(s.file), 'settings.json'), '{');
-      assert.equal(readT3SessionRelationResult(['child-native'], {
+      assert.deepEqual(readT3SessionRelationResult(['child-native'], {
         homeDir: s.home, env: {}, includeOwnershipStatus: true
-      }).ownershipComplete, false);
+      }).incompleteNativeIds, new Set(['child-native']));
     } else if (change === 'replace with unaccounted parent') {
       s.thread('replacement');
       s.provider('replacement-provider', 'replacement', 'unaccounted-t3-parent', 'antigravity');
@@ -1003,6 +1011,72 @@ for (const [client, driver, change] of [
   });
 }
 
+
+test('a targeted tick cannot restore a cleared T3 parent from another client partition', async t => {
+  const { collectUsageOnce, localTodayKey } = require('../../src/shared/collector');
+  const s = store(t);
+  pair(s, 'claudeAgent', 'antigravity');
+  const key = 'claude:child-native';
+  const entries = [
+    { client: 'antigravity', sessionId: 'parent-native', model: 'm', input: 30 },
+    { client: 'claude', sessionId: 'child-native', model: 'm', input: 20 }
+  ];
+  const targets = [];
+  let captured;
+  const options = { clients: 'antigravity,claude', homeDir: s.home, env: {}, osInfo: {},
+    historyEnabled: false, limitsEnabled: false, wslScanEnabled: false,
+    onAnchorComputed: value => { captured = value; },
+    runTokscale: async ({ clients }) => {
+      targets.push(clients);
+      return { entries: entries.filter(row => clients.split(',').includes(row.client)) };
+    } };
+  const anchor = () => ({ ...captured.windowsPeriods, dateKey: localTodayKey(),
+    todayPartitions: captured.todayPartitions, sessionIdentityVersion: captured.sessionIdentityVersion });
+  await collectUsageOnce(options);
+  assert.equal(captured.todayPartitions.claude.sessions[key].parentSessionId, 'parent-native');
+  targets.length = 0;
+
+  s.db.exec("UPDATE orchestration_v2_projection_threads SET deleted_at = '2026-11-25' WHERE thread_id = 'parent'");
+  const tick = () => collectUsageOnce({ ...options, targetClients: ['antigravity'], todayOnlyAnchor: anchor() });
+  const first = await tick();
+  assert.equal(first.today.sessions[key].parentSessionId, undefined);
+  assert.equal(captured.todayPartitions.claude.sessions[key].t3ParentLink, undefined);
+  assert.equal(captured.todayPartitions.claude.sessions[key].parentSessionId, undefined);
+
+  // The incomplete read permits retaining an old verified edge, but must not
+  // bring one back from the frozen Claude portion of the Today scan.
+  s.db.exec('DROP TABLE orchestration_v2_projection_nodes');
+  const second = await tick();
+  assert.deepEqual(targets, ['antigravity', 'antigravity']);
+  assert.equal(second.today.sessions[key].parentSessionId, undefined);
+  assert.equal(second.today.sessions[key].t3ThreadId, 'child');
+  assert.equal(second.today.sessions[key].totalTokens, 20);
+});
+
+test('unreadable ACP bindings make only the affected parent relationship incomplete', t => {
+  const s = store(t);
+  s.thread('parent');
+  s.thread('child', 'parent');
+  registry(s, { agent: { driver: 'acpRegistry', config: { agentId: 'claude-acp' } } });
+  s.provider('launch-provider', 'parent', 'parent-native', 'acpRegistry', 'strong', 'agent');
+  s.provider('child-provider', 'child', 'child-native');
+  s.delegation('child-provider', 'launch-provider', 'parent');
+  const periods = { today: extractUsageFromTokscale({ entries: [
+    { client: 'claude', sessionId: 'parent-native', model: 'm', input: 10 },
+    { client: 'codex', sessionId: 'child-native', model: 'm', input: 20 }
+  ] }) };
+  const row = periods.today.sessions['codex:child-native'];
+  applyT3SessionParents(periods, s.home, { env: {} });
+  assert.equal(row.parentSessionId, 'parent-native');
+
+  fs.writeFileSync(path.join(path.dirname(s.file), 'settings.json'), '{');
+  const result = readT3SessionRelationResult(['child-native'], { homeDir: s.home, env: {}, includeOwnershipStatus: true });
+  assert.equal(result.ownershipComplete, true);
+  assert.deepEqual(result.incompleteNativeIds, new Set());
+  assert.deepEqual(result.incompleteParentThreads, new Set(['child']));
+  applyT3SessionParents(periods, s.home, { env: {} });
+  assert.equal(row.parentSessionId, 'parent-native');
+});
 
 test('a saved Antigravity range gains the first verified T3 thread and parent', async t => {
   const { collectUsageOnce, localTodayKey } = require('../../src/shared/collector');
