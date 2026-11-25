@@ -6,7 +6,7 @@ const os = require('node:os');
 const path = require('node:path');
 const test = require('node:test');
 const sqlite = require('node:sqlite');
-const { readT3SessionParents, readT3SessionRelations, readT3SessionRelationResult } = require('../../src/shared/t3SessionMetadata');
+const { readT3SessionParents, readT3SessionRelations, readT3SessionRelationResult } = require('../../src/shared/t3/sessionMetadata');
 const { applySessionMetadata, applyT3SessionParents, applySessionIdentities } = require('../../src/shared/sessionMetadata');
 const { normalizePeriod, mergePeriods, extractUsageFromTokscale, stripSessionTextFromPeriod } = require('../../src/shared/usage');
 

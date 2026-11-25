@@ -6,7 +6,7 @@ const { claudeSessionRoots } = require('./paths');
 const { readDesktopSessionTitles } = require('./desktopSessionTitles');
 const { envValue } = require('../../limits/providerHelpers');
 const { findSessionFiles } = require('../../sessionFiles');
-const { readT3SessionMeta } = require('../../t3SessionMetadata');
+const { readT3SessionMeta } = require('../../t3/sessionMetadata');
 const { normalizeSessionContext, shouldReadSessionContext } = require('../../sessionContext');
 const { normalizeReasoningEffort } = require('../../sessionLive');
 

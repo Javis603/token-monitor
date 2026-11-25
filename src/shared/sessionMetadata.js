@@ -22,8 +22,8 @@ const workbuddySession = require('./providers/workbuddy/sessionMetadata');
 const devinSessionMetadata = require('./providers/devin/sessionMetadata');
 const grokSessionMetadata = require('./providers/grok/sessionMetadata');
 const zcodeSessionMetadata = require('./providers/zcode/sessionMetadata');
-const { readT3SessionRelationResult } = require('./t3SessionMetadata');
-const { supportsT3SessionClient, nativeAccountingId } = require('./t3SessionIdentity');
+const { readT3SessionRelationResult } = require('./t3/sessionMetadata');
+const { supportsT3SessionClient, nativeAccountingId } = require('./t3/sessionIdentity');
 
 function isoFromDate(value) {
   const date = value instanceof Date ? value : new Date(value || '');

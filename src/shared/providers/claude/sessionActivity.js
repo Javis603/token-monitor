@@ -8,8 +8,8 @@ const { readLinuxPidDomain, readLinuxProcessStarts } = require('./linuxProcessId
 const { resolveClaudeConfigDir, claudeSessionRoots } = require('./paths');
 const { claudeProbeDir, isClaudeProbeCwd } = require('./probe');
 const { isSafeSessionId } = require('../../sessionFiles');
-const { readT3Activity } = require('../../t3SessionActivity');
-const { readT3SessionMeta } = require('../../t3SessionMetadata');
+const { readT3Activity } = require('../../t3/sessionActivity');
+const { readT3SessionMeta } = require('../../t3/sessionMetadata');
 const { readSessionTitle } = require('./sessionMetadata');
 const { isArchivedSession } = require('../../sessionLive');
 

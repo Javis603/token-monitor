@@ -3,8 +3,8 @@
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
-const { resolveSqlite, openDb } = require('./sqliteReadOnly');
-const { nativeAccountingId, readT3IdentityBindings, t3AccountingClient } = require('./t3SessionIdentity');
+const { resolveSqlite, openDb } = require('../sqliteReadOnly');
+const { nativeAccountingId, readT3IdentityBindings, t3AccountingClient } = require('./sessionIdentity');
 
 const QUERY_CHUNK_SIZE = 400;
 const T3_DEFAULT_TITLES = new Set(['new thread', 'start a new conversation']);

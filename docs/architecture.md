@@ -144,7 +144,7 @@ Under Chromium, never set `Host`, keep `credentials: 'omit'` so browser cookies 
 
 `client:sessionId` remains the accounting key. Verified `t3ThreadId` and Codex `nativeSessionId` may join runs for presentation without replacing it. `parentSessionId` and optional `parentClient` are one atomic link; absent `parentClient` means the child's client. Normalization, archives and sync retain verified identities and reject conflicting device evidence. Missing parents never create usage.
 
-Native links precede T3 evidence. The [relationship reader](../src/shared/t3SessionMetadata.js) verifies provider, thread and execution-root ownership; the [identity bindings](../src/shared/t3SessionIdentity.js) normalize supported UUIDs but match opaque ACP IDs exactly. Human forks, weak identities, conflicts and unknown/incompatible executables remain unbound. Relationships read no conversation content and do not broaden title consent.
+Native links precede T3 evidence. The [relationship reader](../src/shared/t3/sessionMetadata.js) verifies provider, thread and execution-root ownership; the [identity bindings](../src/shared/t3/sessionIdentity.js) normalize supported UUIDs but match opaque ACP IDs exactly. Human forks, weak identities, conflicts and unknown/incompatible executables remain unbound. Relationships read no conversation content and do not broaden title consent.
 
 Metadata upgrades preserve counters and `fullScanAt`, persisting identities and links before advancing their version. Transient reads apply no partial relationship facts and leave upgrades retryable; corrupt/unsupported stores wait for full scans rather than repeatedly upgrading history.
 
