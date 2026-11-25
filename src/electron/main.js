@@ -4328,7 +4328,7 @@ function startHostCollector() {
         if (payload.allTimeProjectsOmitted === true) {
           console.log('[host-ingest] all-time project breakdown omitted to reduce the sync snapshot size');
         }
-        embeddedHub.hub.ingest(payload);
+        const accepted = embeddedHub.hub.ingest(payload);
         const fixedRangeAt = JSON.stringify([visibleSummary.updatedAt, options.sessionTitleSyncGeneration, visibleSummary.projectsEnabled !== false, visibleSummary.nativeRangeWindows, Boolean(visibleSummary.dailySessionPeriods)]);
         if (visibleSummary.nativeRanges && handle.fixedRangeAt !== fixedRangeAt) {
           try {
@@ -4350,7 +4350,8 @@ function startHostCollector() {
             console.log(`[host-ingest] fixed range upload deferred: ${error.message}`);
           }
         }
-        if (visibleSummary.dailySessionPeriods && handle.fixedRangeAt === fixedRangeAt && payload.history?.dailyTotalsOmitted > 0) {
+        if (visibleSummary.dailySessionPeriods && handle.fixedRangeAt === fixedRangeAt
+          && payload.history?.dailyTotalsOmitted > 0 && accepted.history?.summary?.activeDaysComplete !== true) {
           embeddedHub.hub.restoreHistory(syncPayload(visibleSummary, { ...options, pagedSessions: true }));
         }
         if (settings.lastPostedDeviceId !== visibleSummary.deviceId) {

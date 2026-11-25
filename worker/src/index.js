@@ -735,7 +735,7 @@ export class HubDO {
           error: error.status === 413 ? 'payload_too_large' : 'bad_request', message: error.message
         });
       }
-      let record, upload, fixedRangeRevision = null;
+      let record, upload, fixedRangeRevision = null, historyCalendarRetained = false;
       try {
         record = await this.mutate(async () => {
           const incoming = delta ? this.uploadBaselines.prepare(payload) : payload;
@@ -766,6 +766,10 @@ export class HubDO {
           const next = compact ? restoreDeviceHistory(existing, incoming) : mergeSyncDeviceRecord(previousWithSessions, {
             ...incoming, receivedAt: new Date().toISOString()
           }, { preserveSessionTitles });
+          historyCalendarRetained = !compact && incoming.history?.dailyTotalsOmitted > 0
+            && Boolean(incoming.history.dailyTotalsRevision)
+            && incoming.history.dailyTotalsRevision === next.history?.dailyTotalsRevision
+            && next.history.summary?.activeDaysComplete === true;
           const storageKey = `dev:${next.deviceId}`;
           const encoder = new TextEncoder();
           const storageBytes = encoder.encode(storageKey).byteLength
@@ -813,7 +817,8 @@ export class HubDO {
       const response = {
         ok: true, deviceId: record.deviceId,
         ...(request.headers.get(FIXED_RANGE_HEADER) === FIXED_RANGE_VERSION ? { fixedRanges: 1, fixedRangeDelta: 1, fixedRangeBatch: 1, fixedRangeIndexDelta: 1, dailySessionRanges: 1, fixedRangeRevision } : {}),
-        ...(upload ? { upload } : {})
+        ...(upload ? { upload } : {}),
+        ...(historyCalendarRetained ? { historyCalendarRetained: true } : {})
       };
       return jsonResponse(
         200,

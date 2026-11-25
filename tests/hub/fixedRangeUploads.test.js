@@ -542,6 +542,20 @@ for (const kind of ['Node', 'Worker']) test(`${kind} preserves the calendar and 
   assert.equal(restoredStats.historyPreview.summary.activeDaysComplete, true);
   assert.equal(restoredStats.devices[0].periods.month.sessions['claude:0'].title, 'shared title');
   assert.equal(Object.keys(restoredStats.devices[0].periods.month.sessions).length, 89, 'the old reader keeps its accepted inline rows');
+  const ingestHistory = async (history) => {
+    const response = await send(base + '/api/ingest', { method: 'POST',
+      headers: { ...headers, 'x-token-monitor-upload': '1' }, body: JSON.stringify({ ...legacyBody, history }) });
+    assert.equal(response.status, 200);
+    return response.json();
+  };
+  const retainedCalendar = await ingestHistory(legacyBody.history);
+  assert.equal(retainedCalendar.historyCalendarRetained, true);
+  assert.equal(retainedCalendar.stats.historyPreview.summary.activeDaysComplete, true);
+
+  const changedHistory = { ...legacyBody.history, dailyTotalsRevision: 'a'.repeat(64) };
+  const changedCalendar = await ingestHistory(changedHistory);
+  assert.equal(changedCalendar.historyCalendarRetained, undefined);
+  assert.equal(changedCalendar.stats.historyPreview.summary.activeDaysComplete, false);
   const revoked = await send(titleUrl, { method: 'PUT', headers, body: JSON.stringify({ enabled: false }) });
   assert.equal(revoked.status, 200);
   assert.equal(await fetchFixedRange(send, base, summary.deviceId, 'month', window, headers, revision), null);

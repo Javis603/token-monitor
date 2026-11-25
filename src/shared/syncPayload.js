@@ -243,6 +243,9 @@ function buildSyncPayload(summary, {
   if (Array.isArray(payload.history?.dailyTotals)) {
     payload.history = { ...payload.history };
     delete payload.history.dailyTotalsOmitted;
+    if (summary.dailySessionPeriods && payload.history.summary?.activeDaysComplete === true) {
+      payload.history.dailyTotalsRevision = historyKey(payload.history.dailyTotals);
+    }
   }
 
   for (const periodName of ['today', 'month']) {
@@ -507,7 +510,8 @@ function createSyncPayloadUploader({ now = Date.now } = {}) {
           options.logger?.(`fixed range upload deferred: ${error.message}`);
         }
       }
-      if (daily && ready && deltaBaseline && result.payload?.history?.dailyTotalsOmitted > 0
+      if (daily && ready && deltaBaseline && ack?.historyCalendarRetained !== true
+        && result.payload?.history?.dailyTotalsOmitted > 0
         && requestGeneration === generation) {
         try {
           const original = historyForSync(summary.history, summary.periodWindows);

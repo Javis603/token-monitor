@@ -664,7 +664,11 @@ function createHub({
             fixedRanges: 1, fixedRangeDelta: 1, fixedRangeBatch: 1, fixedRangeIndexDelta: 1, dailySessionRanges: 1,
             fixedRangeRevision: getFixedRanges(record.deviceId)?.revision ?? null
           } : {}),
-          ...(upload ? { upload } : {})
+          ...(upload ? { upload } : {}),
+          ...(!compact && payload.history?.dailyTotalsOmitted > 0 && payload.history.dailyTotalsRevision
+            && payload.history.dailyTotalsRevision === record.history?.dailyTotalsRevision
+            && record.history.summary?.activeDaysComplete === true
+            ? { historyCalendarRetained: true } : {})
         };
         return sendJson(res, 200, wantsMinimalResponse(req) ? response : { ...response, stats: getStats() });
       } catch (error) {

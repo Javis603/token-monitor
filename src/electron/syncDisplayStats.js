@@ -201,7 +201,9 @@ function composeLocalSyncStats(hubStats, localDevice, options = {}) {
     // time; the Hub's copy is the only proof an upload landed, so it travels
     // alongside for the sync settings panel (null until the Hub has one).
     if (device.deviceId === localDeviceId) {
-      return { ...previous, ...device, hubReceivedAt: previous?.receivedAt || null };
+      const merged = { ...previous, ...device, hubReceivedAt: previous?.receivedAt || null };
+      if (!hasOwn(device, 'sessionDetailsOmitted')) delete merged.sessionDetailsOmitted;
+      return merged;
     }
     if (!previous) return device;
     if (hasHubStaleAfterMs) return { ...previous, ...device };
