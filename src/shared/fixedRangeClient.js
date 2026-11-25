@@ -2,6 +2,7 @@
 'use strict';
 
 const { randomUUID } = require('node:crypto');
+const { MAX_UPLOAD_BYTES } = require('./uploadDelta');
 const { FIXED_RANGE_PAGE_BYTES, MAX_FIXED_RANGE_PAGES, encodeFixedRangeSnapshot, decodeFixedRangePeriod, fixedRangeRowKey } = require('./fixedRangeSync');
 
 /** @typedef {Record<string, any>} JsonRecord */
@@ -68,19 +69,43 @@ function fixedRangeDeltaPages(previous, next) {
 }
 
 /**
+ * @param {JsonRecord[]} pages
+ * @param {number} maxBytes
+ */
+function* fixedRangeRequestBodies(pages, maxBytes = MAX_UPLOAD_BYTES) {
+  const prefix = '{"pages":[';
+  const suffix = ']}';
+  let batch = [];
+  let bytes = prefix.length + suffix.length;
+  for (const page of pages) {
+    const body = JSON.stringify(page);
+    const size = Buffer.byteLength(body);
+    if (batch.length && bytes + 1 + size > maxBytes) {
+      yield batch.length === 1 ? batch[0] : prefix + batch.join(',') + suffix;
+      batch = [];
+      bytes = prefix.length + suffix.length;
+    }
+    bytes += size + (batch.length ? 1 : 0);
+    batch.push(body);
+  }
+  if (batch.length) yield batch.length === 1 ? batch[0] : prefix + batch.join(',') + suffix;
+}
+
+/**
  * @param {RangeFetch} fetch
  * @param {string} hubUrl
  * @param {JsonRecord} record
  * @param {HeadersInit} headers
  * @param {{ syncSessionTitles?: boolean, sessionTitleSyncGeneration?: number }} options
  * @param {JsonRecord[]} previous
+ * @param {boolean} batchSupported
  */
-async function uploadFixedRangeVersion(fetch, hubUrl, record, headers, options, previous = []) {
+async function uploadFixedRangeVersion(fetch, hubUrl, record, headers, options, previous = [], batchSupported = false) {
   const url = fixedRangeUrl(hubUrl, record.deviceId).href;
-  /** @param {JsonRecord[]} pages */
-  async function send(pages) {
-    for (const page of pages) {
-      const response = await fetch(url, { method: 'PUT', headers, body: JSON.stringify(page) });
+  /** @param {Iterable<string>} bodies */
+  async function send(bodies) {
+    for (const body of bodies) {
+      const response = await fetch(url, { method: 'PUT', headers, body });
       if (!response.ok) {
         await response.arrayBuffer();
         if ([400, 404, 405, 409, 413].includes(response.status)) return response.status;
@@ -93,13 +118,15 @@ async function uploadFixedRangeVersion(fetch, hubUrl, record, headers, options, 
 
   let full = [...fixedRangeUploadPages(record, options)];
   const pages = fixedRangeDeltaPages(previous, full);
-  const status = await send(pages);
+  const hasDelta = pages.some(page => page.delta);
+  const bodies = batchSupported && hasDelta ? fixedRangeRequestBodies(pages) : pages.map(page => JSON.stringify(page));
+  const status = await send(bodies);
   if (status === 200) return full;
-  if (![400, 409, 413].includes(status) || !pages.some(page => page.delta)) return null;
+  if (![400, 409, 413].includes(status) || !hasDelta) return null;
   // A new revision abandons any pages staged before the baseline was rejected.
   const revision = randomUUID();
   full = full.map(page => ({ ...page, revision }));
-  return await send(full) === 200 ? full : null;
+  return await send(full.map(page => JSON.stringify(page))) === 200 ? full : null;
 }
 
 /**
@@ -144,4 +171,4 @@ async function fetchFixedRange(fetch, hubUrl, deviceId, name, window, headers, e
   return decodeFixedRangePeriod(index.ranges, pages, name);
 }
 
-module.exports = { fixedRangeUploadPages, fixedRangeDeltaPages, uploadFixedRangeVersion, uploadFixedRanges, fetchFixedRange };
+module.exports = { fixedRangeUploadPages, fixedRangeDeltaPages, fixedRangeRequestBodies, uploadFixedRangeVersion, uploadFixedRanges, fetchFixedRange };

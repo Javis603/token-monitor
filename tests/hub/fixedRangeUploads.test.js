@@ -8,7 +8,7 @@ const { join } = require('node:path');
 const { pathToFileURL } = require('node:url');
 const { createHub } = require('../../src/hub/server');
 const { encodeFixedRangeSnapshot, decodeFixedRangePeriod } = require('../../src/shared/fixedRangeSync');
-const { fetchFixedRange, uploadFixedRanges } = require('../../src/shared/fixedRangeClient');
+const { fetchFixedRange, fixedRangeRequestBodies, uploadFixedRanges } = require('../../src/shared/fixedRangeClient');
 const { createSyncPayloadUploader } = require('../../src/shared/syncPayload');
 const { mergePeriods, mergeSyncDeviceRecord } = require('../../src/shared/usage');
 
@@ -276,10 +276,13 @@ for (const kind of ['Node', 'Worker']) test(`${kind} synchronizes changed fixed-
     if (options.method !== 'PUT') return send(url, options);
     const payload = JSON.parse(options.body);
     requests.push(payload);
-    if (staleBaseline && payload.delta && payload.page === 1) {
-      payload.delta.baseRevision = '00000000-0000-4000-8000-000000000000';
+    if (staleBaseline && payload.pages) {
+      payload.pages[1].delta.baseRevision = '00000000-0000-4000-8000-000000000000';
       const response = await send(url, { ...options, body: JSON.stringify(payload) });
       assert.equal(response.status, 409);
+      const unpublished = await send(url, { headers });
+      assert.equal(unpublished.status, 404);
+      await unpublished.arrayBuffer();
       return response;
     }
     return send(url, options);
@@ -299,7 +302,7 @@ for (const kind of ['Node', 'Worker']) test(`${kind} synchronizes changed fixed-
   };
   const upload = async summary => {
     const result = await uploader(transport, base + '/api/ingest', { summary, headers });
-    assert.equal((await result.response.json()).fixedRangeDelta, 1);
+    assert.equal((await result.response.json()).fixedRangeBatch, 1);
     const published = await fetchFixedRange(send, base, deviceId, 'last7', window, headers);
     const { ranges, pages } = encodeFixedRangeSnapshot(summary, { maxPageBytes: 512 * 1024 });
     assert.deepEqual(published, JSON.parse(JSON.stringify(decodeFixedRangePeriod(ranges, pages, 'last7'))));
@@ -313,7 +316,9 @@ for (const kind of ['Node', 'Worker']) test(`${kind} synchronizes changed fixed-
     'claude:added': { ...sessions['claude:s1'], sessionId: 'added' } };
   delete next['claude:s1'];
   await upload(makeRecord(2, next));
-  const delta = requests[0].delta;
+  assert.equal(requests.length, 1);
+  assert.ok(requests[0].pages.length > 1);
+  const delta = requests[0].pages[0].delta;
   assert.equal(delta.baseRevision, first.revision);
   assert.deepEqual(delta.remove, ['["last7","sessions","claude:s1"]']);
   assert.ok(delta.upsert.some(row => row[2] === 'claude:added'));
@@ -323,9 +328,18 @@ for (const kind of ['Node', 'Worker']) test(`${kind} synchronizes changed fixed-
   requests.length = 0;
   staleBaseline = true;
   await upload(makeRecord(3, next));
-  assert.ok(requests[0].delta);
-  assert.ok(requests[1].delta);
-  assert.ok(requests[2].rows);
-  assert.equal(requests[2].page, 0);
-  assert.notEqual(requests[0].revision, requests[2].revision);
+  assert.ok(requests[0].pages[0].delta);
+  assert.ok(requests[1].rows);
+  assert.equal(requests[1].page, 0);
+  assert.notEqual(requests[0].pages[0].revision, requests[1].revision);
+});
+
+
+test('fixed range batches split by UTF-8 body size including their envelope', () => {
+  const pages = [0, 1, 2].map(page => ({ page, rows: ['會話'.repeat(100)] }));
+  const limit = Buffer.byteLength(JSON.stringify({ pages: pages.slice(0, 2) }));
+  const exact = [...fixedRangeRequestBodies(pages, limit)].map(body => JSON.parse(body));
+  assert.deepEqual(exact, [{ pages: pages.slice(0, 2) }, pages[2]]);
+  const overflow = [...fixedRangeRequestBodies(pages, limit - 1)].map(body => JSON.parse(body));
+  assert.deepEqual(overflow, pages);
 });

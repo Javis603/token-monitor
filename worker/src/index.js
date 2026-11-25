@@ -164,26 +164,32 @@ export class HubDO {
       try { payload = await readIngestJson(request); }
       catch (error) { return jsonResponse(error.status === 413 ? 413 : 400, { error: 'bad_fixed_range_page' }); }
       const result = await this.mutate(() => this.withStorageTransaction(async (storage) => {
+        const pages = fixedRangeUploads.fixedRangeRequestPages(payload);
+        if (!pages) return jsonResponse(400, { error: 'bad_fixed_range_page' });
         const device = await storage.get(`dev:${deviceId}`);
         const policy = await storage.get(`${TITLE_POLICY_PREFIX}${deviceId}`);
-        const preserveTitles = syncContent.acceptsSessionTitles(this.syncSessionTitles, policy, payload?.sessionTitleSyncGeneration);
+        const preserveTitles = syncContent.acceptsSessionTitles(this.syncSessionTitles, policy, pages[0]?.sessionTitleSyncGeneration);
         const previous = await storage.get(key);
-        let published = previous;
-        if (previous && previous.revision === payload?.revision && Number.isInteger(payload.page) && payload.page >= 0) {
-          const rows = previous.pageCount === 0 && payload.page === 0 ? []
-            : payload.page < previous.pageCount
-              ? await storage.get(fixedRangePageKey(deviceId, previous.revision, payload.page)) : undefined;
-          published = { ...previous, rows };
-        } else if (previous?.revision && previous.revision === payload?.delta?.baseRevision
-          && Number.isSafeInteger(payload.delta.basePage) && payload.delta.basePage >= 0
-          && payload.delta.basePage < previous.pageCount) {
-          const baseRows = await storage.get(fixedRangePageKey(deviceId, previous.revision, payload.delta.basePage));
-          published = { ...previous, baseRows };
+        let accepted;
+        for (const page of pages) {
+          let published = previous;
+          if (previous && previous.revision === page?.revision && Number.isInteger(page.page) && page.page >= 0) {
+            const rows = previous.pageCount === 0 && page.page === 0 ? []
+              : page.page < previous.pageCount
+                ? await storage.get(fixedRangePageKey(deviceId, previous.revision, page.page)) : undefined;
+            published = { ...previous, rows };
+          } else if (previous?.revision && previous.revision === page?.delta?.baseRevision
+            && Number.isSafeInteger(page.delta.basePage) && page.delta.basePage >= 0
+            && page.delta.basePage < previous.pageCount) {
+            const baseRows = await storage.get(fixedRangePageKey(deviceId, previous.revision, page.delta.basePage));
+            published = { ...previous, baseRows };
+          }
+          accepted = this.fixedRangeUploads.accept(deviceId, page, device, preserveTitles, published);
+          if (accepted.status !== 200) return jsonResponse(accepted.status, {
+            error: accepted.status === 409 ? 'fixed_range_revision_mismatch' : 'bad_fixed_range_page'
+          });
         }
-        const { status, complete, snapshot } = this.fixedRangeUploads.accept(deviceId, payload, device, preserveTitles, published);
-        if (status !== 200) return jsonResponse(status, {
-          error: status === 409 ? 'fixed_range_revision_mismatch' : 'bad_fixed_range_page'
-        });
+        const { complete, snapshot } = accepted;
         if (snapshot) {
           const { pages, ...index } = snapshot;
           for (const [page, rows] of pages.entries()) {
@@ -725,7 +731,7 @@ export class HubDO {
       this.queueBroadcast();
       const response = {
         ok: true, deviceId: record.deviceId,
-        ...(request.headers.get(FIXED_RANGE_HEADER) === FIXED_RANGE_VERSION ? { fixedRanges: 1, fixedRangeDelta: 1 } : {}),
+        ...(request.headers.get(FIXED_RANGE_HEADER) === FIXED_RANGE_VERSION ? { fixedRanges: 1, fixedRangeDelta: 1, fixedRangeBatch: 1 } : {}),
         ...(upload ? { upload } : {})
       };
       return jsonResponse(

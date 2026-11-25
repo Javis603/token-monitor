@@ -381,6 +381,8 @@ The Hub makes an immutable revision readable after it accepts the complete publi
 
 A supporting Hub also acknowledges `fixedRangeDelta: 1` in the ingest response. A producer may send a page-sized difference from the last confirmed fixed-range revision. Use `delta: {baseRevision, basePage, upsert, remove}` in place of `rows`. `upsert` carries complete changed row tuples. `remove` carries the JSON-encoded three-element row identities (range, kind, accounting key). The Hub applies the difference to that device's published base page, validates the reconstructed page against the same limits and current sharing settings, and publishes only after all resulting pages pass validation. Producers use full pages for the first publish, for pages where the difference is larger, or for a new full publication when the baseline is rejected. Hubs without this acknowledgement continue to receive full pages.
 
+Hubs that acknowledge `fixedRangeBatch: 1` also accept `{ "pages": [...] }` for consecutive pages of one publication, with the same observation and title consent generation. Each request has the usual 2 MiB JSON limit including the envelope. The producer batches difference uploads within that limit and sends any remaining pages in order. The Hub validates every page in a request before publishing the completed revision. A producer uses individual page requests on a Hub without batching support.
+
 ## `GET /api/stats`
 
 Returns aggregate stats for the widget.

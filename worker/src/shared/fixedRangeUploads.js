@@ -4,7 +4,7 @@
 // @ts-check
 'use strict';
 
-const { admitFixedRangeIndex, admitFixedRangePage, decodeFixedRangePeriod, rangesMatchDeviceDay, fixedRangeRowKey, compareFixedRangeRows } = require('./fixedRangeSync');
+const { admitFixedRangeIndex, admitFixedRangePage, decodeFixedRangePeriod, MAX_FIXED_RANGE_PAGES, rangesMatchDeviceDay, fixedRangeRowKey, compareFixedRangeRows } = require('./fixedRangeSync');
 
 /** @typedef {Record<string, any>} JsonRecord */
 const MAX_STAGED_UPLOADS = 4;
@@ -82,6 +82,21 @@ function applyFixedRangePageDelta(delta, baseRows) {
     rows.set(key, detail);
   }
   return [...rows.values()].sort(compareFixedRangeRows);
+}
+
+/**
+ * A batch contains consecutive pages for one publication and consent generation.
+ * @param {JsonRecord} payload
+ * @returns {JsonRecord[] | null}
+ */
+function fixedRangeRequestPages(payload) {
+  if (payload?.pages === undefined) return [payload];
+  if (!Array.isArray(payload.pages) || payload.pages.length < 2 || payload.pages.length > MAX_FIXED_RANGE_PAGES) return null;
+  const [first] = payload.pages;
+  if (!Number.isSafeInteger(first?.page) || first.page < 0 || first.page + payload.pages.length > MAX_FIXED_RANGE_PAGES) return null;
+  return payload.pages.every((page, offset) => page?.page === first.page + offset
+    && page.revision === first.revision && page.observedAt === first.observedAt
+    && page.sessionTitleSyncGeneration === first.sessionTitleSyncGeneration) ? payload.pages : null;
 }
 
 /**
@@ -191,6 +206,6 @@ function createFixedRangeUploads() {
 }
 
 module.exports = {
-  createFixedRangeUploads, retireFixedRangeSnapshot, rememberFixedRangeObservation,
+  createFixedRangeUploads, fixedRangeRequestPages, retireFixedRangeSnapshot, rememberFixedRangeObservation,
   hasCurrentFixedRangeObservation, withoutFixedRangeObservation
 };

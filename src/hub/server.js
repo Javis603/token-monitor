@@ -2,7 +2,7 @@
 
 const http = require('node:http');
 const {
-  createFixedRangeUploads, retireFixedRangeSnapshot, rememberFixedRangeObservation,
+  createFixedRangeUploads, fixedRangeRequestPages, retireFixedRangeSnapshot, rememberFixedRangeObservation,
   hasCurrentFixedRangeObservation, withoutFixedRangeObservation
 } = require('../shared/fixedRangeUploads');
 const { decodeFixedRangePeriod, FIXED_RANGE_HEADER, FIXED_RANGE_VERSION } = require('../shared/fixedRangeSync');
@@ -98,14 +98,20 @@ function createHub({
   }
 
   function acceptFixedRange(deviceId, payload) {
-    const preserveTitles = acceptsSessionTitles(serverTitlesEnabled, store.syncTitlePolicies[deviceId], payload?.sessionTitleSyncGeneration);
+    const pages = fixedRangeRequestPages(payload);
+    if (!pages) return { status: 400 };
+    const preserveTitles = acceptsSessionTitles(serverTitlesEnabled, store.syncTitlePolicies[deviceId], pages[0]?.sessionTitleSyncGeneration);
     const previous = store.fixedRanges[deviceId];
-    const published = previous && previous.revision === payload?.revision ? {
-      ...previous,
-      pageCount: previous.pages.length,
-      rows: previous.pages.length === 0 && payload.page === 0 ? [] : previous.pages[payload.page]
-    } : previous;
-    const result = fixedRangeUploads.accept(deviceId, payload, store.devices[deviceId], preserveTitles, published);
+    let result;
+    for (const page of pages) {
+      const published = previous && previous.revision === page?.revision ? {
+        ...previous,
+        pageCount: previous.pages.length,
+        rows: previous.pages.length === 0 && page.page === 0 ? [] : previous.pages[page.page]
+      } : previous;
+      result = fixedRangeUploads.accept(deviceId, page, store.devices[deviceId], preserveTitles, published);
+      if (result.status !== 200) return result;
+    }
     if (result.snapshot) publishFixedRanges(deviceId, result.snapshot);
     return result;
   }
@@ -612,7 +618,7 @@ function createHub({
             })) : undefined;
         const response = {
           ok: true, deviceId: record.deviceId,
-          ...(req.headers[FIXED_RANGE_HEADER] === FIXED_RANGE_VERSION ? { fixedRanges: 1, fixedRangeDelta: 1 } : {}),
+          ...(req.headers[FIXED_RANGE_HEADER] === FIXED_RANGE_VERSION ? { fixedRanges: 1, fixedRangeDelta: 1, fixedRangeBatch: 1 } : {}),
           ...(upload ? { upload } : {})
         };
         return sendJson(res, 200, wantsMinimalResponse(req) ? response : { ...response, stats: getStats() });
