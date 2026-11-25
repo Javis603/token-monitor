@@ -78,6 +78,16 @@ function historyWithoutTokenComponents(history) {
   };
 }
 
+function historyForUpload(summary) {
+  const history = historyForSync(summary.history, summary.periodWindows);
+  if (!Array.isArray(history?.dailyTotals)) return history;
+  const { dailyTotalsOmitted: _omitted, ...complete } = history;
+  if (summary.dailySessionPeriods && complete.summary?.activeDaysComplete === true) {
+    complete.dailyTotalsRevision = historyKey(complete.dailyTotals);
+  }
+  return complete;
+}
+
 function projectEntries(period) {
   return period?.projects && typeof period.projects === 'object'
     ? Object.keys(period.projects).length
@@ -217,7 +227,7 @@ function buildSyncPayload(summary, {
     payload.sessionTitleSyncGeneration = sessionTitleSyncGeneration;
   }
   if (!omitHistory && summary.history && typeof summary.history === 'object') {
-    payload.history = historyForSync(summary.history, summary.periodWindows);
+    payload.history = historyForUpload(summary);
     if (omitHistoryTokenComponents) {
       payload.history = historyWithoutTokenComponents(payload.history);
     }
@@ -240,13 +250,6 @@ function buildSyncPayload(summary, {
   delete payload.sessionDetailsOmitted;
   delete payload.periodProjectsOmitted;
   delete payload.codexLocalSessionKeys;
-  if (Array.isArray(payload.history?.dailyTotals)) {
-    payload.history = { ...payload.history };
-    delete payload.history.dailyTotalsOmitted;
-    if (summary.dailySessionPeriods && payload.history.summary?.activeDaysComplete === true) {
-      payload.history.dailyTotalsRevision = historyKey(payload.history.dailyTotals);
-    }
-  }
 
   for (const periodName of ['today', 'month']) {
     const period = payload[periodName];
@@ -359,7 +362,7 @@ function syncPayload(summary, options = {}) {
 async function postSyncPayload(fetchFn, url, { headers = {}, summary, logger, syncSessionTitles = false, sessionTitleSyncGeneration, acknowledgedHistoryKey, pagedSessions = false } = {}) {
   const syncOptions = { syncSessionTitles, sessionTitleSyncGeneration, pagedSessions };
   if (acknowledgedHistoryKey && summary?.history !== undefined
-    && historyKey(historyForSync(summary.history, summary.periodWindows)) === acknowledgedHistoryKey) {
+    && historyKey(historyForUpload(summary)) === acknowledgedHistoryKey) {
     // Omit before cloning and sizing: the freed budget belongs to live detail.
     syncOptions.omitHistory = true;
   }
