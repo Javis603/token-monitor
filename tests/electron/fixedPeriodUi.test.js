@@ -342,3 +342,40 @@ test('session detail uses a synced range only for the selected period', () => {
   state.period = 'today';
   assert.equal(context.sessionDetailPeriod(), 'today');
 });
+
+test('synced range reads stop after the retry budget until the key changes', async () => {
+  const source = read('app.js');
+  const request = source.match(/function requestSyncedFixedPeriod\(\) \{[\s\S]*?\n\}/)[0];
+  let key = 'old';
+  let now = 0;
+  let reads = 0;
+  const timers = [];
+  const context = {
+    state: { stats: { snapshot: {} } },
+    syncedFixedPeriodKey: () => key,
+    window: { tokenMonitor: { getSyncedFixedPeriod: async () => { reads++; return null; } } },
+    Date: { now: () => now },
+    FIXED_PERIOD_HISTORY_RETRY_MS: 4000,
+    FIXED_PERIOD_HISTORY_MAX_RETRIES: 3,
+    setTimeout: callback => timers.push(callback),
+    clearTimeout() {},
+    statsRenderScheduler: { request() {} }
+  };
+  vm.runInNewContext(request, context);
+  context.requestSyncedFixedPeriod();
+  await Promise.resolve();
+  for (let retry = 0; retry < 3; retry++) {
+    now += 4000;
+    timers.shift()();
+    await Promise.resolve();
+  }
+
+  assert.equal(reads, 4);
+  assert.equal(timers.length, 0);
+  now += 4000;
+  context.requestSyncedFixedPeriod();
+  assert.equal(reads, 4);
+  key = 'new';
+  context.requestSyncedFixedPeriod();
+  assert.equal(reads, 5);
+});

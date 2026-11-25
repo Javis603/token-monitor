@@ -6704,8 +6704,9 @@ function requestSyncedFixedPeriod() {
     request.pending = false;
     // Pages can arrive late, and a transient transport failure can also leave
     // the selected revision without details until the next read.
-    request.retryAt = snapshot?.detailsAvailable ? Infinity : Date.now() + FIXED_PERIOD_HISTORY_RETRY_MS;
-    if (!snapshot?.detailsAvailable && request.retries < FIXED_PERIOD_HISTORY_MAX_RETRIES) {
+    const canRetry = !snapshot?.detailsAvailable && request.retries < FIXED_PERIOD_HISTORY_MAX_RETRIES;
+    request.retryAt = canRetry ? Date.now() + FIXED_PERIOD_HISTORY_RETRY_MS : Infinity;
+    if (canRetry) {
       request.retryTimer = setTimeout(() => {
         if (state.syncedFixedPeriod !== request || key !== syncedFixedPeriodKey()) return;
         request.retries += 1;
@@ -9051,6 +9052,8 @@ async function refreshStats(options = {}) {
       state.homeHistoryRetrySignature = '';
       state.homeHistoryRetries = 0;
       state.homeHistorySignature = '';
+      clearTimeout(state.syncedFixedPeriod?.retryTimer);
+      state.syncedFixedPeriod = null;
     }
     applyCodexActiveAccountFromStats();
     const forceFixedPeriodHistory = options.forceHistory === true;
