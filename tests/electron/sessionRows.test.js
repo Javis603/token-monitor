@@ -677,7 +677,7 @@ function groupMemberRenderer(onOpen = () => {}) {
   const source = fs.readFileSync(path.join(__dirname, '../../src/electron/renderer/app.js'), 'utf8');
   const body = source.slice(source.indexOf('function sessionGroupRunNode('), source.indexOf('function renderSessionGroupDetail('));
   const api = require('../../src/electron/renderer/sessionRows');
-  return Function('rowTemplate', 'updateRow', 'sessionRowsApi', 't', 'openSessionDetail', 'window',
+  return Function('rowTemplate', 'updateRow', 'sessionRowsApi', 't', 'formatDetailTokens', 'openSessionDetail', 'window',
     `${body}\nreturn sessionGroupRunNode;`)(
     data => ({ data, dataset: {}, events: {}, classes: new Set(['row']),
       classList: { add() {} },
@@ -687,7 +687,7 @@ function groupMemberRenderer(onOpen = () => {}) {
     }),
     (node, data) => { node.data = data; node.interactive = api.sessionRowDetailAvailable(data); },
     api, key => ({ 'sessions.mainSession': '主會話', 'sessions.subagent': '子代理',
-      'sessions.backgroundReviews': 'Codex Auto Review' })[key] || key, onOpen, { TokenMonitorDomReconcile: require('../../src/electron/renderer/domReconcile') }
+      'sessions.backgroundReviews': 'Codex Auto Review' })[key] || key, String, onOpen, { TokenMonitorDomReconcile: require('../../src/electron/renderer/domReconcile') }
   );
 }
 

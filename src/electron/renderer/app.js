@@ -5776,6 +5776,7 @@ function applySessionDetailResult(request, options) {
     return;
   }
   request.renderOptions = null;
+  request.pendingDisplayRefresh = false;
   renderSessionDetail(options);
 }
 
@@ -6141,6 +6142,16 @@ function sessionGroupRunNode(row, max, parent) {
   // Group members are still session rows. Share the template, metrics, tooltip
   // and activity rendering; exchange rows belong only to the actual transcript.
   const member = { ...row, name: title, titleModelLabel: namedGroup ? undefined : row.modelLabel };
+  if (row.modelTokens) {
+    member.modelTooltipEntries = sessionRowsApi.sessionModelTooltipEntries(
+      { models: row.modelTokens, totalTokens: row.value, latestModel: row.latestModel },
+      {
+        latestModelLabel: t('session.latestModel'),
+        unattributedLabel: t('dashboard.tooltip.unclassified'),
+        formatTokens: formatDetailTokens
+      }
+    );
+  }
   if (subagentGroup) {
     member.subtitle = [row.clientLabel, sessionRowsApi.sessionModelMetadataLabel(row)].filter(Boolean).join(' · ');
     member.activity = row.activitySummary;
@@ -8706,20 +8717,21 @@ function setRendererSettings(next) {
   const animationChanged = tokenNumberAnimationApi.normalize(state.settings?.tokenNumberAnimation)
     !== tokenNumberAnimationApi.normalize(next.tokenNumberAnimation);
   const restoringPeriodTabs = state.settings?.periodTabOrder?.length && !next.periodTabOrder?.length;
+  const previousLocale = currentLocale();
   const detailCompactChanged = (state.settings?.detailTokensUseCompactUnits === true) !== (next.detailTokensUseCompactUnits === true);
-  const detailUnitsChanged = (state.settings?.compactTokenUnits === 'localized') !== (next.compactTokenUnits === 'localized')
-    || (state.settings?.locale || '') !== (next.locale || '');
+  const detailUnitsChanged = (state.settings?.compactTokenUnits === 'localized') !== (next.compactTokenUnits === 'localized');
   state.settings = next;
+  const localeChanged = previousLocale !== currentLocale();
   if (next.periodTabOrder?.length) ensureVisiblePeriod(next.periodTabOrder);
   else if (restoringPeriodTabs && fixedPeriodRangesApi.slotForSelection(state.period) === 'month') {
     const defaultPeriod = fixedPeriodRangesApi.normalizeMonthMode(next.periodMonthMode);
     if (state.period !== defaultPeriod && setPeriod(defaultPeriod)) followOpenSessionToPeriod();
   }
   if (next.detailTokensUseCompactUnits !== true) detailTokenDisplayApi.reset();
-  if (detailCompactChanged || detailUnitsChanged) {
+  if (detailCompactChanged || detailUnitsChanged || localeChanged) {
     settleRowNumberAnimations();
     if (state.openSession?.kind === 'session' && state.openSession.detail) {
-      state.openSession.renderOptions = { detail: state.openSession.detail, preserveScroll: true };
+      state.openSession.pendingDisplayRefresh = true;
     }
   }
   if (animationChanged) {
@@ -8924,7 +8936,11 @@ function renderAppContent({ fromSearch = false } = {}) {
     if (state.openSession.renderOptions) {
       const options = state.openSession.renderOptions;
       state.openSession.renderOptions = null;
+      state.openSession.pendingDisplayRefresh = false;
       renderSessionDetail(options);
+    } else if (state.openSession.pendingDisplayRefresh && state.openSession.detail) {
+      state.openSession.pendingDisplayRefresh = false;
+      renderSessionDetail({ detail: state.openSession.detail, preserveScroll: true });
     }
     void refreshOpenSessionDetail();
   } else {

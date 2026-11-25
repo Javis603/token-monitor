@@ -326,17 +326,51 @@ test('detailTokenDisplay formats exact when disabled, western/localized compact 
 test('compactTokenUnitsRow stays visible in East Asian locales when detailTokensUseCompactUnits is enabled without showCompactTotalTokens', () => {
   const row = new FakeElement('div');
   row.classList.add('hidden');
-  const syncVisibility = (locale) => {
-    row.classList.toggle('hidden', !compactTokens.supportsLocalizedCompactTokenUnits(locale));
+  const localeHelpers = appSource.slice(
+    appSource.indexOf('function preferredLanguages('),
+    appSource.indexOf('function effectiveCompactTokenUnits(')
+  );
+  const syncStart = appSource.indexOf('els.showCompactTotalTokensInput.checked = state.settings.showCompactTotalTokens === true;');
+  const syncEnd = appSource.indexOf('els.swapSettingsRefreshInput.checked =', syncStart);
+  assert.ok(syncStart >= 0 && syncEnd > syncStart, 'appearance compact-unit sync block should exist in syncSettingsForm');
+
+  const state = { settings: {} };
+  const context = {
+    state,
+    i18n,
+    compactTokenApi: compactTokens,
+    tokenRateApi: { isSharedSyncMode: () => false },
+    navigator: { languages: ['en-US'], language: 'en-US' },
+    syncFontSettingsControls() {},
+    els: {
+      showCompactTotalTokensInput: { checked: false },
+      detailTokensUseCompactUnitsInput: { checked: false },
+      showLiveTokenRateInput: { checked: false },
+      liveTokenRateScopeInput: { value: 'all' },
+      liveTokenRateScopeRow: new FakeElement('div'),
+      compactTokenUnitsInput: { value: 'western' },
+      compactTokenUnitsRow: row
+    }
   };
-  syncVisibility('zh-CN');
-  assert.equal(row.classList.contains('hidden'), false);
-  syncVisibility('ja');
-  assert.equal(row.classList.contains('hidden'), false);
-  syncVisibility('ko');
-  assert.equal(row.classList.contains('hidden'), false);
-  syncVisibility('en');
-  assert.equal(row.classList.contains('hidden'), true);
+  vm.runInNewContext(`
+    ${localeHelpers}
+    globalThis.syncAppearanceCompactControls = function syncAppearanceCompactControls() {
+      ${appSource.slice(syncStart, syncEnd)}
+    };
+  `, context);
+
+  for (const [language, expectedHidden] of [['zh-CN', false], ['ja', false], ['ko', false], ['en', true]]) {
+    state.settings = {
+      showCompactTotalTokens: false,
+      detailTokensUseCompactUnits: true,
+      compactTokenUnits: 'localized',
+      language
+    };
+    context.syncAppearanceCompactControls();
+    assert.equal(context.els.showCompactTotalTokensInput.checked, false);
+    assert.equal(context.els.detailTokensUseCompactUnitsInput.checked, true);
+    assert.equal(row.classList.contains('hidden'), expectedHidden, `compactTokenUnitsRow hidden mismatch for ${language}`);
+  }
 });
 
 test('breakdown rows toggle between compact and exact across all visible rows, expose exact aria-label, and stop propagation so clicking tokens never opens session detail', () => {
@@ -838,6 +872,224 @@ test('keyboard activation inside rebuilt tool, device, and project accordions pr
     assert.equal(rowNodes[rowIndex].classList.contains('expanded'), true);
     assert.equal(document.activeElement.textContent, compactText);
   }
+});
+
+test('open session group toggle refreshes both group total and member model tooltips', () => {
+  const api = freshDetailTokenDisplay();
+  const document = fakeDocument();
+  const state = {
+    breakdown: 'session',
+    openSession: null,
+    settings: {
+      detailTokensUseCompactUnits: true,
+      compactTokenUnits: 'localized',
+      locale: 'zh-CN',
+      showToolIcons: false
+    }
+  };
+  const formatNumber = (value) => Math.round(Number(value || 0)).toLocaleString('en-US');
+  const formatCompact = (value) => compactTokens.formatCompactTokens(value, 'localized', 'zh-CN');
+  const t = (key) => i18n.translate('zh-CN', key);
+
+  const helpersStart = appSource.indexOf('function captureDetailTokenFocus(');
+  const helpersEnd = appSource.indexOf('function decorateDetailTokenElement(', helpersStart);
+  const runNodeStart = appSource.indexOf('function sessionGroupRunNode(');
+  const groupEnd = appSource.indexOf('function detailNote(', runNodeStart);
+  const renderedMembers = [];
+  const sessionDetail = document.createElement('div');
+  const sessionDetailHead = document.createElement('div');
+
+  const context = {
+    document,
+    rendererDom,
+    window: { TokenMonitorDomReconcile: require('../../src/electron/renderer/domReconcile') },
+    els: {
+      sessionToolFilter: document.createElement('div'),
+      sessionSearchHost: document.createElement('div'),
+      sessionSortToggle: document.createElement('div'),
+      sessionSearchToggle: document.createElement('div'),
+      breakdown: document.createElement('div'),
+      sessionDetail,
+      sessionDetailHead
+    },
+    state,
+    sessionRowsApi: sessionRows,
+    t,
+    closeSessionDetail() {},
+    openSessionDetail() {},
+    sessionDetailBackArrow: () => document.createElement('span'),
+    bindHoverMarquee() {},
+    settleRowNumberAnimations() {},
+    formatNumber,
+    formatDetailTokens: (value) => api.formatDetailTokens(value),
+    decorateDetailTokenElement: (el, value, options = {}) => {
+      const exactText = options.exactText !== undefined ? String(options.exactText) : formatNumber(value);
+      api.decorateTokenElement(el, exactText, {
+        exactHint: t('detail.tokens.clickForExact'),
+        compactHint: t('detail.tokens.clickForCompact')
+      });
+    },
+    formatCost: (value) => `$${Number(value || 0).toFixed(2)}`,
+    rowTemplate: () => document.createElement('div'),
+    updateRow: (_node, data) => { renderedMembers.push(data); }
+  };
+  vm.runInNewContext(`
+    ${appSource.slice(helpersStart, helpersEnd)}
+    ${appSource.slice(runNodeStart, groupEnd)}
+    globalThis.renderSessionGroupDetail = renderSessionGroupDetail;
+    globalThis.refreshDetailTokenViews = refreshDetailTokenViews;
+  `, context);
+
+  api.configure({
+    isEnabled: () => true,
+    getUnitSystem: () => 'localized',
+    getLocale: () => 'zh-CN',
+    formatExact: formatNumber,
+    formatCompact,
+    onToggle: () => context.refreshDetailTokenViews()
+  });
+
+  const [memberRow] = sessionRows.sessionRowsForPeriod({
+    sessions: {
+      'claude:m1': {
+        client: 'claude',
+        sessionId: 'm1',
+        title: 'Main run',
+        totalTokens: 200_000,
+        models: { 'claude-sonnet-4-6': 150_000, 'claude-haiku-4-5': 50_000 }
+      }
+    }
+  }, {
+    latestModelLabel: t('session.latestModel'),
+    unattributedLabel: t('dashboard.tooltip.unclassified'),
+    formatTokens: (value) => api.formatDetailTokens(value)
+  });
+
+  state.openSession = {
+    kind: 'session-group',
+    summary: {
+      subagentGroup: true,
+      name: 'Main run',
+      value: 200_000,
+      cost: 2.5,
+      subagentCount: 0,
+      groupRows: [{ ...memberRow, groupRole: 'main' }]
+    }
+  };
+  context.renderSessionGroupDetail(state.openSession);
+  assert.equal(sessionDetail.querySelector('.session-group-tokens').textContent, '20万');
+  assert.deepEqual(renderedMembers.at(-1).modelTooltipEntries.map((entry) => entry[1]), ['15万', '5万']);
+
+  // Click group total to switch to exact: both group total and member tooltip counts update.
+  sessionDetail.querySelector('.session-group-tokens').dispatch('click');
+  assert.equal(sessionDetail.querySelector('.session-group-tokens').textContent, '200,000');
+  assert.deepEqual(renderedMembers.at(-1).modelTooltipEntries.map((entry) => entry[1]), ['150,000', '50,000']);
+
+  // Click again to switch back to compact.
+  sessionDetail.querySelector('.session-group-tokens').dispatch('click');
+  assert.equal(sessionDetail.querySelector('.session-group-tokens').textContent, '20万');
+  assert.deepEqual(renderedMembers.at(-1).modelTooltipEntries.map((entry) => entry[1]), ['15万', '5万']);
+});
+
+test('language changes refresh open session detail via resolved locale and never clobber a newer transcript snapshot', () => {
+  const localeHelpers = appSource.slice(
+    appSource.indexOf('function preferredLanguages('),
+    appSource.indexOf('function effectiveCompactTokenUnits(')
+  );
+  const applyStart = appSource.indexOf('function applySessionDetailResult(');
+  const applyEnd = appSource.indexOf('// A native range\'s turns', applyStart);
+  const setSettingsStart = appSource.indexOf('function setRendererSettings(');
+  const setSettingsEnd = appSource.indexOf('function periodContentAvailability(', setSettingsStart);
+  const flushStart = appSource.indexOf('if (state.openSession.renderOptions) {');
+  const flushEnd = appSource.indexOf('void refreshOpenSessionDetail();', flushStart);
+  assert.ok(flushStart >= 0 && flushEnd > flushStart, 'openSession deferred refresh branch should exist');
+
+  const renders = [];
+  let surface = 'main';
+  const state = {
+    period: 'today',
+    settings: {
+      language: 'zh-CN',
+      detailTokensUseCompactUnits: true,
+      compactTokenUnits: 'localized'
+    },
+    openSession: {
+      kind: 'session',
+      detail: { exchanges: [{ key: 'old', value: 100_000 }] }
+    }
+  };
+  const context = {
+    state,
+    i18n,
+    compactTokenApi: compactTokens,
+    tokenNumberAnimationApi: require('../../src/electron/tokenNumberAnimation'),
+    fixedPeriodRangesApi: require('../../src/electron/renderer/fixedPeriodRanges'),
+    detailTokenDisplayApi: { reset() {} },
+    navigator: { languages: ['en-US'], language: 'en-US' },
+    visibleStatsSurface: () => surface,
+    isRendererWindowHidden: () => surface !== 'main',
+    statsRenderScheduler: { request() {} },
+    settleRowNumberAnimations() {},
+    renderSessionDetail: (options) => { renders.push(options); }
+  };
+  vm.runInNewContext(`
+    ${localeHelpers}
+    ${appSource.slice(applyStart, applyEnd)}
+    ${appSource.slice(setSettingsStart, setSettingsEnd)}
+    globalThis.setRendererSettings = setRendererSettings;
+    globalThis.applySessionDetailResult = applySessionDetailResult;
+    globalThis.flushOpenSession = function flushOpenSession() {
+      ${appSource.slice(flushStart, flushEnd)}
+    };
+  `, context);
+
+  // Language change (without a settings.locale field) marks the open session for refresh.
+  context.setRendererSettings({
+    language: 'ko',
+    detailTokensUseCompactUnits: true,
+    compactTokenUnits: 'localized'
+  });
+  assert.equal(state.openSession.pendingDisplayRefresh, true);
+  assert.equal(state.openSession.renderOptions, undefined);
+  context.flushOpenSession();
+  assert.equal(renders.length, 1);
+  assert.equal(renders[0].preserveScroll, true);
+  assert.equal(renders[0].detail.exchanges[0].key, 'old');
+  assert.equal(state.openSession.pendingDisplayRefresh, false);
+
+  // If a newer transcript arrives while a display refresh is pending, deferred flush renders the newer snapshot.
+  context.setRendererSettings({
+    language: 'ja',
+    detailTokensUseCompactUnits: true,
+    compactTokenUnits: 'localized'
+  });
+  assert.equal(state.openSession.pendingDisplayRefresh, true);
+  const newerDetail = { exchanges: [{ key: 'new', value: 250_000 }] };
+  state.openSession.detail = newerDetail;
+  surface = 'main';
+  context.applySessionDetailResult(state.openSession, { detail: newerDetail, preserveScroll: true });
+  assert.equal(renders.length, 2);
+  assert.strictEqual(renders[1].detail, newerDetail);
+  assert.equal(state.openSession.pendingDisplayRefresh, false);
+  // Subsequent deferred flush is a no-op and cannot replay the older snapshot.
+  context.flushOpenSession();
+  assert.equal(renders.length, 2);
+
+  // Same race when applySessionDetailResult runs while hidden (queued in renderOptions).
+  context.setRendererSettings({
+    language: 'zh-CN',
+    detailTokensUseCompactUnits: true,
+    compactTokenUnits: 'localized'
+  });
+  const newestDetail = { exchanges: [{ key: 'newest', value: 300_000 }] };
+  state.openSession.detail = newestDetail;
+  surface = '';
+  context.applySessionDetailResult(state.openSession, { detail: newestDetail, preserveScroll: true });
+  surface = 'main';
+  context.flushOpenSession();
+  assert.equal(renders.length, 3);
+  assert.strictEqual(renders[2].detail, newestDetail);
+  assert.equal(state.openSession.pendingDisplayRefresh, false);
 });
 
 test('regression: Edge Dock detail cards and TOTAL TOKENS remain unaffected by detailTokensUseCompactUnits', () => {
