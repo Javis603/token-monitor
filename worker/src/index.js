@@ -751,7 +751,7 @@ export class HubDO {
       this.queueBroadcast();
       const response = {
         ok: true, deviceId: record.deviceId,
-        ...(request.headers.get(FIXED_RANGE_HEADER) === FIXED_RANGE_VERSION ? { fixedRanges: 1, fixedRangeDelta: 1, fixedRangeBatch: 1, fixedRangeRevision } : {}),
+        ...(request.headers.get(FIXED_RANGE_HEADER) === FIXED_RANGE_VERSION ? { fixedRanges: 1, fixedRangeDelta: 1, fixedRangeBatch: 1, fixedRangeIndexDelta: 1, fixedRangeRevision } : {}),
         ...(upload ? { upload } : {})
       };
       return jsonResponse(

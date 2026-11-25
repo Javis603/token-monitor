@@ -622,7 +622,7 @@ function createHub({
         const response = {
           ok: true, deviceId: record.deviceId,
           ...(req.headers[FIXED_RANGE_HEADER] === FIXED_RANGE_VERSION ? {
-            fixedRanges: 1, fixedRangeDelta: 1, fixedRangeBatch: 1,
+            fixedRanges: 1, fixedRangeDelta: 1, fixedRangeBatch: 1, fixedRangeIndexDelta: 1,
             fixedRangeRevision: getFixedRanges(record.deviceId)?.revision ?? null
           } : {}),
           ...(upload ? { upload } : {})

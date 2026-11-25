@@ -4,6 +4,7 @@
 // @ts-check
 'use strict';
 
+const { applyStatsPatch } = require('./hubDelta');
 const { admitFixedRangeIndex, admitFixedRangePage, decodeFixedRangePeriod, MAX_FIXED_RANGE_PAGES, rangesMatchDeviceDay, fixedRangeRowKey, compareFixedRangeRows } = require('./fixedRangeSync');
 
 /** @typedef {Record<string, any>} JsonRecord */
@@ -127,6 +128,16 @@ function createFixedRangeUploads() {
     if (publishedTime > observationTime) return { status: 409 };
     const titleGeneration = preserveSessionTitles ? payload.sessionTitleSyncGeneration : null;
     const projectsEnabled = device.projectsEnabled !== false;
+    let rangesInput = payload.ranges;
+    if (payload.indexDelta !== undefined) {
+      const indexDelta = payload.indexDelta;
+      if (payload.page !== 0 || rangesInput !== undefined || !indexDelta
+        || !Array.isArray(indexDelta.patch) || indexDelta.patch.length > 20000) return { status: 400 };
+      if (!published?.revision || published.revision !== indexDelta.baseRevision
+        || published.titleGeneration !== titleGeneration) return { status: 409 };
+      try { rangesInput = applyStatsPatch(published.ranges, indexDelta.patch); }
+      catch (_) { return { status: 400 }; }
+    }
     let rowsInput = payload.rows;
     if (payload.delta !== undefined) {
       const delta = payload.delta;
@@ -148,7 +159,7 @@ function createFixedRangeUploads() {
     };
     const indexMatches = (/** @type {JsonRecord} */ ranges, /** @type {number} */ totalPages) => (
       payload.page !== 0 || (payload.totalPages === totalPages
-        && sameJson(admitFixedRangeIndex(payload.ranges, payload.totalPages), ranges))
+        && sameJson(admitFixedRangeIndex(rangesInput, payload.totalPages), ranges))
     );
     if (published?.revision === revision) {
       const page = admitPage(published.pageCount);
@@ -168,7 +179,7 @@ function createFixedRangeUploads() {
     }
     let stage = stages.get(deviceId);
     if (payload.page === 0 && stage?.revision !== revision) {
-      const ranges = admitFixedRangeIndex(payload.ranges, payload.totalPages);
+      const ranges = admitFixedRangeIndex(rangesInput, payload.totalPages);
       if (!ranges || !rangesMatchDeviceDay(ranges, device.periodWindows.today.key)) return { status: 400 };
       if (!stage && stages.size >= MAX_STAGED_UPLOADS) return { status: 429 };
       stage = { observedAt, revision, ranges, totalPages: payload.totalPages, pages: [],

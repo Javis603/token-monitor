@@ -478,7 +478,7 @@ function createSyncPayloadUploader({ now = Date.now } = {}) {
         && ack.deviceId === summary?.deviceId && summary.nativeRanges && !fixedRangeConfirmed) {
         try {
           const committed = await uploadFixedRangeVersion(fetchFn, url.replace(/\/api\/ingest$/, ''), summary, headers, options,
-            ack.fixedRangeDelta === 1 ? fixedRangeBaseline ?? [] : [], ack.fixedRangeBatch === 1);
+            ack.fixedRangeDelta === 1 ? fixedRangeBaseline ?? [] : [], ack.fixedRangeBatch === 1, ack.fixedRangeIndexDelta === 1);
           if (committed && requestGeneration === generation) {
             acknowledgedFixedRangeAt = fixedRangeAt;
             fixedRangeBaseline = ack.fixedRangeDelta === 1 ? committed : null;

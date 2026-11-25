@@ -279,12 +279,14 @@ for (const kind of ['Node', 'Worker']) test(`${kind} synchronizes changed fixed-
   const deviceId = 'fixed-range-delta';
   const requests = [];
   let staleBaseline = false;
+  let staleIndex = false;
   const transport = async (url, options) => {
     if (options.method !== 'PUT') return send(url, options);
     const payload = JSON.parse(options.body);
     requests.push(payload);
-    if (staleBaseline && payload.pages) {
-      payload.pages[1].delta.baseRevision = '00000000-0000-4000-8000-000000000000';
+    if ((staleBaseline || staleIndex) && payload.pages) {
+      const delta = staleIndex ? payload.pages[0].indexDelta : payload.pages[1].delta;
+      delta.baseRevision = '00000000-0000-4000-8000-000000000000';
       const response = await send(url, { ...options, body: JSON.stringify(payload) });
       assert.equal(response.status, 409);
       const unpublished = await send(url, { headers });
@@ -325,7 +327,10 @@ for (const kind of ['Node', 'Worker']) test(`${kind} synchronizes changed fixed-
   await upload(makeRecord(2, next));
   assert.equal(requests.length, 1);
   assert.ok(requests[0].pages.length > 1);
-  const delta = requests[0].pages[0].delta;
+  const firstPage = requests[0].pages[0];
+  assert.equal(firstPage.indexDelta.baseRevision, first.revision);
+  assert.equal(Object.hasOwn(firstPage, 'ranges'), false);
+  const delta = firstPage.delta;
   assert.equal(delta.baseRevision, first.revision);
   assert.deepEqual(delta.remove, ['["last7","sessions","claude:s1"]']);
   assert.ok(delta.upsert.some(row => row[2] === 'claude:added'));
@@ -340,11 +345,20 @@ for (const kind of ['Node', 'Worker']) test(`${kind} synchronizes changed fixed-
   assert.equal(requests[1].page, 0);
   assert.notEqual(requests[0].pages[0].revision, requests[1].revision);
 
+  staleBaseline = false;
+  staleIndex = true;
+  requests.length = 0;
+  await upload(makeRecord(4, next));
+  assert.ok(requests[0].pages[0].indexDelta);
+  assert.ok(requests[1].rows);
+  assert.notEqual(requests[0].pages[0].revision, requests[1].revision);
+  staleIndex = false;
+
   const deleted = await send(base + '/api/devices/' + deviceId, { method: 'DELETE', headers });
   assert.equal(deleted.status, 200);
   staleBaseline = false;
   requests.length = 0;
-  await upload(makeRecord(3, next));
+  await upload(makeRecord(4, next));
   assert.ok(requests.length, 'the same observation is republished after device deletion');
 });
 

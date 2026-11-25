@@ -383,6 +383,8 @@ A supporting Hub also acknowledges `fixedRangeDelta: 1` in the ingest response a
 
 Hubs that acknowledge `fixedRangeBatch: 1` also accept `{ "pages": [...] }` for consecutive pages of one publication, with the same observation and title consent generation. Each request has the usual 2 MiB JSON limit including the envelope. The producer batches difference uploads within that limit and sends any remaining pages in order. The Hub validates every page in a request before publishing the completed revision. A producer uses individual page requests on a Hub without batching support.
 
+Hubs that acknowledge `fixedRangeIndexDelta: 1` also accept `indexDelta: {baseRevision, patch}` instead of `ranges` on page zero. The patch uses the same JSON Patch operations as ordinary ingest against the published ranges index. The reconstructed index must pass the full index validator. A producer sends the full index when the patch is larger or the base is rejected.
+
 ## `GET /api/stats`
 
 Returns aggregate stats for the widget.
