@@ -855,16 +855,21 @@ for (const sibling of ['corrupt', 'locked']) test(`a newly conflicting Antigravi
   s.provider('competing-provider', 'competing', 'acp-conversation', 'antigravity');
   s.provider('competing-native-provider', 'competing', 'native-child', 'antigravity');
   const legacyPath = path.join(path.dirname(s.file), 'state.sqlite');
-  if (sibling === 'locked') {
-    const legacy = new sqlite.DatabaseSync(legacyPath);
-    legacy.exec('CREATE TABLE legacy (id TEXT); BEGIN EXCLUSIVE');
-    t.after(() => legacy.close());
-  } else {
-    fs.writeFileSync(legacyPath, 'corrupt unrelated legacy store');
+  let legacy;
+  let next;
+  try {
+    if (sibling === 'locked') {
+      legacy = new sqlite.DatabaseSync(legacyPath);
+      legacy.exec('CREATE TABLE legacy (id TEXT); BEGIN EXCLUSIVE');
+    } else {
+      fs.writeFileSync(legacyPath, 'corrupt unrelated legacy store');
+    }
+    next = await collectUsageOnce({ ...options, todayOnlyAnchor: { dateKey: localTodayKey(),
+      today: full.today, month: full.month, allTime: full.allTime, todayPartitions: captured.todayPartitions,
+      sessionIdentityVersion: captured.sessionIdentityVersion } });
+  } finally {
+    legacy?.close();
   }
-  const next = await collectUsageOnce({ ...options, todayOnlyAnchor: { dateKey: localTodayKey(),
-    today: full.today, month: full.month, allTime: full.allTime, todayPartitions: captured.todayPartitions,
-    sessionIdentityVersion: captured.sessionIdentityVersion } });
   for (const name of ['today', 'month', 'allTime']) {
     assert.equal(next[name].sessions[key].t3ThreadId, undefined);
     assert.equal(next[name].sessions[key].parentSessionId, undefined);
