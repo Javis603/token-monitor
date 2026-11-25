@@ -54,6 +54,7 @@ function dashboardWindowFixture(platform = 'win32', settings = {}) {
     syncWindowsBackdrop(win, { enabled, mode = 'acrylic' }) {
       if (platform === 'win32' && win) backdrops.set(win, enabled ? mode : 'transparent');
     },
+    windowsAccentActive: win => backdrops.get(win) === 'accent',
     nativeBlurEnabled: (source = settings) => source.systemGlass !== false,
     attachNativeMaterialVisibility() {}, syncNativeMaterialVisibility() {},
     nativeMaterialOptions: () => ({}), limitsHistoryController: null, settings,

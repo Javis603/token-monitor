@@ -234,11 +234,17 @@ html.native-high-contrast {
   --line-strong-alpha: 0.48 !important;
 }
 html.native-high-contrast .shell { border: 1px solid var(--line-strong); }
+html.is-windows {
+  --windows-widget-radius: 8px;
+}
+html.is-windows.windows-accent-square {
+  --windows-widget-radius: 0px;
+}
 html.is-windows, html.is-windows body {
-  border-radius: 8px;
+  border-radius: var(--windows-widget-radius);
 }
 html.is-windows .shell {
-  border-radius: 8px;
+  border-radius: var(--windows-widget-radius);
   /* No clip-path on Windows: Chromium renders clip-path with a hard, non-AA
      edge on a transparent window, which made the bottom corners look truncated.
      border-radius + overflow:hidden round the corners (and clip the backdrop
@@ -337,7 +343,7 @@ html.is-windows.floating-bubble-collapsed-left body .floating-bubble-tab,
 html.is-windows.floating-bubble-collapsed-right body .floating-bubble-tab,
 body.is-windows.floating-bubble-collapsed-left .floating-bubble-tab,
 body.is-windows.floating-bubble-collapsed-right .floating-bubble-tab {
-  border-radius: 8px;
+  border-radius: var(--windows-widget-radius);
 }
 .floating-bubble-tab:hover {
   color: var(--text);
