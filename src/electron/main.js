@@ -178,6 +178,9 @@ const {
   projectModelAliasHistory
 } = require('./modelAliasPresentation');
 const { createHub } = require('../hub/server');
+const { fetchFixedRange, fixedRangeUploadPages } = require('../shared/fixedRangeClient');
+const { SYNC_WEEK_STARTS_ON } = require('../shared/fixedRangeSync');
+const { resolveSyncedFixedPeriod, historyFallbackForDevices } = require('./syncedFixedPeriod');
 const { probeHubBuild } = require('./hubBuildStatus');
 const { normalizeLimitsRefreshMode, normalizeLimitsRefreshMs, parseBoolean, parseLimitProviders } = require('../shared/limits/collector');
 const { createCursorUsageEventIndex } = require('../shared/providers/cursor/usageEvents');
@@ -921,16 +924,18 @@ function syncUploadIntervalMs() {
 
 // The collector composes the native Week range for this calendar week. The
 // renderer resolves the same locale and checks the range it receives.
-function collectorWeekStartsOn() {
+function collectorCalendarLocale() {
   const preferred = typeof app.getPreferredSystemLanguages === 'function' ? app.getPreferredSystemLanguages() : [app.getLocale()];
-  return fixedPeriodRangesApi.weekStartsOn(resolveRegionalLocale([...preferred, settings?.locale]));
+  return resolveRegionalLocale([...preferred, settings?.locale]);
 }
 
-function electronUsageConfig(errorPrefix, { nativeRangesEnabled = false } = {}) {
+function collectorWeekStartsOn() {
+  return fixedPeriodRangesApi.weekStartsOn(collectorCalendarLocale());
+}
+
+function electronUsageConfig(errorPrefix, { synced = false } = {}) {
   return usageConfigFromSettings(settings, {
-    // Only standalone stats show native ranges; Hub and sync views keep the
-    // History-derived ones, so their collectors skip the extra day windows.
-    nativeRangesEnabled,
+    nativeRangesEnabled: true,
     agentVersion: appVersion(),
     agentRuntime: 'electron-widget',
     commandTimeoutMs: 120 * 1000,
@@ -949,7 +954,7 @@ function electronUsageConfig(errorPrefix, { nativeRangesEnabled = false } = {}) 
     intervalRequiresActivity: collectorIntervalRequiresActivity(),
     watchDebounceMs: 1500,
     dailyHistoryArchiveWriteEnabled: () => !isExternalAgentActive(),
-    weekStartsOn: collectorWeekStartsOn(),
+    weekStartsOn: synced ? SYNC_WEEK_STARTS_ON : collectorWeekStartsOn(),
     onError: (error, reason) => console.log(`[${errorPrefix}] ${reason}: ${error.message}`),
     logger: (message) => console.log(`[${errorPrefix}] ${message}`)
   });
@@ -4178,7 +4183,7 @@ async function startIcloudCollector() {
       flush: () => runtime.flush(),
       stop: () => runtime.stop()
     };
-    const usageOptions = electronUsageConfig('icloud-collector');
+    const usageOptions = electronUsageConfig('icloud-collector', { synced: true });
     createdDeviceRuntime = createDeviceRuntime({
       envelope: electronDeviceEnvelope(),
       initialLimits: lastCollectedDevice?.limits,
@@ -4260,7 +4265,7 @@ function startSyncCollector() {
     flush: () => syncUploadScheduler.flush(),
     stop: () => syncUploadScheduler.stop()
   };
-  const usageOptions = electronUsageConfig('sync-collector');
+  const usageOptions = electronUsageConfig('sync-collector', { synced: true });
   deviceRuntimeHandle = createDeviceRuntime({
     envelope: electronDeviceEnvelope(),
     initialLimits: lastCollectedDevice?.limits,
@@ -4309,6 +4314,18 @@ function startHostCollector() {
           console.log('[host-ingest] all-time project breakdown omitted to reduce the sync snapshot size');
         }
         embeddedHub.hub.ingest(payload);
+        const fixedRangeAt = JSON.stringify([visibleSummary.updatedAt, options.sessionTitleSyncGeneration]);
+        if (visibleSummary.nativeRanges && handle.fixedRangeAt !== fixedRangeAt) {
+          try {
+            for (const page of fixedRangeUploadPages(visibleSummary, options)) {
+              const accepted = handle.hub.acceptFixedRange(visibleSummary.deviceId, page);
+              if (accepted.status !== 200) break;
+              if (accepted.complete) handle.fixedRangeAt = fixedRangeAt;
+            }
+          } catch (error) {
+            console.log(`[host-ingest] fixed range upload deferred: ${error.message}`);
+          }
+        }
         if (settings.lastPostedDeviceId !== visibleSummary.deviceId) {
           settings.lastPostedDeviceId = visibleSummary.deviceId;
           saveSettings();
@@ -4318,7 +4335,7 @@ function startHostCollector() {
       });
     }
   };
-  const usageOptions = electronUsageConfig('host-collector');
+  const usageOptions = electronUsageConfig('host-collector', { synced: true });
   deviceRuntimeHandle = createDeviceRuntime({
     envelope: electronDeviceEnvelope(),
     initialLimits: lastCollectedDevice?.limits,
@@ -4393,7 +4410,15 @@ function injectLocalDeviceStatus(stats) {
   for (const device of stats.devices) if (device.limits) device.limits = { ...device.limits, providers: device.limits.providers.map(row => ({
     ...row, stale: isProviderStale(row, device.limits, device, stats.staleAfterMs, now)
   })) };
-  if (mode !== 'local') snapshotLocalDevices.set(stats, { localDevice: lastCollectedDevice });
+  if (mode !== 'local') {
+    snapshotLocalDevices.set(stats, { localDevice: lastCollectedDevice });
+    delete stats.localFixedRangeRevision;
+    if (settings?.hubMode === 'client' && ownsUsageRuntime() && lastCollectedDevice?.nativeRanges
+      && stats.devices.some(device => device.deviceId === lastCollectedDevice.deviceId
+        && device.updatedAt === lastCollectedDevice.updatedAt)) {
+      stats.localFixedRangeRevision = JSON.stringify([lastCollectedDevice.deviceId, lastCollectedDevice.updatedAt]);
+    }
+  }
   return stats;
 }
 
@@ -5021,7 +5046,7 @@ function startLocalCollector() {
   sendStatus(false, { reason: 'collecting' });
   // One config object for both, so the fingerprint the seed validates against
   // cannot drift from the one the collector will compute.
-  const usageOptions = electronUsageConfig('collector', { nativeRangesEnabled: true });
+  const usageOptions = electronUsageConfig('collector');
   primeLocalStatsFromAnchor(usageOptions, widgetProducerOwner);
   deviceRuntimeHandle = createDeviceRuntime({
     envelope: electronDeviceEnvelope(),
@@ -5305,6 +5330,8 @@ function settingsForRenderer() {
     windowsBackdropFallback: windowsBackdropFallback(mainWindow),
     syncContentStatus: getSyncContentRuntime().status(),
     locale,
+    calendarLocale: collectorCalendarLocale(),
+    syncWeekStartsOn: SYNC_WEEK_STARTS_ON,
     fontContext: windowsFontContext(locale),
     deviceIconScope: currentHubIdentity() || 'local',
     ...redactedCredentials,
@@ -6566,7 +6593,7 @@ function usageCollectorNameForMode() {
 }
 
 function usageConfigForMode() {
-  return electronUsageConfig(usageCollectorNameForMode(), { nativeRangesEnabled: mode === 'local' });
+  return electronUsageConfig(usageCollectorNameForMode(), { synced: mode !== 'local' });
 }
 
 function applyUsageRuntimeForMode() {
@@ -7701,6 +7728,52 @@ function createDashboardWindow() {
   win.loadFile(path.join(__dirname, 'renderer', 'dashboard.html'))
     .catch((error) => discardFailedDashboardWindow(win, `load failed: ${error.message}`));
   return win;
+}
+
+async function getSyncedFixedPeriod(snapshotId, source, selection) {
+  const stats = rendererSnapshots.get(snapshotId, source);
+  const revisions = stats?.fixedRangeRevisions || {};
+  if (mode !== 'sync' || source !== hubModeGeneration || !fixedPeriodRangesApi.isDerived(selection)
+    || (!stats?.localFixedRangeRevision && !Object.keys(revisions).length)) return null;
+  const config = historyResolverOptions();
+  const localDevice = stats.localFixedRangeRevision ? snapshotLocalDevices.get(stats)?.localDevice : null;
+  const options = { weekStartsOn: SYNC_WEEK_STARTS_ON, now: Date.now() };
+  const headers = config.secret ? { authorization: `Bearer ${config.secret}` } : {};
+  const signal = AbortSignal.timeout(15_000);
+  const read = (deviceId, name, window, revision) => {
+    if (config.hubMode === 'icloud') return config.icloudSync?.readFixedRange(deviceId, name, window, revision);
+    if (config.hubMode === 'host') return config.embeddedHub?.hub.readFixedRange(deviceId, name, window, revision);
+    if (!config.hubUrl) return null;
+    return fetchFixedRange(
+      (url, init) => fetch(url, { ...init, signal, redirect: 'error' }),
+      config.hubUrl, deviceId, name, window, headers, revision
+    );
+  };
+  const history = async (devices) => {
+    if (!config.historyEnabled) return null;
+    try {
+      const resolved = await resolveCompleteHistoryWithDevices(config);
+      return historyFallbackForDevices(selection, devices, resolved.deviceHistories, options);
+    } catch (_) { return null; }
+  };
+  const fixed = await resolveSyncedFixedPeriod(selection, stats.devices || [], revisions, { ...options, localDevice, read, history });
+  if (!fixed || source !== hubModeGeneration) return null;
+  const current = config.hubMode === 'icloud'
+    ? config.icloudSync?.getStats() : currentHubStatsCache();
+  if (current && Object.entries(revisions).some(([id, revision]) => (
+    id !== localDevice?.deviceId && current.fixedRangeRevisions?.[id] !== revision
+  ))) return null;
+  const input = {
+    periods: { [selection]: fixed.period },
+    devices: fixed.devices.map(({ period, ...device }) => ({ ...device, periods: { [selection]: period } }))
+  };
+  const visible = settings?.sessionTitlesEnabled === false ? withoutSessionTitleStats(input) : input;
+  const projected = projectModelAliasStats(visible, settings?.modelAliases, { grouping: settings?.modelAliasGrouping });
+  return {
+    ...fixed,
+    period: projected.periods[selection],
+    devices: projected.devices.map(({ periods, ...device }) => ({ ...device, period: periods[selection] }))
+  };
 }
 
 async function getDashboardHistory(options = {}) {
@@ -9017,6 +9090,7 @@ app.whenReady().then(() => {
     return true;
   });
   ipcMain.handle('dashboard:getHistory', (_event, options) => getDashboardHistory(options));
+  ipcMain.handle('stats:fixedPeriod', (_event, ...args) => getSyncedFixedPeriod(...args));
   ipcMain.on('dashboard:ready', (event) => {
     const win = BrowserWindow.fromWebContents(event.sender);
     if (!win || win !== dashboardWindow || win.isDestroyed()) return;

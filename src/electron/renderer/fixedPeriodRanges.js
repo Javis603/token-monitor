@@ -107,7 +107,8 @@
     }
     if (selection === 'week') {
       const weekday = new Date(`${todayKey}T00:00:00Z`).getUTCDay();
-      const offset = (weekday - weekStartsOn(options.locale) + 7) % 7;
+      const firstDay = Number.isInteger(options.weekStartsOn) ? options.weekStartsOn : weekStartsOn(options.locale);
+      const offset = (weekday - firstDay + 7) % 7;
       return { start: dayKeyAddDays(todayKey, -offset), end: todayKey };
     }
     if (selection === 'last7') return { start: dayKeyAddDays(todayKey, -6), end: todayKey };
@@ -745,6 +746,7 @@
     dayKeyAddDays,
     derivePeriod,
     deviceInventorySignature,
+    deviceDayState,
     devicesForReadySnapshot,
     displayLabel,
     fixedPeriodDeviceSnapshots,

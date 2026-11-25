@@ -144,6 +144,7 @@ test('refresh renders native Devices before the pending History read completes',
     sessionStatsForDisplay: value => value,
     applyCodexActiveAccountFromStats() {},
     currentNativeRangeSnapshot: () => state.stats === stats,
+    syncedFixedPeriodKey: () => '',
     fixedPeriodRangesApi: { isDerived: () => true },
     statsRenderScheduler: { request() { rendered++; } },
     warmFixedPeriodHistory: () => history,
@@ -159,4 +160,35 @@ test('refresh renders native Devices before the pending History read completes',
   resolveHistory();
   await refresh;
   assert.equal(rendered, 2);
+});
+
+test('fixed Week History and Trends use the synchronized calendar even with a different viewer locale', () => {
+  const source = read('app.js');
+  const context = {
+    fixedPeriodRangesApi: require('../../src/electron/renderer/fixedPeriodRanges'),
+    fixedPeriodTodayKey: () => '2026-11-25',
+    currentCalendarLocale: () => 'en-US',
+    syncedFixedPeriodKey: () => 'selected',
+    state: {
+      mode: 'sync', period: 'week', settings: { syncWeekStartsOn: 1 },
+      fixedPeriodHistory: { fixedPeriods: { historyTransportAvailable: true } },
+      syncedFixedPeriod: { key: 'selected', snapshot: { status: 'ready', period: { totalTokens: 25 } } }
+    },
+    fixedPeriodSources: () => [{
+      deviceId: 'remote', historyAvailable: true,
+      periodWindows: { today: { key: '2026-11-25', endsAt: '2099-11-26T00:00:00Z' }, timeZone: 'UTC' },
+      history: { daily: [
+        { date: '2026-11-22', tokens: 11 },
+        { date: '2026-11-23', tokens: 25 }
+      ] }
+    }]
+  };
+  const extract = (name) => source.match(new RegExp('function ' + name + '\\(\\) \\{[\\s\\S]*?\\n\\}'))[0];
+  vm.runInNewContext(extract('buildFixedPeriodSourcesSnapshot') + '\n' + extract('buildFixedPeriodSnapshot'), context);
+  assert.equal(context.buildFixedPeriodSourcesSnapshot().period.totalTokens, 25);
+  const trends = context.buildFixedPeriodSnapshot().summary;
+  assert.equal(trends.peakDayTokens, 25);
+  assert.equal(trends.activeDays, 1);
+  context.state.mode = 'local';
+  assert.equal(context.buildFixedPeriodSourcesSnapshot().period.totalTokens, 36);
 });

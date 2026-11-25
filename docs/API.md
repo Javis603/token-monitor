@@ -371,6 +371,14 @@ The patch uses RFC 6902 `add`, `remove` and `replace` with RFC 6901 paths agains
 
 Baselines are private and bounded in memory, not durable history. Restart, eviction, a legacy/full writer or device deletion invalidates the previous token; title-policy changes discard the affected baseline, including retained text. A missing or stale token returns `409 {"error":"upload_baseline_mismatch"}` without applying anything. Send one current complete ingest to recover. Do not blindly replay a patch after an ambiguous/lost acknowledgement. Clients choose a full ingest whenever the patch envelope would be no smaller, and retain the existing reduced full-ingest retry after `413`. A downgraded Hub returning `404`/`405` also recovers through full ingest.
 
+## `GET /api/fixed-ranges` and `PUT /api/fixed-ranges`
+
+The authenticated Node Hub and Worker acknowledge `X-Token-Monitor-Fixed-Ranges: 1` with `fixedRanges: 1` in a successful ingest response. Fixed ranges are optional. Producers keep using ordinary ingest regardless of range support. Authenticated stats include `fixedRangeRevisions`, an object keyed by device ID, for published ranges matching the device's accepted usage snapshot.
+
+Use `?deviceId=<id>` for all requests. A PUT includes `observedAt` matching the device's accepted `updatedAt`, an opaque `revision`, a zero-based `page` and its `rows`. Page zero also includes `ranges` and `totalPages`. Each range entry includes inclusive calendar dates `start` and `end`, exact `totals`, counts `sessions` and `projects`, and the range's `firstPage` and `pageCount`. Rows are tuples of range name, `sessions` or `projects`, accounting key and normalized detail. Each page has a 512 KiB row budget, with at most 32 pages in a publication. A publication without detail rows sends its index in page zero with empty rows.
+
+The Hub makes an immutable revision readable after it accepts the complete publication. An identical page replay succeeds. A conflicting replay or a replay of a superseded revision returns 409. Each usage observation accepts at most 32 replacement revisions. Sync producers use Monday as the first day of Week in their own time zone. GET without `page` returns the index. Request the desired slice with `page=<number>&revision=<revision>` and verify the selected dates. A missing publication or page returns 404. A changed revision or mismatched observation returns 409. Titles follow the same opt-in and consent generation as ordinary ingest. Conversation content stays on the originating device.
+
 ## `GET /api/stats`
 
 Returns aggregate stats for the widget.

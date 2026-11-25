@@ -1,4 +1,6 @@
 import uploadDelta from './shared/uploadDelta.js';
+import fixedRangeUploads from './shared/fixedRangeUploads.js';
+import { FIXED_RANGE_HEADER, FIXED_RANGE_VERSION } from './shared/fixedRangeSync.js';
 import { publicLimits } from './shared/limits/core.js';
 import subscriptionDisplay from './shared/subscriptionDisplay.js';
 import currency from './shared/currency.js';
@@ -17,7 +19,7 @@ import hubProtocol from './shared/hubProtocol.js';
 const CORS_HEADERS = {
   'access-control-allow-origin': '*',
   'access-control-allow-methods': 'GET,POST,PUT,DELETE,OPTIONS',
-  'access-control-allow-headers': 'authorization,content-type,x-token-monitor-secret,x-token-monitor-response,x-token-monitor-stream,x-token-monitor-upload'
+  'access-control-allow-headers': 'authorization,content-type,x-token-monitor-secret,x-token-monitor-response,x-token-monitor-stream,x-token-monitor-upload,x-token-monitor-fixed-ranges'
 };
 
 // SQLite Durable Object storage allows 8 MB for the key and its value. Keep
@@ -119,10 +121,15 @@ export default {
   }
 };
 
+function fixedRangePageKey(deviceId, revision, page) {
+  return `fixedRangePage:${encodeURIComponent(deviceId)}:${revision}:${page}`;
+}
+
 export class HubDO {
   constructor(state, env) {
     this.state = state;
     this.uploadBaselines = uploadDelta.createUploadBaselines();
+    this.fixedRangeUploads = fixedRangeUploads.createFixedRangeUploads();
     this.env = env;
     this.sseClients = new Set();
     this.heartbeatTimer = null;
@@ -139,6 +146,71 @@ export class HubDO {
     this.titlePrivacyServerEnabled = null;
     this.titlePrivacyCleanup = null;
     this.ready = this.scheduleTitlePrivacy();
+  }
+
+  async clearFixedRanges(storage, deviceId, index) {
+    if (!index) return;
+    for (let page = 0; page < index.pageCount; page++) {
+      await storage.delete(fixedRangePageKey(deviceId, index.revision, page));
+    }
+  }
+
+  async handleFixedRanges(request, url) {
+    const deviceId = url.searchParams.get('deviceId') || '';
+    if (!deviceId) return jsonResponse(400, { error: 'deviceId_required' });
+    const key = `fixedRanges:${deviceId}`;
+    if (request.method === 'PUT') {
+      let payload;
+      try { payload = await readIngestJson(request); }
+      catch (error) { return jsonResponse(error.status === 413 ? 413 : 400, { error: 'bad_fixed_range_page' }); }
+      const result = await this.mutate(() => this.withStorageTransaction(async (storage) => {
+        const device = await storage.get(`dev:${deviceId}`);
+        const policy = await storage.get(`${TITLE_POLICY_PREFIX}${deviceId}`);
+        const preserveTitles = syncContent.acceptsSessionTitles(this.syncSessionTitles, policy, payload?.sessionTitleSyncGeneration);
+        const previous = await storage.get(key);
+        let published = previous;
+        if (previous && previous.revision === payload?.revision && Number.isInteger(payload.page) && payload.page >= 0) {
+          const rows = previous.pageCount === 0 && payload.page === 0 ? []
+            : payload.page < previous.pageCount
+              ? await storage.get(fixedRangePageKey(deviceId, previous.revision, payload.page)) : undefined;
+          published = { ...previous, rows };
+        }
+        const { status, complete, snapshot } = this.fixedRangeUploads.accept(deviceId, payload, device, preserveTitles, published);
+        if (status !== 200) return jsonResponse(status, {
+          error: status === 409 ? 'fixed_range_revision_mismatch' : 'bad_fixed_range_page'
+        });
+        if (snapshot) {
+          const { pages, ...index } = snapshot;
+          for (const [page, rows] of pages.entries()) {
+            await storage.put(fixedRangePageKey(deviceId, index.revision, page), rows);
+          }
+          await storage.put(key, { ...index, pageCount: pages.length });
+          await storage.put(`fixedRangeRevision:${deviceId}`, { observedAt: index.observedAt, revision: index.revision });
+          if (previous?.revision !== index.revision) await this.clearFixedRanges(storage, deviceId, previous);
+        }
+        return jsonResponse(200, { complete });
+      }));
+      if (result.ok && (await result.clone().json()).complete) this.queueBroadcast();
+      return result;
+    }
+    if (request.method !== 'GET') return jsonResponse(405, { error: 'method_not_allowed' });
+    const [index, device] = await Promise.all([
+      this.state.storage.get(key), this.state.storage.get(`dev:${deviceId}`)
+    ]);
+    if (!index?.revision || !fixedRangeUploads.hasCurrentFixedRangeObservation(device) || index.observedAt !== device.updatedAt) {
+      return jsonResponse(404, { error: 'not_found' });
+    }
+    if (!url.searchParams.has('page')) {
+      const { retiredRevisions: _retired, ...metadata } = index;
+      return jsonResponse(200, metadata, {}, request);
+    }
+    if (url.searchParams.get('revision') !== index.revision) {
+      return jsonResponse(409, { error: 'fixed_range_revision_mismatch' });
+    }
+    const page = url.searchParams.get('page');
+    const rows = /^(0|[1-9]\d*)$/.test(page) && Number(page) < index.pageCount
+      ? await this.state.storage.get(fixedRangePageKey(deviceId, index.revision, Number(page))) : null;
+    return rows ? jsonResponse(200, { rows }, {}, request) : jsonResponse(404, { error: 'not_found' });
   }
 
   // Storage awaits allow request interleaving. Every record/policy/config write
@@ -177,6 +249,16 @@ export class HubDO {
       for (const [key, policy] of policies) {
         if (key.startsWith(TITLE_POLICY_PREFIX) && !enabled && policy?.enabled === true) {
           await storage.put(key, syncContent.nextTitlePolicy(policy, false));
+        }
+      }
+      const rangeIndexes = policies.size ? await storage.list({ prefix: 'fixedRanges:' }) : [];
+      for (const [key, index] of rangeIndexes) {
+        const id = key.slice('fixedRanges:'.length);
+        const policy = policies.get(`${TITLE_POLICY_PREFIX}${id}`);
+        if (index?.titleGeneration && !syncContent.acceptsSessionTitles(enabled, policy, index.titleGeneration)) {
+          await this.clearFixedRanges(storage, id, index);
+          await storage.put(key, fixedRangeUploads.retireFixedRangeSnapshot(index));
+          await storage.delete(`fixedRangeRevision:${id}`);
         }
       }
       const devices = await storage.list({ prefix: 'dev:' });
@@ -241,7 +323,15 @@ export class HubDO {
       if (!enabled) {
         const record = await storage.get(`dev:${deviceId}`);
         if (record) await storage.put(`dev:${deviceId}`, stripSessionTextFromDeviceRecord(record));
+        const rangeKey = `fixedRanges:${deviceId}`;
+        const rangeIndex = await storage.get(rangeKey);
+        if (rangeIndex?.titleGeneration) {
+          await this.clearFixedRanges(storage, deviceId, rangeIndex);
+          await storage.put(rangeKey, fixedRangeUploads.retireFixedRangeSnapshot(rangeIndex));
+          await storage.delete(`fixedRangeRevision:${deviceId}`);
+        }
       }
+      this.fixedRangeUploads.discard(deviceId);
       changed = true;
       return next;
     }));
@@ -276,8 +366,8 @@ export class HubDO {
     return Array.from(entries.values());
   }
 
-  async getStats() {
-    const devices = await this.listDevices();
+  async getStats(devices) {
+    devices ??= await this.listDevices();
     const stats = aggregateDevices(devices, this.staleAfterMs);
     stats.staleAfterMs = this.staleAfterMs;
     const history = aggregateHistory(devices);
@@ -298,8 +388,14 @@ export class HubDO {
   // path. Adding it here means the public route neither reads it nor has to
   // remember to drop it back out — every caller below is behind the secret.
   async statsWithSubscriptionVersion() {
-    const stats = await this.getStats();
+    const devices = await this.listDevices();
+    const stats = await this.getStats(devices);
     stats.subscriptionsUpdatedAt = (await this.getSubscriptions())?.updatedAt || '';
+    const rangeRevisions = await this.state.storage.list({ prefix: 'fixedRangeRevision:' });
+    stats.fixedRangeRevisions = Object.fromEntries(devices.filter(fixedRangeUploads.hasCurrentFixedRangeObservation).flatMap(({ deviceId, updatedAt }) => {
+      const stamp = rangeRevisions.get(`fixedRangeRevision:${deviceId}`);
+      return stamp?.observedAt === updatedAt ? [[deviceId, stamp.revision]] : [];
+    }));
     stats.syncSettingsRevisions = Object.fromEntries(await Promise.all(syncContent.SHARED_SYNC_KINDS.map(async (kind) => [kind, (await this.getSyncSettings(kind)).revision])));
     return stats;
   }
@@ -500,6 +596,8 @@ export class HubDO {
     }
     if (!(await isAuthorized(request, this.secret))) return jsonResponse(401, { error: 'unauthorized' });
 
+    if (url.pathname === '/api/fixed-ranges') return this.handleFixedRanges(request, url);
+
     if ((request.method === 'GET' || request.method === 'HEAD') && url.pathname === '/api/sync/content') {
       return jsonResponse(200, syncContent.syncContentCapability(this.syncSessionTitles));
     }
@@ -535,7 +633,7 @@ export class HubDO {
 
     if ((request.method === 'GET' || request.method === 'HEAD') && url.pathname === '/api/devices') {
       const devices = await this.listDevices();
-      return jsonResponse(200, { devices }, {}, request);
+      return jsonResponse(200, { devices: devices.map(fixedRangeUploads.withoutFixedRangeObservation) }, {}, request);
     }
 
     if ((request.method === 'GET' || request.method === 'HEAD') && url.pathname === '/api/history') {
@@ -604,7 +702,11 @@ export class HubDO {
           if (storageBytes > MAX_DEVICE_STORAGE_BYTES) {
             throw Object.assign(new Error('payload_too_large'), { status: 413, code: 'payload_too_large' });
           }
+          // The private clock uses the storage headroom, outside the device
+          // budget exposed to existing producers.
+          fixedRangeUploads.rememberFixedRangeObservation(next, existing);
           await this.state.storage.put(storageKey, next);
+          if (existing?.updatedAt !== next.updatedAt) this.fixedRangeUploads.discard(deviceId);
           this.uploadBaselines.forget(deviceId);
           if (delta || request.headers.get(uploadDelta.UPLOAD_HEADER) === uploadDelta.UPLOAD_VERSION) {
             upload = this.uploadBaselines.commit(deviceId, stripSessionTextFromDeviceRecord(incoming, { preserveSessionTitles }));
@@ -616,7 +718,11 @@ export class HubDO {
         throw error;
       }
       this.queueBroadcast();
-      const response = { ok: true, deviceId: record.deviceId, ...(upload ? { upload } : {}) };
+      const response = {
+        ok: true, deviceId: record.deviceId,
+        ...(request.headers.get(FIXED_RANGE_HEADER) === FIXED_RANGE_VERSION ? { fixedRanges: 1 } : {}),
+        ...(upload ? { upload } : {})
+      };
       return jsonResponse(
         200,
         hubProtocol.wantsMinimalResponse(request)
@@ -687,6 +793,11 @@ export class HubDO {
         const key = `${TITLE_POLICY_PREFIX}${deviceId}`;
         await storage.put(key, syncContent.nextTitlePolicy(await storage.get(key), false));
         await storage.delete(`dev:${deviceId}`);
+        const rangeKey = `fixedRanges:${deviceId}`;
+        await this.clearFixedRanges(storage, deviceId, await storage.get(rangeKey));
+        await storage.delete(rangeKey);
+        await storage.delete(`fixedRangeRevision:${deviceId}`);
+        this.fixedRangeUploads.discard(deviceId);
       }));
       this.broadcast('delete').catch(() => {});
       return jsonResponse(200, { ok: true, deviceId });
