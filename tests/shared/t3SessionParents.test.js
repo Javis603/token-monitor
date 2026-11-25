@@ -1045,3 +1045,26 @@ test('later store query failures discard partial facts without suppressing compl
   errorCode = 6;
   assert.deepEqual(readT3SessionRelationResult(['child-native'], { ...deps, t3DbPaths: [copied, s.file] }), { facts: new Map(), status: 'retryable' }, 'later success cannot mask LOCKED');
 });
+
+test('built-in antigravity and kiro drivers group within T3 threads and across delegated tasks', t => {
+  const s = store(t);
+  s.thread('parent');
+  s.thread('child-kiro', 'parent');
+  s.provider('parent-agy', 'parent', '32964522-c967-4d55-9c35-eca7059ff0dd', 'antigravity');
+  s.provider('child-kiro-p', 'child-kiro', 'sess_50d40b40-c470-4fd3-8f5d-1a0c1f57cfce', 'kiro');
+  s.delegation('child-kiro-p', 'parent-agy', 'parent', 'k');
+  const periods = {
+    today: normalizePeriod({
+      sessions: {
+        a: { client: 'antigravity', sessionId: '32964522-c967-4d55-9c35-eca7059ff0dd', totalTokens: 100, costUsd: 1 },
+        k: { client: 'kiro', sessionId: 'sess_50d40b40-c470-4fd3-8f5d-1a0c1f57cfce', totalTokens: 50, costUsd: 0.5 }
+      }
+    })
+  };
+  applyT3SessionParents(periods, s.home, { env: {} });
+  const ss = periods.today.sessions;
+  assert.equal(ss['antigravity:32964522-c967-4d55-9c35-eca7059ff0dd'].t3ThreadId, 'parent');
+  assert.equal(ss['kiro:sess_50d40b40-c470-4fd3-8f5d-1a0c1f57cfce'].t3ThreadId, 'child-kiro');
+  assert.equal(ss['kiro:sess_50d40b40-c470-4fd3-8f5d-1a0c1f57cfce'].parentSessionId, '32964522-c967-4d55-9c35-eca7059ff0dd');
+  assert.equal(ss['kiro:sess_50d40b40-c470-4fd3-8f5d-1a0c1f57cfce'].parentClient, 'antigravity');
+});
