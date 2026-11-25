@@ -393,6 +393,7 @@ state.fixedPeriodHistoryRetryTimer = null;
 state.fixedPeriodHistoryPromise = null;
 state.fixedPeriodHistoryCoordinator = null;
 state.fixedPeriodSnapshot = null;
+state.syncedFixedPeriod = null;
 state.periodMenuOpen = false;
 state.sessionToolFilter = '';
 state.sessionPage = 0;
@@ -767,7 +768,7 @@ function currentLocale() {
 }
 
 function currentCalendarLocale() {
-  return i18n.resolveRegionalLocale([...preferredLanguages(), state.settings?.locale]);
+  return state.settings?.calendarLocale || i18n.resolveRegionalLocale([...preferredLanguages(), state.settings?.locale]);
 }
 
 function supportsLocalizedCompactTokenUnits(locale) {
@@ -3558,7 +3559,8 @@ function buildFixedPeriodSourcesSnapshot() {
     historyEnabled: state.settings?.historyEnabled !== false,
     historyAvailable: meta.historyTransportAvailable === true,
     todayKey: fixedPeriodTodayKey(),
-    locale: currentCalendarLocale()
+    locale: currentCalendarLocale(),
+    weekStartsOn: state.mode === 'sync' ? state.settings?.syncWeekStartsOn : undefined
   });
 }
 
@@ -5693,7 +5695,9 @@ function applySessionDetailResult(request, options) {
 
 // A native range's turns are its days; other periods keep their names.
 function sessionDetailPeriod() {
-  const range = currentNativeRangeSnapshot()?.range;
+  const range = currentNativeRangeSnapshot()?.range
+    || (state.fixedPeriodSnapshot?.selection === state.period && state.fixedPeriodSnapshot.detailsAvailable && state.fixedPeriodSnapshot.devices
+      .find(device => device.deviceId === state.settings?.deviceId)?.range);
   return range ? `range:${range.start}:${range.end}` : state.period;
 }
 
@@ -5704,7 +5708,7 @@ async function openSessionDetail({ client, sessionId, sessionCost, title, source
   const request = { kind: 'session', client, sessionId, sessionCost,
     title: state.settings?.sessionTitlesEnabled === false && !fixedGroupHeading ? '' : title,
     sourceDevice,
-    remote: Boolean(sourceDevice && sessionRowsApi.remoteSessionDevice(sourceDevice, state.settings?.deviceId)),
+    remote: sourceDevice?.ambiguous === true || Boolean(sourceDevice?.deviceId && sourceDevice.deviceId !== state.settings?.deviceId),
     period: state.period, detailPeriod: sessionDetailPeriod(), detail: null, returnTo, titleFollowsSession: titleFollowsSession === true };
   state.openSession = request;
   if (request.remote) {
@@ -6660,8 +6664,70 @@ function canRenderNativeDevices() {
   return state.breakdown === 'device' && Boolean(currentNativeRangeSnapshot());
 }
 
+function syncedFixedPeriodKey() {
+  const stats = state.stats;
+  const revisions = Object.entries(stats?.fixedRangeRevisions || {}).sort();
+  if (state.settings?.hubMode === 'local' || (!revisions.length && !stats?.localFixedRangeRevision) || !stats?.snapshot
+    || !fixedPeriodRangesApi.isDerived(state.period)) return '';
+  // A fallback device can update live Today without a range or History revision.
+  const deviceObservations = (stats.devices || []).map(device => [
+    device.deviceId, device.updatedAt, fixedPeriodRangesApi.deviceDayState(device)?.currentKey || ''
+  ]);
+  return JSON.stringify([
+    stats.snapshot.source, state.settings?.hubMode, state.period, currentCalendarLocale(), fixedPeriodTodayKey(), deviceObservations, revisions,
+    stats.localFixedRangeRevision, stats.deviceHistoryRevision, state.settings?.historyEnabled, state.settings?.sessionTitlesEnabled,
+    state.settings?.modelAliases, state.settings?.modelAliasGrouping
+  ]);
+}
+
+function requestSyncedFixedPeriod() {
+  const key = syncedFixedPeriodKey();
+  if (!key || !window.tokenMonitor.getSyncedFixedPeriod) return;
+  const previous = state.syncedFixedPeriod;
+  if (previous?.key === key && (previous.pending || Date.now() < previous.retryAt)) return;
+  clearTimeout(previous?.retryTimer);
+  const { id, source } = state.stats.snapshot;
+  const sameKey = previous?.key === key;
+  const request = {
+    key, pending: true, snapshot: sameKey ? previous.snapshot : null,
+    retries: sameKey ? previous.retries : 0
+  };
+  state.syncedFixedPeriod = request;
+  const finish = (snapshot) => {
+    if (state.syncedFixedPeriod !== request) return;
+    if (key !== syncedFixedPeriodKey()) {
+      state.syncedFixedPeriod = null;
+      return;
+    }
+    request.snapshot = snapshot;
+    request.pending = false;
+    // Pages can arrive late, and a transient transport failure can also leave
+    // the selected revision without details until the next read.
+    const canRetry = !snapshot?.detailsAvailable && request.retries < FIXED_PERIOD_HISTORY_MAX_RETRIES;
+    request.retryAt = canRetry ? Date.now() + FIXED_PERIOD_HISTORY_RETRY_MS : Infinity;
+    if (canRetry) {
+      request.retryTimer = setTimeout(() => {
+        if (state.syncedFixedPeriod !== request || key !== syncedFixedPeriodKey()) return;
+        request.retries += 1;
+        request.retryAt = 0;
+        requestSyncedFixedPeriod();
+      }, FIXED_PERIOD_HISTORY_RETRY_MS);
+    }
+    state.sessionRowsCache = null;
+    statsRenderScheduler.request();
+  };
+  void window.tokenMonitor.getSyncedFixedPeriod(id, source, state.period)
+    .then(finish, () => finish(null));
+}
+
 function buildFixedPeriodSnapshot() {
   if (!fixedPeriodRangesApi.isDerived(state.period)) return { status: 'native', period: null };
+  const synced = state.syncedFixedPeriod?.key === syncedFixedPeriodKey() ? state.syncedFixedPeriod.snapshot : null;
+  if (synced) {
+    const history = state.settings?.historyEnabled !== false && !state.fixedPeriodHistoryFailed
+      ? buildFixedPeriodSourcesSnapshot() : null;
+    return { ...synced, synchronized: true, daily: history?.daily, summary: history?.summary };
+  }
   const native = currentNativeRangeSnapshot();
   if (native) {
     // While History refreshes, the last snapshot for this range still holds
@@ -6684,7 +6750,7 @@ function buildFixedPeriodSnapshot() {
       state.fixedPeriodSnapshot,
       state.period
     );
-    return ready
+    return ready && !ready.synchronized
       ? ready
       : { status: 'loading', reason: 'loading', period: null };
   }
@@ -6814,6 +6880,11 @@ async function warmFixedPeriodHistory(options = {}) {
 }
 
 function fixedPeriodMessage(snapshot, breakdown = '') {
+  if (state.syncedFixedPeriod?.pending && state.syncedFixedPeriod.key === syncedFixedPeriodKey()
+    && (snapshot?.status !== 'ready' || breakdown === 'session' || breakdown === 'project')) {
+    return t(breakdown === 'session' ? 'periodRange.sessionLoading'
+      : breakdown === 'project' ? 'periodRange.projectLoading' : 'periodRange.loading');
+  }
   if (state.stats?.nativeRangesPending && (breakdown === 'session' || breakdown === 'project')) {
     return t(breakdown === 'session' ? 'periodRange.sessionLoading' : 'periodRange.projectLoading');
   }
@@ -8633,7 +8704,7 @@ function periodContentAvailability() {
     detailUnavailable: derived && !fixedPeriodRangesApi.supportsBreakdown(state.period, state.breakdown, {
       deviceRowsAvailable: Array.isArray(state.fixedPeriodHistory?.deviceHistories)
         || (state.breakdown === 'device' && fixedPeriodDevices().length > 0),
-      native: state.fixedPeriodSnapshot?.native === true
+      native: state.fixedPeriodSnapshot?.native === true || state.fixedPeriodSnapshot?.detailsAvailable === true
     })
   };
 }
@@ -8697,6 +8768,7 @@ function renderAppContent({ fromSearch = false } = {}) {
       // visible repaint, so switching to a fixed range cannot remain on loading.
       void loadFixedPeriodHistory();
     }
+    requestSyncedFixedPeriod();
     state.fixedPeriodSnapshot = buildFixedPeriodSnapshot();
     showFixedPeriod(state.fixedPeriodSnapshot);
   } else {
@@ -8979,11 +9051,13 @@ async function refreshStats(options = {}) {
       state.homeHistoryRetrySignature = '';
       state.homeHistoryRetries = 0;
       state.homeHistorySignature = '';
+      clearTimeout(state.syncedFixedPeriod?.retryTimer);
+      state.syncedFixedPeriod = null;
     }
     applyCodexActiveAccountFromStats();
     const forceFixedPeriodHistory = options.forceHistory === true;
     if (fixedPeriodRangesApi.isDerived(state.period)) {
-      if (canRenderNativeDevices()) statsRenderScheduler.request();
+      if (syncedFixedPeriodKey() || canRenderNativeDevices()) statsRenderScheduler.request();
       await warmFixedPeriodHistory({
         force: forceFixedPeriodHistory,
         retryFailed: forceFixedPeriodHistory,
@@ -17243,7 +17317,7 @@ window.tokenMonitor.onStatsPush?.((payload) => {
       // fetched; repaint once with the coherent snapshot instead of flashing an
       // intermediate loading layout.
       if (fixedPeriodHistoryNeedsWarmup()) {
-        if (canRenderNativeDevices()) statsRenderScheduler.request();
+        if (syncedFixedPeriodKey() || canRenderNativeDevices()) statsRenderScheduler.request();
         void warmFixedPeriodHistory({ renderOnComplete: true });
       } else {
         statsRenderScheduler.request();
