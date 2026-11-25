@@ -5,6 +5,9 @@
 // plus Today. Watch ticks keep the past part and add the fresh Today.
 
 const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const os = require('node:os');
+const path = require('node:path');
 const test = require('node:test');
 
 const collectorPath = require.resolve('../../src/shared/collector');
@@ -373,6 +376,49 @@ test('persisted past days are reused after a restart only when they still fit', 
   assert.equal((await watch(anchorWith(persisted), { weekStartsOn: 0 })).nativeRanges, undefined);
   const tampered = { ...persisted, starts: { ...persisted.starts, last7: dayKey(3) } };
   assert.equal((await watch(anchorWith(tampered))).nativeRanges, undefined);
+});
+
+test('the first anchored scan after restart keeps the daily session publication', async t => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'tm-daily-anchor-'));
+  const previousShared = process.env.TOKEN_MONITOR_SHARED_DIR;
+  process.env.TOKEN_MONITOR_SHARED_DIR = directory;
+  t.after(() => {
+    if (previousShared === undefined) delete process.env.TOKEN_MONITOR_SHARED_DIR;
+    else process.env.TOKEN_MONITOR_SHARED_DIR = previousShared;
+    fs.rmSync(directory, { recursive: true, force: true });
+  });
+  const calls = [];
+  const capture = [];
+  const options = baseOptions({
+    now: new Date(), homeDir: directory, dailySessionSyncEnabled: true,
+    watchEnabled: false, sessionActivityPolling: false, intervalMs: 600_000,
+    pricingCatalogTimers: { setTimeout: () => 1, clearTimeout() {} },
+    onUpdate: summary => capture.push(summary),
+    runTokscaleWindows: async ({ windows }) => {
+      calls.push('full');
+      return Object.fromEntries(windows.map(({ name }) => [name, report(name.startsWith('d') ? [['past', 10]] : [['today', 20]])]));
+    },
+    runTokscale: async ({ flags }) => {
+      calls.push(flags.join(' '));
+      return report([['today', 20]]);
+    }
+  });
+  async function collect() {
+    const runtime = freshCollector().startCollector(options);
+    try { await runtime.whenIdle(); }
+    finally { runtime.stop(); await runtime.whenIdle(); }
+    return capture.at(-1)?.dailySessionPeriods;
+  }
+  const initial = await collect();
+  assert.equal(Object.keys(initial || {}).length, 31);
+  const persisted = JSON.parse(fs.readFileSync(path.join(directory, 'collector-anchor.json'), 'utf8'));
+  assert.equal(Object.keys(persisted.dailySessionPastDays || {}).length, 30);
+  const restored = await collect();
+  assert.deepEqual(calls, ['full', '--today']);
+  assert.deepEqual(Object.keys(restored || {}), Object.keys(initial));
+  const yesterday = initial[persisted.nativePastRanges.starts.yesterday];
+  assert.equal(yesterday.sessions['claude:past'].totalTokens, 10);
+  assert.deepEqual(restored[persisted.nativePastRanges.starts.yesterday], JSON.parse(JSON.stringify(yesterday)));
 });
 
 test('a native range keeps History Trends and device rows for the same range', () => {

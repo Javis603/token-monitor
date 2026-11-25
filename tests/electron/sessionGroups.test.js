@@ -84,6 +84,13 @@ test('stats repaint refreshes the open group by identity and retires a removed g
   repaint(state, period(0), rowsForPeriod, close, () => false, request => { rendered = request; },
     () => pending);
   assert.equal(state.openSession.summary.value, 100, 'keep the open group while paging');
+  const previousGroup = state.openSession;
+  state.settings = { sessionTitlesEnabled: false };
+  repaint(state, period(0), rowsForPeriod, close, () => false, () => assert.fail('cached titles must close'),
+    () => pending);
+  assert.equal(state.openSession, null);
+  state.openSession = previousGroup;
+  state.settings = { sessionTitlesEnabled: true };
   pending = false;
   repaint(state, period(0), rowsForPeriod, close, () => false, () => assert.fail('removed group must close'),
     () => pending);

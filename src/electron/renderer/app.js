@@ -7841,7 +7841,7 @@ function scheduleSessionStatusRepaint(period, incompleteHint = '') {
   stopSessionStatusRepaint();
   const now = Date.now();
   const sessions = [
-    ...Object.entries(period?.sessions || {}).map(([key, session]) => window.TokenMonitorSessionLive.sessionWithActivity(period, key, session)),
+    ...Object.entries(displayedSessions(state.period, period) || {}).map(([key, session]) => window.TokenMonitorSessionLive.sessionWithActivity(period, key, session)),
     ...Object.values(state.stats?.nativeSessions?.[state.period] || {})
   ];
   const next = window.TokenMonitorSessionLive.nextSessionStatusChangeAt(sessions, now);
@@ -8913,7 +8913,7 @@ function renderAppContent({ fromSearch = false } = {}) {
     els.breakdown.classList.add('hidden');
     if (state.openSession.kind === 'session-group') {
       const latest = sessionRowsForPeriod(period).find((row) => row.key === state.openSession.summary.key);
-      if (!latest && !pagedSessionsPending()) {
+      if (!latest && (state.settings?.sessionTitlesEnabled === false || !pagedSessionsPending())) {
         closeSessionDetail();
         return;
       }

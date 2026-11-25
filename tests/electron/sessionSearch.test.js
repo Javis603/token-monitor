@@ -218,6 +218,7 @@ test('typing after a session-status repaint uses the refreshed projection cache'
   const stats = {};
   const staleRows = [{ key: 'session:1', running: true, context: { percentLeft: 50 } }];
   const freshRows = [{ key: 'session:1', running: false }];
+  const pagedSession = { running: true };
   const state = { stats, period: 'today', breakdown: 'session', sessionSearchQuery: '',
     sessionRowsCache: { stats, period: 'today', rows: staleRows } };
   let timer;
@@ -226,8 +227,13 @@ test('typing after a session-status repaint uses the refreshed projection cache'
     rendererDom,
     state, Date, els: { breakdown: { scrollTop: 120 } },
     window: { TokenMonitorSessionLive: {
-      nextSessionStatusChangeAt: () => timer ? 0 : Date.now() + 1000
+      sessionWithActivity: (_period, _key, session) => session,
+      nextSessionStatusChangeAt: (sessions) => {
+        assert.deepEqual(sessions, [pagedSession], 'the timer includes paged-only rows');
+        return timer ? 0 : Date.now() + 1000;
+      }
     } },
+    displayedSessions: () => ({ 'paged:1': pagedSession }),
     stopSessionStatusRepaint: () => {},
     visibleStatsSurface: () => 'main',
     setTimeout: callback => { timer = callback; return 1; },

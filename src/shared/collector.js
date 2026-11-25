@@ -1867,7 +1867,8 @@ async function collectUsageOnce(options) {
   if (options.dailySessionSyncEnabled === true && nativeRangeSnapshot) {
     const past = nativeDays || anchor?.dailySessionPastDays;
     const dayKeys = nativeRangePastDays(todayKey, true);
-    if (past && dayKeys.every(key => Object.hasOwn(past, key))
+    if (dayKeys.every(key => Number.isFinite(past?.[key]?.totalTokens)
+      && past[key].sessions && typeof past[key].sessions === 'object' && !Array.isArray(past[key].sessions))
       && String(allTimeSince) <= dayKeys[dayKeys.length - 1]) {
       const days = Object.fromEntries(dayKeys.map(key => [key, {
         ...past[key],
@@ -2670,6 +2671,9 @@ function startCollector(options) {
           catalogProjects: saved.catalogProjects,
           ...(typeof saved.cursorSnapshotKey === 'string' ? { cursorSnapshotKey: saved.cursorSnapshotKey } : {}),
           ...(saved.nativePastRanges && typeof saved.nativePastRanges === 'object' ? { nativePastRanges: saved.nativePastRanges } : {}),
+          ...(options.dailySessionSyncEnabled === true && saved.dailySessionPastDays
+            && typeof saved.dailySessionPastDays === 'object' && !Array.isArray(saved.dailySessionPastDays)
+            ? { dailySessionPastDays: saved.dailySessionPastDays } : {}),
           // Per-client partitions are deliberately rebuilt by the first
           // anchored all-client tick after restart. Persisted partitions
           // could be stale for clients that changed while the app was down.
@@ -2713,6 +2717,7 @@ function startCollector(options) {
         // Watch ticks after a restart reuse the anchor; without its past days
         // the native ranges would wait for the next full scan.
         ...(anchor.nativePastRanges ? { nativePastRanges: anchor.nativePastRanges } : {}),
+        ...(anchor.dailySessionPastDays ? { dailySessionPastDays: anchor.dailySessionPastDays } : {}),
         configFingerprint: configFingerprint(clients, allTimeSince, options.projectsEnabled, options.customScanPaths, tickPricingRevision, sourceOptions, tickSourceRevision),
         fullScanAt: new Date(lastFullScanAt).toISOString()
       }));
