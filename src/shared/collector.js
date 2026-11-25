@@ -1521,15 +1521,14 @@ async function collectUsageOnce(options) {
         for (const period of [today, month, allTime]) if (period.sessions?.[key]) targets.add(period.sessions[key]);
       }
       sessionIdentitiesComplete = applyT3SessionParents({ today, month, allTime }, options.homeDir || os.homedir(), localSessionMetadataDeps, targets);
-      if (sessionIdentitiesComplete) {
-        for (const key of Object.keys(today.sessions || {})) {
-          if (!localSessionMetadataDeps.metadataCache.get(key)?.t3ThreadRevoked) continue;
-          for (const period of [today, month, allTime, ...Object.values(todayPartitions)]) {
-            const retained = period.sessions?.[key];
-            if (!retained?.t3ThreadId) continue;
-            delete retained.t3ThreadId;
-            localSessionMetadataDeps.revokedT3ThreadKeys.add(key);
-          }
+      // A verified conflict can revoke a link even when another store is locked.
+      for (const key of Object.keys(today.sessions || {})) {
+        if (!localSessionMetadataDeps.metadataCache.get(key)?.t3ThreadRevoked) continue;
+        for (const period of [today, month, allTime, ...Object.values(todayPartitions)]) {
+          const retained = period.sessions?.[key];
+          if (!retained?.t3ThreadId) continue;
+          delete retained.t3ThreadId;
+          localSessionMetadataDeps.revokedT3ThreadKeys.add(key);
         }
       }
     } else {

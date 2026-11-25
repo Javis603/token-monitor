@@ -826,7 +826,7 @@ test('anchored SQLite metadata preserves the resolvable Month parent pair across
   assert.equal(groups.length, 1); assert.equal(groups[0].groupRows.length, 2);
 });
 
-test('a newly conflicting Antigravity ID loses its retained T3 grouping on a Today refresh', async t => {
+for (const sibling of ['corrupt', 'locked']) test(`a newly conflicting Antigravity ID loses its retained T3 grouping with a ${sibling} sibling store`, async t => {
   const { collectUsageOnce, localTodayKey } = require('../../src/shared/collector');
   const s = store(t);
   const key = 'antigravity:acp-conversation';
@@ -841,7 +841,14 @@ test('a newly conflicting Antigravity ID loses its retained T3 grouping on a Tod
   assert.equal(full.month.sessions[key].t3ThreadId, 'original');
   s.thread('competing');
   s.provider('competing-provider', 'competing', 'acp-conversation', 'antigravity');
-  fs.writeFileSync(path.join(path.dirname(s.file), 'state.sqlite'), 'corrupt unrelated legacy store');
+  const legacyPath = path.join(path.dirname(s.file), 'state.sqlite');
+  if (sibling === 'locked') {
+    const legacy = new sqlite.DatabaseSync(legacyPath);
+    legacy.exec('CREATE TABLE legacy (id TEXT); BEGIN EXCLUSIVE');
+    t.after(() => legacy.close());
+  } else {
+    fs.writeFileSync(legacyPath, 'corrupt unrelated legacy store');
+  }
   const next = await collectUsageOnce({ ...options, todayOnlyAnchor: { dateKey: localTodayKey(),
     today: full.today, month: full.month, allTime: full.allTime, todayPartitions: captured.todayPartitions,
     sessionIdentityVersion: captured.sessionIdentityVersion } });
