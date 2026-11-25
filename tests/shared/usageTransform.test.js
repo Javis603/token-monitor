@@ -270,7 +270,10 @@ test('the transform reads no setting outside the ones a worker is handed', () =>
 
   assert.deepEqual([...read].filter((key) => !USAGE_TRANSFORM_SETTING_KEYS.includes(key)), []);
   assert.deepEqual(
-    usageTransformSettings({ clients: 'codex', projectsEnabled: false, hubUrl: 'https://hub', secret: 'x' }),
-    { clients: 'codex', projectsEnabled: false }
+    usageTransformSettings({
+      clients: 'codex', projectsEnabled: false, claudeDesktopSplitEnabled: false,
+      hubUrl: 'https://hub', secret: 'x'
+    }),
+    { clients: 'codex', projectsEnabled: false, claudeDesktopSplitEnabled: false }
   );
 });

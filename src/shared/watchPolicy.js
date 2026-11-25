@@ -41,7 +41,9 @@ function descendantPrefix(root) {
 // checkpoints. Tokscale still traverses the complete tree on each Kiro scan;
 // pruning watcher paths alone cannot make frequent scans cheap. Keep this
 // source on interval/manual collection until the scanner bounds it too.
-const INTERVAL_ONLY_SOURCE_CHECK_IDS = new Set(['kiro-ide-globalstorage']);
+// `claude-desktop-app` is Claude Desktop's userData root: a presence check for
+// the derived row, whose transcripts are already watched through `claude`.
+const INTERVAL_ONLY_SOURCE_CHECK_IDS = new Set(['kiro-ide-globalstorage', 'claude-desktop-app']);
 
 // The watcher only ever wants paths, so it keeps its original shape rather than
 // learning about check ids it would immediately discard.
@@ -473,8 +475,11 @@ function watchPolicyEntries(clientsCsv, options = {}) {
   if (candidates.copilot && exporter) bound('copilot', [exporter.dir], (_parts, resolved) => !exporter.matches(resolved));
 
   // Claude's parser and source fingerprint also read same-stem agent metadata.
-  bound('claude', sourceRoots('claude', 'claude-projects', 'claude-transcripts'),
-    recursiveSourceFiles((name) => name.endsWith('.jsonl') || name.endsWith('.meta.json')));
+  // Tracking `claude-desktop` without `claude` moves those roots onto it.
+  for (const claudeClient of ['claude', 'claude-desktop']) {
+    bound(claudeClient, sourceRoots(claudeClient, 'claude-projects', 'claude-transcripts'),
+      recursiveSourceFiles((name) => name.endsWith('.jsonl') || name.endsWith('.meta.json')));
+  }
   // Codex compresses a finished rollout to `.jsonl.zst` beside it. chokidar
   // holds a native watcher per discovered file, so an archive that can never
   // grow again keeps a descriptor for the rest of the session — 5.8k of them on
@@ -537,9 +542,11 @@ function watchPolicyEntries(clientsCsv, options = {}) {
   // Keep dynamic discovery ancestors, pruning dependency/VCS trees. Link
   // handling differs between discovery, scan roots and individual JSONL files.
   // IndexedDB roots and external blob trees are separate.
-  const desktopRoots = rootsByClient.claude || [];
-  bound('claude', desktopRoots.filter(({ id, dir }) => id === 'claude-desktop-transcripts' && dirExists(dir)).map(({ dir }) => dir),
-    ignoreDesktopTranscriptPath);
+  for (const claudeClient of ['claude', 'claude-desktop']) {
+    const desktopRoots = rootsByClient[claudeClient] || [];
+    bound(claudeClient, desktopRoots.filter(({ id, dir }) => id === 'claude-desktop-transcripts' && dirExists(dir)).map(({ dir }) => dir),
+      ignoreDesktopTranscriptPath);
+  }
 
   bound('openclaw', candidates.openclaw || [], (parts) => {
     // The first level is the dynamic agent id. Keep it so newly created agents

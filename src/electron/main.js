@@ -773,6 +773,9 @@ function defaultSettings() {
     limitsHistoryOpenMode: 'hover',
     claudePrepaidBalanceEnabled: parseBoolean(process.env.TOKEN_MONITOR_CLAUDE_PREPAID_BALANCE, true),
     claudeCliFallbackEnabled: true,
+    // Carve Claude Desktop sessions out of the Claude Code usage row (default on).
+    // Off restores upstream behaviour: Desktop transcripts stay under `claude`.
+    claudeDesktopSplitEnabled: parseBoolean(process.env.TOKEN_MONITOR_CLAUDE_DESKTOP_SPLIT, true),
     antigravityLocalLimitsEnabled: true,
     // The key OpenCode stores for itself needs no setup, so tracking it is the
     // default. This turns that off for a machine that is signed in to an account
@@ -2095,7 +2098,11 @@ function readSettings() {
     // Evaluating unconditionally is also cheap: with the split client already
     // present nothing is inserted, and the marker is what makes that a decision
     // rather than an absence.
-    const seeded = seedSplitClients(merged.clients, { applied: merged.seededClientSplits });
+    merged.claudeDesktopSplitEnabled = parseBoolean(merged.claudeDesktopSplitEnabled, true);
+    const seeded = seedSplitClients(merged.clients, {
+      applied: merged.seededClientSplits,
+      claudeDesktopSplitEnabled: merged.claudeDesktopSplitEnabled !== false
+    });
     // The marker records that this install has been through the migration, not
     // that it gained a client. Recording it only on a successful insert would
     // leave an install that tracks the parent later still un-migrated, so the
@@ -2434,7 +2441,9 @@ function assertClientArchiveCaptureReady(nextClients, sessionUsageArchiveEnabled
 
 function updateArchivedClientUsage(previousClients, nextClients) {
   const removedClients = removedTrackedClients(previousClients, nextClients);
-  let archive = pruneArchivedClientUsage(settings.archivedClientUsage, nextClients);
+  let archive = pruneArchivedClientUsage(settings.archivedClientUsage, nextClients, {
+    claudeDesktopSplitEnabled: settings.claudeDesktopSplitEnabled !== false
+  });
   if (removedClients.length > 0) {
     // Before this run's first complete record, localDevice may be a first-scan
     // preview whose unscanned windows would archive as zero. Only the seed, or
@@ -8319,6 +8328,7 @@ app.whenReady().then(() => {
       limitsHistoryOpenMode: ['hover', 'click', 'off'].includes(patch.limitsHistoryOpenMode ?? settings.limitsHistoryOpenMode) ? (patch.limitsHistoryOpenMode ?? settings.limitsHistoryOpenMode) : 'hover',
       claudePrepaidBalanceEnabled: parseBoolean(patch.claudePrepaidBalanceEnabled ?? settings.claudePrepaidBalanceEnabled, true),
       claudeCliFallbackEnabled: parseBoolean(patch.claudeCliFallbackEnabled ?? settings.claudeCliFallbackEnabled, true),
+      claudeDesktopSplitEnabled: parseBoolean(patch.claudeDesktopSplitEnabled ?? settings.claudeDesktopSplitEnabled, true),
       antigravityLocalLimitsEnabled: parseBoolean(patch.antigravityLocalLimitsEnabled ?? settings.antigravityLocalLimitsEnabled, true),
       codexResetForecastEnabled: parseBoolean(patch.codexResetForecastEnabled ?? settings.codexResetForecastEnabled, false),
       workbuddyQuotaTotalEnabled: parseBoolean(patch.workbuddyQuotaTotalEnabled ?? settings.workbuddyQuotaTotalEnabled, false),

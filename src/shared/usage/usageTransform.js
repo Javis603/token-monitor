@@ -15,6 +15,7 @@ const { applyProjectRollups } = require('../usage');
 const USAGE_TRANSFORM_SETTING_KEYS = Object.freeze([
   'archivedClientUsage',
   'clients',
+  'claudeDesktopSplitEnabled',
   'projectsEnabled',
   'sessionUsageArchiveEnabled'
 ]);
@@ -91,21 +92,25 @@ function createUsageTransform(options = {}) {
   // argument because capturing into it is a separate decision, see below.
   function project(summary, archive, now) {
     const settings = getSettings() || {};
+    const archiveOptions = {
+      now,
+      claudeDesktopSplitEnabled: settings.claudeDesktopSplitEnabled !== false
+    };
     // Past-day sessions are capture input only; no record carries them.
     const { nativeRangeDays: _days, ...published } = summary;
     const withArchivedClients = applyArchivedClientUsage(published, settings.archivedClientUsage, {
       activeClients: settings.clients,
-      now,
+      ...archiveOptions,
       shareSessions: true
     });
     const visibleSummary = settings.sessionUsageArchiveEnabled === false
       ? withArchivedClients
       : applySessionDayArchive(applySessionUsageArchive(withArchivedClients, archive, {
-          now,
+          ...archiveOptions,
           canonical: true,
           canonicalSummary: true,
           mutate: true
-        }), archive, { now, canonical: true, activeClients: settings.clients });
+        }), archive, { ...archiveOptions, canonical: true, activeClients: settings.clients });
     delete visibleSummary.sessionUsageArchiveFullScan;
     return settings.projectsEnabled === false ? visibleSummary : applyProjectRollups(visibleSummary);
   }
