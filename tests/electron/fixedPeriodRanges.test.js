@@ -14,7 +14,7 @@ test('custom period tabs keep a unique supported order or fall back to the legac
     ['week', 'cycle', 'yesterday']);
   assert.deepEqual(ranges.normalizePeriodTabOrder(['allTime', 'month', 'week', 'today', 'last30', 'last7', 'cycle', 'yesterday']),
     ['allTime', 'month', 'week', 'today', 'last30', 'last7']);
-  assert.deepEqual(ranges.PERIOD_TAB_OPTIONS.map(ranges.displayLabel), ['Day', 'YDAY', 'Week', '7D', 'Month', '30D', 'Cycle', 'Total']);
+  assert.deepEqual(ranges.PERIOD_TAB_OPTIONS.map(ranges.displayLabel), ['DAY', 'YDAY', 'WEEK', '7D', 'MONTH', '30D', 'CYCLE', 'TOTAL']);
 });
 
 function day(date, tokens, client = 'claude', model = 'opus') {
@@ -222,7 +222,7 @@ test('billing cycle starts on the configured day and clamps to short months', ()
   assert.equal(ranges.normalizeCycleStartDay(Symbol('day')), 1);
   assert.equal(ranges.normalizeCycleStartDay([15]), 1);
   assert.equal(ranges.slotForSelection('cycle'), 'month');
-  assert.equal(ranges.displayLabel('cycle'), 'Cycle');
+  assert.equal(ranges.displayLabel('cycle'), 'CYCLE');
   assert.equal(ranges.isDerived('cycle'), true);
 });
 

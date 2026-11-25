@@ -8,14 +8,14 @@
   const MIN_PERIOD_TABS = 3;
   const MAX_PERIOD_TABS = 6;
   const LABELS = Object.freeze({
-    today: 'Day',
-    month: 'Month',
-    allTime: 'Total',
+    today: 'DAY',
+    month: 'MONTH',
+    allTime: 'TOTAL',
     yesterday: 'YDAY',
-    week: 'Week',
+    week: 'WEEK',
     last7: '7D',
     last30: '30D',
-    cycle: 'Cycle'
+    cycle: 'CYCLE'
   });
 
   function finiteNumber(value) {

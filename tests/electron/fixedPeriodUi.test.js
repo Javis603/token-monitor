@@ -41,7 +41,9 @@ test('fixed periods reuse the existing three-slot control', () => {
   const html = read('index.html');
   const slots = [...html.matchAll(/data-period-slot="([^"]+)"/g)].map((match) => match[1]);
   assert.deepEqual(slots, ['today', 'month', 'allTime']);
-  assert.match(html, /id="monthPeriodTab"[^>]*aria-haspopup="menu"[^>]*>Month<\/button>/);
+  assert.match(html, /data-period-slot="today"[^>]*>DAY<\/button>/);
+  assert.match(html, /id="monthPeriodTab"[^>]*aria-haspopup="menu"[^>]*>MONTH<\/button>/);
+  assert.match(html, /data-period-slot="allTime"[^>]*>TOTAL<\/button>/);
   assert.doesNotMatch(html, /id="monthPeriodTab"[^>]*>[^<]*(?:▼|▾|⌄)/);
 });
 
