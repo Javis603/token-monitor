@@ -821,8 +821,9 @@ test('flat catalog project provenance requires a full scan instead of guessing p
   assert.ok(collectorAnchorTrust({ ...anchor, catalogProjects: { today: { 'antigravity:session': 'project-a' }, month: {}, allTime: {} } }, options));
 });
 
-for (const scenario of ['cross-client', 'native', 'locked', 'partial', 'missing', 'empty', 'unsupported', 'corrupt']) test(`old persisted anchors retain identity migration through refresh and restart: ${scenario}`, async t => {
+for (const scenario of ['cross-client', 'antigravity', 'native', 'locked', 'partial', 'missing', 'empty', 'unsupported', 'corrupt']) test(`old persisted anchors retain identity migration through refresh and restart: ${scenario}`, async t => {
   const nativeChild = scenario === 'native';
+  const antigravityChild = scenario === 'antigravity';
   const retryable = ['locked', 'partial'].includes(scenario);
   const unavailable = ['missing', 'empty', 'unsupported', 'corrupt'].includes(scenario);
   const { DatabaseSync } = require('node:sqlite');
@@ -841,8 +842,9 @@ for (const scenario of ['cross-client', 'native', 'locked', 'partial', 'missing'
     fs.rmSync(home, { recursive: true, force: true });
   });
   const native = 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa';
-  const childNative = nativeChild ? 'cccccccc-cccc-cccc-cccc-cccccccccccc' : 'opaque-devin';
-  const childClient = nativeChild ? 'codex' : 'devin';
+  const childNative = nativeChild || antigravityChild ? 'cccccccc-cccc-cccc-cccc-cccccccccccc' : 'opaque-devin';
+  const childClient = nativeChild ? 'codex' : (antigravityChild ? 'antigravity' : 'devin');
+  const childDriver = nativeChild || antigravityChild ? childClient : 'acpRegistry';
   const childId = nativeChild ? 'historical-child' : childNative;
   const childKey = `${childClient}:${childId}`;
   const historyDir = path.join(home, '.codex', 'sessions');
@@ -861,8 +863,8 @@ for (const scenario of ['cross-client', 'native', 'locked', 'partial', 'missing'
     lineage: { parentThreadId: 'app-thread', relationshipToParent: 'subagent' },
     forkedFrom: { type: 'node', nodeId: 'task' }
   }));
-  db.prepare('INSERT INTO orchestration_v2_projection_provider_threads VALUES (?, ?, ?, ?)').run('devin-provider', 'devin-app', nativeChild ? 'codex' : 'acpRegistry',
-    JSON.stringify({ providerInstanceId: 'configured-devin', nativeThreadRef: { nativeId: childNative, driver: nativeChild ? 'codex' : 'acpRegistry', strength: 'strong' } }));
+  db.prepare('INSERT INTO orchestration_v2_projection_provider_threads VALUES (?, ?, ?, ?)').run('devin-provider', 'devin-app', childDriver,
+    JSON.stringify({ providerInstanceId: 'configured-devin', nativeThreadRef: { nativeId: childNative, driver: childDriver, strength: 'strong' } }));
   db.prepare('INSERT INTO orchestration_v2_projection_nodes VALUES (?, ?, ?, ?, ?)').run('root', 'app-thread', 'root', 'root_turn', 'provider');
   db.prepare('INSERT INTO orchestration_v2_projection_nodes VALUES (?, ?, ?, ?, ?)').run('task', 'app-thread', 'root', 'subagent', 'devin-provider');
   fs.writeFileSync(path.join(home, 'settings.json'), JSON.stringify({ providerInstances: { 'configured-devin': { driver: 'acpRegistry', config: { agentId: 'devin' } } } }));
@@ -888,7 +890,7 @@ for (const scenario of ['cross-client', 'native', 'locked', 'partial', 'missing'
   if (nativeChild) for (const period of ['month', 'allTime']) anchorPeriods[period].sessions[childKey].parentClient = 'codex';
   fs.writeFileSync(file, JSON.stringify({ dateKey: localTodayKey(), ...anchorPeriods,
     calendarKey: collectionCalendarKey(),
-    configFingerprint: configFingerprint('codex', '2024-01-01', false), fullScanAt: capturedAt, sessionIdentityVersion: 1 }));
+    configFingerprint: configFingerprint('codex', '2024-01-01', false), fullScanAt: capturedAt, sessionIdentityVersion: antigravityChild ? 2 : 1 }));
   const scans = [], resolved = [], updates = [];
   let relationReads = 0;
   let failLater = scenario === 'partial';
@@ -939,7 +941,7 @@ for (const scenario of ['cross-client', 'native', 'locked', 'partial', 'missing'
     assert.equal(updates[0].month.sessions[childKey].parentSessionId, undefined);
     assert.equal(updates[0].month.sessions[childKey].t3ThreadId, undefined, 'no partial T3 identity is applied');
     const failed = JSON.parse(fs.readFileSync(file, 'utf8'));
-    assert.equal(failed.sessionIdentityVersion, retryable ? 1 : 2);
+    assert.equal(failed.sessionIdentityVersion, retryable ? 1 : 3);
     assert.equal(failed.month.sessions[childKey].parentSessionId, undefined);
     assert.equal(failed.month.totalTokens, 40);
     assert.equal(failed.fullScanAt, capturedAt);
@@ -968,7 +970,7 @@ for (const scenario of ['cross-client', 'native', 'locked', 'partial', 'missing'
   assert.equal(relationReads, unavailable ? 0 : scenario === 'locked' ? 1 : scenario === 'partial' ? 3 : 2, 'one lookup per eligible tick');
   assert.equal(resolved.includes('historical'), false, 'migration only reads identity headers, never full historical metadata');
   const saved = JSON.parse(fs.readFileSync(file, 'utf8'));
-  assert.equal(saved.sessionIdentityVersion, 2);
+  assert.equal(saved.sessionIdentityVersion, 3);
   assert.equal(saved.fullScanAt, capturedAt, 'metadata migration does not pretend to be a new full scan');
   assert.equal(saved.today.totalTokens, 10, 'frozen delta baseline is retained');
   assert.equal(saved.month.totalTokens, 40);

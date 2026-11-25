@@ -85,6 +85,72 @@ test('ACP agent identity comes from its configured instance, with mixed-provider
   assert.equal(ss['devin:bird-notebook'].parentSessionId, 'like-paperback', 'visible main provider switch is a proven parent');
 });
 
+test('T3 Antigravity ACP displays its thread title and groups same-thread runs and delegated usage', t => {
+  const s = store(t);
+  const main = '1349661f-2212-4dae-b0b5-000000000001';
+  const second = '1349661f-2212-4dae-b0b5-000000000002';
+  s.thread('parent');
+  s.thread('child', 'parent');
+  s.thread('unverified');
+  s.provider('launch-provider', 'parent', main, 'antigravity');
+  s.provider('second-provider', 'parent', second, 'antigravity');
+  s.provider('child-provider', 'child', 'child-native', 'claudeAgent');
+  s.provider('weak-provider', 'unverified', 'weak-id', 'antigravity', 'weak');
+  s.provider('wrong-provider', 'unverified', 'wrong-id', 'codex');
+  s.delegation('child-provider', 'launch-provider', 'parent');
+  s.db.exec("UPDATE orchestration_v2_projection_threads SET title = 'T3 ACP title' WHERE thread_id = 'parent'");
+  s.db.exec("UPDATE orchestration_v2_projection_threads SET title = 'Wrong title' WHERE thread_id = 'unverified'");
+  const nativeDir = path.join(s.home, '.gemini', 'antigravity');
+  fs.mkdirSync(nativeDir, { recursive: true });
+  const catalog = new sqlite.DatabaseSync(path.join(nativeDir, 'conversation_summaries.db'));
+  try {
+    catalog.exec('CREATE TABLE conversation_summaries (conversation_id TEXT PRIMARY KEY, title TEXT, preview TEXT, workspace_uris TEXT)');
+    catalog.prepare('INSERT INTO conversation_summaries VALUES (?, ?, NULL, NULL)').run(main, 'Native Antigravity title');
+  } finally {
+    catalog.close();
+  }
+  const makeRow = (client, sessionId, value) => ({ client, sessionId, totalTokens: value, costUsd: value / 10 });
+  const periods = { today: normalizePeriod({ sessions: {
+    a: makeRow('antigravity', main, 10),
+    b: makeRow('antigravity', second, 20),
+    c: makeRow('claude', 'child-native', 30),
+    d: makeRow('antigravity', 'weak-id', 40),
+    e: makeRow('antigravity', 'wrong-id', 50)
+  } }) };
+  const deps = { env: {}, metadataCache: new Map() };
+  applySessionMetadata(periods, s.home, deps);
+  const sessions = periods.today.sessions;
+  const launch = sessions[`antigravity:${main}`];
+  assert.equal(launch.title, 'T3 ACP title');
+  assert.equal(launch.t3ThreadId, 'parent');
+  assert.equal(sessions[`antigravity:${second}`].t3ThreadId, 'parent');
+  assert.equal(sessions['claude:child-native'].parentClient, 'antigravity');
+  assert.equal(sessions['claude:child-native'].parentSessionId, main);
+  for (const id of ['weak-id', 'wrong-id']) {
+    assert.equal(sessions[`antigravity:${id}`].title, '');
+    assert.equal(sessions[`antigravity:${id}`].t3ThreadId, undefined);
+  }
+  const { sessionRowsForPeriod, groupSessionRows } = require('../../src/electron/renderer/sessionRows');
+  const group = groupSessionRows(sessionRowsForPeriod(periods.today)).find(row => row.groupRows?.length === 3);
+  assert.equal(group?.subagentCount, 1);
+  assert.equal(group?.value, 60);
+  assert.equal(group?.cost, 6);
+
+  s.db.exec("UPDATE orchestration_v2_projection_threads SET title = 'Renamed T3 ACP title' WHERE thread_id = 'parent'");
+  applySessionMetadata(periods, s.home, deps);
+  assert.equal(launch.title, 'Renamed T3 ACP title');
+  s.db.exec("UPDATE orchestration_v2_projection_threads SET title = 'New thread' WHERE thread_id = 'parent'");
+  applySessionMetadata(periods, s.home, deps);
+  assert.equal(launch.title, 'Native Antigravity title', 'the T3 placeholder does not replace the native title');
+  s.db.exec("UPDATE orchestration_v2_projection_threads SET title = 'Renamed T3 ACP title' WHERE thread_id = 'parent'");
+  applySessionMetadata(periods, s.home, deps);
+  assert.equal(launch.title, 'Renamed T3 ACP title');
+  s.thread('ambiguous');
+  s.provider('ambiguous-provider', 'ambiguous', main, 'antigravity');
+  applySessionMetadata(periods, s.home, deps);
+  assert.equal(launch.title, 'Native Antigravity title', 'ambiguous ownership falls back to the native title');
+});
+
 for (const driver of ['cursor', 'opencode', 'grok', 'muse']) {
   test(`T3 ${driver} uses shared delegation without changing the accounting client`, t => {
     const s = store(t); pair(s, driver, driver);
@@ -579,7 +645,7 @@ test('ACP projection instance column must agree with its payload and uses only c
 
 test('unknown drivers and Pi file-path identities remain unbound instead of guessing an accounting id', t => {
   const s = store(t); s.thread('main');
-  for (const driver of ['unknown', 'pi', 'antigravity', 'constructor']) s.provider(driver, 'main', 'same-id', driver);
+  for (const driver of ['unknown', 'pi', 'constructor']) s.provider(driver, 'main', 'same-id', driver);
   assert.equal(readT3SessionRelations(['same-id'], { homeDir: s.home, env: {} }).size, 0);
 });
 

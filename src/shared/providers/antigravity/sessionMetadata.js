@@ -6,6 +6,7 @@ const path = require('node:path');
 const { fileURLToPath } = require('node:url');
 const { antigravityDataRoots } = require('./selfSync');
 const { antigravityCliDataDir } = require('../../clientSources');
+const { readT3SessionMeta } = require('../../t3SessionMetadata');
 
 // Deferred like cursor: importing this resolver must not emit Node's
 // experimental node:sqlite warning for collectors that never see an Antigravity row.
@@ -19,6 +20,7 @@ function resolveSqlite(deps = {}) {
 }
 
 const titleCache = new Map();
+const T3_TITLE_SOURCE = 't3-antigravity';
 
 function fileStamp(filePath) {
   try {
@@ -220,14 +222,25 @@ function resolveSessionMetadata(sessionIds, context = {}) {
     }
   }
 
+  const t3Invalidated = new Set();
+  const t3Titles = readT3SessionMeta(sessionIds, {
+    ...context.deps,
+    driver: 'antigravity',
+    homeDir: home,
+    useEnvRoot: !context.deps?.scopedHome,
+    cleanTitle,
+    invalidatedSessionIds: t3Invalidated
+  });
   for (const sessionId of sessionIds) {
     const key = `antigravity:${sessionId}`;
     const previous = context.metadata?.get(key);
     const anchored = context.deps?.t3Titles?.[key];
     const retained = previous && Object.prototype.hasOwnProperty.call(previous, 'catalogTitle')
       ? previous.catalogTitle : anchored;
+    const previousSource = previous?.catalogTitleSource || context.deps?.catalogTitleSources?.[key];
     const hasAnchoredProject = Boolean(context.deps?.catalogProjects?.today?.[key]);
-    if (result.get(sessionId)?.catalogTitle === null && unresolved.has(sessionId) && retained) {
+    if (result.get(sessionId)?.catalogTitle === null && unresolved.has(sessionId) && retained
+      && previousSource !== T3_TITLE_SOURCE) {
       const meta = result.get(sessionId);
       meta.catalogTitle = retained;
       meta.title = retained;
@@ -235,6 +248,21 @@ function resolveSessionMetadata(sessionIds, context = {}) {
       delete meta.catalogTitleSource;
       delete meta.projectId;
       delete meta.projectLabel;
+    }
+    const nativeMeta = result.get(sessionId);
+    // Match the T3 sidebar even when the native catalog has its own title.
+    const t3Title = t3Titles.get(sessionId)?.title
+      || (previousSource === T3_TITLE_SOURCE && !t3Invalidated.has(sessionId) ? retained : null);
+    if (t3Title) {
+      result.set(sessionId, {
+        ...nativeMeta,
+        catalogOnly: true,
+        catalogTitle: t3Title,
+        catalogTitleSource: T3_TITLE_SOURCE,
+        title: t3Title
+      });
+    } else if (!nativeMeta && previousSource === T3_TITLE_SOURCE && t3Invalidated.has(sessionId)) {
+      result.set(sessionId, { catalogOnly: true, catalogTitle: null });
     }
     if (!result.has(sessionId)) {
       // A successful missing-row query can revoke a persisted override even

@@ -79,6 +79,7 @@ function discoverT3DbPaths(options = {}) {
 // session ids are not native conversation identities.
 function t3TitleQueries(db, tables, providerDriver) {
   const queries = [];
+  const antigravity = providerDriver === 'antigravity';
   const columnsFor = (table) => new Set(db.prepare(`PRAGMA table_info(${table})`).all().map((column) => String(column.name)));
   const v2Threads = 'orchestration_v2_projection_threads';
   const v2Providers = 'orchestration_v2_projection_provider_threads';
@@ -90,20 +91,26 @@ function t3TitleQueries(db, tables, providerDriver) {
       const driver = providerColumns.has('driver')
         ? (providerColumns.has('provider') ? 'COALESCE(r.driver, r.provider)' : 'r.driver')
         : 'r.provider';
+      // One malformed payload must not hide every other title in the batch.
+      const payload = "(CASE WHEN json_valid(r.payload_json) THEN r.payload_json END)";
+      const threadId = `json_extract(${payload}, '$.nativeThreadRef.nativeId')`;
+      const deleted = columns.has('deleted_at') ? '(t.deleted_at IS NOT NULL)' : '0';
       queries.push({
         authoritative: true,
-        // One malformed payload must not hide every other title in the batch.
-        threadId: "(CASE WHEN json_valid(r.payload_json) THEN json_extract(r.payload_json, '$.nativeThreadRef.nativeId') END)",
+        threadId,
         from: `FROM ${v2Threads} t JOIN ${v2Providers} r ON r.thread_id = t.thread_id`,
         // Tombstones still own the native id and suppress retained V1 titles.
-        deleted: columns.has('deleted_at') ? '(t.deleted_at IS NOT NULL)' : '0',
-        where: `${driver} = ? AND `,
+        deleted: antigravity ? `(COUNT(DISTINCT t.thread_id) > 1 OR ${deleted})` : deleted,
+        where: `${driver} = ? AND ${antigravity
+          ? `json_extract(${payload}, '$.nativeThreadRef.driver') = 'antigravity' AND json_extract(${payload}, '$.nativeThreadRef.strength') = 'strong' AND `
+          : ''}`,
         params: [providerDriver],
-        order: columns.has('updated_at') ? ' ORDER BY t.updated_at DESC, t.thread_id' : ''
+        order: antigravity ? ` GROUP BY ${threadId}`
+          : (columns.has('updated_at') ? ' ORDER BY t.updated_at DESC, t.thread_id' : '')
       });
     }
   }
-  if (tables.has('projection_threads') && tables.has('provider_session_runtime')) {
+  if (!antigravity && tables.has('projection_threads') && tables.has('provider_session_runtime')) {
     const columns = columnsFor('projection_threads');
     const runtimeColumns = columnsFor('provider_session_runtime');
     if (columns.has('title') && runtimeColumns.has('resume_cursor_json')
@@ -124,7 +131,7 @@ function t3TitleQueries(db, tables, providerDriver) {
 
 function readT3SessionMeta(sessionIds, deps = {}) {
   const providerDriver = deps.driver;
-  if (!['codex', 'claudeAgent'].includes(providerDriver)) return new Map();
+  if (!['codex', 'claudeAgent', 'antigravity'].includes(providerDriver)) return new Map();
   const cleanTitle = deps.cleanTitle || cleanT3Title;
   const candidatesForId = deps.candidatesForId || ((id) => [id]);
   const ids = [...new Set(Array.from(sessionIds || []).map(String).filter(Boolean))];
@@ -140,8 +147,8 @@ function readT3SessionMeta(sessionIds, deps = {}) {
     try { return fs.statSync(dbPath).isFile(); } catch (_) { return false; }
   });
   if (dbPaths.length === 0) return out;
-  // Codex supplies rollout-id expansion; Claude matches its native session id
-  // exactly. Neither provider may match a T3 app id or shared runtime session.
+  // Codex supplies rollout-id expansion; Claude and Antigravity match native
+  // session ids exactly. T3 app ids and shared runtime sessions are not aliases.
   const candidatesBySession = new Map(ids.map((id) => [id, candidatesForId(id)]));
   const candidateIds = [...new Set([...candidatesBySession.values()].flat())];
   const titleByThreadId = new Map();
