@@ -410,7 +410,7 @@ function readT3SessionRelationResult(nativeIds, deps = {}) {
     }
   }
   return { facts: status === 'retryable' ? new Map() : out, status, ...(deps.includeAntigravityTitles ? { titleStoresRead } : {}),
-    ...(deps.includeOwnershipStatus ? { ownershipComplete: ownershipRead && !ownershipIncomplete } : {}) };
+    ...(deps.includeOwnershipStatus ? { ambiguous, ownershipComplete: ownershipRead && !ownershipIncomplete } : {}) };
 }
 
 function readT3SessionRelations(nativeIds, deps = {}) {

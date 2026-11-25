@@ -136,7 +136,7 @@ test('T3 Antigravity ACP displays its thread title and groups same-thread runs a
   fs.mkdirSync(otherDir, { recursive: true });
   fs.copyFileSync(nativeDb, path.join(otherDir, 'conversation_summaries.db'));
   const otherCatalog = new sqlite.DatabaseSync(path.join(otherDir, 'conversation_summaries.db'));
-  try { otherCatalog.exec('DELETE FROM conversation_summaries'); } finally { otherCatalog.close(); }
+  try { otherCatalog.exec('UPDATE conversation_summaries SET title = NULL, workspace_uris = NULL'); } finally { otherCatalog.close(); }
   fs.renameSync(nativeDb, nativeDb + '.moved');
   const coldDeps = { env: {}, metadataCache: new Map(), antigravityTitleCache: new Map(),
     t3Titles: { [`antigravity:${main}`]: launch.title },
@@ -841,6 +841,7 @@ test('a newly conflicting Antigravity ID loses its retained T3 grouping on a Tod
   assert.equal(full.month.sessions[key].t3ThreadId, 'original');
   s.thread('competing');
   s.provider('competing-provider', 'competing', 'acp-conversation', 'antigravity');
+  fs.writeFileSync(path.join(path.dirname(s.file), 'state.sqlite'), 'corrupt unrelated legacy store');
   const next = await collectUsageOnce({ ...options, todayOnlyAnchor: { dateKey: localTodayKey(),
     today: full.today, month: full.month, allTime: full.allTime, todayPartitions: captured.todayPartitions,
     sessionIdentityVersion: captured.sessionIdentityVersion } });
