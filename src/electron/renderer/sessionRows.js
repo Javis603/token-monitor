@@ -989,9 +989,12 @@
   }
 
   function sessionListRows(rows, options) {
+    const grouped = groupSessionRows(rows, options);
+    // Keep the tool/model presentation when the user hides session titles.
+    if (options?.sessionTitlesEnabled === false) return grouped;
     // A project identifies a standalone row on the list. Group members and
     // transcript headings still use the session's own title or tool/model.
-    return groupSessionRows(rows, options).map(row => {
+    return grouped.map(row => {
       if (row.kind !== 'session' || row.titled || !row.projectLabel) return row;
       return { ...row, name: row.projectLabel, subtitle: row.name, activity: row.subtitle,
         sessionDetailHeading: row.name };

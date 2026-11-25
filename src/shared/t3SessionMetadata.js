@@ -226,6 +226,9 @@ function readT3SessionRelationResult(nativeIds, deps = {}) {
   if (!ids.length) return { facts: out, status: 'complete' };
   if (!sqlite) return { facts: out, status: 'unavailable' };
   let status = 'complete';
+  const completedStores = new Set();
+  let ownershipRead = false;
+  let ownershipIncomplete = false;
   const names = {
     t: 'orchestration_v2_projection_threads',
     p: 'orchestration_v2_projection_provider_threads',
@@ -238,6 +241,8 @@ function readT3SessionRelationResult(nativeIds, deps = {}) {
   for (const file of discoverT3DbPaths(deps)) {
     let db;
     let complete = false;
+    let readTitle = false;
+    let readHistoricalOwnership = false;
     const facts = new Map();
     const conflicts = new Set();
     const parentConflicts = new Set();
@@ -251,7 +256,10 @@ function readT3SessionRelationResult(nativeIds, deps = {}) {
       if (!has('t', ['thread_id', 'deleted_at', 'payload_json'])
         || !has('p', ['provider_thread_id', 'thread_id', 'driver', 'payload_json'])) {
         const tables = db.prepare("SELECT name FROM sqlite_master WHERE type = 'table'").all();
-        if (tables.length && status === 'complete') status = 'unavailable';
+        if (tables.length) {
+          ownershipIncomplete = true;
+          if (status === 'complete') status = 'unavailable';
+        }
         continue;
       }
       const bindings = readT3IdentityBindings(file);
@@ -261,6 +269,8 @@ function readT3SessionRelationResult(nativeIds, deps = {}) {
           ? `(CASE WHEN ${payloadId} IS NULL OR ${payloadId} = ${alias}.provider_instance_id THEN ${alias}.provider_instance_id END)`
           : payloadId;
       };
+      readTitle = deps.includeAntigravityTitles && has('t', ['title']);
+      const titleColumn = readTitle ? ', t.title AS title' : '';
       const strong = `${native('p', 'driver')} = p.driver AND ${native('p', 'strength')} = 'strong'`;
       const add = row => {
         const client = t3AccountingClient(row.driver, row.instanceId, bindings);
@@ -272,14 +282,18 @@ function readT3SessionRelationResult(nativeIds, deps = {}) {
         if (conflicts.has(key)) return;
         if (facts.has(key) && facts.get(key).threadId !== threadId) {
           facts.delete(key); conflicts.add(key);
-        } else if (!facts.has(key)) facts.set(key, { threadId });
+        } else if (!facts.has(key)) {
+          const title = client === 'antigravity' && readTitle ? cleanT3Title(row.title) : '';
+          facts.set(key, { threadId, ...(client === 'antigravity' && deps.includeAntigravityTitles
+            ? { title: title && !T3_DEFAULT_TITLES.has(title.toLowerCase()) ? title : null, titleStore: file } : {}) });
+        }
       };
       // IDs live in unindexed JSON in current T3 schemas. One candidate pass
       // per table avoids rescanning all providers for every 400-ID batch. The
       // target filters precede the indexed ownership joins.
       const idJson = JSON.stringify(ids);
       const uuidJson = JSON.stringify(uuidIds);
-      const sql = `SELECT p.driver, ${instance('p')} AS instanceId, ${native('p', 'nativeId')} AS nativeId, p.thread_id AS threadId
+      const sql = `SELECT p.driver, ${instance('p')} AS instanceId, ${native('p', 'nativeId')} AS nativeId, p.thread_id AS threadId${titleColumn}
         FROM ${names.p} p CROSS JOIN ${names.t} t ON t.thread_id = p.thread_id
         WHERE (${native('p', 'nativeId')} IN (SELECT value FROM json_each(?))
           OR lower(${native('p', 'nativeId')}) IN (SELECT value FROM json_each(?)))
@@ -290,10 +304,13 @@ function readT3SessionRelationResult(nativeIds, deps = {}) {
       // reference. Superseded attempts can already have accounted usage.
       // Validate the attempt's provider and root ownership before using it.
       // Pin join order: SQLite otherwise scans every message/tool node first.
-      if (has('a', ['thread_id', 'provider_thread_id', 'root_node_id', 'status', 'payload_json'])
-          && has('n', ['node_id', 'thread_id', 'provider_thread_id', 'kind'])) {
+      const hasNodes = has('n', ['node_id', 'thread_id', 'root_node_id', 'kind', 'provider_thread_id']);
+      const hasAttempts = has('a', ['thread_id', 'provider_thread_id', 'root_node_id', 'status', 'payload_json']);
+      readHistoricalOwnership = hasNodes && (!columns.a.size || hasAttempts);
+      if (!readHistoricalOwnership) ownershipIncomplete = true;
+      if (hasAttempts && hasNodes) {
         const history = `SELECT p.driver, 1 AS historical, ${instance('p')} AS instanceId,
-            json_extract(${json('a')}, '$.nativeThreadId') AS nativeId, p.thread_id AS threadId
+            json_extract(${json('a')}, '$.nativeThreadId') AS nativeId, p.thread_id AS threadId${titleColumn}
           FROM ${names.a} a
           CROSS JOIN ${names.p} p ON p.provider_thread_id = a.provider_thread_id AND p.thread_id = a.thread_id
           CROSS JOIN ${names.t} t ON t.thread_id = p.thread_id
@@ -306,7 +323,7 @@ function readT3SessionRelationResult(nativeIds, deps = {}) {
             AND t.deleted_at IS NULL AND ${strong}`;
         for (const row of db.prepare(history).all(idJson, uuidJson)) add(row);
       }
-      if (!has('n', ['node_id', 'thread_id', 'root_node_id', 'kind', 'provider_thread_id'])) {
+      if (!hasNodes) {
         complete = true;
         continue;
       }
@@ -368,12 +385,15 @@ function readT3SessionRelationResult(nativeIds, deps = {}) {
       // Extended SQLite error codes retain the base code in the low byte.
       // Empty/missing stores are valid; corruption and unsupported schemas wait
       // for the next full scan, while transient contention/resource failures defer migration.
+      if (error.code !== 'ENOENT') ownershipIncomplete = true;
       const code = Number(error.errcode) & 0xff;
       if ([5, 6].includes(code) || ['EBUSY', 'EAGAIN', 'EINTR', 'EMFILE', 'ENFILE'].includes(error.code)) status = 'retryable';
       else if (error.code !== 'ENOENT' && status === 'complete') status = 'unavailable';
     } finally {
       if (db) { try { db.close(); } catch (_) {} }
       if (complete) {
+        ownershipRead = true;
+        if (deps.includeAntigravityTitles && readHistoricalOwnership) completedStores.add(file);
         for (const key of conflicts) { out.delete(key); ambiguous.add(key); }
         for (const key of parentConflicts) ambiguousParents.add(key);
         for (const [key, fact] of facts) {
@@ -386,13 +406,20 @@ function readT3SessionRelationResult(nativeIds, deps = {}) {
           if (previous?.parentThreadId && fact.parentThreadId && (previous.parentThreadId !== fact.parentThreadId
             || previous.parentClient !== fact.parentClient || previous.parentNativeId !== fact.parentNativeId)) ambiguousParents.add(key);
           const merged = { ...previous, ...fact };
+          if (previous?.titleStore) {
+            merged.title = previous.title;
+            merged.titleStore = previous.titleStore;
+          }
           if (ambiguousParents.has(key)) for (const field of ['parentThreadId', 'parentClient', 'parentNativeId']) delete merged[field];
           out.set(key, merged);
         }
       }
     }
   }
-  return { facts: status === 'retryable' ? new Map() : out, status };
+  return { facts: status === 'retryable' ? new Map() : out, status, ...(deps.includeAntigravityTitles ? { completedStores } : {}),
+    ...(deps.includeOwnershipStatus ? {
+      ambiguous, ownershipComplete: ownershipRead && !ownershipIncomplete
+    } : {}) };
 }
 
 function readT3SessionRelations(nativeIds, deps = {}) {
