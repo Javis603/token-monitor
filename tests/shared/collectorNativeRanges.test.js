@@ -512,12 +512,13 @@ test('device state applies live activity to sessions held in its native ranges',
   assert.equal(snapshot.nativeRanges.last7.sessionActivity, undefined);
 });
 
-test('Yesterday takes a resumed session\'s identity from Today, not its times', async () => {
+test('Yesterday and daily slices preserve a resumed session\'s closed-day timestamps', async () => {
   const { collectUsageOnce } = freshCollector();
   const yesterdayAt = `${dayKey(1)}T10:00:00.000Z`;
   const todayAt = `${TODAY}T11:00:00.000Z`;
   let captured = null;
   await collectUsageOnce(baseOptions({
+    dailySessionSyncEnabled: true,
     runTokscaleWindows: async ({ windows }) => {
       const reports = windowReports(windows);
       for (const entry of reports[`d${dayKey(1)}`].entries) if (entry.sessionId === 'spanning') entry.lastUsedAt = yesterdayAt;
@@ -531,9 +532,11 @@ test('Yesterday takes a resumed session\'s identity from Today, not its times', 
     month: captured.windowsPeriods.month,
     allTime: captured.windowsPeriods.allTime,
     todayPartitions: captured.todayPartitions,
-    nativePastRanges: captured.nativePastRanges
+    nativePastRanges: captured.nativePastRanges,
+    dailySessionPastDays: captured.dailySessionPastDays
   };
   const watch = await collectUsageOnce(baseOptions({
+    dailySessionSyncEnabled: true,
     todayOnlyAnchor: anchor,
     runTokscaleWindows: async () => assert.fail('a watch tick scans only Today'),
     runTokscale: async () => ({
@@ -543,4 +546,6 @@ test('Yesterday takes a resumed session\'s identity from Today, not its times', 
   }));
   assert.equal(watch.nativeRanges.yesterday.sessions['claude:spanning'].lastUsedAt, yesterdayAt);
   assert.equal(watch.nativeRanges.last7.sessions['claude:spanning'].lastUsedAt, todayAt);
+  assert.equal(watch.dailySessionPeriods[dayKey(1)].sessions['claude:spanning'].lastUsedAt, yesterdayAt);
+  assert.equal(watch.dailySessionPeriods[TODAY].sessions['claude:spanning'].lastUsedAt, todayAt);
 });

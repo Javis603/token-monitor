@@ -1874,7 +1874,7 @@ async function collectUsageOnce(options) {
         ...past[key],
         sessions: Object.fromEntries(Object.entries(past[key].sessions).map(([id, row]) => [id, { ...row }]))
       }]));
-      propagateTodayProjects(allTime, days, { ...localSessionMetadataDeps, projectsFromToday: true });
+      propagateIdentity(allTime, days, { ...localSessionMetadataDeps, projectsFromToday: true });
       summary.dailySessionPeriods = { ...days, [todayKey]: today };
     }
   }
