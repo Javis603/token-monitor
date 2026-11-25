@@ -5697,7 +5697,7 @@ function applySessionDetailResult(request, options) {
 // A native range's turns are its days; other periods keep their names.
 function sessionDetailPeriod() {
   const range = currentNativeRangeSnapshot()?.range
-    || (state.fixedPeriodSnapshot?.detailsAvailable && state.fixedPeriodSnapshot.devices
+    || (state.fixedPeriodSnapshot?.selection === state.period && state.fixedPeriodSnapshot.detailsAvailable && state.fixedPeriodSnapshot.devices
       .find(device => device.deviceId === state.settings?.deviceId)?.range);
   return range ? `range:${range.start}:${range.end}` : state.period;
 }

@@ -696,7 +696,7 @@ export class HubDO {
           error: error.status === 413 ? 'payload_too_large' : 'bad_request', message: error.message
         });
       }
-      let record, upload;
+      let record, upload, fixedRangeRevision = null;
       try {
         record = await this.mutate(async () => {
           const incoming = delta ? this.uploadBaselines.prepare(payload) : payload;
@@ -716,8 +716,28 @@ export class HubDO {
           // The private clock uses the storage headroom, outside the device
           // budget exposed to existing producers.
           fixedRangeUploads.rememberFixedRangeObservation(next, existing);
-          await this.state.storage.put(storageKey, next);
-          if (existing?.updatedAt !== next.updatedAt) this.fixedRangeUploads.discard(deviceId);
+          const projectsChanged = (existing?.projectsEnabled !== false) !== (next.projectsEnabled !== false);
+          const revisionKey = `fixedRangeRevision:${deviceId}`;
+          if (projectsChanged) {
+            await this.withStorageTransaction(async storage => {
+              const indexKey = `fixedRanges:${deviceId}`;
+              const index = await storage.get(indexKey);
+              if (index?.revision) {
+                await this.clearFixedRanges(storage, deviceId, index);
+                await storage.put(indexKey, fixedRangeUploads.retireFixedRangeSnapshot(index));
+                await storage.delete(revisionKey);
+              }
+              await storage.put(storageKey, next);
+            });
+          } else {
+            await this.state.storage.put(storageKey, next);
+          }
+          if (existing?.updatedAt !== next.updatedAt || projectsChanged) this.fixedRangeUploads.discard(deviceId);
+          if (!projectsChanged && request.headers.get(FIXED_RANGE_HEADER) === FIXED_RANGE_VERSION
+            && fixedRangeUploads.hasCurrentFixedRangeObservation(next)) {
+            const stamp = await this.state.storage.get(revisionKey);
+            if (stamp?.observedAt === next.updatedAt) fixedRangeRevision = stamp.revision;
+          }
           this.uploadBaselines.forget(deviceId);
           if (delta || request.headers.get(uploadDelta.UPLOAD_HEADER) === uploadDelta.UPLOAD_VERSION) {
             upload = this.uploadBaselines.commit(deviceId, stripSessionTextFromDeviceRecord(incoming, { preserveSessionTitles }));
@@ -731,7 +751,7 @@ export class HubDO {
       this.queueBroadcast();
       const response = {
         ok: true, deviceId: record.deviceId,
-        ...(request.headers.get(FIXED_RANGE_HEADER) === FIXED_RANGE_VERSION ? { fixedRanges: 1, fixedRangeDelta: 1, fixedRangeBatch: 1 } : {}),
+        ...(request.headers.get(FIXED_RANGE_HEADER) === FIXED_RANGE_VERSION ? { fixedRanges: 1, fixedRangeDelta: 1, fixedRangeBatch: 1, fixedRangeRevision } : {}),
         ...(upload ? { upload } : {})
       };
       return jsonResponse(

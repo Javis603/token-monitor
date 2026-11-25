@@ -324,3 +324,21 @@ test('a new fallback device observation invalidates a completed synchronized ran
   await Promise.resolve();
   assert.deepEqual(reads, ['snapshot-1', 'snapshot-2']);
 });
+
+test('session detail uses a synced range only for the selected period', () => {
+  const source = fs.readFileSync(path.join(__dirname, '../../src/electron/renderer/app.js'), 'utf8');
+  const detailPeriod = source.match(/function sessionDetailPeriod\(\) \{[\s\S]*?\n\}/)[0];
+  const state = {
+    period: 'yesterday',
+    settings: { deviceId: 'local' },
+    fixedPeriodSnapshot: {
+      detailsAvailable: true, selection: 'yesterday',
+      devices: [{ deviceId: 'local', range: { start: '2026-11-24', end: '2026-11-24' } }]
+    }
+  };
+  const context = { state, currentNativeRangeSnapshot: () => null };
+  vm.runInNewContext(detailPeriod, context);
+  assert.equal(context.sessionDetailPeriod(), 'range:2026-11-24:2026-11-24');
+  state.period = 'today';
+  assert.equal(context.sessionDetailPeriod(), 'today');
+});

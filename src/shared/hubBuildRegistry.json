@@ -638,7 +638,7 @@
       },
       {
         "revision": 15,
-        "buildId": "sha256:6fd99553b5652346d7774b7e0331cd13c47c7df9ca329ce76db8bd2a4f74d6ae"
+        "buildId": "sha256:9b36ca3b7d609e8662ee594d0a9b00fcf5c5a815b44e9955173be3783ccd53eb"
       }
     ],
     "cloudflare-worker": [
@@ -712,7 +712,7 @@
       },
       {
         "revision": 18,
-        "buildId": "sha256:48b54d133bf2c184526ac2fbe65cac3b33e2ba687fefa4bc8904251e7ec29d27"
+        "buildId": "sha256:7a5f9ca5fe972da00731cebaa07cd22c3bd2e29b29eefdedc2d6bdde80369a5f"
       }
     ]
   }

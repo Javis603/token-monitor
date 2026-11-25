@@ -471,9 +471,11 @@ function createSyncPayloadUploader({ now = Date.now } = {}) {
         }
       }
       const summary = options.summary;
-      const fixedRangeAt = JSON.stringify([summary?.updatedAt, options.sessionTitleSyncGeneration]);
+      const fixedRangeAt = JSON.stringify([summary?.updatedAt, options.sessionTitleSyncGeneration, summary?.projectsEnabled !== false]);
+      const fixedRangeConfirmed = fixedRangeAt === acknowledgedFixedRangeAt
+        && (!hasOwn(ack, 'fixedRangeRevision') || ack.fixedRangeRevision === fixedRangeBaseline?.[0]?.revision);
       if (requestGeneration === generation && ack?.ok && ack.fixedRanges === 1
-        && ack.deviceId === summary?.deviceId && summary.nativeRanges && fixedRangeAt !== acknowledgedFixedRangeAt) {
+        && ack.deviceId === summary?.deviceId && summary.nativeRanges && !fixedRangeConfirmed) {
         try {
           const committed = await uploadFixedRangeVersion(fetchFn, url.replace(/\/api\/ingest$/, ''), summary, headers, options,
             ack.fixedRangeDelta === 1 ? fixedRangeBaseline ?? [] : [], ack.fixedRangeBatch === 1);

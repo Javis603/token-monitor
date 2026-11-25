@@ -318,7 +318,10 @@ function createHub({
       preserveSessionTitles: acceptsSessionTitles(serverTitlesEnabled, store.syncTitlePolicies[deviceId], payload.sessionTitleSyncGeneration)
     });
     rememberFixedRangeObservation(record, previous);
-    if (previous?.updatedAt !== record.updatedAt) fixedRangeUploads.discard(record.deviceId);
+    const projectsChanged = (previous?.projectsEnabled !== false) !== (record.projectsEnabled !== false);
+    if (previous?.updatedAt !== record.updatedAt || projectsChanged) fixedRangeUploads.discard(deviceId);
+    const snapshot = store.fixedRanges[deviceId];
+    if (projectsChanged && snapshot?.revision) store.fixedRanges[deviceId] = retireFixedRangeSnapshot(snapshot);
     store.devices[record.deviceId] = record;
     queuePersist();
     if (statsListeners.size > 0) notifyStatsListeners('ingest');
@@ -618,7 +621,10 @@ function createHub({
             })) : undefined;
         const response = {
           ok: true, deviceId: record.deviceId,
-          ...(req.headers[FIXED_RANGE_HEADER] === FIXED_RANGE_VERSION ? { fixedRanges: 1, fixedRangeDelta: 1, fixedRangeBatch: 1 } : {}),
+          ...(req.headers[FIXED_RANGE_HEADER] === FIXED_RANGE_VERSION ? {
+            fixedRanges: 1, fixedRangeDelta: 1, fixedRangeBatch: 1,
+            fixedRangeRevision: getFixedRanges(record.deviceId)?.revision ?? null
+          } : {}),
           ...(upload ? { upload } : {})
         };
         return sendJson(res, 200, wantsMinimalResponse(req) ? response : { ...response, stats: getStats() });

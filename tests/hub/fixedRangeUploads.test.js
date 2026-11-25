@@ -123,6 +123,7 @@ for (const kind of ['Node', 'Worker']) test(`${kind} publishes complete range pa
     const loaded = await fetchFixedRange(send, base, deviceId, 'last7', rangeRecord.nativeRangeWindows.last7, headers);
     assert.deepEqual(loaded, period);
     receivedPeriods.push(loaded);
+    assert.equal(await fetchFixedRange(send, base, deviceId, 'last7', { start: '2026-11-18', end: '2026-11-24' }, headers, replacement.revision), null);
 
     const { ranges: empty } = encodeFixedRangeSnapshot({
       ...rangeRecord, nativeRanges: { last7: { totalTokens } }
@@ -147,7 +148,6 @@ for (const kind of ['Node', 'Worker']) test(`${kind} publishes complete range pa
     const devices = await (await send(base + '/api/devices', { headers })).json();
     assert.equal(Object.hasOwn(devices.devices.find(row => row.deviceId === deviceId), 'fixedRangeObservedAt'), false);
     assert.equal((await put(zeroPages)).status, 409);
-    assert.equal(await fetchFixedRange(send, base, deviceId, 'last7', { start: '2026-11-18', end: '2026-11-24' }, headers), null);
   }
   assert.equal(mergePeriods(...receivedPeriods).totalTokens, 90);
 });
@@ -258,9 +258,16 @@ for (const kind of ['Node', 'Worker']) test(`${kind} cannot publish project rows
   assert.equal(staged.status, 200);
   assert.deepEqual(await staged.json(), { complete: false });
 
-  assert.equal((await ingest({ limitsOnly: true, projectsEnabled: false })).status, 200);
+  assert.equal((await ingest({ projectsEnabled: false })).status, 200);
+  assert.equal((await ingest({ projectsEnabled: true })).status, 200);
   assert.equal((await put(1, rows.filter(row => row[1] === 'sessions'))).status, 409);
   assert.equal((await send(endpoint, { headers })).status, 404);
+  assert.equal(await uploadFixedRanges(send, base, rangeRecord, headers), true);
+  assert.equal((await send(endpoint, { headers })).status, 200);
+  assert.equal((await ingest({ projectsEnabled: false })).status, 200);
+  assert.equal((await send(endpoint, { headers })).status, 404);
+  const stats = await (await send(base + '/api/stats', { headers })).json();
+  assert.equal(Object.hasOwn(stats.fixedRangeRevisions, record.deviceId), false);
   assert.equal(await uploadFixedRanges(send, base, { ...rangeRecord, projectsEnabled: false }, headers), true);
 });
 
@@ -332,6 +339,13 @@ for (const kind of ['Node', 'Worker']) test(`${kind} synchronizes changed fixed-
   assert.ok(requests[1].rows);
   assert.equal(requests[1].page, 0);
   assert.notEqual(requests[0].pages[0].revision, requests[1].revision);
+
+  const deleted = await send(base + '/api/devices/' + deviceId, { method: 'DELETE', headers });
+  assert.equal(deleted.status, 200);
+  staleBaseline = false;
+  requests.length = 0;
+  await upload(makeRecord(3, next));
+  assert.ok(requests.length, 'the same observation is republished after device deletion');
 });
 
 
