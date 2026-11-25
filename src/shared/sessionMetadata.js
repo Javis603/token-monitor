@@ -399,11 +399,13 @@ function applyT3SessionParents(periods, home = os.homedir(), deps = {}, targets,
   if (!nativeIds.length) return true;
   const { facts: relations, status, ownershipComplete, ambiguous, incompleteNativeIds, incompleteParentThreads } = readT3SessionRelationResult(nativeIds, {
     ...deps, homeDir: home, useEnvRoot: deps.scopedHome !== true,
-    includeOwnershipStatus: children.some(session => session.t3ThreadId || session.t3ParentLink)
+    includeOwnershipStatus: Boolean(deps.completeT3ParentRows) || children.some(session => session.t3ThreadId || session.t3ParentLink)
   });
   const links = new Map();
   const ownershipIsComplete = session =>
     ownershipComplete && !ids.get(session).some(id => incompleteNativeIds.has(id));
+  const parentReadIsComplete = (session, link) =>
+    ownershipIsComplete(session) && !incompleteParentThreads.has(link.threadId);
   for (const session of children) {
     const nativeKeys = ids.get(session).map(id => `${session.client}:${id}`);
     const matches = nativeKeys.map(key => relations.get(key)).filter(Boolean);
@@ -418,8 +420,9 @@ function applyT3SessionParents(periods, home = os.homedir(), deps = {}, targets,
     }
     if (conflict) continue;
     if (link && matches.every(fact => fact.threadId === link.threadId)) {
-      if (session.t3ParentLink && (session.t3ThreadId !== link.threadId
-        || (!link.parentThreadId && ownershipIsComplete(session) && !incompleteParentThreads.has(link.threadId)))) {
+      const completeParentRead = parentReadIsComplete(session, link);
+      if (completeParentRead) deps.completeT3ParentRows?.add(session);
+      if (session.t3ParentLink && (session.t3ThreadId !== link.threadId || (!link.parentThreadId && completeParentRead))) {
         delete session.parentSessionId;
         delete session.parentClient;
         delete session.t3ParentLink;
@@ -473,7 +476,7 @@ function applyT3SessionParents(periods, home = os.homedir(), deps = {}, targets,
         parent = fallback.native.get(key) || fallback.app.get(link.parentThreadId);
       }
       if (!parent || (parent.client === session.client && parent.sessionId === session.sessionId)) {
-        if (session.t3ParentLink && ownershipIsComplete(session) && !incompleteParentThreads.has(link.threadId)) {
+        if (session.t3ParentLink && parentReadIsComplete(session, link)) {
           delete session.parentSessionId;
           delete session.parentClient;
           delete session.t3ParentLink;

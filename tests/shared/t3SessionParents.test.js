@@ -1026,14 +1026,21 @@ test('a targeted tick cannot restore a cleared T3 parent from another client par
   const options = { clients: 'antigravity,claude', homeDir: s.home, env: {}, osInfo: {},
     historyEnabled: false, limitsEnabled: false, wslScanEnabled: false,
     onAnchorComputed: value => { captured = value; },
-    runTokscale: async ({ clients }) => {
+    runTokscale: async ({ clients, flags }) => {
       targets.push(clients);
-      return { entries: entries.filter(row => clients.split(',').includes(row.client)) };
+      const found = entries.filter(row => clients.split(',').includes(row.client));
+      if (flags.includes('--today')) return { entries: found };
+      return { entries: [
+        ...found.map(row => row.client === 'claude' ? { ...row, parentSessionId: 'native-parent' } : row),
+        { client: 'claude', sessionId: 'native-parent', model: 'm', input: 10 }
+      ] };
     } };
   const anchor = () => ({ ...captured.windowsPeriods, dateKey: localTodayKey(),
     todayPartitions: captured.todayPartitions, sessionIdentityVersion: captured.sessionIdentityVersion });
   await collectUsageOnce(options);
   assert.equal(captured.todayPartitions.claude.sessions[key].parentSessionId, 'parent-native');
+  assert.equal(captured.windowsPeriods.month.sessions[key].parentSessionId, 'native-parent');
+  assert.equal(captured.windowsPeriods.allTime.sessions[key].parentSessionId, 'native-parent');
   targets.length = 0;
 
   s.db.exec("UPDATE orchestration_v2_projection_threads SET deleted_at = '2026-11-25' WHERE thread_id = 'parent'");
@@ -1042,6 +1049,9 @@ test('a targeted tick cannot restore a cleared T3 parent from another client par
   assert.equal(first.today.sessions[key].parentSessionId, undefined);
   assert.equal(captured.todayPartitions.claude.sessions[key].t3ParentLink, undefined);
   assert.equal(captured.todayPartitions.claude.sessions[key].parentSessionId, undefined);
+  assert.equal(first.month.sessions[key].parentSessionId, 'native-parent');
+  assert.equal(first.allTime.sessions[key].parentSessionId, 'native-parent');
+  assert.deepEqual(captured.changedT3ThreadKeys, [key]);
 
   // The incomplete read permits retaining an old verified edge, but must not
   // bring one back from the frozen Claude portion of the Today scan.

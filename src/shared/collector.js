@@ -1355,6 +1355,7 @@ async function collectUsageOnce(options) {
     catalogTitleSources: {},
     revokedT3ThreadKeys: new Set(),
     changedT3ThreadKeys: new Set(),
+    completeT3ParentRows: new WeakSet(),
     catalogProjects: { today: {}, month: {}, allTime: {}, labels: {} },
     catalogProjectRows: new WeakSet()
     // dshSessionFileCache is deliberately NOT reset here: it's module-level
@@ -1597,8 +1598,13 @@ async function collectUsageOnce(options) {
         const partitionRow = todayPartitions[currentToday.client]?.sessions?.[key];
         if (partitionRow && !revoked) refreshT3SessionLinks(partitionRow, currentToday);
         const savedToday = anchor.today?.sessions?.[key];
+        // Fresh scans lack the old T3 edge even if the relationship read
+        // could not confirm its removal. Persist only verified changes.
+        const todayLinkChanged = savedToday && t3SessionLinksChanged(savedToday, currentToday)
+          && (savedToday.t3ThreadId !== currentToday.t3ThreadId || currentToday.parentSessionId
+            || localSessionMetadataDeps.completeT3ParentRows.has(currentToday));
         if (!revoked && supportsT3SessionClient(currentToday.client)
-          && ((savedToday && currentToday.t3ThreadId && savedToday.t3ThreadId !== currentToday.t3ThreadId)
+          && (todayLinkChanged
           || broader.some(([saved, current]) => {
             const retained = saved?.sessions?.[key];
             return retained && t3SessionLinksChanged(retained, current.sessions?.[key]);
