@@ -304,8 +304,11 @@ function readT3SessionRelationResult(nativeIds, deps = {}) {
       // reference. Superseded attempts can already have accounted usage.
       // Validate the attempt's provider and root ownership before using it.
       // Pin join order: SQLite otherwise scans every message/tool node first.
-      if (has('a', ['thread_id', 'provider_thread_id', 'root_node_id', 'status', 'payload_json'])
-          && has('n', ['node_id', 'thread_id', 'provider_thread_id', 'kind'])) {
+      const hasNodes = has('n', ['node_id', 'thread_id', 'root_node_id', 'kind', 'provider_thread_id']);
+      const hasAttempts = has('a', ['thread_id', 'provider_thread_id', 'root_node_id', 'status', 'payload_json']);
+      readHistoricalOwnership = hasNodes && (!columns.a.size || hasAttempts);
+      if (!readHistoricalOwnership) ownershipIncomplete = true;
+      if (hasAttempts && hasNodes) {
         const history = `SELECT p.driver, 1 AS historical, ${instance('p')} AS instanceId,
             json_extract(${json('a')}, '$.nativeThreadId') AS nativeId, p.thread_id AS threadId${titleColumn}
           FROM ${names.a} a
@@ -320,9 +323,7 @@ function readT3SessionRelationResult(nativeIds, deps = {}) {
             AND t.deleted_at IS NULL AND ${strong}`;
         for (const row of db.prepare(history).all(idJson, uuidJson)) add(row);
       }
-      readHistoricalOwnership = has('n', ['node_id', 'thread_id', 'root_node_id', 'kind', 'provider_thread_id']);
-      if (!readHistoricalOwnership) {
-        ownershipIncomplete = true;
+      if (!hasNodes) {
         complete = true;
         continue;
       }

@@ -192,7 +192,10 @@ test('T3 Antigravity ACP displays its thread title and groups same-thread runs a
   assert.equal(deps.catalogProjects.today[`antigravity:${main}`], undefined);
 });
 
-test('a readable T3 store without a title column clears its cached Antigravity title', t => {
+for (const schema of [
+  'DROP TABLE orchestration_v2_projection_nodes',
+  'CREATE TABLE orchestration_v2_projection_run_attempts (thread_id TEXT)'
+]) test(`incomplete T3 ownership retains the cached Antigravity title: ${schema}`, t => {
   const s = store(t);
   s.thread('thread');
   s.provider('provider', 'thread', 'conversation', 'antigravity');
@@ -205,7 +208,7 @@ test('a readable T3 store without a title column clears its cached Antigravity t
   const before = periods();
   applySessionMetadata(before, s.home, deps);
   assert.equal(before.today.sessions[key].title, 'T3 title');
-  s.db.exec("DROP TABLE orchestration_v2_projection_nodes; DELETE FROM orchestration_v2_projection_provider_threads");
+  s.db.exec(schema + '; DELETE FROM orchestration_v2_projection_provider_threads');
   const incomplete = periods();
   applySessionMetadata(incomplete, s.home, deps);
   assert.equal(incomplete.today.sessions[key].title, 'T3 title', 'a missing historical schema makes absence inconclusive');
