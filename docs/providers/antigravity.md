@@ -49,7 +49,7 @@ The generated `antigravity-cache` directory is deliberately not watched. Token M
 
 ### Session titles and project resolution
 
-Antigravity session entries are joined against the local `conversation_summaries.db` SQLite database located under the Antigravity configuration roots (`~/.gemini/antigravity`, or paths specified via `ANTIGRAVITY_HOME`/`ANTIGRAVITY_DATA_DIR`) and the CLI root beside its `conversations` directory. The CLI root follows the collector's existing `GEMINI_CLI_HOME` path policy; IDE roots remain under the configured home's `.gemini` directory.
+Antigravity session entries are joined against the local `conversation_summaries.db` SQLite database located under the Antigravity configuration roots (`~/.gemini/antigravity`, or paths specified via `ANTIGRAVITY_HOME`/`ANTIGRAVITY_DATA_DIR`), the CLI root beside its `conversations` directory, and each discovered T3 Code `antigravity-acp` profile root beside its `conversations` directory. The CLI root follows the collector's existing `GEMINI_CLI_HOME` path policy, T3 ACP roots follow `T3CODE_HOME` (ignored for WSL lookups), and IDE roots remain under the configured home's `.gemini` directory.
 
 For each conversation ID:
 

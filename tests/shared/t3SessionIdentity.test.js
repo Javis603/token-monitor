@@ -34,11 +34,14 @@ test('historical Codex and Claude IDs require UUIDs while opaque ACP IDs retain 
 
 test('built-in drivers use explicit accounting clients and never inherit object properties', () => {
   const bindings = new Map([['codex', 'devin']]);
-  for (const [driver, client] of Object.entries({ codex: 'codex', claudeAgent: 'claude', cursor: 'cursor', opencode: 'opencode', grok: 'grok', muse: 'muse' })) {
+  for (const [driver, client] of Object.entries({
+    codex: 'codex', claudeAgent: 'claude', antigravity: 'antigravity',
+    kiro: 'kiro', cursor: 'cursor', opencode: 'opencode', grok: 'grok', muse: 'muse'
+  })) {
     assert.equal(t3AccountingClient(driver, 'codex', bindings), client);
     assert.equal(supportsT3SessionClient(client), true);
   }
-  for (const driver of ['unknown', 'constructor', 'toString', '__proto__']) {
+  for (const driver of ['unknown', 'pi', 'constructor', 'toString', '__proto__']) {
     assert.equal(t3AccountingClient(driver, 'codex', bindings), null);
     assert.equal(supportsT3SessionClient(driver), false);
   }

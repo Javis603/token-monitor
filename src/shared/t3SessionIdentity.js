@@ -6,8 +6,8 @@ const path = require('node:path');
 // T3 owns the relationship. These bindings only select the accounting client;
 // a strong native reference must still match an existing session exactly.
 const DRIVER_CLIENTS = Object.freeze({
-  codex: 'codex', claudeAgent: 'claude', cursor: 'cursor',
-  opencode: 'opencode', grok: 'grok', muse: 'muse'
+  codex: 'codex', claudeAgent: 'claude', antigravity: 'antigravity',
+  kiro: 'kiro', cursor: 'cursor', opencode: 'opencode', grok: 'grok', muse: 'muse'
 });
 const REGISTRY_CLIENTS = Object.freeze({
   'codex-acp': 'codex', 'claude-acp': 'claude', cursor: 'cursor',
