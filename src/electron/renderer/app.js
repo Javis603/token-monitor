@@ -6807,6 +6807,9 @@ async function warmFixedPeriodHistory(options = {}) {
 }
 
 function fixedPeriodMessage(snapshot, breakdown = '') {
+  if (state.stats?.nativeRangesPending && (breakdown === 'session' || breakdown === 'project')) {
+    return t(breakdown === 'session' ? 'periodRange.sessionLoading' : 'periodRange.projectLoading');
+  }
   if (snapshot?.status === 'loading') return t('periodRange.loading');
   if (breakdown === 'session') return t('periodRange.sessionUnavailable');
   if (breakdown === 'project') return t('periodRange.projectUnavailable');

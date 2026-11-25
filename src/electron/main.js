@@ -4953,6 +4953,9 @@ function primeLocalStatsFromAnchor(usageOptions, widgetProducerOwner) {
       projectsEnabled: usageOptions.projectsEnabled,
       customScanPaths: usageOptions.customScanPaths,
       wslScanEnabled: usageOptions.wslScanEnabled,
+      nativeRangesEnabled: usageOptions.nativeRangesEnabled,
+      weekStartsOn: usageOptions.weekStartsOn,
+      codexDotsVisible: usageOptions.codexDotsVisible,
       wslSupported: process.platform === 'win32',
       historyEnabled: usageOptions.historyEnabled,
       dailyHistoryArchiveEnabled: usageOptions.dailyHistoryArchiveEnabled,
@@ -4979,7 +4982,7 @@ function primeLocalStatsFromAnchor(usageOptions, widgetProducerOwner) {
   }
   anchorSeedDevice = visible;
   localDevice = visible;
-  localStats = withHistoryPreview(aggregateDevices([visible], 0), [visible]);
+  localStats = coldLocalStats(visible);
   // Through the normal publisher, not straight to the renderer: the tray reads
   // what sendPush sets, and in tray mode the window is hidden, so a seed that
   // only reached the renderer would leave the one visible surface on zero.
@@ -4993,6 +4996,12 @@ function primeLocalStatsFromAnchor(usageOptions, widgetProducerOwner) {
   }, { skipExport: true, deferToRenderer: true, widgetProducerOwner });
 }
 
+function coldLocalStats(device) {
+  const stats = withHistoryPreview(aggregateDevices([device], 0), [device]);
+  stats.nativeRangesPending = true;
+  return attachLocalNativeRanges(stats, device);
+}
+
 // The first scan holds its record back until all-time is in, which on a long
 // history is minutes after Today was ready. Show each window as it lands, over
 // the seed's last known values when there is one. Display only: nothing here is
@@ -5001,7 +5010,7 @@ function publishColdPreview(preview, reason, widgetProducerOwner) {
   if (lastCollectedDevice) return;
   const device = seedWithColdPreview(anchorSeedDevice || preview, preview);
   localDevice = device;
-  localStats = withHistoryPreview(aggregateDevices([device], 0), [device]);
+  localStats = coldLocalStats(device);
   sendPush({
     event: 'stats',
     data: { type: 'stats', reason, stats: localStats, at: new Date().toISOString() }
