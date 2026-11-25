@@ -283,7 +283,7 @@ function resolveSessionMetadata(sessionIds, context = {}) {
     const previousT3Title = previousT3Store ? retained : null;
     const match = t3Relations.get(key);
     const retainT3Title = previousT3Title && !ambiguous?.has(key)
-      && (t3Status === 'retryable' || !completedStores?.has(previousT3Store));
+      && (t3Status === 'retryable' || (match?.titleStore !== previousT3Store && !completedStores?.has(previousT3Store)));
     const t3Title = match?.title || (retainT3Title ? previousT3Title : null);
     if (t3Title) {
       result.set(sessionId, {

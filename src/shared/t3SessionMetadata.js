@@ -229,7 +229,6 @@ function readT3SessionRelationResult(nativeIds, deps = {}) {
   const completedStores = new Set();
   let ownershipRead = false;
   let ownershipIncomplete = false;
-  let delegationIncomplete = false;
   const names = {
     t: 'orchestration_v2_projection_threads',
     p: 'orchestration_v2_projection_provider_threads',
@@ -243,6 +242,7 @@ function readT3SessionRelationResult(nativeIds, deps = {}) {
     let db;
     let complete = false;
     let readTitle = false;
+    let readHistoricalOwnership = false;
     const facts = new Map();
     const conflicts = new Set();
     const parentConflicts = new Set();
@@ -284,7 +284,7 @@ function readT3SessionRelationResult(nativeIds, deps = {}) {
           facts.delete(key); conflicts.add(key);
         } else if (!facts.has(key)) {
           const title = client === 'antigravity' && readTitle ? cleanT3Title(row.title) : '';
-          facts.set(key, { threadId, ...(client === 'antigravity' && readTitle
+          facts.set(key, { threadId, ...(client === 'antigravity' && deps.includeAntigravityTitles
             ? { title: title && !T3_DEFAULT_TITLES.has(title.toLowerCase()) ? title : null, titleStore: file } : {}) });
         }
       };
@@ -320,8 +320,9 @@ function readT3SessionRelationResult(nativeIds, deps = {}) {
             AND t.deleted_at IS NULL AND ${strong}`;
         for (const row of db.prepare(history).all(idJson, uuidJson)) add(row);
       }
-      if (!has('n', ['node_id', 'thread_id', 'root_node_id', 'kind', 'provider_thread_id'])) {
-        if (facts.size) delegationIncomplete = true;
+      readHistoricalOwnership = has('n', ['node_id', 'thread_id', 'root_node_id', 'kind', 'provider_thread_id']);
+      if (!readHistoricalOwnership) {
+        ownershipIncomplete = true;
         complete = true;
         continue;
       }
@@ -391,7 +392,7 @@ function readT3SessionRelationResult(nativeIds, deps = {}) {
       if (db) { try { db.close(); } catch (_) {} }
       if (complete) {
         ownershipRead = true;
-        if (deps.includeAntigravityTitles) completedStores.add(file);
+        if (deps.includeAntigravityTitles && readHistoricalOwnership) completedStores.add(file);
         for (const key of conflicts) { out.delete(key); ambiguous.add(key); }
         for (const key of parentConflicts) ambiguousParents.add(key);
         for (const [key, fact] of facts) {
@@ -416,8 +417,7 @@ function readT3SessionRelationResult(nativeIds, deps = {}) {
   }
   return { facts: status === 'retryable' ? new Map() : out, status, ...(deps.includeAntigravityTitles ? { completedStores } : {}),
     ...(deps.includeOwnershipStatus ? {
-      ambiguous, ownershipComplete: ownershipRead && !ownershipIncomplete,
-      delegationComplete: ownershipRead && !ownershipIncomplete && !delegationIncomplete
+      ambiguous, ownershipComplete: ownershipRead && !ownershipIncomplete
     } : {}) };
 }
 

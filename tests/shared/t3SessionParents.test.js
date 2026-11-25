@@ -205,6 +205,12 @@ test('a readable T3 store without a title column clears its cached Antigravity t
   const before = periods();
   applySessionMetadata(before, s.home, deps);
   assert.equal(before.today.sessions[key].title, 'T3 title');
+  s.db.exec("DROP TABLE orchestration_v2_projection_nodes; DELETE FROM orchestration_v2_projection_provider_threads");
+  const incomplete = periods();
+  applySessionMetadata(incomplete, s.home, deps);
+  assert.equal(incomplete.today.sessions[key].title, 'T3 title', 'a missing historical schema makes absence inconclusive');
+  assert.equal(deps.metadataCache.get(key).t3ThreadRevoked, undefined);
+  s.provider('provider', 'thread', 'conversation', 'antigravity');
   s.db.exec('ALTER TABLE orchestration_v2_projection_threads DROP COLUMN title');
   const after = periods();
   applySessionMetadata(after, s.home, deps);
@@ -930,7 +936,7 @@ test('a saved Antigravity range gains the first verified T3 thread and parent', 
     allTimeSince: '2024-01-01', historyEnabled: false, limitsEnabled: false, wslScanEnabled: false,
     nativeRangesEnabled: true,
     onAnchorComputed: value => { captured = value; },
-    runTokscale: async () => ({ entries: ['parent-native', 'child-native'].map(sessionId =>
+    runTokscale: async () => ({ entries: ['parent-native', 'parent-local', 'child-native'].map(sessionId =>
       ({ client: 'antigravity', sessionId, model: 'm', input: 20 })) }) };
   const full = await collectUsageOnce(options);
   assert.equal(full.month.sessions[key].t3ThreadId, undefined);
@@ -939,14 +945,17 @@ test('a saved Antigravity range gains the first verified T3 thread and parent', 
   const daysAgo = days => new Date(date.getTime() - days * 86400000).toISOString().slice(0, 10);
   const starts = { yesterday: daysAgo(1), week: daysAgo((date.getUTCDay() + 6) % 7), last7: daysAgo(6), last30: daysAgo(29) };
   const nativePastRanges = { todayKey, weekStartsOn: 1, starts,
-    periods: Object.fromEntries(Object.keys(starts).map(name => [name, structuredClone(full.month)])) };
+    periods: Object.fromEntries(Object.keys(starts).map(name => [name, extractUsageFromTokscale({ entries: ['parent-local', 'child-native'].map(sessionId =>
+      ({ client: 'antigravity', sessionId, model: 'm', input: 20 })) })])) };
   pair(s, 'antigravity', 'antigravity');
+  s.provider('parent-local-provider', 'parent', 'parent-local', 'antigravity');
   const next = await collectUsageOnce({ ...options, todayOnlyAnchor: { dateKey: todayKey,
     today: full.today, month: full.month, allTime: full.allTime, todayPartitions: captured.todayPartitions,
     sessionIdentityVersion: captured.sessionIdentityVersion, nativePastRanges } });
+  assert.equal(next.allTime.sessions[key].parentSessionId, 'parent-native');
   for (const range of [next.nativeRanges.yesterday, captured.nativePastRanges.periods.yesterday]) {
     assert.equal(range.sessions[key].t3ThreadId, 'child');
-    assert.equal(range.sessions[key].parentSessionId, 'parent-native');
+    assert.equal(range.sessions[key].parentSessionId, 'parent-local');
     assert.equal(range.totalTokens, 40);
   }
 });

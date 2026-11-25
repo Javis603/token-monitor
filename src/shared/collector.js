@@ -1019,6 +1019,23 @@ function refreshT3SessionLinks(session, resolved) {
   if (resolved.t3ParentLink) session.t3ParentLink = true;
 }
 
+function rangeT3Parent(resolved, session, period, allTime) {
+  if (!resolved?.t3ParentLink || !resolved.parentSessionId) return resolved;
+  const parentKey = `${resolved.parentClient || resolved.client}:${resolved.parentSessionId}`;
+  const parentThread = allTime.sessions?.[parentKey]?.t3ThreadId;
+  if (!parentThread) return resolved;
+
+  // A range may contain an older run of the same verified parent thread.
+  const isLocalParent = key => period.sessions[key] !== session && period.sessions[key]?.totalTokens > 0
+    && allTime.sessions?.[key]?.t3ThreadId === parentThread;
+  const retainedParent = `${session.parentClient || session.client}:${session.parentSessionId}`;
+  const localKey = session.t3ParentLink && isLocalParent(retainedParent) ? retainedParent
+    : (isLocalParent(parentKey) ? parentKey : Object.keys(period.sessions).find(isLocalParent));
+  if (!localKey || localKey === parentKey) return resolved;
+  const parent = period.sessions[localKey];
+  return { ...resolved, parentSessionId: parent.sessionId, parentClient: parent.client === session.client ? undefined : parent.client };
+}
+
 // The process-wide rationing for cursor/antigravity syncs. Deliberately a single
 // module-scoped instance with no per-call override: the tokscale cache it guards
 // is one directory on disk, so a collector rebuilt by a settings change must
@@ -1620,7 +1637,8 @@ async function collectUsageOnce(options) {
           if (period.sessions[key]) revokeT3SessionLinks(period.sessions[key]);
         }
         for (const key of changedT3ThreadKeys) {
-          if (period.sessions[key]) refreshT3SessionLinks(period.sessions[key], allTime.sessions?.[key]);
+          const session = period.sessions[key];
+          if (session) refreshT3SessionLinks(session, rangeT3Parent(allTime.sessions?.[key], session, period, allTime));
         }
       }
       nativePastRanges = { ...nativePastRanges, periods };

@@ -397,7 +397,7 @@ function applyT3SessionParents(periods, home = os.homedir(), deps = {}, targets,
   const ids = new Map(children.map(session => [session, candidates(session)]));
   const nativeIds = [...new Set([...ids.values()].flat())];
   if (!nativeIds.length) return true;
-  const { facts: relations, status, delegationComplete } = readT3SessionRelationResult(nativeIds, {
+  const { facts: relations, status, ownershipComplete } = readT3SessionRelationResult(nativeIds, {
     ...deps, homeDir: home, useEnvRoot: deps.scopedHome !== true,
     includeOwnershipStatus: children.some(session => session.t3ParentLink)
   });
@@ -408,7 +408,7 @@ function applyT3SessionParents(periods, home = os.homedir(), deps = {}, targets,
     const matches = ids.get(session).map(id => relations.get(`${session.client}:${id}`)).filter(Boolean);
     const link = matches[0];
     if (link && matches.every(fact => fact.threadId === link.threadId)) {
-      if (session.t3ParentLink && (session.t3ThreadId !== link.threadId || delegationComplete)) {
+      if (session.t3ParentLink && (session.t3ThreadId !== link.threadId || ownershipComplete)) {
         delete session.parentSessionId;
         delete session.parentClient;
         delete session.t3ParentLink;
