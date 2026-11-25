@@ -64,7 +64,7 @@ test('the main settings IPC projection hides provider secrets while retaining co
     limitAccountFormsForRenderer,
   limitConnectionSourcesForRenderer, rendererOmittedAccountKeys, process: { env: {} },
     getSyncContentRuntime: () => ({ status: () => ({ enabled: {} }) }),
-    trayMenuLocale: () => 'en', windowsFontContext: () => undefined,
+    trayMenuLocale: () => 'en', collectorCalendarLocale: () => 'en-GB', SYNC_WEEK_STARTS_ON: 1, windowsFontContext: () => undefined,
     effectiveSubscriptions: () => [], subscriptionsAreShared: () => false,
     currentHubIdentity: () => 'local', subscriptionDocumentVersion: () => 0,
     subscriptionsDocumentFor: () => null, pendingOrphanedSubscriptions: () => [],

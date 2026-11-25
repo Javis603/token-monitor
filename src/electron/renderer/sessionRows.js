@@ -693,6 +693,7 @@
           key: `session:${key}`,
           kind: 'session',
           name: sessionTitle || titleParts.join(' · '),
+          projectLabel: textValue(session.projectLabel),
           modelLabel,
           modelTooltipEntries,
           subtitle: (sessionTitle ? titleParts : activityParts).join(' · '),
@@ -987,6 +988,16 @@
     });
   }
 
+  function sessionListRows(rows, options) {
+    // A project identifies a standalone row on the list. Group members and
+    // transcript headings still use the session's own title or tool/model.
+    return groupSessionRows(rows, options).map(row => {
+      if (row.kind !== 'session' || row.titled || !row.projectLabel) return row;
+      return { ...row, name: row.projectLabel, subtitle: row.name, activity: row.subtitle,
+        sessionDetailHeading: row.name };
+    });
+  }
+
   function sessionBreakdownIncomplete(stats, periodName) {
     const omitted = stats?.sessionDetailsOmitted || {};
     if (periodName === 'today') return finiteNumber(omitted.today) > 0;
@@ -1021,6 +1032,7 @@
     filterSessionRows,
     groupBackgroundReviewRows,
     groupSessionRows,
+    sessionListRows,
     groupSubagentRows,
     grokBotSessionIdsForMaps,
     isGrokBotSession,
