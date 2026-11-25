@@ -9145,7 +9145,11 @@ app.whenReady().then(() => {
   startAppUpdateBackgroundChecks();
 });
 
-app.on('second-instance', focusExistingWindow);
+app.on('second-instance', () => {
+  // Windows can dispatch this inside the native window constructor, before
+  // createWindow assigns mainWindow. Wait for that construction to return.
+  setImmediate(focusExistingWindow);
+});
 app.on('window-all-closed', () => {
   if (process.platform !== 'darwin' && !mainWindowHibernated) app.quit();
 });
