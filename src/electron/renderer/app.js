@@ -8602,8 +8602,13 @@ function setRendererSettings(next) {
   const titlesChanged = (state.settings?.sessionTitlesEnabled !== false) !== (next.sessionTitlesEnabled !== false);
   const animationChanged = tokenNumberAnimationApi.normalize(state.settings?.tokenNumberAnimation)
     !== tokenNumberAnimationApi.normalize(next.tokenNumberAnimation);
+  const restoringPeriodTabs = state.settings?.periodTabOrder?.length && !next.periodTabOrder?.length;
   state.settings = next;
   if (next.periodTabOrder?.length) ensureVisiblePeriod(next.periodTabOrder);
+  else if (restoringPeriodTabs && fixedPeriodRangesApi.slotForSelection(state.period) === 'month') {
+    const defaultPeriod = fixedPeriodRangesApi.normalizeMonthMode(next.periodMonthMode);
+    if (state.period !== defaultPeriod && setPeriod(defaultPeriod)) followOpenSessionToPeriod();
+  }
   if (animationChanged) {
     pluginViewHost?.refreshMotion();
     cancelNumberAnimation();
@@ -10675,51 +10680,66 @@ function clearPeriodDropMarker() {
   periodDropMarker = null;
 }
 
-for (const list of [shownPeriodTabs, availablePeriodTabs]) {
-  function dropOrder(event) {
-    if (!draggedPeriod || periodOrderSaving) return null;
+const periodTabDrag = rowDragControllerApi.createRowDragController({
+  axis: 'grid',
+  dragSort: verticalDragSortApi,
+  getList: () => shownPeriodTabs,
+  getScrollPanel: () => els.settingsPanel,
+  rowSelector: '.period-tab-chip',
+  idKey: 'period',
+  preserveScroll: preserveSettingsPanelScroll,
+  applyOrder: order => placePeriodChips(shownPeriodTabs, order),
+  previewOrderAt(x, y) {
+    const target = x === undefined ? null : document.elementFromPoint(x, y);
+    const canRemove = availablePeriodTabs.contains(target)
+      && shownPeriodOrder().length > fixedPeriodRangesApi.MIN_PERIOD_TABS;
+    if (canRemove) availablePeriodTabs.dataset.periodDrop = 'list';
+    else availablePeriodTabs.removeAttribute('data-period-drop');
+    return shownPeriodTabs.contains(target);
+  },
+  onDropOutside(event, period) {
+    const target = document.elementFromPoint(event.clientX, event.clientY);
+    if (shownPeriodTabs.contains(target)) return false;
     const order = shownPeriodOrder();
-    const shown = order.includes(draggedPeriod);
-    const next = order.filter(period => period !== draggedPeriod);
-    if (list === availablePeriodTabs) {
-      return shown && order.length > fixedPeriodRangesApi.MIN_PERIOD_TABS ? next : null;
+    if (availablePeriodTabs.contains(target) && order.length > fixedPeriodRangesApi.MIN_PERIOD_TABS) {
+      void savePeriodTabOrder(order.filter(id => id !== period), period);
     }
-    if (!shown && order.length >= fixedPeriodRangesApi.MAX_PERIOD_TABS) return null;
-    const target = event.target.closest('.period-tab-chip');
-    if (target?.dataset.period === draggedPeriod) return null;
-    const rect = target?.getBoundingClientRect();
-    const after = rect && event.clientX >= rect.left + rect.width / 2;
-    const index = target ? next.indexOf(target.dataset.period) + Number(after) : next.length;
-    next.splice(index, 0, draggedPeriod);
-    return next;
-  }
+    return true;
+  },
+  mirrorOrder: () => { periodOrderSaving = true; },
+  persistOrder: (order, period) => void savePeriodTabOrder(order, period),
+  requestRender: syncPeriodTabSettings
+});
 
-  list.addEventListener('dragover', event => {
-    clearPeriodDropMarker();
-    if (!dropOrder(event)) return;
-    event.preventDefault();
-    event.dataTransfer.dropEffect = 'move';
-    const chip = list === shownPeriodTabs ? event.target.closest('.period-tab-chip') : null;
-    periodDropMarker = chip || list;
-    const rect = chip?.getBoundingClientRect();
-    periodDropMarker.dataset.periodDrop = rect ? (event.clientX < rect.left + rect.width / 2 ? 'before' : 'after') : 'list';
-  });
-  list.addEventListener('dragleave', event => {
-    if (!list.contains(event.relatedTarget)) clearPeriodDropMarker();
-  });
-  list.addEventListener('drop', event => {
-    const next = dropOrder(event);
-    clearPeriodDropMarker();
-    if (!next) return;
-    event.preventDefault();
-    const period = draggedPeriod;
-    draggedPeriod = '';
-    const current = shownPeriodOrder();
-    if (next.length !== current.length || next.some((id, index) => id !== current[index])) {
-      void savePeriodTabOrder(next, period);
-    }
-  });
+function periodInsertionTarget(event) {
+  const chip = event.target.closest('.period-tab-chip');
+  if (!chip) return { chip: shownPeriodTabs, edge: 'list' };
+  const rect = chip.getBoundingClientRect();
+  return { chip, edge: event.clientX < rect.left + rect.width / 2 ? 'before' : 'after' };
 }
+
+shownPeriodTabs.addEventListener('dragover', event => {
+  clearPeriodDropMarker();
+  if (!draggedPeriod || periodOrderSaving || shownPeriodOrder().length >= fixedPeriodRangesApi.MAX_PERIOD_TABS) return;
+  event.preventDefault();
+  event.dataTransfer.dropEffect = 'move';
+  const { chip, edge } = periodInsertionTarget(event);
+  periodDropMarker = chip;
+  chip.dataset.periodDrop = edge;
+});
+shownPeriodTabs.addEventListener('dragleave', event => {
+  if (!shownPeriodTabs.contains(event.relatedTarget)) clearPeriodDropMarker();
+});
+shownPeriodTabs.addEventListener('drop', event => {
+  clearPeriodDropMarker();
+  const order = [...shownPeriodOrder()];
+  if (!draggedPeriod || periodOrderSaving || order.length >= fixedPeriodRangesApi.MAX_PERIOD_TABS) return;
+  event.preventDefault();
+  const { chip, edge } = periodInsertionTarget(event);
+  const index = edge === 'list' ? order.length : order.indexOf(chip.dataset.period) + Number(edge === 'after');
+  order.splice(index, 0, draggedPeriod);
+  void savePeriodTabOrder(order, draggedPeriod);
+});
 
 function shownPeriodOrder() {
   const custom = state.settings?.periodTabOrder;
@@ -10770,9 +10790,14 @@ const periodChips = new Map(fixedPeriodRangesApi.PERIOD_TAB_OPTIONS.map(period =
   chip.className = 'tab period-tab-chip';
   chip.dataset.period = period;
   chip.append(document.createElement('span'));
-  chip.draggable = true;
+  chip.addEventListener('pointerdown', event => {
+    if (!periodOrderSaving && chip.parentElement === shownPeriodTabs) {
+      chip.querySelector('.limit-detail-tooltip:popover-open')?.hidePopover();
+      periodTabDrag.startRowDrag(event, period);
+    }
+  });
   chip.addEventListener('dragstart', event => {
-    if (periodOrderSaving || (chip.parentElement === availablePeriodTabs && chip.getAttribute('aria-disabled') === 'true')) {
+    if (periodOrderSaving || chip.parentElement !== availablePeriodTabs || chip.getAttribute('aria-disabled') === 'true') {
       event.preventDefault();
       return;
     }
@@ -10789,13 +10814,13 @@ const periodChips = new Map(fixedPeriodRangesApi.PERIOD_TAB_OPTIONS.map(period =
     syncPeriodTabSettings();
   });
   chip.addEventListener('click', () => {
-    if (periodOrderSaving || chip.getAttribute('aria-disabled') === 'true') return;
+    if (periodOrderSaving || draggedPeriod || periodTabDrag.isDragging() || chip.getAttribute('aria-disabled') === 'true') return;
     const order = shownPeriodOrder();
     const next = order.includes(period) ? order.filter(id => id !== period) : [...order, period];
     void savePeriodTabOrder(next, period);
   });
   chip.addEventListener('keydown', event => {
-    if (!event.altKey || periodOrderSaving || chip.parentElement !== shownPeriodTabs) return;
+    if (!event.altKey || periodOrderSaving || draggedPeriod || periodTabDrag.isDragging() || chip.parentElement !== shownPeriodTabs) return;
     const offset = event.key === 'ArrowLeft' ? -1 : event.key === 'ArrowRight' ? 1 : 0;
     if (!offset) return;
     event.preventDefault();
@@ -10810,7 +10835,7 @@ const periodChips = new Map(fixedPeriodRangesApi.PERIOD_TAB_OPTIONS.map(period =
 }));
 
 function syncPeriodTabSettings() {
-  if (periodOrderSaving || draggedPeriod) return;
+  if (periodOrderSaving || draggedPeriod || periodTabDrag.deferRender()) return;
   const order = shownPeriodOrder();
   const available = fixedPeriodRangesApi.PERIOD_TAB_OPTIONS.filter(period => !order.includes(period));
   placePeriodChips(shownPeriodTabs, order);
@@ -10821,6 +10846,7 @@ function syncPeriodTabSettings() {
     const countLimit = shown ? fixedPeriodRangesApi.MIN_PERIOD_TABS : fixedPeriodRangesApi.MAX_PERIOD_TABS;
     chip.firstElementChild.textContent = fixedPeriodRangesApi.displayLabel(period);
     syncPeriodButtonName(chip, period, { tooltip: true });
+    chip.draggable = !shown;
     chip.setAttribute('aria-pressed', String(shown));
     chip.setAttribute('aria-disabled', String(order.length === countLimit));
     if (shown) chip.setAttribute('aria-keyshortcuts', 'Alt+ArrowLeft Alt+ArrowRight');
@@ -10829,7 +10855,7 @@ function syncPeriodTabSettings() {
 }
 
 resetPeriodTabs.addEventListener('click', () => {
-  if (!periodOrderSaving && !draggedPeriod) void savePeriodTabOrder([], 'today');
+  if (!periodOrderSaving && !draggedPeriod && !periodTabDrag.isDragging()) void savePeriodTabOrder([], 'today');
 });
 
 function ensureVisiblePeriod(order) {

@@ -8995,7 +8995,22 @@ html.native-liquid-glass .view-switcher-menu-item { border-radius: 9px; }
 .period-tab-chip:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
 .period-tab-list:not(.period-tab-list-shown) > .period-tab-chip[aria-disabled="true"] { cursor: default; }
 .period-tab-chip[draggable="true"]:not([aria-disabled="true"]) { cursor: grab; }
-.period-tab-chip.dragging { opacity: .5; }
+.period-tab-list-shown.is-reordering { overflow-anchor: none; }
+.period-tab-list-shown.drag-active > .period-tab-chip {
+  transform: translate(var(--drag-shift-x, 0px), var(--drag-shift-y, 0px));
+  transition: transform 160ms var(--ease-out, ease);
+}
+.period-tab-list-shown.drag-active > .period-tab-chip.dragging {
+  z-index: 2;
+  pointer-events: none;
+  transform: translate(var(--drag-x, 0px), var(--drag-y, 0px));
+  transition: none;
+}
+@media (prefers-reduced-motion: reduce) {
+  :root:not([data-reduce-motion="off"]) .period-tab-list-shown.drag-active > .period-tab-chip { transition: none; }
+}
+:root[data-reduce-motion="on"] .period-tab-list-shown.drag-active > .period-tab-chip { transition: none; }
+.period-tab-list:not(.period-tab-list-shown) > .period-tab-chip.dragging { opacity: .5; }
 .period-tab-chip[data-period-drop="before"] { box-shadow: -2px 0 var(--accent); }
 .period-tab-chip[data-period-drop="after"] { box-shadow: 2px 0 var(--accent); }
 .period-tab-list[data-period-drop="list"] { outline: 1px solid var(--accent); outline-offset: 1px; }
