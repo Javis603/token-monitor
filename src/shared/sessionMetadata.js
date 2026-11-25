@@ -22,8 +22,8 @@ const workbuddySession = require('./providers/workbuddy/sessionMetadata');
 const devinSessionMetadata = require('./providers/devin/sessionMetadata');
 const grokSessionMetadata = require('./providers/grok/sessionMetadata');
 const zcodeSessionMetadata = require('./providers/zcode/sessionMetadata');
-const { readT3SessionRelationResult } = require('./t3SessionMetadata');
-const { supportsT3SessionClient, nativeAccountingId } = require('./t3SessionIdentity');
+const { readT3SessionRelationResult } = require('./t3/sessionMetadata');
+const { revokeT3SessionLinks, supportsT3SessionClient, nativeAccountingId } = require('./t3/sessionIdentity');
 
 function isoFromDate(value) {
   const date = value instanceof Date ? value : new Date(value || '');
@@ -397,18 +397,43 @@ function applyT3SessionParents(periods, home = os.homedir(), deps = {}, targets,
   const ids = new Map(children.map(session => [session, candidates(session)]));
   const nativeIds = [...new Set([...ids.values()].flat())];
   if (!nativeIds.length) return true;
-  const { facts: relations, status } = readT3SessionRelationResult(nativeIds, { ...deps, homeDir: home, useEnvRoot: deps.scopedHome !== true });
-  if (status === 'retryable') return false;
-  if (!relations.size) return true;
+  const { facts: relations, status, ownershipComplete, ambiguous, incompleteNativeIds, incompleteParentThreads } = readT3SessionRelationResult(nativeIds, {
+    ...deps, homeDir: home, useEnvRoot: deps.scopedHome !== true,
+    includeOwnershipStatus: Boolean(deps.completeT3ParentRows) || children.some(session => session.t3ThreadId || session.t3ParentLink)
+  });
   const links = new Map();
+  const ownershipIsComplete = session =>
+    ownershipComplete && !ids.get(session).some(id => incompleteNativeIds.has(id));
+  const parentReadIsComplete = (session, link) =>
+    ownershipIsComplete(session) && !incompleteParentThreads.has(link.threadId);
   for (const session of children) {
-    const matches = ids.get(session).map(id => relations.get(`${session.client}:${id}`)).filter(Boolean);
+    const nativeKeys = ids.get(session).map(id => `${session.client}:${id}`);
+    const matches = nativeKeys.map(key => relations.get(key)).filter(Boolean);
     const link = matches[0];
-    if (link && matches.every(fact => fact.threadId === link.threadId)) session.t3ThreadId = link.threadId;
+    const conflict = nativeKeys.some(key => ambiguous?.has(key))
+      || matches.some(fact => fact.threadId !== link.threadId);
+    if ((session.t3ThreadId || session.t3ParentLink)
+      && (conflict || (session.client !== 'antigravity' && nativeKeys.length && !link && ownershipIsComplete(session)))) {
+      revokeT3SessionLinks(session);
+      deps.revokedT3ThreadKeys?.add(`${session.client}:${session.sessionId}`);
+      continue;
+    }
+    if (conflict) continue;
+    if (link && matches.every(fact => fact.threadId === link.threadId)) {
+      const completeParentRead = parentReadIsComplete(session, link);
+      if (completeParentRead) deps.completeT3ParentRows?.add(session);
+      if (session.t3ParentLink && (session.t3ThreadId !== link.threadId || (!link.parentThreadId && completeParentRead))) {
+        delete session.parentSessionId;
+        delete session.parentClient;
+        delete session.t3ParentLink;
+      }
+      session.t3ThreadId = link.threadId;
+    }
     // Native links, including Codex reviews, take precedence over app links.
-    if (!session.parentSessionId && link?.parentThreadId
+    if ((!session.parentSessionId || session.t3ParentLink) && link?.parentThreadId
       && matches.every(fact => fact.parentThreadId === link.parentThreadId)) links.set(session, link);
   }
+  if (status === 'retryable') return false;
   if (!links.size) return true;
   // History is parent evidence, never an additional lookup target on a watch
   // tick. Build only the requested parent indexes, and only when a link needs
@@ -440,6 +465,9 @@ function applyT3SessionParents(periods, home = os.homedir(), deps = {}, targets,
     for (const session of sessions(period)) {
       const link = links.get(session);
       if (!link) continue;
+      const retainedParent = session.t3ParentLink
+        && period.sessions?.[`${session.parentClient || session.client}:${session.parentSessionId}`];
+      if (retainedParent?.t3ThreadId === link.parentThreadId) continue;
       local ||= index([evidencePeriods?.[name], period]);
       const key = `${link.parentClient}:${link.parentNativeId}`;
       let parent = local.native.get(key) || local.app.get(link.parentThreadId);
@@ -447,10 +475,18 @@ function applyT3SessionParents(periods, home = os.homedir(), deps = {}, targets,
         fallback ||= index([...Object.values(evidencePeriods || {}), ...Object.values(periods || {})]);
         parent = fallback.native.get(key) || fallback.app.get(link.parentThreadId);
       }
-      if (!parent || (parent.client === session.client && parent.sessionId === session.sessionId)) continue;
+      if (!parent || (parent.client === session.client && parent.sessionId === session.sessionId)) {
+        if (session.t3ParentLink && parentReadIsComplete(session, link)) {
+          delete session.parentSessionId;
+          delete session.parentClient;
+          delete session.t3ParentLink;
+        }
+        continue;
+      }
       session.parentSessionId = parent.sessionId;
       if (parent.client !== session.client) session.parentClient = parent.client;
       else delete session.parentClient;
+      session.t3ParentLink = true;
     }
   }
   return true;

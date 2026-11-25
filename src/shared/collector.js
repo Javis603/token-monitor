@@ -88,7 +88,8 @@ const { kimiWorkSessionsRoots } = require('./providers/kimi/sessionMetadata');
 const { sessionActivityProvidersFor, refreshSessionActivity } = require('./sessionActivityRegistry');
 const { isSessionActivityClient } = require('./sessionActivityProviders');
 const { normalizeReasoningEffort, isSessionReasoningEffortClient } = require('./sessionLive');
-const { readT3Activities } = require('./t3SessionActivity');
+const { readT3Activities } = require('./t3/sessionActivity');
+const { revokeT3SessionLinks, supportsT3SessionClient } = require('./t3/sessionIdentity');
 const { createProcessStartBatch } = require('./processStarts');
 const { catpawSourcesFingerprint } = require('./providers/catpaw/paths');
 const { readLocalUsageView, resolveLocalUsagePricing } = require('./providers/codex/localUsage');
@@ -888,13 +889,19 @@ function propagateTodayProjects(today, periods, titleMetadata = {}) {
       // stays; one whose parent has no usage left there (its rollout was
       // deleted, say) yields to the fresh link when that one resolves.
       if (session.nativeSessionId) target.nativeSessionId = session.nativeSessionId;
-      if (session.t3ThreadId) target.t3ThreadId = session.t3ThreadId;
+      if (session.t3ThreadId && !target.t3ParentLink) target.t3ThreadId = session.t3ThreadId;
       const parentClient = session.parentClient || session.client;
       const targetParentClient = target.parentClient || target.client;
-      if (session.parentSessionId && (session.parentSessionId !== target.parentSessionId || parentClient !== targetParentClient)
-        && (!target.parentSessionId || (!sessionHasPeriodUsage(period, targetParentClient, target.parentSessionId)
-          && sessionHasPeriodUsage(period, parentClient, session.parentSessionId)))) {
+      if (session.parentSessionId && ((target.t3ParentLink && !session.t3ParentLink
+        && (parentClient === targetParentClient && session.parentSessionId === target.parentSessionId
+          || sessionHasPeriodUsage(period, parentClient, session.parentSessionId)
+          || !sessionHasPeriodUsage(period, targetParentClient, target.parentSessionId)))
+        || ((session.parentSessionId !== target.parentSessionId || parentClient !== targetParentClient)
+          && (!target.parentSessionId || (!sessionHasPeriodUsage(period, targetParentClient, target.parentSessionId)
+            && sessionHasPeriodUsage(period, parentClient, session.parentSessionId)))))) {
         target.parentSessionId = session.parentSessionId;
+        if (session.t3ParentLink) target.t3ParentLink = true;
+        else delete target.t3ParentLink;
         if (parentClient !== target.client) target.parentClient = parentClient;
         else delete target.parentClient;
       }
@@ -952,7 +959,7 @@ function propagateTodayProjects(today, periods, titleMetadata = {}) {
 // Yesterday is a closed day: it takes a session's current title, project and
 // links, but its times, context and turn state stay those of that day.
 const PAST_DAY_IDENTITY_FIELDS = Object.freeze([
-  'title', 'projectId', 'projectLabel', 'sessionKind', 'nativeSessionId', 't3ThreadId', 'parentSessionId', 'parentClient'
+  'title', 'projectId', 'projectLabel', 'sessionKind', 'nativeSessionId', 't3ThreadId', 'parentSessionId', 'parentClient', 't3ParentLink'
 ]);
 
 function propagateIdentity(source, periods, titleMetadata) {
@@ -971,6 +978,59 @@ function propagateIdentity(source, periods, titleMetadata) {
       }
     }
   }
+}
+
+function copySessionLinks(source, target, { preserveRangeParents = false } = {}) {
+  for (const [key, session] of Object.entries(target?.sessions || {})) {
+    const resolved = source?.sessions?.[key];
+    for (const field of ['nativeSessionId', 't3ThreadId']) {
+      if (resolved?.[field]) session[field] = resolved[field];
+    }
+    if (resolved?.parentSessionId) {
+      if (preserveRangeParents
+        && sessionHasPeriodUsage(target, session.parentClient || session.client, session.parentSessionId)) continue;
+      session.parentSessionId = resolved.parentSessionId;
+      if (resolved.t3ParentLink) session.t3ParentLink = true;
+      else delete session.t3ParentLink;
+      if (resolved.parentClient && resolved.parentClient !== session.client) session.parentClient = resolved.parentClient;
+      else delete session.parentClient;
+    }
+  }
+}
+
+function t3SessionLinksChanged(session, resolved) {
+  return Boolean(resolved?.t3ThreadId && (session.t3ThreadId !== resolved.t3ThreadId
+    || ((session.t3ParentLink || resolved.t3ParentLink)
+      && (session.parentSessionId !== resolved.parentSessionId || session.parentClient !== resolved.parentClient
+        || Boolean(session.t3ParentLink) !== Boolean(resolved.t3ParentLink)))));
+}
+
+function refreshT3SessionLinks(session, resolved, revoked = false) {
+  if (!revoked && !t3SessionLinksChanged(session, resolved)) return;
+  const hadT3Parent = session.t3ParentLink;
+  revokeT3SessionLinks(session);
+  if (!revoked) session.t3ThreadId = resolved.t3ThreadId;
+  if (session.parentSessionId || !resolved?.parentSessionId || (revoked && (!hadT3Parent || resolved.t3ParentLink))) return;
+  session.parentSessionId = resolved.parentSessionId;
+  if (resolved.parentClient) session.parentClient = resolved.parentClient;
+  if (resolved.t3ParentLink) session.t3ParentLink = true;
+}
+
+function rangeT3Parent(resolved, session, period, allTime) {
+  if (!resolved?.t3ParentLink || !resolved.parentSessionId) return resolved;
+  const parentKey = `${resolved.parentClient || resolved.client}:${resolved.parentSessionId}`;
+  const parentThread = allTime.sessions?.[parentKey]?.t3ThreadId;
+  if (!parentThread) return resolved;
+
+  // A range may contain an older run of the same verified parent thread.
+  const isLocalParent = key => period.sessions[key] !== session && period.sessions[key]?.totalTokens > 0
+    && allTime.sessions?.[key]?.t3ThreadId === parentThread;
+  const retainedParent = `${session.parentClient || session.client}:${session.parentSessionId}`;
+  const localKey = session.t3ParentLink && isLocalParent(retainedParent) ? retainedParent
+    : (isLocalParent(parentKey) ? parentKey : Object.keys(period.sessions).find(isLocalParent));
+  if (!localKey || localKey === parentKey) return resolved;
+  const parent = period.sessions[localKey];
+  return { ...resolved, parentSessionId: parent.sessionId, parentClient: parent.client === session.client ? undefined : parent.client };
 }
 
 // The process-wide rationing for cursor/antigravity syncs. Deliberately a single
@@ -1293,6 +1353,9 @@ async function collectUsageOnce(options) {
     invalidatedTitleKeys: new Set(),
     t3Titles: {},
     catalogTitleSources: {},
+    revokedT3ThreadKeys: new Set(),
+    changedT3ThreadKeys: new Set(),
+    completeT3ParentRows: new WeakSet(),
     catalogProjects: { today: {}, month: {}, allTime: {}, labels: {} },
     catalogProjectRows: new WeakSet()
     // dshSessionFileCache is deliberately NOT reset here: it's module-level
@@ -1506,6 +1569,47 @@ async function collectUsageOnce(options) {
         for (const period of [today, month, allTime]) if (period.sessions?.[key]) targets.add(period.sessions[key]);
       }
       sessionIdentitiesComplete = applyT3SessionParents({ today, month, allTime }, options.homeDir || os.homedir(), localSessionMetadataDeps, targets);
+      // A verified conflict can revoke a link even when another store is locked.
+      for (const key of Object.keys(today.sessions || {})) {
+        const currentToday = today.sessions[key];
+        const metadata = localSessionMetadataDeps.metadataCache.get(key);
+        const revoked = metadata?.t3ThreadRevoked || localSessionMetadataDeps.revokedT3ThreadKeys.has(key);
+        if (revoked) {
+          for (const period of [today, month, allTime, ...Object.values(todayPartitions)]) {
+            const retained = period.sessions?.[key];
+            if (!retained?.t3ThreadId && !retained?.t3ParentLink) continue;
+            revokeT3SessionLinks(retained);
+            localSessionMetadataDeps.revokedT3ThreadKeys.add(key);
+          }
+        }
+        const broader = [[anchor.month, month], [anchor.allTime, allTime]];
+        // A period-local T3 alias can keep its place while it is verified.
+        // If reconciliation removed it, fall back to the native observation.
+        if (currentToday.parentSessionId && !currentToday.t3ParentLink) {
+          for (const [saved, current] of broader) {
+            const retained = current.sessions?.[key];
+            if (!saved?.sessions?.[key]?.t3ParentLink || !retained || retained.parentSessionId) continue;
+            retained.parentSessionId = currentToday.parentSessionId;
+            if (currentToday.parentClient) retained.parentClient = currentToday.parentClient;
+          }
+        }
+        // An untouched client partition can still carry a stale T3 edge
+        // into the next targeted tick when the lookup becomes inconclusive.
+        const partitionRow = todayPartitions[currentToday.client]?.sessions?.[key];
+        if (partitionRow && !revoked) refreshT3SessionLinks(partitionRow, currentToday);
+        const savedToday = anchor.today?.sessions?.[key];
+        // Fresh scans lack the old T3 edge even if the relationship read
+        // could not confirm its removal. Persist only verified changes.
+        const todayLinkChanged = savedToday && t3SessionLinksChanged(savedToday, currentToday)
+          && (savedToday.t3ThreadId !== currentToday.t3ThreadId || currentToday.parentSessionId
+            || localSessionMetadataDeps.completeT3ParentRows.has(currentToday));
+        if (!revoked && supportsT3SessionClient(currentToday.client)
+          && (todayLinkChanged
+          || broader.some(([saved, current]) => {
+            const retained = saved?.sessions?.[key];
+            return retained && t3SessionLinksChanged(retained, current.sessions?.[key]);
+          }))) localSessionMetadataDeps.changedT3ThreadKeys.add(key);
+      }
     } else {
       sessionIdentitiesComplete = decorateLocalPeriods({ today, month, allTime }, { retryMisses: true });
     }
@@ -1528,13 +1632,35 @@ async function collectUsageOnce(options) {
     ? options.weekStartsOn
     : 1;
   const todayKey = localTodayKey(collectedAt);
-  if (options.nativeRangesEnabled !== true) {
+  const upgradeRangeLinks = anchorUsed && sessionIdentitiesComplete && anchor.sessionIdentityVersion !== SESSION_IDENTITY_VERSION;
+  const changedT3ThreadKeys = localSessionMetadataDeps.changedT3ThreadKeys;
+  const refreshRangeLinks = changedT3ThreadKeys.size || localSessionMetadataDeps.revokedT3ThreadKeys.size;
+  if (options.nativeRangesEnabled !== true && !upgradeRangeLinks && !refreshRangeLinks) {
     // Another collector may share this anchor; only one that shows native
     // ranges reuses or publishes them.
   } else if (anchorUsed) {
     // The anchor belongs to this date (see anchorUsed). Its past days are over.
     // A persisted copy is checked like any other saved input.
-    nativePastRanges = matchingNativePastRanges(anchor.nativePastRanges, todayKey, weekStartsOn);
+    const revokedLinks = localSessionMetadataDeps.revokedT3ThreadKeys;
+    nativePastRanges = matchingNativePastRanges(anchor.nativePastRanges, todayKey,
+      upgradeRangeLinks || refreshRangeLinks ? anchor.nativePastRanges?.weekStartsOn : weekStartsOn);
+    if ((upgradeRangeLinks || refreshRangeLinks) && nativePastRanges) {
+      const periods = Object.fromEntries(Object.entries(nativePastRanges.periods).map(([name, period]) => [name, {
+        ...period,
+        sessions: Object.fromEntries(Object.entries(period.sessions || {}).map(([key, row]) => [key, { ...row }]))
+      }]));
+      for (const period of Object.values(periods)) {
+        if (upgradeRangeLinks) copySessionLinks(allTime, period, { preserveRangeParents: true });
+        for (const key of revokedLinks) {
+          if (period.sessions[key]) refreshT3SessionLinks(period.sessions[key], allTime.sessions?.[key], true);
+        }
+        for (const key of changedT3ThreadKeys) {
+          const session = period.sessions[key];
+          if (session) refreshT3SessionLinks(session, rangeT3Parent(allTime.sessions?.[key], session, period, allTime));
+        }
+      }
+      nativePastRanges = { ...nativePastRanges, periods };
+    }
   } else if (nativeDays) {
     const periods = {};
     const starts = {};
@@ -1688,12 +1814,13 @@ async function collectUsageOnce(options) {
   }
 
   const codexDotsUsage = Boolean(codexLocalView?.sessionKeys?.length && periodHasUsage(codexLocalView.allTime));
-  const nativeRangeSnapshot = composeNativeRanges(nativePastRanges, today, {
-    allTimeSince,
-    wslAllTime: wslBundle.allTime,
-    codexDotsUsage,
-    titleMetadata: { ...localSessionMetadataDeps, t3Titles: anchor?.t3Titles, scanTitleClears }
-  });
+  const nativeRangeSnapshot = options.nativeRangesEnabled === true && nativePastRanges?.weekStartsOn === weekStartsOn
+    ? composeNativeRanges(nativePastRanges, today, {
+      allTimeSince,
+      wslAllTime: wslBundle.allTime,
+      codexDotsUsage,
+      titleMetadata: { ...localSessionMetadataDeps, t3Titles: anchor?.t3Titles, scanTitleClears }
+    }) : null;
 
   // One filesystem probe per tick, shared by the legacy status and the health
   // record below. Probing twice cost a second pass over every client's roots —
@@ -1783,6 +1910,8 @@ async function collectUsageOnce(options) {
       todayPartitions,
       t3Titles,
       catalogTitleSources,
+      revokedT3ThreadKeys: [...localSessionMetadataDeps.revokedT3ThreadKeys],
+      changedT3ThreadKeys: [...changedT3ThreadKeys],
       catalogProjects,
       wslBundle,
       wslStatus,
@@ -2185,7 +2314,7 @@ function collectorAnchorTrust(saved, options = {}) {
 // valid, so a long-running session periodically rescans month/allTime
 // and picks up any changes that the delta-derivation might miss.
 const FULL_SCAN_INTERVAL_MS = 60 * 60 * 1000;
-const SESSION_IDENTITY_VERSION = 2;
+const SESSION_IDENTITY_VERSION = 3;
 
 // Ceiling on how long an unbroken run of watch events may keep deferring the
 // tick. Every event clears the pending debounce timer and re-arms a fresh one,
@@ -2856,21 +2985,25 @@ function startCollector(options) {
         const identitiesUpgraded = anchor.sessionIdentityVersion !== captured.sessionIdentityVersion;
         if (identitiesUpgraded) {
           for (const period of ['today', 'month', 'allTime']) {
-            for (const [key, session] of Object.entries(anchor[period]?.sessions || {})) {
-              const resolved = captured.windowsPeriods[period]?.sessions?.[key];
-              for (const field of ['nativeSessionId', 't3ThreadId']) {
-                if (resolved?.[field]) session[field] = resolved[field];
-              }
-              // Commit the confirmed link with its namespace before advancing
-              // the migration version; later watch ticks do not revisit history.
-              if (resolved?.parentSessionId) {
-                session.parentSessionId = resolved.parentSessionId;
-                if (resolved.parentClient && resolved.parentClient !== session.client) session.parentClient = resolved.parentClient;
-                else delete session.parentClient;
-              }
+            copySessionLinks(captured.windowsPeriods[period], anchor[period]);
+          }
+          if (captured.nativePastRanges) anchor.nativePastRanges = captured.nativePastRanges;
+          anchor.sessionIdentityVersion = captured.sessionIdentityVersion;
+        }
+        const revokedLinks = captured.revokedT3ThreadKeys || [];
+        const changedLinks = captured.changedT3ThreadKeys || [];
+        if (revokedLinks.length || changedLinks.length) {
+          for (const period of ['today', 'month', 'allTime']) {
+            for (const key of revokedLinks) {
+              const row = anchor[period]?.sessions?.[key];
+              if (row) refreshT3SessionLinks(row, captured.windowsPeriods[period]?.sessions?.[key], true);
+            }
+            for (const key of changedLinks) {
+              const row = anchor[period]?.sessions?.[key];
+              if (row) refreshT3SessionLinks(row, captured.windowsPeriods[period]?.sessions?.[key]);
             }
           }
-          anchor.sessionIdentityVersion = captured.sessionIdentityVersion;
+          if (captured.nativePastRanges) anchor.nativePastRanges = captured.nativePastRanges;
         }
         // Keep the rolling per-client today partitions fresh for targeted
         // watch ticks. WSL stays independently frozen between interval ticks.
@@ -2920,7 +3053,9 @@ function startCollector(options) {
           wslAnchor = captured.wslBundle;
           wslStatusAnchor = captured.wslStatus || null;
         }
-        if (titlesChanged || projectsChanged || sourcesChanged || identitiesUpgraded) persistAnchor(tickPricingRevision, tickSourceRevision);
+        if (titlesChanged || projectsChanged || sourcesChanged || identitiesUpgraded || revokedLinks.length || changedLinks.length) {
+          persistAnchor(tickPricingRevision, tickSourceRevision);
+        }
       }
       const transformedSummary = await onUpdate?.(summary, reason);
       if (tickCursorSnapshot) publishedCursorRevision = tickCursorSnapshot.revision;

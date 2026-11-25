@@ -121,6 +121,7 @@
       if (!linked.parentSessionId && previous.parentSessionId) {
         linked.parentSessionId = previous.parentSessionId;
         if (previous.parentClient) linked.parentClient = previous.parentClient;
+        if (previous.t3ParentLink) linked.t3ParentLink = true;
       }
       return [key, linked];
     }));
