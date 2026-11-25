@@ -53,4 +53,12 @@ function t3AccountingClient(driver, instanceId, bindings) {
     : (Object.hasOwn(DRIVER_CLIENTS, driver) ? DRIVER_CLIENTS[driver] : null);
 }
 
-module.exports = { supportsT3SessionClient, nativeAccountingId, readT3IdentityBindings, t3AccountingClient };
+function revokeT3SessionLinks(session) {
+  delete session.t3ThreadId;
+  if (!session.t3ParentLink) return;
+  delete session.parentSessionId;
+  delete session.parentClient;
+  delete session.t3ParentLink;
+}
+
+module.exports = { revokeT3SessionLinks, supportsT3SessionClient, nativeAccountingId, readT3IdentityBindings, t3AccountingClient };

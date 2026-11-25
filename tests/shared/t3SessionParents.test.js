@@ -354,6 +354,7 @@ test('app parent enrichment is independent of titles and resolves period-specifi
   }
   periods.today.sessions['claude:child-native'].parentSessionId = 'native-authoritative';
   delete periods.today.sessions['claude:child-native'].parentClient;
+  delete periods.today.sessions['claude:child-native'].t3ParentLink;
   applyT3SessionParents(periods, s.home, { env: {} });
   assert.equal(periods.today.sessions['claude:child-native'].parentSessionId, 'native-authoritative');
   assert.equal(periods.today.sessions['claude:child-native'].parentClient, undefined);
@@ -928,6 +929,37 @@ for (const change of ['corrupt', 'locked', 'reassigned', 'parent removed', 'inco
   else if (incomplete) assert.deepEqual(captured.changedT3ThreadKeys, []);
   else assert.deepEqual(new Set(captured.revokedT3ThreadKeys), new Set([key, nativeKey]));
 });
+
+for (const [client, driver] of [['claude', 'claudeAgent'], ['codex', 'codex']]) {
+  test(`an Antigravity parent deletion refreshes retained ${client} delegation`, async t => {
+    const { collectUsageOnce, localTodayKey } = require('../../src/shared/collector');
+    const s = store(t);
+    pair(s, driver, 'antigravity');
+    const key = `${client}:child-native`;
+    let captured;
+    const options = { clients: `antigravity,${client}`, homeDir: s.home, env: {}, osInfo: {},
+      historyEnabled: false, limitsEnabled: false, wslScanEnabled: false,
+      onAnchorComputed: value => { captured = value; },
+      runTokscale: async () => ({ entries: [
+        { client: 'antigravity', sessionId: 'parent-native', model: 'm', input: 30 },
+        { client, sessionId: 'child-native', model: 'm', input: 20 }
+      ] }) };
+    const before = await collectUsageOnce(options);
+    assert.equal(before.month.sessions[key].parentSessionId, 'parent-native');
+    s.db.exec("UPDATE orchestration_v2_projection_threads SET deleted_at = '2026-11-25' WHERE thread_id = 'parent'");
+    const after = await collectUsageOnce({ ...options, todayOnlyAnchor: { dateKey: localTodayKey(),
+      today: before.today, month: before.month, allTime: before.allTime, todayPartitions: captured.todayPartitions,
+      sessionIdentityVersion: captured.sessionIdentityVersion } });
+    assert.deepEqual(captured.changedT3ThreadKeys, [key]);
+    for (const name of ['today', 'month', 'allTime']) {
+      const row = after[name].sessions[key];
+      assert.equal(row.t3ThreadId, 'child');
+      assert.equal(row.parentSessionId, undefined);
+      assert.equal(row.parentClient, undefined);
+      assert.equal(row.totalTokens, 20);
+    }
+  });
+}
 
 
 test('a saved Antigravity range gains the first verified T3 thread and parent', async t => {

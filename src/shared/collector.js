@@ -89,6 +89,7 @@ const { sessionActivityProvidersFor, refreshSessionActivity } = require('./sessi
 const { isSessionActivityClient } = require('./sessionActivityProviders');
 const { normalizeReasoningEffort, isSessionReasoningEffortClient } = require('./sessionLive');
 const { readT3Activities } = require('./t3/sessionActivity');
+const { revokeT3SessionLinks, supportsT3SessionClient } = require('./t3/sessionIdentity');
 const { createProcessStartBatch } = require('./processStarts');
 const { catpawSourcesFingerprint } = require('./providers/catpaw/paths');
 const { readLocalUsageView, resolveLocalUsagePricing } = require('./providers/codex/localUsage');
@@ -891,7 +892,10 @@ function propagateTodayProjects(today, periods, titleMetadata = {}) {
       if (session.t3ThreadId && !target.t3ParentLink) target.t3ThreadId = session.t3ThreadId;
       const parentClient = session.parentClient || session.client;
       const targetParentClient = target.parentClient || target.client;
-      if (session.parentSessionId && ((target.t3ParentLink && !session.t3ParentLink)
+      if (session.parentSessionId && ((target.t3ParentLink && !session.t3ParentLink
+        && (parentClient === targetParentClient && session.parentSessionId === target.parentSessionId
+          || sessionHasPeriodUsage(period, parentClient, session.parentSessionId)
+          || !sessionHasPeriodUsage(period, targetParentClient, target.parentSessionId)))
         || ((session.parentSessionId !== target.parentSessionId || parentClient !== targetParentClient)
           && (!target.parentSessionId || (!sessionHasPeriodUsage(period, targetParentClient, target.parentSessionId)
             && sessionHasPeriodUsage(period, parentClient, session.parentSessionId)))))) {
@@ -992,14 +996,6 @@ function copySessionLinks(source, target, { preserveRangeParents = false } = {})
       else delete session.parentClient;
     }
   }
-}
-
-function revokeT3SessionLinks(session) {
-  delete session.t3ThreadId;
-  if (!session.t3ParentLink) return;
-  delete session.parentSessionId;
-  delete session.parentClient;
-  delete session.t3ParentLink;
 }
 
 function t3SessionLinksChanged(session, resolved) {
@@ -1574,10 +1570,10 @@ async function collectUsageOnce(options) {
       // A verified conflict can revoke a link even when another store is locked.
       for (const key of Object.keys(today.sessions || {})) {
         const metadata = localSessionMetadataDeps.metadataCache.get(key);
-        if (!metadata?.t3ThreadRevoked) {
+        if (!metadata?.t3ThreadRevoked && !localSessionMetadataDeps.revokedT3ThreadKeys.has(key)) {
           const savedToday = anchor.today?.sessions?.[key];
           const currentToday = today.sessions[key];
-          if (today.sessions[key].client === 'antigravity'
+          if (supportsT3SessionClient(currentToday.client)
             && ((savedToday && currentToday.t3ThreadId && savedToday.t3ThreadId !== currentToday.t3ThreadId)
             || [[anchor.month, month], [anchor.allTime, allTime]].some(([saved, current]) => {
               const retained = saved?.sessions?.[key];

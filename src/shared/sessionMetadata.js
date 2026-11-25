@@ -23,7 +23,7 @@ const devinSessionMetadata = require('./providers/devin/sessionMetadata');
 const grokSessionMetadata = require('./providers/grok/sessionMetadata');
 const zcodeSessionMetadata = require('./providers/zcode/sessionMetadata');
 const { readT3SessionRelationResult } = require('./t3/sessionMetadata');
-const { supportsT3SessionClient, nativeAccountingId } = require('./t3/sessionIdentity');
+const { revokeT3SessionLinks, supportsT3SessionClient, nativeAccountingId } = require('./t3/sessionIdentity');
 
 function isoFromDate(value) {
   const date = value instanceof Date ? value : new Date(value || '');
@@ -397,18 +397,26 @@ function applyT3SessionParents(periods, home = os.homedir(), deps = {}, targets,
   const ids = new Map(children.map(session => [session, candidates(session)]));
   const nativeIds = [...new Set([...ids.values()].flat())];
   if (!nativeIds.length) return true;
-  const { facts: relations, status, ownershipComplete } = readT3SessionRelationResult(nativeIds, {
+  const { facts: relations, status, ownershipComplete, ambiguous } = readT3SessionRelationResult(nativeIds, {
     ...deps, homeDir: home, useEnvRoot: deps.scopedHome !== true,
-    includeOwnershipStatus: children.some(session => session.t3ParentLink)
+    includeOwnershipStatus: children.some(session => session.t3ThreadId || session.t3ParentLink)
   });
-  if (status === 'retryable') return false;
-  if (!relations.size) return true;
   const links = new Map();
   for (const session of children) {
-    const matches = ids.get(session).map(id => relations.get(`${session.client}:${id}`)).filter(Boolean);
+    const nativeKeys = ids.get(session).map(id => `${session.client}:${id}`);
+    const matches = nativeKeys.map(key => relations.get(key)).filter(Boolean);
     const link = matches[0];
+    const conflict = nativeKeys.some(key => ambiguous?.has(key))
+      || matches.some(fact => fact.threadId !== link.threadId);
+    if ((session.t3ThreadId || session.t3ParentLink)
+      && (conflict || (session.client !== 'antigravity' && ownershipComplete && nativeKeys.length && !link))) {
+      revokeT3SessionLinks(session);
+      deps.revokedT3ThreadKeys?.add(`${session.client}:${session.sessionId}`);
+      continue;
+    }
+    if (conflict) continue;
     if (link && matches.every(fact => fact.threadId === link.threadId)) {
-      if (session.t3ParentLink && (session.t3ThreadId !== link.threadId || ownershipComplete)) {
+      if (session.t3ParentLink && (session.t3ThreadId !== link.threadId || (ownershipComplete && !link.parentThreadId))) {
         delete session.parentSessionId;
         delete session.parentClient;
         delete session.t3ParentLink;
@@ -419,6 +427,7 @@ function applyT3SessionParents(periods, home = os.homedir(), deps = {}, targets,
     if ((!session.parentSessionId || session.t3ParentLink) && link?.parentThreadId
       && matches.every(fact => fact.parentThreadId === link.parentThreadId)) links.set(session, link);
   }
+  if (status === 'retryable') return false;
   if (!links.size) return true;
   // History is parent evidence, never an additional lookup target on a watch
   // tick. Build only the requested parent indexes, and only when a link needs
@@ -450,6 +459,9 @@ function applyT3SessionParents(periods, home = os.homedir(), deps = {}, targets,
     for (const session of sessions(period)) {
       const link = links.get(session);
       if (!link) continue;
+      const retainedParent = session.t3ParentLink
+        && period.sessions?.[`${session.parentClient || session.client}:${session.parentSessionId}`];
+      if (retainedParent?.t3ThreadId === link.parentThreadId) continue;
       local ||= index([evidencePeriods?.[name], period]);
       const key = `${link.parentClient}:${link.parentNativeId}`;
       let parent = local.native.get(key) || local.app.get(link.parentThreadId);
@@ -459,9 +471,9 @@ function applyT3SessionParents(periods, home = os.homedir(), deps = {}, targets,
       }
       if (!parent || (parent.client === session.client && parent.sessionId === session.sessionId)) continue;
       session.parentSessionId = parent.sessionId;
-      if (session.client === 'antigravity') session.t3ParentLink = true;
       if (parent.client !== session.client) session.parentClient = parent.client;
       else delete session.parentClient;
+      session.t3ParentLink = true;
     }
   }
   return true;
