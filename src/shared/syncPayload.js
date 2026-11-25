@@ -7,6 +7,8 @@ const { UPLOAD_HEADER, UPLOAD_VERSION } = require('./uploadDelta');
 const { MAX_JSON_BODY_BYTES } = require('./http');
 const { syncLimits } = require('./limits/core');
 const { stripSessionTextFromDeviceRecord } = require('./usage');
+const { uploadFixedRangeVersion } = require('./fixedRangeClient');
+const { FIXED_RANGE_HEADER, FIXED_RANGE_VERSION } = require('./fixedRangeSync');
 const { isReasonixSyntheticSession } = require('./providers/reasonix/sessionGuard');
 
 const SYNC_PAYLOAD_MARGIN_BYTES = 16 * 1024;
@@ -229,6 +231,7 @@ function buildSyncPayload(summary, {
   // shape and every Hub keep deriving ranges from History.
   delete payload.nativeRanges;
   delete payload.nativeRangeWindows;
+  delete payload.nativeRangeDays;
   const projectsEnabled = summary.projectsEnabled !== false;
   delete payload.allTimeProjectsOmitted;
   delete payload.allTimeProjectsIncomplete;
@@ -400,11 +403,18 @@ function createSyncPayloadUploader({ now = Date.now } = {}) {
   let identity = null;
   let acknowledged = null;
   let deltaBaseline = null;
+  let acknowledgedFixedRangeAt = null;
+  /** @type {Record<string, any>[] | null} */
+  let fixedRangeBaseline = null;
   let generation = 0;
 
   function resetHistory({ preserveDelta = false } = {}) {
     acknowledged = null;
-    if (!preserveDelta) deltaBaseline = null;
+    acknowledgedFixedRangeAt = null;
+    if (!preserveDelta) {
+      deltaBaseline = null;
+      fixedRangeBaseline = null;
+    }
     generation += 1;
   }
 
@@ -426,6 +436,7 @@ function createSyncPayloadUploader({ now = Date.now } = {}) {
       const send = async (target, request) => {
         const fullHeaders = new Headers(request.headers);
         fullHeaders.set(UPLOAD_HEADER, UPLOAD_VERSION);
+        if (options.summary?.nativeRanges) fullHeaders.set(FIXED_RANGE_HEADER, FIXED_RANGE_VERSION);
         if (deltaBaseline) {
           const body = JSON.stringify({ deviceId: options.summary.deviceId || options.summary.id,
             baseRevision: deltaBaseline.revision, patch: statsPatch(deltaBaseline.payload, JSON.parse(request.body)) });
@@ -457,6 +468,23 @@ function createSyncPayloadUploader({ now = Date.now } = {}) {
             // was accepted, so omitted detail can be restored on a later upload.
             acknowledged = { key: historyKey(result.payload.history), at: startedAt };
           }
+        }
+      }
+      const summary = options.summary;
+      const fixedRangeAt = JSON.stringify([summary?.updatedAt, options.sessionTitleSyncGeneration, summary?.projectsEnabled !== false, summary?.nativeRangeWindows]);
+      const fixedRangeConfirmed = fixedRangeAt === acknowledgedFixedRangeAt
+        && (!hasOwn(ack, 'fixedRangeRevision') || ack.fixedRangeRevision === fixedRangeBaseline?.[0]?.revision);
+      if (requestGeneration === generation && ack?.ok && ack.fixedRanges === 1
+        && ack.deviceId === summary?.deviceId && summary.nativeRanges && !fixedRangeConfirmed) {
+        try {
+          const committed = await uploadFixedRangeVersion(fetchFn, url.replace(/\/api\/ingest$/, ''), summary, headers, options,
+            ack.fixedRangeDelta === 1 ? fixedRangeBaseline ?? [] : [], ack.fixedRangeBatch === 1, ack.fixedRangeIndexDelta === 1);
+          if (committed && requestGeneration === generation) {
+            acknowledgedFixedRangeAt = fixedRangeAt;
+            fixedRangeBaseline = ack.fixedRangeDelta === 1 ? committed : null;
+          }
+        } catch (error) {
+          options.logger?.(`fixed range upload deferred: ${error.message}`);
         }
       }
       return result;

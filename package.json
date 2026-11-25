@@ -163,7 +163,8 @@
   },
   "dependencies": {
     "@xhayper/discord-rpc": "^1.5.1",
-    "chokidar": "^4.0.3",
+    "chokidar": "6.0.0",
+    "chokidar-macos": "npm:chokidar@4.0.3",
     "dotenv": "^17.4.2",
     "electron-updater": "6.8.12",
     "image-size": "^2.0.4",
@@ -187,6 +188,6 @@
     "typescript": "^7.0.2"
   },
   "engines": {
-    "node": ">=22.15.0"
+    "node": ">=22.22.0"
   }
 }

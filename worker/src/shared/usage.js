@@ -1682,6 +1682,7 @@ function mergeDeviceRecord(existing, incoming) {
   }
   if (incoming?.limitsOnly === true) {
     normalizedIncoming.periods = normalizedExisting.periods;
+    normalizedIncoming.updatedAt = normalizedExisting.updatedAt;
     delete normalizedIncoming.allTimeTokensUnavailable;
     if (normalizedExisting.allTimeTokensUnavailable === true) normalizedIncoming.allTimeTokensUnavailable = true;
     // The three attribution fields describe the usage this branch is carrying

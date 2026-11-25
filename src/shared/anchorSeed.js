@@ -1,6 +1,6 @@
 'use strict';
 
-const { archivedHistory, collectorAnchorTrust, computePeriodWindows } = require('./collector');
+const { archivedHistory, collectorAnchorTrust, composeNativeRanges, computePeriodWindows, matchingNativePastRanges } = require('./collector');
 const { mergePeriods } = require('./usage');
 const { filterReasonixSyntheticSessions } = require('./providers/reasonix/sessionGuard');
 
@@ -35,6 +35,9 @@ function deviceRecordFromAnchor(saved, options = {}) {
     wslSupported = false,
     hostname = '',
     platform = '',
+    nativeRangesEnabled = false,
+    weekStartsOn = 1,
+    codexDotsVisible = true,
     historyEnabled = true,
     dailyHistoryArchiveEnabled = false,
     dailyHistoryArchiveOptions = {},
@@ -77,6 +80,23 @@ function deviceRecordFromAnchor(saved, options = {}) {
     : wslScanEnabled !== true
       ? { state: 'disabled', detected: [], withData: [] }
       : (saved.wslStatus || null);
+  const trackedClients = String(clients || '').split(',').filter(Boolean);
+  // An empty WSL bundle captured with scanning disabled does not establish
+  // coverage after the setting is enabled. The regular seed still stands.
+  const wslCoverageKnown = !wslSupported || !wslScanEnabled
+    || Boolean(wsl?.allTime && wslStatus?.state && wslStatus.state !== 'disabled');
+  const pastRanges = nativeRangesEnabled && wslCoverageKnown
+    ? matchingNativePastRanges(saved.nativePastRanges, currentWindows.today.key, weekStartsOn)
+    : null;
+  const nativeRangeSnapshot = composeNativeRanges(pastRanges, saved.today, {
+    allTimeSince,
+    wslAllTime: wsl?.allTime,
+    // Legacy anchors do not say whether the last scan included Dots usage.
+    codexDotsUsage: codexDotsVisible && trackedClients.includes('codex') && pastRanges?.codexDotsUsage !== false
+  });
+  for (const [name, period] of Object.entries(nativeRangeSnapshot?.nativeRanges || {})) {
+    nativeRangeSnapshot.nativeRanges[name] = cleanPeriod(period);
+  }
   const at = new Date(trust.capturedAtMs).toISOString();
   // History waits for `tokscale graph`, which runs after all three windows. The
   // daily archive already holds every day the last graphs saw, so show that in
@@ -100,7 +120,7 @@ function deviceRecordFromAnchor(saved, options = {}) {
     platform,
     updatedAt: at,
     receivedAt: at,
-    trackedClients: String(clients || '').split(',').filter(Boolean),
+    trackedClients,
     // Both drive UI beyond the totals: projectsEnabled decides whether the
     // all-time project breakdown is flagged incomplete, wslStatus feeds the
     // attribution panel. Leaving them off makes the seed a record that looks
@@ -119,6 +139,7 @@ function deviceRecordFromAnchor(saved, options = {}) {
     allTime: withWsl(saved.allTime, wsl?.allTime),
     ...(Object.prototype.hasOwnProperty.call(saved, 'nativeSessions') ? { nativeSessions: nativeView(saved.nativeSessions) } : {}),
     ...(Object.prototype.hasOwnProperty.call(saved, 'nativeProjects') ? { nativeProjects: nativeView(saved.nativeProjects) } : {}),
+    ...nativeRangeSnapshot,
     ...(history ? { historyAvailable: true, history } : {})
   };
 }

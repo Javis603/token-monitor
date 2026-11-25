@@ -9,19 +9,47 @@ const vm = require('node:vm');
 const rendererDir = path.join(__dirname, '..', '..', 'src', 'electron', 'renderer');
 const read = (name) => fs.readFileSync(path.join(rendererDir, name), 'utf8');
 
+test('reset restores the configured middle range from a custom selection', () => {
+  const source = read('app.js');
+  const start = source.indexOf('function setRendererSettings(next)');
+  const end = source.indexOf('function periodContentAvailability()', start);
+  const fixedPeriodRangesApi = require('../../src/electron/renderer/fixedPeriodRanges');
+  for (const [active, configured, expected] of [
+    ['last7', 'month', 'month'],
+    ['last30', 'week', 'week'],
+    ['today', 'month', 'today'],
+    ['allTime', 'month', 'allTime']
+  ]) {
+    const state = { period: active, settings: { periodTabOrder: ['today', 'month', 'last7', 'last30', 'allTime'], periodMonthMode: configured } };
+    let followed = 0;
+    const context = {
+      state, fixedPeriodRangesApi, tokenNumberAnimationApi: { normalize: value => value },
+      setPeriod(period) { state.period = period; return true; },
+      followOpenSessionToPeriod() { followed++; }
+    };
+    vm.runInNewContext(source.slice(start, end), context);
+    context.setRendererSettings({ periodTabOrder: [], periodMonthMode: configured });
+    context.setRendererSettings({ periodTabOrder: [], periodMonthMode: configured });
+    assert.equal(state.period, expected);
+    assert.equal(followed, Number(active !== expected));
+  }
+});
+
 test('fixed periods reuse the existing three-slot control', () => {
   const html = read('index.html');
   const slots = [...html.matchAll(/data-period-slot="([^"]+)"/g)].map((match) => match[1]);
   assert.deepEqual(slots, ['today', 'month', 'allTime']);
+  assert.match(html, /data-period-slot="today"[^>]*>DAY<\/button>/);
   assert.match(html, /id="monthPeriodTab"[^>]*aria-haspopup="menu"[^>]*>MONTH<\/button>/);
+  assert.match(html, /data-period-slot="allTime"[^>]*>TOTAL<\/button>/);
   assert.doesNotMatch(html, /id="monthPeriodTab"[^>]*>[^<]*(?:▼|▾|⌄)/);
 });
 
-test('the middle-slot menu and Settings expose the same four fixed choices', () => {
+test('the middle-slot menu and Settings expose the same fixed choices', () => {
   const html = read('index.html');
   const menu = html.slice(html.indexOf('id="monthPeriodMenu"'), html.indexOf('class="actions-hotspot"'));
   const setting = html.slice(html.indexOf('id="periodMonthModeInput"'), html.indexOf('</select>', html.indexOf('id="periodMonthModeInput"')));
-  const expected = ['month', 'week', 'last7', 'last30'];
+  const expected = ['month', 'yesterday', 'week', 'last7', 'last30'];
   assert.deepEqual([...menu.matchAll(/data-fixed-period="([^"]+)"/g)].map((match) => match[1]), expected);
   assert.deepEqual([...setting.matchAll(/option value="([^"]+)"/g)].map((match) => match[1]), expected);
 });
@@ -34,7 +62,7 @@ test('fixed-period menu follows the glass theme and keeps labels left aligned', 
   const boot = read('floatingBubbleBoot.js');
   assert.ok(html.indexOf('src="fixedPeriodRanges.js"') < html.indexOf('src="app.js"'));
   assert.match(html, /id="monthPeriodMenu" class="view-switcher-menu period-menu hidden"/);
-  assert.equal((html.match(/class="view-switcher-menu-item"/g) || []).length, 4);
+  assert.equal((html.match(/class="view-switcher-menu-item"/g) || []).length, 5);
   assert.match(css, /\.view-switcher-menu-item\s*\{[^}]*font-size:\s*0\.6875rem;[^}]*text-align:\s*left;/s);
   assert.ok(css.lastIndexOf('.period-menu {') > css.indexOf('.view-switcher-menu {'));
   assert.match(css, /\.titlebar\.period-menu-open\s*\{\s*z-index:\s*13;/);
@@ -43,7 +71,7 @@ test('fixed-period menu follows the glass theme and keeps labels left aligned', 
   assert.match(app, /button\.classList\.toggle\('is-current', active\)/);
   assert.match(app, /handlePeriodMenuNavigation\(event/);
   assert.match(app, /setPeriodMenuOpen\(true, \{ focus: event\.key === 'ArrowUp' \? 'last' : 'first' \}\)/);
-  assert.match(app, /deviceHistoriesAvailable: Array\.isArray\(state\.fixedPeriodHistory\?\.deviceHistories\)/);
+  assert.match(app, /deviceRowsAvailable: Array\.isArray\(state\.fixedPeriodHistory\?\.deviceHistories\)/);
   assert.match(app, /getDashboardHistory\(\{ includeDevices: true \}\)/);
   assert.match(app, /state\.stats\?\.deviceHistoryRevision \|\| state\.stats\?\.historyRevision/);
   assert.match(app, /deviceInventorySignature\(state\.stats\?\.devices \|\| \[\]\)/);
@@ -65,9 +93,9 @@ test('fixed-period menu follows the glass theme and keeps labels left aligned', 
   assert.match(app, /force: forceFixedPeriodHistory,[\s\S]*?retryFailed: forceFixedPeriodHistory/);
   assert.match(app, /isDerived\(next\) && state\.fixedPeriodHistoryFailed[\s\S]*?warmFixedPeriodHistory\(\{ retryFailed: true, renderOnComplete: true \}\)/);
   assert.match(app, /fixedPeriodHistorySignature !== signature[\s\S]*?\|\| state\.fixedPeriodHistoryBusy\) \{[\s\S]*?void loadFixedPeriodHistory\(\);/);
-  assert.match(boot, /\['today', 'month', 'week', 'last7', 'last30', 'allTime'\]\.includes\(period\)/);
+  assert.match(boot, /\['today', 'month', 'yesterday', 'week', 'last7', 'last30', 'allTime'\]\.includes\(period\)/);
   assert.match(app, /function fixedPeriodDevices\(\)/);
-  assert.match(app, /devicesForReadySnapshot\(state\.fixedPeriodSnapshot, state\.period\)/);
+  assert.match(app, /devicesForReadySnapshot\(state\.fixedPeriodSnapshot, state\.period, localDevice\)/);
   assert.match(app, /fixedPeriodSnapshotFromDevices\(state\.period, fixedPeriodSources\(\)/);
   const snapshotBuilder = app.slice(app.indexOf('function buildFixedPeriodSnapshot()'), app.indexOf('async function loadFixedPeriodHistory'));
   assert.ok(snapshotBuilder.indexOf('historyEnabled === false') < snapshotBuilder.indexOf('fixedPeriodHistoryRequested'));
@@ -111,4 +139,245 @@ test('cold-start boot restores every fixed middle-slot selection', () => {
       { period, breakdown: 'home' }
     );
   }
+});
+
+test('a pending local scan shows loading copy for missing range details', () => {
+  const source = read('app.js');
+  const state = { stats: { nativeRangesPending: true } };
+  const context = { state, t: (key) => key };
+  vm.runInNewContext(source.slice(source.indexOf('function fixedPeriodMessage('),
+    source.indexOf('function hidePeriodContentForMessage(')), context);
+  const ready = { status: 'ready' };
+  assert.equal(context.fixedPeriodMessage(ready, 'session'), 'periodRange.sessionLoading');
+  assert.equal(context.fixedPeriodMessage(ready, 'project'), 'periodRange.projectLoading');
+  assert.equal(context.fixedPeriodMessage({ status: 'loading' }), 'periodRange.loading');
+  state.stats = {};
+  assert.equal(context.fixedPeriodMessage(ready, 'session'), 'periodRange.sessionUnavailable');
+  assert.equal(context.fixedPeriodMessage(ready, 'project'), 'periodRange.projectUnavailable');
+});
+
+test('refresh renders native Devices before the pending History read completes', async () => {
+  const source = read('app.js');
+  const state = { period: 'last7', breakdown: 'device' };
+  const stats = { nativeRangeWindows: { last7: {} } };
+  let resolveHistory;
+  const history = new Promise(resolve => { resolveHistory = resolve; });
+  let rendered = 0;
+  const context = {
+    state,
+    window: { tokenMonitor: { getStats: async () => stats } },
+    observeLiveTokenRate() {},
+    observeDisplayLiveTokenRates() {},
+    allTimeSessions: { invalidate() {}, attach: value => value },
+    sessionStatsForDisplay: value => value,
+    applyCodexActiveAccountFromStats() {},
+    currentNativeRangeSnapshot: () => state.stats === stats,
+    syncedFixedPeriodKey: () => '',
+    fixedPeriodRangesApi: { isDerived: () => true },
+    statsRenderScheduler: { request() { rendered++; } },
+    warmFixedPeriodHistory: () => history,
+    maybeUpdateBarsIcon() {}
+  };
+  const gate = source.match(/function canRenderNativeDevices\(\) \{[^}]+\}/)?.[0];
+  if (gate) vm.runInNewContext(gate, context);
+  vm.runInNewContext(source.slice(source.indexOf('async function refreshStats('),
+    source.indexOf('async function refreshStatusViewManually(')), context);
+  const refresh = context.refreshStats();
+  await new Promise(setImmediate);
+  assert.equal(rendered, 1);
+  resolveHistory();
+  await refresh;
+  assert.equal(rendered, 2);
+});
+
+test('fixed Week History and Trends use the synchronized calendar even with a different viewer locale', () => {
+  const source = read('app.js');
+  const context = {
+    fixedPeriodRangesApi: require('../../src/electron/renderer/fixedPeriodRanges'),
+    fixedPeriodTodayKey: () => '2026-11-25',
+    currentCalendarLocale: () => 'en-US',
+    syncedFixedPeriodKey: () => 'selected',
+    state: {
+      mode: 'sync', period: 'week', settings: { syncWeekStartsOn: 1 },
+      fixedPeriodHistory: { fixedPeriods: { historyTransportAvailable: true } },
+      syncedFixedPeriod: { key: 'selected', snapshot: { status: 'ready', period: { totalTokens: 25 } } }
+    },
+    fixedPeriodSources: () => [{
+      deviceId: 'remote', historyAvailable: true,
+      periodWindows: { today: { key: '2026-11-25', endsAt: '2099-11-26T00:00:00Z' }, timeZone: 'UTC' },
+      history: { daily: [
+        { date: '2026-11-22', tokens: 11 },
+        { date: '2026-11-23', tokens: 25 }
+      ] }
+    }]
+  };
+  const extract = (name) => source.match(new RegExp('function ' + name + '\\(\\) \\{[\\s\\S]*?\\n\\}'))[0];
+  vm.runInNewContext(extract('buildFixedPeriodSourcesSnapshot') + '\n' + extract('buildFixedPeriodSnapshot'), context);
+  assert.equal(context.buildFixedPeriodSourcesSnapshot().period.totalTokens, 25);
+  const trends = context.buildFixedPeriodSnapshot().summary;
+  assert.equal(trends.peakDayTokens, 25);
+  assert.equal(trends.activeDays, 1);
+  context.state.mode = 'local';
+  assert.equal(context.buildFixedPeriodSourcesSnapshot().period.totalTokens, 36);
+});
+
+for (const hubMode of ['icloud', 'client']) test(`${hubMode} retries incomplete fixed range details without another stats event`, async () => {
+  const source = read('app.js').match(/function requestSyncedFixedPeriod\(\) \{[\s\S]*?\n\}/)[0];
+  let key = 'week';
+  let reads = 0;
+  const responses = [null, { detailsAvailable: false }, { detailsAvailable: true }, null, null, { detailsAvailable: true }];
+  const timers = new Set();
+  const context = {
+    state: { settings: { hubMode }, stats: { snapshot: { id: 'a' } } },
+    window: { tokenMonitor: { getSyncedFixedPeriod: async () => responses[reads++] } },
+    syncedFixedPeriodKey: () => key,
+    statsRenderScheduler: { request() {} },
+    FIXED_PERIOD_HISTORY_RETRY_MS: 4000,
+    FIXED_PERIOD_HISTORY_MAX_RETRIES: 3,
+    setTimeout: (callback, delay) => {
+      assert.equal(delay, 4000);
+      timers.add(callback);
+      return callback;
+    },
+    clearTimeout: callback => timers.delete(callback)
+  };
+  vm.runInNewContext(source, context);
+  const fireRetry = async () => {
+    assert.equal(timers.size, 1);
+    const [callback] = timers;
+    timers.delete(callback);
+    callback();
+    await Promise.resolve();
+  };
+  context.requestSyncedFixedPeriod();
+  await Promise.resolve();
+  context.requestSyncedFixedPeriod();
+  assert.equal(reads, 1);
+  await fireRetry();
+  await fireRetry();
+  assert.equal(reads, 3);
+  assert.equal(context.state.syncedFixedPeriod.snapshot.detailsAvailable, true);
+  assert.equal(timers.size, 0);
+
+  key = 'last7';
+  context.requestSyncedFixedPeriod();
+  await Promise.resolve();
+  key = 'today';
+  await fireRetry();
+  assert.equal(reads, 4);
+  assert.equal(timers.size, 0);
+
+  key = 'yesterday';
+  context.requestSyncedFixedPeriod();
+  key = 'today';
+  await Promise.resolve();
+  assert.equal(timers.size, 0);
+  key = 'yesterday';
+  context.requestSyncedFixedPeriod();
+  await Promise.resolve();
+  assert.equal(reads, 6);
+  assert.equal(context.state.syncedFixedPeriod.snapshot.detailsAvailable, true);
+});
+
+test('a new fallback device observation invalidates a completed synchronized range', async () => {
+  const source = read('app.js');
+  const context = {
+    state: {
+      period: 'week',
+      stats: {
+        snapshot: { id: 'snapshot-1', source: 1 },
+        fixedRangeRevisions: { native: 'range-1' },
+        deviceHistoryRevision: 'history-1',
+        devices: [
+          { deviceId: 'native', updatedAt: '2026-11-25T01:00:00Z' },
+          { deviceId: 'legacy', updatedAt: '2026-11-25T01:00:00Z', periods: { today: { totalTokens: 0 } } }
+        ]
+      }
+    },
+    fixedPeriodRangesApi: { isDerived: () => true, deviceDayState: () => ({ currentKey: '2026-11-25' }) },
+    currentCalendarLocale: () => 'en-GB',
+    fixedPeriodTodayKey: () => '2026-11-25',
+    statsRenderScheduler: { request() {} },
+    FIXED_PERIOD_HISTORY_RETRY_MS: 4000,
+    FIXED_PERIOD_HISTORY_MAX_RETRIES: 3,
+    setTimeout,
+    clearTimeout
+  };
+  const reads = [];
+  context.window = { tokenMonitor: { getSyncedFixedPeriod: async id => {
+    reads.push(id);
+    return { detailsAvailable: true };
+  } } };
+  const extract = name => source.match(new RegExp('function ' + name + '\\(\\) \\{[\\s\\S]*?\\n\\}'))[0];
+  vm.runInNewContext(extract('syncedFixedPeriodKey') + '\n' + extract('requestSyncedFixedPeriod'), context);
+
+  context.requestSyncedFixedPeriod();
+  await Promise.resolve();
+  assert.equal(context.state.syncedFixedPeriod.retryAt, Infinity);
+
+  context.state.stats.snapshot = { id: 'snapshot-2', source: 1 };
+  context.requestSyncedFixedPeriod();
+  assert.deepEqual(reads, ['snapshot-1'], 'a new snapshot ID alone leaves the cache intact');
+
+  const legacy = context.state.stats.devices[1];
+  legacy.updatedAt = '2026-11-25T02:00:00Z';
+  legacy.periods.today.totalTokens = 25;
+  context.requestSyncedFixedPeriod();
+  await Promise.resolve();
+  assert.deepEqual(reads, ['snapshot-1', 'snapshot-2']);
+});
+
+test('session detail uses a synced range only for the selected period', () => {
+  const source = fs.readFileSync(path.join(__dirname, '../../src/electron/renderer/app.js'), 'utf8');
+  const detailPeriod = source.match(/function sessionDetailPeriod\(\) \{[\s\S]*?\n\}/)[0];
+  const state = {
+    period: 'yesterday',
+    settings: { deviceId: 'local' },
+    fixedPeriodSnapshot: {
+      detailsAvailable: true, selection: 'yesterday',
+      devices: [{ deviceId: 'local', range: { start: '2026-11-24', end: '2026-11-24' } }]
+    }
+  };
+  const context = { state, currentNativeRangeSnapshot: () => null };
+  vm.runInNewContext(detailPeriod, context);
+  assert.equal(context.sessionDetailPeriod(), 'range:2026-11-24:2026-11-24');
+  state.period = 'today';
+  assert.equal(context.sessionDetailPeriod(), 'today');
+});
+
+test('synced range reads stop after the retry budget until the key changes', async () => {
+  const source = read('app.js');
+  const request = source.match(/function requestSyncedFixedPeriod\(\) \{[\s\S]*?\n\}/)[0];
+  let key = 'old';
+  let now = 0;
+  let reads = 0;
+  const timers = [];
+  const context = {
+    state: { stats: { snapshot: {} } },
+    syncedFixedPeriodKey: () => key,
+    window: { tokenMonitor: { getSyncedFixedPeriod: async () => { reads++; return null; } } },
+    Date: { now: () => now },
+    FIXED_PERIOD_HISTORY_RETRY_MS: 4000,
+    FIXED_PERIOD_HISTORY_MAX_RETRIES: 3,
+    setTimeout: callback => timers.push(callback),
+    clearTimeout() {},
+    statsRenderScheduler: { request() {} }
+  };
+  vm.runInNewContext(request, context);
+  context.requestSyncedFixedPeriod();
+  await Promise.resolve();
+  for (let retry = 0; retry < 3; retry++) {
+    now += 4000;
+    timers.shift()();
+    await Promise.resolve();
+  }
+
+  assert.equal(reads, 4);
+  assert.equal(timers.length, 0);
+  now += 4000;
+  context.requestSyncedFixedPeriod();
+  assert.equal(reads, 4);
+  key = 'new';
+  context.requestSyncedFixedPeriod();
+  assert.equal(reads, 5);
 });

@@ -90,6 +90,18 @@
   assert(await historyCount() === opens, 'a newly inserted balance disclosure suppresses its retained row history timer');
   mimoRow.dispatchEvent(new PointerEvent('pointerleave'));
   state.breakdown = 'session';
+  const untitled = { client: 'codex', sessionId: 'project-test', projectLabel: 'Token Monitor',
+    totalTokens: 100, models: { 'gpt-5': 100 }, messageCount: 2 };
+  state.stats.periods.today.sessions = { 'codex:project-test': untitled };
+  els.breakdown.classList.remove('hidden');
+  renderRows(sessionRowsForPeriod(state.stats.periods.today));
+  const projectRow = els.breakdown.querySelector('[data-key="session:codex:project-test"]');
+  const projectId = projectRow.querySelector('.row-detail');
+  assert(projectRow.querySelector('.row-title').textContent === 'Token Monitor', 'untitled session uses the project name');
+  assert(!projectId.classList.contains('hidden') && projectId.textContent === 'project-test', 'project-labelled row retains its visible session ID');
+  projectRow.click();
+  assert(els.sessionDetailHead.querySelector('.detail-heading')?.textContent === 'Codex · gpt-5', 'Details retains the tool/model heading');
+  state.openSession = null;
   const raw = { client: 'codex', sessionId: 'test', title: 'Test session', totalTokens: 100,
     models: { 'gpt-5': 70, 'gpt-5-mini': 30 }, lastUsedAt: new Date().toISOString() };
   state.stats.periods.today.sessions = { 'codex:test': raw };

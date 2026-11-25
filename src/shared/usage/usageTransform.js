@@ -2,6 +2,7 @@
 
 const { applyArchivedClientUsage } = require('./clientUsageArchive');
 const {
+  applySessionDayArchive,
   applySessionUsageArchive,
   normalizeSessionUsageArchive,
   sessionUsageArchiveDate
@@ -90,19 +91,21 @@ function createUsageTransform(options = {}) {
   // argument because capturing into it is a separate decision, see below.
   function project(summary, archive, now) {
     const settings = getSettings() || {};
-    const withArchivedClients = applyArchivedClientUsage(summary, settings.archivedClientUsage, {
+    // Past-day sessions are capture input only; no record carries them.
+    const { nativeRangeDays: _days, ...published } = summary;
+    const withArchivedClients = applyArchivedClientUsage(published, settings.archivedClientUsage, {
       activeClients: settings.clients,
       now,
       shareSessions: true
     });
     const visibleSummary = settings.sessionUsageArchiveEnabled === false
       ? withArchivedClients
-      : applySessionUsageArchive(withArchivedClients, archive, {
+      : applySessionDayArchive(applySessionUsageArchive(withArchivedClients, archive, {
           now,
           canonical: true,
           canonicalSummary: true,
           mutate: true
-        });
+        }), archive, { now, canonical: true, activeClients: settings.clients });
     delete visibleSummary.sessionUsageArchiveFullScan;
     return settings.projectsEnabled === false ? visibleSummary : applyProjectRollups(visibleSummary);
   }

@@ -201,6 +201,11 @@ function refreshWindowsBackdrop(win, options = {}) {
   return true;
 }
 
+function windowsAccentActive(win) {
+  const state = windowStates.get(win);
+  return state?.mode === 'accent' && !state.fallback;
+}
+
 function windowsBackdropFallback(win) {
   return windowStates.get(win)?.fallback === true;
 }
@@ -211,5 +216,6 @@ module.exports = {
   createAccentApi,
   refreshWindowsBackdrop,
   syncWindowsBackdrop,
+  windowsAccentActive,
   windowsBackdropFallback
 };

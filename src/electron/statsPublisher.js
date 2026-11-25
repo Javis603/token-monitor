@@ -162,8 +162,10 @@ function createRendererSnapshots(options = {}) {
       if (!stats || typeof stats !== 'object' || !copy || typeof copy !== 'object') return copy;
       return { ...copy, snapshot: { ...register(stats, projection) } };
     },
-    get(id) {
-      return byId.get(id) || null;
+    get(id, expectedSource) {
+      const stats = byId.get(id);
+      if (!stats || (expectedSource !== undefined && tags.get(stats)?.source !== expectedSource)) return null;
+      return stats;
     }
   };
 }

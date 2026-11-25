@@ -1,0 +1,223 @@
+// @ts-check
+'use strict';
+
+const { normalizePeriod, stripSessionTextFromPeriod } = require('./usage');
+
+const FIXED_RANGE_NAMES = Object.freeze(['yesterday', 'week', 'last7', 'last30']);
+const encoder = new TextEncoder();
+const DAY_MS = 86_400_000;
+const FIXED_RANGE_HEADER = 'x-token-monitor-fixed-ranges';
+const FIXED_RANGE_VERSION = '1';
+const SYNC_WEEK_STARTS_ON = 1;
+const FIXED_RANGE_PAGE_BYTES = 512 * 1024;
+const MAX_FIXED_RANGE_PAGES = 32;
+
+/** @typedef {Record<string, any>} JsonRecord */
+/** @typedef {[string, string, string, JsonRecord]} DetailRow */
+
+/** @param {string} left @param {string} right */
+function compareKeys(left, right) {
+  return left < right ? -1 : left > right ? 1 : 0;
+}
+
+/** @param {DetailRow} row */
+function fixedRangeRowKey(row) {
+  return JSON.stringify([row[0], row[1], row[2]]);
+}
+
+/** @param {DetailRow} left @param {DetailRow} right */
+function compareFixedRangeRows(left, right) {
+  return compareKeys(left[0], right[0]) || compareKeys(right[1], left[1])
+    || compareKeys(left[2], right[2]);
+}
+
+/** @param {unknown} value */
+function dateKey(value) {
+  if (typeof value !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(value)) return '';
+  const date = new Date(value + 'T00:00:00Z');
+  return Number.isFinite(date.getTime()) && date.toISOString().slice(0, 10) === value ? value : '';
+}
+
+/**
+ * Convert a device's scan to an upload index and bounded detail pages. The
+ * index carries exact totals independently of how many pages the range needs.
+ * @param {JsonRecord} record
+ * @param {{ maxPageBytes: number, preserveSessionTitles?: boolean }} options
+ */
+function encodeFixedRangeSnapshot(record, { maxPageBytes, preserveSessionTitles = false }) {
+  /** @type {JsonRecord} */
+  const ranges = {};
+  /** @type {DetailRow[][]} */
+  const pages = [];
+  /** @type {DetailRow[]} */
+  let page = [];
+  let pageBytes = 2;
+  for (const name of FIXED_RANGE_NAMES) {
+    const window = record.nativeRangeWindows?.[name];
+    const period = record.nativeRanges?.[name];
+    const start = dateKey(window?.start);
+    const end = dateKey(window?.end);
+    if (!start || !end || end < start || !Number.isSafeInteger(period?.totalTokens)
+      || period.totalTokens < 0) continue;
+    const source = stripSessionTextFromPeriod(period, { preserveSessionTitles });
+    const { sessions, projects, ...totals } = normalizePeriod(source, {
+      projectsEnabled: record.projectsEnabled !== false
+    });
+    const firstPage = pages.length;
+    ranges[name] = {
+      start, end, totals,
+      sessions: Object.keys(sessions).length,
+      projects: Object.keys(projects).length
+    };
+    for (const [kind, rows] of [['sessions', sessions], ['projects', projects]]) {
+      for (const [key, value] of Object.entries(rows).sort(([a], [b]) => compareKeys(a, b))) {
+        /** @type {DetailRow} */
+        const row = [name, String(kind), key, value];
+        const bytes = encoder.encode(JSON.stringify(row)).byteLength;
+        if (bytes + 2 > maxPageBytes) throw new RangeError('fixed range detail row exceeds page budget');
+        if (pageBytes + bytes + (page.length ? 1 : 0) > maxPageBytes) {
+          pages.push(page);
+          page = [];
+          pageBytes = 2;
+        }
+        pageBytes += bytes + (page.length ? 1 : 0);
+        page.push(row);
+      }
+    }
+    if (page.length) pages.push(page);
+    ranges[name].firstPage = firstPage;
+    ranges[name].pageCount = pages.length - firstPage;
+    page = [];
+    pageBytes = 2;
+  }
+  return { ranges, pages };
+}
+
+/**
+ * Reconstruct the selected range only after all its rows have arrived.
+ * Transport callers validate the owning device and immutable snapshot
+ * revision before passing the index and pages.
+ * @param {JsonRecord} index
+ * @param {DetailRow[][]} pages pages for the selected range, in index order
+ * @param {string} name
+ */
+function decodeFixedRangePeriod(index, pages, name) {
+  if (!FIXED_RANGE_NAMES.includes(name) || !Object.hasOwn(index, name)) return null;
+  const metadata = index[name];
+  if (pages.length !== metadata.pageCount) return null;
+  const details = { sessions: new Map(), projects: new Map() };
+  for (const page of pages) {
+    for (const [range, kind, key, row] of page) {
+      if (range !== name) return null;
+      if ((kind !== 'sessions' && kind !== 'projects') || details[kind].has(key)) return null;
+      details[kind].set(key, row);
+    }
+  }
+  if (details.sessions.size !== metadata.sessions || details.projects.size !== metadata.projects) return null;
+  return {
+    ...metadata.totals,
+    sessions: Object.fromEntries(details.sessions),
+    projects: Object.fromEntries(details.projects)
+  };
+}
+
+/** @param {unknown} value */
+function isObject(value) {
+  return value !== null && typeof value === 'object' && !Array.isArray(value);
+}
+
+/**
+ * Check that the page index covers the upload exactly once. A zero-detail
+ * range is valid and remains distinguishable from a missing range.
+ * @param {JsonRecord} ranges
+ * @param {number} totalPages
+ */
+function validFixedRangeIndex(ranges, totalPages) {
+  if (!isObject(ranges) || !Object.keys(ranges).length
+    || !Number.isInteger(totalPages) || totalPages < 0 || totalPages > MAX_FIXED_RANGE_PAGES
+    || Object.keys(ranges).some(name => !FIXED_RANGE_NAMES.includes(name))) return false;
+  let nextPage = 0;
+  for (const name of FIXED_RANGE_NAMES) {
+    if (!Object.hasOwn(ranges, name)) continue;
+    const metadata = ranges[name];
+    if (!isObject(metadata) || !dateKey(metadata.start) || !dateKey(metadata.end)
+      || metadata.start > metadata.end || !isObject(metadata.totals)
+      || !Number.isSafeInteger(metadata.totals.totalTokens) || metadata.totals.totalTokens < 0
+      || !Number.isInteger(metadata.sessions) || metadata.sessions < 0
+      || !Number.isInteger(metadata.projects) || metadata.projects < 0
+      || metadata.firstPage !== nextPage || !Number.isInteger(metadata.pageCount) || metadata.pageCount < 0
+      || (metadata.pageCount === 0) !== (metadata.sessions + metadata.projects === 0)) return false;
+    nextPage += metadata.pageCount;
+  }
+  return nextPage === totalPages;
+}
+
+/**
+ * @param {JsonRecord} ranges
+ * @param {unknown} today
+ */
+function rangesMatchDeviceDay(ranges, today) {
+  const key = dateKey(today);
+  if (!key) return false;
+  const todayMs = Date.parse(key);
+  return Object.entries(ranges).every(([name, range]) => {
+    const end = Date.parse(range.end);
+    const start = Date.parse(range.start);
+    const days = (end - start) / DAY_MS + 1;
+    if (name === 'yesterday') return days === 1 && end === todayMs - DAY_MS;
+    if (end !== todayMs) return false;
+    return name === 'week' ? days >= 1 && days <= 7 : days === (name === 'last7' ? 7 : 30);
+  });
+}
+
+/**
+ * Admit one page before staging it. Strip session text at the receiving
+ * boundary as well as at the sender. A publish must recheck the policy before
+ * persisting, since consent can change while another page is in transit.
+ * @param {unknown} value
+ * @param {{ preserveSessionTitles?: boolean, projectsEnabled?: boolean }} options
+ * @returns {DetailRow[] | null}
+ */
+function admitFixedRangePage(value, { preserveSessionTitles = false, projectsEnabled = true } = {}) {
+  if (!Array.isArray(value) || !value.length
+    || encoder.encode(JSON.stringify(value)).byteLength > FIXED_RANGE_PAGE_BYTES) return null;
+  /** @type {DetailRow[]} */
+  const admitted = [];
+  for (const input of value) {
+    if (!Array.isArray(input) || input.length !== 4) return null;
+    const [name, rawKind, key, row] = input;
+    if (!FIXED_RANGE_NAMES.includes(name) || typeof key !== 'string' || !key || !isObject(row)) return null;
+    if (rawKind !== 'sessions' && rawKind !== 'projects') return null;
+    const kind = /** @type {'sessions' | 'projects'} */ (rawKind);
+    if (kind === 'projects' && !projectsEnabled) return null;
+    const period = normalizePeriod(stripSessionTextFromPeriod({ [kind]: { [key]: row } }, {
+      preserveSessionTitles
+    }), { projectsEnabled });
+    const normalized = Object.entries(period[kind]);
+    if (normalized.length !== 1 || normalized[0][0] !== key) return null;
+    admitted.push([name, kind, key, normalized[0][1]]);
+  }
+  return admitted;
+}
+
+/**
+ * @param {JsonRecord} ranges
+ * @param {number} totalPages
+ */
+function admitFixedRangeIndex(ranges, totalPages) {
+  if (!validFixedRangeIndex(ranges, totalPages)) return null;
+  return Object.fromEntries(Object.entries(ranges).map(([name, entry]) => {
+    const { sessions: _sessions, projects: _projects, ...totals } = normalizePeriod({
+      ...entry.totals, sessions: {}, projects: {}
+    });
+    return [name, {
+      start: entry.start, end: entry.end, firstPage: entry.firstPage,
+      pageCount: entry.pageCount, sessions: entry.sessions, projects: entry.projects, totals
+    }];
+  }));
+}
+
+module.exports = {
+  FIXED_RANGE_HEADER, FIXED_RANGE_VERSION, SYNC_WEEK_STARTS_ON, FIXED_RANGE_PAGE_BYTES, MAX_FIXED_RANGE_PAGES, encodeFixedRangeSnapshot, decodeFixedRangePeriod,
+  admitFixedRangeIndex, admitFixedRangePage, rangesMatchDeviceDay, fixedRangeRowKey, compareFixedRangeRows
+};

@@ -11,9 +11,9 @@
   if (root) root.TokenMonitorSessionActivityProjection = api;
 })(typeof window !== 'undefined' ? window : null, function createApi(live, providers) {
   const indexes = new WeakMap();
-  // Local native ranges (Week, Last 7 days, Last 30 days) list the same live
+  // Local native ranges (Yesterday, Week, Last 7 days, Last 30 days) list the same live
   // sessions, so their rows take the same observations.
-  const names = ['today', 'month', 'allTime', 'week', 'last7', 'last30'];
+  const names = ['today', 'month', 'allTime', 'yesterday', 'week', 'last7', 'last30'];
   const nativeSessionNames = ['today', 'month', 'allTime'];
   const LOOKUP_CACHE_LIMIT = 512;
   const clients = providers.SESSION_ACTIVITY_CLIENTS;

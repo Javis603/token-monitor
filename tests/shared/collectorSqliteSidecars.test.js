@@ -47,7 +47,7 @@ for (const [client, relative] of sources) {
       else process.env.TOKEN_MONITOR_SHARED_DIR = previousSharedDir;
     });
 
-    const chokidar = require('chokidar');
+    const chokidar = require('../../src/shared/fileWatcher');
     let onEvent;
     t.mock.method(chokidar, 'watch', () => {
       const watcher = {
