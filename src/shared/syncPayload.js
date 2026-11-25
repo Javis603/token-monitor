@@ -471,7 +471,7 @@ function createSyncPayloadUploader({ now = Date.now } = {}) {
         }
       }
       const summary = options.summary;
-      const fixedRangeAt = JSON.stringify([summary?.updatedAt, options.sessionTitleSyncGeneration, summary?.projectsEnabled !== false]);
+      const fixedRangeAt = JSON.stringify([summary?.updatedAt, options.sessionTitleSyncGeneration, summary?.projectsEnabled !== false, summary?.nativeRangeWindows]);
       const fixedRangeConfirmed = fixedRangeAt === acknowledgedFixedRangeAt
         && (!hasOwn(ack, 'fixedRangeRevision') || ack.fixedRangeRevision === fixedRangeBaseline?.[0]?.revision);
       if (requestGeneration === generation && ack?.ok && ack.fixedRanges === 1

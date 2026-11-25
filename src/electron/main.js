@@ -4319,7 +4319,7 @@ function startHostCollector() {
           console.log('[host-ingest] all-time project breakdown omitted to reduce the sync snapshot size');
         }
         embeddedHub.hub.ingest(payload);
-        const fixedRangeAt = JSON.stringify([visibleSummary.updatedAt, options.sessionTitleSyncGeneration, visibleSummary.projectsEnabled !== false]);
+        const fixedRangeAt = JSON.stringify([visibleSummary.updatedAt, options.sessionTitleSyncGeneration, visibleSummary.projectsEnabled !== false, visibleSummary.nativeRangeWindows]);
         if (visibleSummary.nativeRanges && handle.fixedRangeAt !== fixedRangeAt) {
           try {
             for (const page of fixedRangeUploadPages(visibleSummary, options)) {

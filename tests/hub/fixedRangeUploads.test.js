@@ -114,16 +114,28 @@ for (const kind of ['Node', 'Worker']) test(`${kind} publishes complete range pa
     assert.equal((await upload(traced, base + '/api/ingest', { headers, summary: rangeRecord })).response.ok, true);
     assert.ok(requests.some(([pathname, method]) => pathname === '/api/fixed-ranges' && method === 'PUT'));
     requests.length = 0;
-    await upload(traced, base + '/api/ingest', { headers, summary: rangeRecord });
+    const repeated = await upload(traced, base + '/api/ingest', { headers, summary: rangeRecord });
+    assert.equal(repeated.response.status, 200);
+    const ack = await repeated.response.json();
+    assert.equal(ack.fixedRanges, 1);
     assert.equal(requests.some(([pathname]) => pathname === '/api/fixed-ranges'), false);
     const replacement = await (await send(endpoint, { headers })).json();
     assert.notEqual(replacement.revision, revision);
+    assert.equal(ack.fixedRangeRevision, replacement.revision);
     assert.equal((await put(conflicting)).status, 409, 'a superseded upload may not publish under its old revision');
     assert.equal((await (await send(endpoint, { headers })).json()).revision, replacement.revision);
     const loaded = await fetchFixedRange(send, base, deviceId, 'last7', rangeRecord.nativeRangeWindows.last7, headers);
     assert.deepEqual(loaded, period);
     receivedPeriods.push(loaded);
     assert.equal(await fetchFixedRange(send, base, deviceId, 'last7', { start: '2026-11-18', end: '2026-11-24' }, headers, replacement.revision), null);
+
+    const limited = await send(base + '/api/ingest', {
+      method: 'POST', headers,
+      body: JSON.stringify({ deviceId, limitsOnly: true, updatedAt: '2026-11-25T01:15:00.000Z' })
+    });
+    assert.equal(limited.status, 200);
+    assert.equal((await limited.json()).fixedRangeRevision, replacement.revision);
+    assert.equal((await send(endpoint, { headers })).status, 200);
 
     const { ranges: empty } = encodeFixedRangeSnapshot({
       ...rangeRecord, nativeRanges: { last7: { totalTokens } }
@@ -194,7 +206,9 @@ for (const kind of ['Node', 'Worker']) test(`${kind} revokes titles in range pag
   const replacement = await fetchFixedRange(send, base, deviceId, 'yesterday', window, headers);
   assert.equal(replacement.sessions['claude:a'].title, '');
   if (kind === 'Worker') {
-    const publicStats = await (await send(base + '/api/public/stats')).json();
+    const response = await send(base + '/api/public/stats');
+    assert.equal(response.status, 200);
+    const publicStats = await response.json();
     assert.equal(Object.hasOwn(publicStats, 'fixedRangeRevisions'), false);
   }
 });
@@ -360,6 +374,16 @@ for (const kind of ['Node', 'Worker']) test(`${kind} synchronizes changed fixed-
   requests.length = 0;
   await upload(makeRecord(4, next));
   assert.ok(requests.length, 'the same observation is republished after device deletion');
+
+  requests.length = 0;
+  const shifted = makeRecord(4, next);
+  shifted.periodWindows.today = { key: '2026-11-26', endsAt: '2026-11-27T00:00:00.000Z' };
+  shifted.nativeRangeWindows.last7 = { start: '2026-11-20', end: '2026-11-26' };
+  const moved = await uploader(transport, base + '/api/ingest', { summary: shifted, headers });
+  assert.equal(moved.response.status, 200);
+  assert.equal((await moved.response.json()).fixedRangeRevision, null, 'the earlier calendar revision cannot be advertised');
+  assert.ok(requests.length, 'a changed calendar window is republished at the same timestamp');
+  assert.ok(await fetchFixedRange(send, base, deviceId, 'last7', shifted.nativeRangeWindows.last7, headers));
 });
 
 

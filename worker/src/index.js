@@ -1,6 +1,6 @@
 import uploadDelta from './shared/uploadDelta.js';
 import fixedRangeUploads from './shared/fixedRangeUploads.js';
-import { FIXED_RANGE_HEADER, FIXED_RANGE_VERSION } from './shared/fixedRangeSync.js';
+import { FIXED_RANGE_HEADER, FIXED_RANGE_VERSION, rangesMatchDeviceDay } from './shared/fixedRangeSync.js';
 import { publicLimits } from './shared/limits/core.js';
 import subscriptionDisplay from './shared/subscriptionDisplay.js';
 import currency from './shared/currency.js';
@@ -196,7 +196,7 @@ export class HubDO {
             await storage.put(fixedRangePageKey(deviceId, index.revision, page), rows);
           }
           await storage.put(key, { ...index, pageCount: pages.length });
-          await storage.put(`fixedRangeRevision:${deviceId}`, { observedAt: index.observedAt, revision: index.revision });
+          await storage.put(`fixedRangeRevision:${deviceId}`, { observedAt: index.observedAt, revision: index.revision, day: device.periodWindows.today.key });
           if (previous?.revision !== index.revision) await this.clearFixedRanges(storage, deviceId, previous);
         }
         return jsonResponse(200, { complete });
@@ -208,7 +208,8 @@ export class HubDO {
     const [index, device] = await Promise.all([
       this.state.storage.get(key), this.state.storage.get(`dev:${deviceId}`)
     ]);
-    if (!index?.revision || !fixedRangeUploads.hasCurrentFixedRangeObservation(device) || index.observedAt !== device.updatedAt) {
+    if (!index?.revision || !fixedRangeUploads.hasCurrentFixedRangeObservation(device) || index.observedAt !== device.updatedAt
+      || !rangesMatchDeviceDay(index.ranges, device.periodWindows?.today?.key)) {
       return jsonResponse(404, { error: 'not_found' });
     }
     if (!url.searchParams.has('page')) {
@@ -403,9 +404,9 @@ export class HubDO {
     const stats = await this.getStats(devices);
     stats.subscriptionsUpdatedAt = (await this.getSubscriptions())?.updatedAt || '';
     const rangeRevisions = await this.state.storage.list({ prefix: 'fixedRangeRevision:' });
-    stats.fixedRangeRevisions = Object.fromEntries(devices.filter(fixedRangeUploads.hasCurrentFixedRangeObservation).flatMap(({ deviceId, updatedAt }) => {
+    stats.fixedRangeRevisions = Object.fromEntries(devices.filter(fixedRangeUploads.hasCurrentFixedRangeObservation).flatMap(({ deviceId, updatedAt, periodWindows }) => {
       const stamp = rangeRevisions.get(`fixedRangeRevision:${deviceId}`);
-      return stamp?.observedAt === updatedAt ? [[deviceId, stamp.revision]] : [];
+      return stamp?.observedAt === updatedAt && stamp.day === periodWindows?.today?.key ? [[deviceId, stamp.revision]] : [];
     }));
     stats.syncSettingsRevisions = Object.fromEntries(await Promise.all(syncContent.SHARED_SYNC_KINDS.map(async (kind) => [kind, (await this.getSyncSettings(kind)).revision])));
     return stats;
@@ -736,7 +737,7 @@ export class HubDO {
           if (!projectsChanged && request.headers.get(FIXED_RANGE_HEADER) === FIXED_RANGE_VERSION
             && fixedRangeUploads.hasCurrentFixedRangeObservation(next)) {
             const stamp = await this.state.storage.get(revisionKey);
-            if (stamp?.observedAt === next.updatedAt) fixedRangeRevision = stamp.revision;
+            if (stamp?.observedAt === next.updatedAt && stamp.day === next.periodWindows?.today?.key) fixedRangeRevision = stamp.revision;
           }
           this.uploadBaselines.forget(deviceId);
           if (delta || request.headers.get(uploadDelta.UPLOAD_HEADER) === uploadDelta.UPLOAD_VERSION) {

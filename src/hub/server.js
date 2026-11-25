@@ -5,7 +5,7 @@ const {
   createFixedRangeUploads, fixedRangeRequestPages, retireFixedRangeSnapshot, rememberFixedRangeObservation,
   hasCurrentFixedRangeObservation, withoutFixedRangeObservation
 } = require('../shared/fixedRangeUploads');
-const { decodeFixedRangePeriod, FIXED_RANGE_HEADER, FIXED_RANGE_VERSION } = require('../shared/fixedRangeSync');
+const { decodeFixedRangePeriod, rangesMatchDeviceDay, FIXED_RANGE_HEADER, FIXED_RANGE_VERSION } = require('../shared/fixedRangeSync');
 const { UPLOAD_HEADER, UPLOAD_VERSION, createUploadBaselines } = require('../shared/uploadDelta');
 const path = require('node:path');
 const { URL } = require('node:url');
@@ -87,7 +87,8 @@ function createHub({
     const snapshot = store.fixedRanges[id];
     const device = store.devices[id];
     return snapshot?.revision && hasCurrentFixedRangeObservation(device)
-      && snapshot.observedAt === device.updatedAt ? snapshot : undefined;
+      && snapshot.observedAt === device.updatedAt
+      && rangesMatchDeviceDay(snapshot.ranges, device.periodWindows?.today?.key) ? snapshot : undefined;
   }
 
   function readFixedRange(id, name, window, revision) {
