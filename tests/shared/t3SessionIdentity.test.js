@@ -5,7 +5,7 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const test = require('node:test');
-const { nativeAccountingId, readT3IdentityBindings, supportsT3SessionClient, t3AccountingClient } = require('../../src/shared/t3SessionIdentity');
+const { nativeAccountingId, readT3IdentityBindings, supportsT3SessionClient, t3AccountingClient } = require('../../src/shared/t3/sessionIdentity');
 
 function settingsFile(t) {
   const home = fs.mkdtempSync(path.join(os.tmpdir(), 'tm-t3-bindings-'));

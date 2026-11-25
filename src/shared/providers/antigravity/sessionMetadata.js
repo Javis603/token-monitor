@@ -7,7 +7,7 @@ const { fileURLToPath } = require('node:url');
 const { antigravityDataRoots } = require('./selfSync');
 const { discoverAntigravityAcpPaths } = require('./acpPaths');
 const { antigravityCliDataDir } = require('../../clientSources');
-const { readT3SessionRelationResult } = require('../../t3SessionMetadata');
+const { readT3SessionRelationResult } = require('../../t3/sessionMetadata');
 
 // Deferred like cursor: importing this resolver must not emit Node's
 // experimental node:sqlite warning for collectors that never see an Antigravity row.
