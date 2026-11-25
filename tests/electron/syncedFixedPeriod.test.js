@@ -143,7 +143,7 @@ test('overlapping refreshes share a slow remote read and reuse the result', asyn
   const first = cache.read('device-and-revision', load);
   const latest = cache.read('device-and-revision', load);
   assert.equal(first, latest);
-  assert.equal(cache.read('different-revision', load), null, 'pending reads are bounded');
+
   await Promise.resolve();
   finish({ totalTokens: 25 });
   assert.deepEqual(await latest, { totalTokens: 25 });
@@ -156,9 +156,40 @@ test('overlapping refreshes share a slow remote read and reuse the result', asyn
     return new Promise(resolve => { finish = resolve; });
   });
   await Promise.resolve();
+  const queued = cache.read('queued', () => assert.fail('a cleared queued read must not start'));
   cache.clear();
+  assert.equal(await queued, null);
   assert.equal(aborted.aborted, true);
   finish({ totalTokens: 30 });
   assert.equal(await stale, null);
   assert.equal(await cache.read('old-source', () => null), null, 'a revoked read cannot repopulate the cache');
+});
+
+
+test('all 17 devices contribute exact ranges when only 16 reads can run at once', async () => {
+  const cache = createFixedRangeReadCache();
+  const period = normalizePeriod({ totalTokens: 10 });
+  const devices = Array.from({ length: 17 }, (_, i) => ({
+    deviceId: `device-${i}`,
+    periodWindows: { timeZone: 'UTC', today: { key: day, endsAt: '2026-11-26T00:00:00.000Z' } }
+  }));
+  const revisions = Object.fromEntries(devices.map(device => [device.deviceId, 'rev']));
+  const loads = [];
+  const result = resolveSyncedFixedPeriod('last7', devices, revisions, {
+    now: Date.parse(day + 'T12:00:00Z'),
+    history: () => assert.fail('a queued read must not trigger History fallback'),
+    read: id => cache.read(id, () => new Promise(resolve => loads.push(resolve)))
+  });
+  await new Promise(setImmediate);
+  assert.equal(loads.length, 16);
+  assert.equal(cache.read('device-16', () => assert.fail('queued reads must coalesce')),
+    cache.read('device-16', () => assert.fail('queued reads must coalesce')));
+  loads[0](period);
+  await new Promise(setImmediate);
+  assert.equal(loads.length, 17);
+  for (const finish of loads.slice(1)) finish(period);
+  const snapshot = await result;
+  assert.equal(snapshot.period.totalTokens, 170);
+  assert.equal(snapshot.devices.length, 17);
+  assert.equal(snapshot.detailsAvailable, true);
 });

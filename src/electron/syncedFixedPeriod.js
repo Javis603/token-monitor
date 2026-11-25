@@ -9,6 +9,12 @@ const { projectSessionDeviceSessions } = require('./sessionDeviceSources');
 function createFixedRangeReadCache(maxEntries = 16) {
   const pending = new Map();
   const completed = new Map();
+  const queue = [];
+  let active = 0;
+
+  function drain() {
+    while (active < maxEntries && queue.length) queue.shift().start();
+  }
 
   function read(key, load) {
     if (pending.has(key)) return pending.get(key).promise;
@@ -18,25 +24,35 @@ function createFixedRangeReadCache(maxEntries = 16) {
       completed.set(key, result);
       return result;
     }
-    if (pending.size >= maxEntries) return null;
     const controller = new AbortController();
-    const entry = { controller, promise: null };
-    entry.promise = Promise.resolve().then(() => load(controller.signal)).then(result => {
-      if (controller.signal.aborted) return null;
-      if (result) {
-        completed.set(key, result);
-        if (completed.size > maxEntries) completed.delete(completed.keys().next().value);
-      }
-      return result;
-    }).finally(() => {
-      if (pending.get(key) === entry) pending.delete(key);
+    const entry = { controller, promise: null, cancel: null, start: null };
+    entry.promise = new Promise((resolve, reject) => {
+      entry.cancel = () => resolve(null);
+      entry.start = () => {
+        active++;
+        Promise.resolve().then(() => controller.signal.aborted ? null : load(controller.signal)).then(result => {
+          if (controller.signal.aborted) return null;
+          if (result) {
+            completed.set(key, result);
+            if (completed.size > maxEntries) completed.delete(completed.keys().next().value);
+          }
+          return result;
+        }).finally(() => {
+          active--;
+          if (pending.get(key) === entry) pending.delete(key);
+          drain();
+        }).then(resolve, reject);
+      };
     });
     pending.set(key, entry);
+    queue.push(entry);
+    drain();
     return entry.promise;
   }
 
   return { read, clear() {
     for (const { controller } of pending.values()) controller.abort();
+    for (const entry of queue.splice(0)) entry.cancel();
     pending.clear();
     completed.clear();
   } };
