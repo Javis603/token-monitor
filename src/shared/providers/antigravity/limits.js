@@ -154,24 +154,80 @@ function anonymousRpcRemoval(reading, options, deps) {
     replacementAccount: { accountKey: reading.accountKey } };
 }
 
+// The language server is only reachable while Antigravity (IDE, desktop app, or
+// `agy`) is running, so the local sign-in is otherwise invisible: after a
+// restart the widget would only know the managed OAuth accounts, and anything
+// that picks "an Antigravity account" (such as the subscription form) silently
+// falls back to one of those even when this device's Antigravity is signed in
+// to someone else. The host remembers the last address a live probe reported
+// (no token, address only) and the collector keeps offering it as an
+// identity-only row until the language server answers again.
+function rememberedLocalAccount(deps = {}) {
+  let remembered;
+  try {
+    remembered = typeof deps.resolveAntigravityLocalAccount === 'function'
+      ? deps.resolveAntigravityLocalAccount()
+      : deps.antigravityLocalAccount;
+  } catch (_) {
+    return null;
+  }
+  const accountEmail = String(remembered?.accountEmail || '').trim().toLowerCase();
+  if (!accountEmail || !accountEmail.includes('@')) return null;
+  return { accountEmail, accountKey: antigravityOAuth.accountKey(accountEmail) };
+}
+
+function rememberedLocalProvider(remembered, status, nowMs) {
+  return normalizeLimitProvider({
+    provider: 'antigravity',
+    accountKey: remembered.accountKey,
+    accountLabel: '',
+    accountEmail: remembered.accountEmail,
+    source: 'rpc',
+    status: status || 'notConfigured',
+    updatedAt: nowIso(nowMs),
+    windows: []
+  });
+}
+
+function observeLocalAccount(provider, deps = {}) {
+  if (deps.signal?.aborted) return;
+  const accountEmail = String(provider?.accountEmail || '').trim();
+  if (!provider?.accountKey || !accountEmail) return;
+  try {
+    deps.onAntigravityLocalAccountObserved?.({ accountEmail });
+  } catch (_) {
+    // Remembering the address is best effort; the live row is already correct.
+  }
+}
+
 async function fetchAntigravityLimits(options = {}, deps = {}) {
   if (options.antigravityAccountSlots?.length) options = { ...options, antigravityManagedAccounts: mergedOwnerAccounts(options, 'antigravity', options.antigravityManagedAccounts || []).map(account => ({ ...account, credentials: account.credentials })) };
   const nowMs = (deps.now || Date.now)();
   const probeFn = deps.antigravityProbe || antigravityProbe.probe;
   const localEnabled = options.antigravityLocalLimitsEnabled !== false;
   const scope = options.limitRefreshScope?.provider === 'antigravity' ? options.limitRefreshScope : null;
-  const accounts = antigravityOAuth.normalizeManagedAccounts(
+  const allManagedAccounts = antigravityOAuth.normalizeManagedAccounts(
     options.antigravityManagedAccounts || deps.antigravityManagedAccounts,
     { includeCredentials: true }
-  )
+  );
+  const accounts = allManagedAccounts
     .filter((account) => account.enabled !== false)
     .filter((account) => !scope
       || (!scope.accountKey || scope.accountKey === account.accountKey)
       && (!scope.accountEmail || scope.accountEmail === account.accountEmail));
 
+  // Every configured managed account, disabled ones included: a remembered
+  // local address the user already manages (or switched off) is not offered a
+  // second time as a separate identity. Also skip when local detection is off
+  // or the refresh is scoped to a single account (which uses OAuth only).
+  const managedKeys = new Set(allManagedAccounts.map((account) => account.accountKey).filter(Boolean));
+  const remembered = localEnabled && !scope ? rememberedLocalAccount(deps) : null;
+  const rememberedOffered = remembered && !managedKeys.has(remembered.accountKey) ? remembered : null;
+
   if (localEnabled && accounts.length === 0 && !scope) {
     try {
       const reading = mapAntigravitySnapshot(await probeFn(deps), { nowMs, source: 'rpc' });
+      observeLocalAccount(reading, deps);
       const removal = anonymousRpcRemoval(reading, options, deps);
       return removal ? [reading, removal] : reading;
     } catch (error) {
@@ -198,15 +254,20 @@ async function fetchAntigravityLimits(options = {}, deps = {}) {
         if (rows.length) return rows.length === 1 ? rows[0] : rows;
         if (previous.some(row => row.windows.length)) status = 'unavailable';
       } else deps.noteLimitFailure?.(error, { source: 'rpc' });
+      if (rememberedOffered) return rememberedLocalProvider(rememberedOffered, status, nowMs);
       return normalizeLimitProvider({ ...base, status });
     }
   }
 
+  let localError = null;
   const localPromise = scope || !localEnabled
     ? Promise.resolve(null)
     : probeFn(deps).then(
         (snapshot) => mapAntigravitySnapshot(snapshot, { nowMs, source: 'rpc' }),
-        () => null
+        (error) => {
+          localError = error;
+          return null;
+        }
       );
   const remotePromise = Promise.all(accounts.map(async (account) => {
     try {
@@ -225,6 +286,14 @@ async function fetchAntigravityLimits(options = {}, deps = {}) {
   }));
   const [local, remote] = await Promise.all([localPromise, remotePromise]);
   const providers = [...remote];
+  if (local?.accountKey) observeLocalAccount(local, deps);
+  if (!local?.accountKey && rememberedOffered
+    && !providers.some((provider) => provider.accountKey === rememberedOffered.accountKey)) {
+    const status = localError
+      ? (localError.sourceFailures ? 'unavailable' : providerStatusFromError(localError))
+      : 'notConfigured';
+    providers.unshift(rememberedLocalProvider(rememberedOffered, status, nowMs));
+  }
   if (local?.accountKey) {
     const duplicateIndex = providers.findIndex((provider) => provider.accountKey === local.accountKey);
     if (duplicateIndex < 0) {
