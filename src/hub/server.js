@@ -5,13 +5,13 @@ const {
   createFixedRangeUploads, fixedRangeRequestPages, retireFixedRangeSnapshot, rememberFixedRangeObservation,
   hasCurrentFixedRangeObservation, withoutFixedRangeObservation
 } = require('../shared/fixedRangeUploads');
-const { decodeFixedRangePeriod, rangesMatchDeviceDay, FIXED_RANGE_HEADER, FIXED_RANGE_VERSION } = require('../shared/fixedRangeSync');
+const { dailyRangeKeys, decodeFixedRangePeriod, legacyFixedRangeView, rangesMatchDeviceDay, redactDailyRangeSnapshot, removedPagedClients, restorePagedClientSessions, FIXED_RANGE_HEADER, FIXED_RANGE_VERSION } = require('../shared/fixedRangeSync');
 const { UPLOAD_HEADER, UPLOAD_VERSION, createUploadBaselines } = require('../shared/uploadDelta');
 const path = require('node:path');
 const { URL } = require('node:url');
 const {
-  aggregateDevices,
-  mergeSyncDeviceRecord,
+  mergePeriods, aggregateDevices,
+  mergeSyncDeviceRecord, restoreDeviceHistory,
   aggregateHistory,
   stripSessionTextFromDeviceRecord
 } = require('../shared/usage');
@@ -83,6 +83,7 @@ function createHub({
   store.syncSettings = Object.assign(Object.create(null), store.syncSettings || {});
   store.fixedRanges = Object.assign(Object.create(null), store.fixedRanges || {});
   const fixedRangeUploads = createFixedRangeUploads();
+  const legacyRangeViews = new WeakMap();
   function getFixedRanges(id) {
     const snapshot = store.fixedRanges[id];
     const device = store.devices[id];
@@ -93,9 +94,19 @@ function createHub({
 
   function readFixedRange(id, name, window, revision) {
     const snapshot = getFixedRanges(id);
-    const range = snapshot?.ranges[name];
-    if (snapshot?.revision !== revision || range?.start !== window.start || range.end !== window.end) return null;
-    return decodeFixedRangePeriod(snapshot.ranges, snapshot.pages.slice(range.firstPage, range.firstPage + range.pageCount), name);
+    if (!snapshot || snapshot.revision !== revision) return null;
+    const daily = !Object.hasOwn(snapshot.ranges, name);
+    const names = daily ? dailyRangeKeys(window) : [name];
+    if (!names.length) return null;
+    const periods = [];
+    for (const key of names) {
+      const range = snapshot.ranges[key];
+      if (range?.start !== (daily ? key : window.start) || range.end !== (daily ? key : window.end)) return null;
+      const decoded = decodeFixedRangePeriod(snapshot.ranges, snapshot.pages.slice(range.firstPage, range.firstPage + range.pageCount), key);
+      if (!decoded) return null;
+      periods.push(decoded);
+    }
+    return daily ? mergePeriods(...periods) : periods[0];
   }
 
   function acceptFixedRange(deviceId, payload) {
@@ -149,7 +160,8 @@ function createHub({
   for (const id of Object.keys(store.fixedRanges)) {
     const snapshot = store.fixedRanges[id];
     if (snapshot.titleGeneration && !acceptsSessionTitles(serverTitlesEnabled, store.syncTitlePolicies[id], snapshot.titleGeneration)) {
-      store.fixedRanges[id] = retireFixedRangeSnapshot(snapshot);
+      store.fixedRanges[id] = redactDailyRangeSnapshot(snapshot, store.devices[id]?.periodWindows?.today?.key)
+        || retireFixedRangeSnapshot(snapshot);
     }
   }
   if (JSON.stringify([store.devices, store.syncTitlePolicies, store.fixedRanges]) !== beforeCleanup) persist();
@@ -308,14 +320,18 @@ function createHub({
     return ingestRecord(payload);
   }
 
-  function ingestRecord(payload) {
+  function ingestRecord(payload, { historyOnly = false } = {}) {
     if (!payload || (!payload.deviceId && !payload.id)) {
       throw new Error('deviceId_required');
     }
     const deviceId = String(payload.deviceId || payload.id);
-    uploadBaselines.forget(deviceId);
+    if (!historyOnly) uploadBaselines.forget(deviceId);
     const previous = store.devices[deviceId];
-    const record = mergeSyncDeviceRecord(previous, { ...payload, receivedAt: new Date().toISOString() }, {
+    const removed = removedPagedClients(previous, payload);
+    const published = removed.length ? getFixedRanges(deviceId) : null;
+    const previousWithSessions = published
+      ? restorePagedClientSessions(previous, published.ranges, published.pages, removed) : previous;
+    const record = historyOnly ? restoreDeviceHistory(previous, payload) : mergeSyncDeviceRecord(previousWithSessions, { ...payload, receivedAt: new Date().toISOString() }, {
       preserveSessionTitles: acceptsSessionTitles(serverTitlesEnabled, store.syncTitlePolicies[deviceId], payload.sessionTitleSyncGeneration)
     });
     rememberFixedRangeObservation(record, previous);
@@ -396,7 +412,10 @@ function createHub({
     const previousSavedAt = store.savedAt;
     store.syncTitlePolicies[deviceId] = next;
     if (!enabled && previousDevice) store.devices[deviceId] = stripSessionTextFromDeviceRecord(previousDevice);
-    if (!enabled && previousRanges?.titleGeneration) store.fixedRanges[deviceId] = retireFixedRangeSnapshot(previousRanges);
+    if (!enabled && previousRanges?.titleGeneration) {
+      store.fixedRanges[deviceId] = redactDailyRangeSnapshot(previousRanges, previousDevice?.periodWindows?.today?.key)
+        || retireFixedRangeSnapshot(previousRanges);
+    }
     try { persist(); } catch (error) {
       if (previous) store.syncTitlePolicies[deviceId] = previous;
       else delete store.syncTitlePolicies[deviceId];
@@ -517,15 +536,25 @@ function createHub({
         if (!snapshot) {
           return sendJson(res, 404, { error: 'not_found' });
         }
+        let view = snapshot;
+        const day = store.devices[deviceId]?.periodWindows?.today?.key;
+        if (url.searchParams.get('daily') !== '1' && Object.hasOwn(snapshot.ranges, day)) {
+          let legacy = legacyRangeViews.get(snapshot);
+          if (!legacy) {
+            legacy = legacyFixedRangeView(snapshot.ranges, snapshot.pages, day);
+            legacyRangeViews.set(snapshot, legacy);
+          }
+          view = { ...snapshot, ...legacy };
+        }
         if (!url.searchParams.has('page')) {
-          const { pages: _pages, retiredRevisions: _retired, ...index } = snapshot;
+          const { pages: _pages, retiredRevisions: _retired, ...index } = view;
           return sendJson(res, 200, index);
         }
         if (url.searchParams.get('revision') !== snapshot.revision) {
           return sendJson(res, 409, { error: 'fixed_range_revision_mismatch' });
         }
         const page = url.searchParams.get('page');
-        const rows = /^(0|[1-9]\d*)$/.test(page) ? snapshot.pages[Number(page)] : null;
+        const rows = /^(0|[1-9]\d*)$/.test(page) ? view.pages[Number(page)] : null;
         return rows ? sendJson(res, 200, { rows }) : sendJson(res, 404, { error: 'not_found' });
       }
     }
@@ -611,23 +640,35 @@ function createHub({
       return;
     }
 
-    if (req.method === 'POST' && ['/api/ingest', '/api/ingest/delta'].includes(url.pathname)) {
+    if (req.method === 'POST' && ['/api/ingest', '/api/ingest/delta', '/api/ingest/compact'].includes(url.pathname)) {
       try {
         const incoming = await readJsonBody(req);
-        const delta = url.pathname === '/api/ingest/delta';
+        const compact = url.pathname === '/api/ingest/compact';
+        const delta = compact || url.pathname === '/api/ingest/delta';
         const payload = delta ? uploadBaselines.prepare(incoming) : incoming;
-        const record = ingestRecord(payload);
-        const upload = delta || req.headers[UPLOAD_HEADER] === UPLOAD_VERSION
+        if (compact) {
+          const published = getFixedRanges(payload.deviceId);
+          const day = payload.periodWindows?.today?.key;
+          if (!published || published.observedAt !== payload.updatedAt || !Object.hasOwn(published.ranges, day)) {
+            return sendJson(res, 409, { error: 'fixed_range_revision_mismatch' });
+          }
+        }
+        const record = ingestRecord(payload, { historyOnly: compact });
+        const upload = !compact && (delta || req.headers[UPLOAD_HEADER] === UPLOAD_VERSION)
           ? uploadBaselines.commit(record.deviceId, stripSessionTextFromDeviceRecord(payload, {
               preserveSessionTitles: acceptsSessionTitles(serverTitlesEnabled, store.syncTitlePolicies[record.deviceId], payload.sessionTitleSyncGeneration)
             })) : undefined;
         const response = {
           ok: true, deviceId: record.deviceId,
           ...(req.headers[FIXED_RANGE_HEADER] === FIXED_RANGE_VERSION ? {
-            fixedRanges: 1, fixedRangeDelta: 1, fixedRangeBatch: 1, fixedRangeIndexDelta: 1,
+            fixedRanges: 1, fixedRangeDelta: 1, fixedRangeBatch: 1, fixedRangeIndexDelta: 1, dailySessionRanges: 1,
             fixedRangeRevision: getFixedRanges(record.deviceId)?.revision ?? null
           } : {}),
-          ...(upload ? { upload } : {})
+          ...(upload ? { upload } : {}),
+          ...(!compact && payload.history?.dailyTotalsOmitted > 0 && payload.history.dailyTotalsRevision
+            && payload.history.dailyTotalsRevision === record.history?.dailyTotalsRevision
+            && record.history.summary?.activeDaysComplete === true
+            ? { historyCalendarRetained: true } : {})
         };
         return sendJson(res, 200, wantsMinimalResponse(req) ? response : { ...response, stats: getStats() });
       } catch (error) {
@@ -741,7 +782,7 @@ function createHub({
   return {
     start, stop, server, getStats, getHistory, getDevices, ingest, deleteDevice, onStats, bindHost,
     getSubscriptions, setSubscriptions, getSyncContent, getSyncSettings, setSyncSettings, setSyncTitlePolicy,
-    acceptFixedRange, readFixedRange
+    acceptFixedRange, readFixedRange, restoreHistory: payload => ingestRecord(payload, { historyOnly: true })
   };
 }
 

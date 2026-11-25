@@ -4,7 +4,8 @@
 const { randomUUID } = require('node:crypto');
 const { statsPatch } = require('./hubDelta');
 const { MAX_UPLOAD_BYTES } = require('./uploadDelta');
-const { FIXED_RANGE_PAGE_BYTES, MAX_FIXED_RANGE_PAGES, encodeFixedRangeSnapshot, decodeFixedRangePeriod, fixedRangeRowKey } = require('./fixedRangeSync');
+const { mergePeriods } = require('./usage');
+const { FIXED_RANGE_PAGE_BYTES, MAX_DAILY_RANGE_PAGES, MAX_FIXED_RANGE_PAGES, dailyRangeKeys, encodeFixedRangeSnapshot, decodeFixedRangePeriod, fixedRangeRowKey } = require('./fixedRangeSync');
 
 /** @typedef {Record<string, any>} JsonRecord */
 /** @typedef {(url: string, options?: RequestInit) => Promise<Response>} RangeFetch */
@@ -27,7 +28,8 @@ function* fixedRangeUploadPages(record, options = {}) {
   const { ranges, pages } = encodeFixedRangeSnapshot(record, {
     maxPageBytes: FIXED_RANGE_PAGE_BYTES, preserveSessionTitles: options.syncSessionTitles === true
   });
-  if (Object.keys(ranges).length === 0 || pages.length > MAX_FIXED_RANGE_PAGES) return;
+  const maxPages = record.dailySessionPeriods ? MAX_DAILY_RANGE_PAGES : MAX_FIXED_RANGE_PAGES;
+  if (Object.keys(ranges).length === 0 || pages.length > maxPages) return;
   const revision = randomUUID();
   const totalPages = pages.length;
   for (const [page, rows] of (totalPages ? pages : [[]]).entries()) {
@@ -108,6 +110,35 @@ function* fixedRangeRequestBodies(pages, maxBytes = MAX_UPLOAD_BYTES) {
   if (batch.length) yield batch.length === 1 ? batch[0] : prefix + batch.join(',') + suffix;
 }
 
+/** @param {JsonRecord[]} pages */
+function* dailyRangeRequestBodies(pages) {
+  if (!pages.length) return;
+  const { revision, observedAt, sessionTitleSyncGeneration } = pages[0];
+  const baseRevision = pages.find(page => page.delta)?.delta.baseRevision;
+  const suffix = ']}';
+  let first = 0;
+  let bodies = [];
+  const prefix = () => JSON.stringify({ revision, observedAt, sessionTitleSyncGeneration,
+    firstPage: first, baseRevision }).slice(0, -1) + ',"pages":[';
+  let length = Buffer.byteLength(prefix()) + suffix.length;
+  for (const { page, revision: _revision, observedAt: _observation, sessionTitleSyncGeneration: _title, ...entry } of pages) {
+    const delta = entry.delta;
+    const unchanged = !entry.ranges && !entry.indexDelta && delta && delta.baseRevision === baseRevision
+      && !delta.upsert.length && !delta.remove.length;
+    const body = JSON.stringify(unchanged ? delta.basePage : entry);
+    const size = Buffer.byteLength(body);
+    if (bodies.length && length + 1 + size > MAX_UPLOAD_BYTES) {
+      yield prefix() + bodies.join(',') + suffix;
+      first = page;
+      bodies = [];
+      length = Buffer.byteLength(prefix()) + suffix.length;
+    }
+    length += size + Number(bodies.length > 0);
+    bodies.push(body);
+  }
+  if (bodies.length) yield prefix() + bodies.join(',') + suffix;
+}
+
 /**
  * @param {RangeFetch} fetch
  * @param {string} hubUrl
@@ -134,11 +165,17 @@ async function uploadFixedRangeVersion(fetch, hubUrl, record, headers, options, 
     return 0;
   }
 
-  let full = [...fixedRangeUploadPages(record, options)];
+  let full;
+  try { full = [...fixedRangeUploadPages(record, options)]; }
+  catch (error) {
+    if (record.dailySessionPeriods && error instanceof RangeError) return null;
+    throw error;
+  }
   const rowPages = fixedRangeDeltaPages(previous, full);
   const pages = indexDeltaSupported ? withFixedRangeIndexDelta(rowPages, previous) : rowPages;
   const hasDelta = pages.some(page => page.delta || page.indexDelta);
-  const bodies = batchSupported && hasDelta ? fixedRangeRequestBodies(pages) : pages.map(page => JSON.stringify(page));
+  const bodies = batchSupported && record.dailySessionPeriods ? dailyRangeRequestBodies(pages)
+    : batchSupported && hasDelta ? fixedRangeRequestBodies(pages) : pages.map(page => JSON.stringify(page));
   const status = await send(bodies);
   if (status === 200) return full;
   if (![400, 409, 413].includes(status) || !hasDelta) return null;
@@ -170,24 +207,49 @@ async function uploadFixedRanges(fetch, hubUrl, record, headers, options = {}) {
  */
 async function fetchFixedRange(fetch, hubUrl, deviceId, name, window, headers, expectedRevision) {
   const url = fixedRangeUrl(hubUrl, deviceId);
+  url.searchParams.set('daily', '1');
   const response = await fetch(url.href, { headers });
   if (!response.ok) { await response.arrayBuffer(); return null; }
   const index = await response.json();
-  const range = index.ranges?.[name];
-  if ((expectedRevision && index.revision !== expectedRevision) || range?.start !== window.start || range.end !== window.end
-    || !Number.isInteger(range.firstPage) || range.firstPage < 0
-    || !Number.isInteger(range.pageCount) || range.pageCount < 0 || range.pageCount > MAX_FIXED_RANGE_PAGES) return null;
+  if (expectedRevision && index.revision !== expectedRevision) return null;
+  const daily = !Object.hasOwn(index.ranges || {}, name);
+  const names = daily ? dailyRangeKeys(window) : [name];
+  if (!names.length || names.some(key => {
+    const range = index.ranges?.[key];
+    return range?.start !== (daily ? key : window.start) || range.end !== (daily ? key : window.end)
+      || !Number.isInteger(range.firstPage) || range.firstPage < 0
+      || !Number.isInteger(range.pageCount) || range.pageCount < 0
+      || range.firstPage + range.pageCount > (daily ? MAX_DAILY_RANGE_PAGES : MAX_FIXED_RANGE_PAGES);
+  })) return null;
   url.searchParams.set('revision', index.revision);
-  const pages = [];
-  for (let i = 0; i < range.pageCount; i++) {
-    url.searchParams.set('page', String(range.firstPage + i));
-    const result = await fetch(url.href, { headers });
-    if (!result.ok) { await result.arrayBuffer(); return null; }
-    const { rows } = await result.json();
-    if (!Array.isArray(rows)) return null;
-    pages.push(rows);
+  const pageNumbers = names.flatMap(key => {
+    const { firstPage, pageCount } = index.ranges[key];
+    return Array.from({ length: pageCount }, (_, i) => firstPage + i);
+  });
+  const pages = new Map();
+  for (let offset = 0; offset < pageNumbers.length; offset += 6) {
+    const batch = await Promise.all(pageNumbers.slice(offset, offset + 6).map(async page => {
+      const pageUrl = new URL(url);
+      pageUrl.searchParams.set('page', String(page));
+      const result = await fetch(pageUrl.href, { headers });
+      if (!result.ok) { await result.arrayBuffer(); return null; }
+      const { rows } = await result.json();
+      return Array.isArray(rows) ? { page, rows } : null;
+    }));
+    for (const entry of batch) {
+      if (!entry) return null;
+      pages.set(entry.page, entry.rows);
+    }
   }
-  return decodeFixedRangePeriod(index.ranges, pages, name);
+  const periods = [];
+  for (const key of names) {
+    const { firstPage, pageCount } = index.ranges[key];
+    const period = decodeFixedRangePeriod(index.ranges,
+      Array.from({ length: pageCount }, (_, i) => pages.get(firstPage + i)), key);
+    if (!period) return null;
+    periods.push(period);
+  }
+  return daily ? mergePeriods(...periods) : periods[0];
 }
 
 module.exports = { fixedRangeUploadPages, fixedRangeDeltaPages, withFixedRangeIndexDelta, fixedRangeRequestBodies, uploadFixedRangeVersion, uploadFixedRanges, fetchFixedRange };

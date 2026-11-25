@@ -385,6 +385,10 @@ Hubs that acknowledge `fixedRangeBatch: 1` also accept `{ "pages": [...] }` for 
 
 Hubs that acknowledge `fixedRangeIndexDelta: 1` also accept `indexDelta: {baseRevision, patch}` instead of `ranges` on page zero. The patch uses the same JSON Patch operations as ordinary ingest against the published ranges index. The reconstructed index must pass the full index validator. A producer sends the full index when the patch is larger or the base is rejected.
 
+Hub ingest can also acknowledge `dailySessionRanges: 1`. A capable producer can publish one date-keyed index for 31 consecutive device-local dates ending on the accepted usage date. Each date is a separate slice in the same bounded revision. A capable reader sends `daily=1` on index and page GETs and combines the dates covered by its requested range. GETs without the query flag receive the four original fixed ranges projected from the stored dates. The Hub publishes the date index only after all pages pass validation. Once a matching daily revision is published, a producer can send an upload delta to `POST /api/ingest/compact` to restore any History calendar dropped to fit the initial ingest. The Hub keeps the accepted inline Today and Month rows for existing readers, including their omission flags, and leaves the normal upload baseline intact. A missing or mismatched daily revision returns 409 and preserves the inline fallback.
+
+When a producer supplies a complete activity calendar, `history.dailyTotalsRevision` may identify the full `dailyTotals` array by its SHA-256 fingerprint. An upload that omits the array to fit the budget can carry the same revision and the omitted row count. The Hub retains a previously accepted complete calendar only when both match. Its ingest response then includes `historyCalendarRetained: true`, so the producer can skip the compact upload. History disablement and a changed calendar still update the record normally.
+
 ## `GET /api/stats`
 
 Returns aggregate stats for the widget.

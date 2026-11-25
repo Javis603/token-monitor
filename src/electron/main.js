@@ -180,7 +180,7 @@ const {
 const { createHub } = require('../hub/server');
 const { fetchFixedRange, fixedRangeUploadPages } = require('../shared/fixedRangeClient');
 const { SYNC_WEEK_STARTS_ON } = require('../shared/fixedRangeSync');
-const { createFixedRangeReadCache, resolveSyncedFixedPeriod, historyFallbackForDevices } = require('./syncedFixedPeriod');
+const { createFixedRangeReadCache, resolveSyncedFixedPeriod, resolveSyncedSessionPeriod, historyFallbackForDevices } = require('./syncedFixedPeriod');
 const { probeHubBuild } = require('./hubBuildStatus');
 const { normalizeLimitsRefreshMode, normalizeLimitsRefreshMs, parseBoolean, parseLimitProviders } = require('../shared/limits/collector');
 const { createCursorUsageEventIndex } = require('../shared/providers/cursor/usageEvents');
@@ -937,6 +937,7 @@ function collectorWeekStartsOn() {
 function electronUsageConfig(errorPrefix, { synced = false } = {}) {
   return usageConfigFromSettings(settings, {
     nativeRangesEnabled: true,
+    dailySessionSyncEnabled: synced && settings?.hubMode !== 'icloud',
     agentVersion: appVersion(),
     agentRuntime: 'electron-widget',
     commandTimeoutMs: 120 * 1000,
@@ -2832,7 +2833,16 @@ function rendererAllTimeSessions(stats) {
       ? [...(complete.devices || []).filter(device => device.deviceId !== hubSnapshot.localDevice.deviceId), hubSnapshot.localDevice]
       : complete.devices;
     const sourced = projectSessionDeviceSessions(sessions, devices, ['month', 'allTime']);
-    return projectModelAliasSessions(stats, settings?.sessionTitlesEnabled === false ? withoutSessionTitles(sourced) : sourced, aliases, { grouping });
+    const inline = projectModelAliasSessions(stats, settings?.sessionTitlesEnabled === false ? withoutSessionTitles(sourced) : sourced, aliases, { grouping });
+    if (!stats.sessionDetailsOmitted?.month || !Object.keys(stats.fixedRangeRevisions || {}).length) return inline;
+    return resolveSyncedPeriodForStats(stats, hubModeGeneration, 'month').then(paged => {
+      if (!paged?.period?.sessions) return inline;
+      const local = hubSnapshot?.localDevice?.allTime?.sessions || {};
+      return {
+        ...inline,
+        ...Object.fromEntries(Object.entries(paged.period.sessions).filter(([id]) => !Object.hasOwn(local, id)))
+      };
+    });
   });
 }
 
@@ -4318,18 +4328,31 @@ function startHostCollector() {
         if (payload.allTimeProjectsOmitted === true) {
           console.log('[host-ingest] all-time project breakdown omitted to reduce the sync snapshot size');
         }
-        embeddedHub.hub.ingest(payload);
-        const fixedRangeAt = JSON.stringify([visibleSummary.updatedAt, options.sessionTitleSyncGeneration, visibleSummary.projectsEnabled !== false, visibleSummary.nativeRangeWindows]);
+        const accepted = embeddedHub.hub.ingest(payload);
+        const fixedRangeAt = JSON.stringify([visibleSummary.updatedAt, options.sessionTitleSyncGeneration, visibleSummary.projectsEnabled !== false, visibleSummary.nativeRangeWindows, Boolean(visibleSummary.dailySessionPeriods)]);
         if (visibleSummary.nativeRanges && handle.fixedRangeAt !== fixedRangeAt) {
           try {
-            for (const page of fixedRangeUploadPages(visibleSummary, options)) {
-              const accepted = handle.hub.acceptFixedRange(visibleSummary.deviceId, page);
-              if (accepted.status !== 200) break;
-              if (accepted.complete) handle.fixedRangeAt = fixedRangeAt;
-            }
+            const publish = record => {
+              try {
+                for (const page of fixedRangeUploadPages(record, options)) {
+                  const accepted = handle.hub.acceptFixedRange(record.deviceId, page);
+                  if (accepted.status !== 200) return false;
+                  if (accepted.complete) return true;
+                }
+              } catch (error) {
+                if (!record.dailySessionPeriods || !(error instanceof RangeError)) throw error;
+              }
+              return false;
+            };
+            if (publish(visibleSummary)) handle.fixedRangeAt = fixedRangeAt;
+            else if (visibleSummary.dailySessionPeriods) publish({ ...visibleSummary, dailySessionPeriods: undefined });
           } catch (error) {
             console.log(`[host-ingest] fixed range upload deferred: ${error.message}`);
           }
+        }
+        if (visibleSummary.dailySessionPeriods && handle.fixedRangeAt === fixedRangeAt
+          && payload.history?.dailyTotalsOmitted > 0 && accepted.history?.summary?.activeDaysComplete !== true) {
+          embeddedHub.hub.restoreHistory(syncPayload(visibleSummary, { ...options, pagedSessions: true }));
         }
         if (settings.lastPostedDeviceId !== visibleSummary.deviceId) {
           settings.lastPostedDeviceId = visibleSummary.deviceId;
@@ -7739,9 +7762,13 @@ function createDashboardWindow() {
 }
 
 async function getSyncedFixedPeriod(snapshotId, source, selection) {
-  const stats = rendererSnapshots.get(snapshotId, source);
+  return resolveSyncedPeriodForStats(rendererSnapshots.get(snapshotId, source), source, selection);
+}
+
+async function resolveSyncedPeriodForStats(stats, source, selection) {
   const revisions = stats?.fixedRangeRevisions || {};
-  if (mode !== 'sync' || source !== hubModeGeneration || !fixedPeriodRangesApi.isDerived(selection)
+  const legacyPeriod = selection === 'today' || selection === 'month';
+  if (mode !== 'sync' || source !== hubModeGeneration || (!legacyPeriod && !fixedPeriodRangesApi.isDerived(selection))
     || (!stats?.localFixedRangeRevision && !Object.keys(revisions).length)) return null;
   const config = historyResolverOptions();
   const localDevice = stats.localFixedRangeRevision ? snapshotLocalDevices.get(stats)?.localDevice : null;
@@ -7767,7 +7794,9 @@ async function getSyncedFixedPeriod(snapshotId, source, selection) {
       return historyFallbackForDevices(selection, devices, resolved.deviceHistories, options);
     } catch (_) { return null; }
   };
-  const fixed = await resolveSyncedFixedPeriod(selection, stats.devices || [], revisions, { ...options, localDevice, read, history });
+  const fixed = legacyPeriod
+    ? await resolveSyncedSessionPeriod(selection, stats.devices || [], revisions, { ...options, read })
+    : await resolveSyncedFixedPeriod(selection, stats.devices || [], revisions, { ...options, localDevice, read, history });
   if (!fixed || source !== hubModeGeneration) return null;
   const current = config.hubMode === 'icloud'
     ? config.icloudSync?.getStats() : currentHubStatsCache();

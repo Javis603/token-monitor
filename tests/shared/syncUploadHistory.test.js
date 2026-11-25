@@ -60,6 +60,21 @@ test('changed historical dates and explicit clears are sent immediately without 
   assert.equal(Object.hasOwn((await fixture.send({ ...summary, history: null })).payload, 'history'), false);
 });
 
+test('legacy ACK omits unchanged History carrying a complete calendar revision', async () => {
+  const fixture = harness();
+  const summary = summaryForUpload();
+  summary.dailySessionPeriods = {};
+  summary.history.dailyTotals = [{ date: '2026-11-01', tokens: 100, cost: 0 }];
+  summary.history.summary.activeDaysComplete = true;
+  const first = await fixture.send(summary);
+  assert.match(first.payload.history.dailyTotalsRevision, /^[a-f0-9]{64}$/);
+  assert.equal(Object.hasOwn((await fixture.send(summary)).payload, 'history'), false);
+
+  summary.history.dailyTotals[0].tokens++;
+  const changed = await fixture.send(summary);
+  assert.notEqual(changed.payload.history.dailyTotalsRevision, first.payload.history.dailyTotalsRevision);
+});
+
 test('reconciliation is measured from last full ACK, not extended by successful omissions', async () => {
   const fixture = harness();
   await fixture.send();
