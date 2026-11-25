@@ -3,7 +3,7 @@
 const assert = require('node:assert/strict');
 const test = require('node:test');
 const { normalizePeriod } = require('../../src/shared/usage');
-const { historyFallbackForDevices, resolveSyncedFixedPeriod } = require('../../src/electron/syncedFixedPeriod');
+const { createFixedRangeReadCache, historyFallbackForDevices, resolveSyncedFixedPeriod } = require('../../src/electron/syncedFixedPeriod');
 
 const day = '2026-11-25';
 const windows = {
@@ -130,4 +130,35 @@ test('mismatched History cannot make a missing device contribution look like zer
   const owned = { ...b, history: { daily: [{ date: windows.yesterday.start, tokens: 12 }] } };
   const result = historyFallbackForDevices('yesterday', [owned], [fetched], options);
   assert.equal(result[0].period.totalTokens, 12);
+});
+
+test('overlapping refreshes share a slow remote read and reuse the result', async () => {
+  const cache = createFixedRangeReadCache(1);
+  let finish;
+  let reads = 0;
+  const load = () => {
+    reads++;
+    return new Promise(resolve => { finish = resolve; });
+  };
+  const first = cache.read('device-and-revision', load);
+  const latest = cache.read('device-and-revision', load);
+  assert.equal(first, latest);
+  assert.equal(cache.read('different-revision', load), null, 'pending reads are bounded');
+  await Promise.resolve();
+  finish({ totalTokens: 25 });
+  assert.deepEqual(await latest, { totalTokens: 25 });
+  assert.deepEqual(cache.read('device-and-revision', load), { totalTokens: 25 });
+  assert.equal(reads, 1);
+
+  let aborted;
+  const stale = cache.read('old-source', signal => {
+    aborted = signal;
+    return new Promise(resolve => { finish = resolve; });
+  });
+  await Promise.resolve();
+  cache.clear();
+  assert.equal(aborted.aborted, true);
+  finish({ totalTokens: 30 });
+  assert.equal(await stale, null);
+  assert.equal(await cache.read('old-source', () => null), null, 'a revoked read cannot repopulate the cache');
 });

@@ -1255,11 +1255,13 @@ test('an interrupted iCloud range publication leaves the previous device revisio
   const cloudDocsRoot = path.join(root.root, 'CloudDocs');
   fs.mkdirSync(cloudDocsRoot, { recursive: true });
   let rejectDeviceWrite = false;
+  let rejectRangeIndex = false;
   const first = createIcloudSyncStore({
     platform: 'darwin', home: root.root, cloudDocsRoot, writerId: 'writer-a',
     fsApi: {
       ...fs.promises,
       rename(from, to) {
+        if (rejectRangeIndex && to.endsWith('-index.json')) throw new Error('range index write interrupted');
         if (rejectDeviceWrite && path.dirname(to).endsWith(path.sep + 'devices')) throw new Error('device write interrupted');
         return fs.promises.rename(from, to);
       }
@@ -1274,13 +1276,22 @@ test('an interrupted iCloud range publication leaves the previous device revisio
       client: 'claude', sessionId: 's', totalTokens, projectLabel: 'Project'
     } } } }
   });
+  const rangeFiles = () => fs.readdirSync(path.join(cloudDocsRoot, 'Token Monitor', 'sync-v1', 'fixed-ranges')).sort();
+  rejectRangeIndex = true;
+  const partial = await first.writeDevice(makeRecord(5));
+  assert.equal(partial.fixedRanges, false);
+  assert.deepEqual(rangeFiles(), []);
+  rejectRangeIndex = false;
+
   const record = makeRecord(10);
   const written = await first.writeDevice(record);
   const revision = String(written.revision);
   const range = record.nativeRangeWindows.yesterday;
   await second.discoverDevices();
+  const publishedFiles = rangeFiles();
   rejectDeviceWrite = true;
   await assert.rejects(first.writeDevice(makeRecord(20)), /device write interrupted/);
+  assert.deepEqual(rangeFiles(), publishedFiles);
   assert.deepEqual(second.fixedRangeRevisions(), { 'mac-a': revision });
   const retained = await second.readFixedRange('mac-a', 'yesterday', range, revision);
   assert.equal(retained.totalTokens, 10);

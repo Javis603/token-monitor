@@ -180,7 +180,7 @@ const {
 const { createHub } = require('../hub/server');
 const { fetchFixedRange, fixedRangeUploadPages } = require('../shared/fixedRangeClient');
 const { SYNC_WEEK_STARTS_ON } = require('../shared/fixedRangeSync');
-const { resolveSyncedFixedPeriod, historyFallbackForDevices } = require('./syncedFixedPeriod');
+const { createFixedRangeReadCache, resolveSyncedFixedPeriod, historyFallbackForDevices } = require('./syncedFixedPeriod');
 const { probeHubBuild } = require('./hubBuildStatus');
 const { normalizeLimitsRefreshMode, normalizeLimitsRefreshMs, parseBoolean, parseLimitProviders } = require('../shared/limits/collector');
 const { createCursorUsageEventIndex } = require('../shared/providers/cursor/usageEvents');
@@ -2806,6 +2806,7 @@ function electronPresentationStats(stats) {
 }
 
 const allTimeSessionsCache = createStatsPresentationCache();
+const fixedRangeReads = createFixedRangeReadCache();
 const rendererSnapshots = createRendererSnapshots({ source: () => hubModeGeneration });
 // The local record each Hub snapshot was shown with, captured where the
 // snapshot was built. The collector replaces the live one between publishes.
@@ -6488,6 +6489,7 @@ function startMode() {
   hubModeGeneration += 1;
   advanceMacWidgetProducerAndSourceEpoch();
   clearLatestHubStatsCache();
+  fixedRangeReads.clear();
   edgeDockManualStats = null;
   const icloudStop = stopIcloudRuntime();
   // Tear down collectors synchronously so they can't double-run while the
@@ -7745,15 +7747,18 @@ async function getSyncedFixedPeriod(snapshotId, source, selection) {
   const localDevice = stats.localFixedRangeRevision ? snapshotLocalDevices.get(stats)?.localDevice : null;
   const options = { weekStartsOn: SYNC_WEEK_STARTS_ON, now: Date.now() };
   const headers = config.secret ? { authorization: `Bearer ${config.secret}` } : {};
-  const signal = AbortSignal.timeout(15_000);
   const read = (deviceId, name, window, revision) => {
     if (config.hubMode === 'icloud') return config.icloudSync?.readFixedRange(deviceId, name, window, revision);
     if (config.hubMode === 'host') return config.embeddedHub?.hub.readFixedRange(deviceId, name, window, revision);
     if (!config.hubUrl) return null;
-    return fetchFixedRange(
-      (url, init) => fetch(url, { ...init, signal, redirect: 'error' }),
-      config.hubUrl, deviceId, name, window, headers, revision
-    );
+    const key = JSON.stringify([source, currentHubStatsIdentity(config.hubMode), deviceId, name, window.start, window.end, revision]);
+    return fixedRangeReads.read(key, async (abort) => {
+      const signal = AbortSignal.any([abort, AbortSignal.timeout(15_000)]);
+      return fetchFixedRange(
+        (url, init) => fetch(url, { ...init, signal, redirect: 'error' }),
+        config.hubUrl, deviceId, name, window, headers, revision
+      );
+    });
   };
   const history = async (devices) => {
     if (!config.historyEnabled) return null;
@@ -8580,6 +8585,9 @@ app.whenReady().then(() => {
         try { dashboardWindow.webContents.send('dashboard:historyChanged'); } catch (_) {}
       }
     }
+    if (settings.sessionTitlesEnabled !== previousSettingsState.sessionTitlesEnabled
+      || settings.hubSyncSessionTitles !== previousSettingsState.hubSyncSessionTitles
+      || settings.projectsEnabled !== previousSettingsState.projectsEnabled) fixedRangeReads.clear();
     pushSettingsToRenderer();
     if (settings.sessionTitlesEnabled !== previousSettingsState.sessionTitlesEnabled) {
       refreshLimitStatsPresentation();

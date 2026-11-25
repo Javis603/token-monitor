@@ -6,6 +6,42 @@ const {
 } = require('./renderer/fixedPeriodRanges');
 const { projectSessionDeviceSessions } = require('./sessionDeviceSources');
 
+function createFixedRangeReadCache(maxEntries = 16) {
+  const pending = new Map();
+  const completed = new Map();
+
+  function read(key, load) {
+    if (pending.has(key)) return pending.get(key).promise;
+    if (completed.has(key)) {
+      const result = completed.get(key);
+      completed.delete(key);
+      completed.set(key, result);
+      return result;
+    }
+    if (pending.size >= maxEntries) return null;
+    const controller = new AbortController();
+    const entry = { controller, promise: null };
+    entry.promise = Promise.resolve().then(() => load(controller.signal)).then(result => {
+      if (controller.signal.aborted) return null;
+      if (result) {
+        completed.set(key, result);
+        if (completed.size > maxEntries) completed.delete(completed.keys().next().value);
+      }
+      return result;
+    }).finally(() => {
+      if (pending.get(key) === entry) pending.delete(key);
+    });
+    pending.set(key, entry);
+    return entry.promise;
+  }
+
+  return { read, clear() {
+    for (const { controller } of pending.values()) controller.abort();
+    pending.clear();
+    completed.clear();
+  } };
+}
+
 async function resolveSyncedFixedPeriod(selection, devices, revisions, options) {
   const entries = await Promise.all(devices.map(async (device) => {
     const revision = Object.hasOwn(revisions, device.deviceId) && revisions[device.deviceId];
@@ -78,4 +114,4 @@ function historyFallbackForDevices(selection, devices, histories, options) {
   return snapshot.status === 'ready' ? snapshot.devices : null;
 }
 
-module.exports = { resolveSyncedFixedPeriod, historyFallbackForDevices };
+module.exports = { createFixedRangeReadCache, resolveSyncedFixedPeriod, historyFallbackForDevices };

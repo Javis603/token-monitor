@@ -968,12 +968,19 @@ function createIcloudSyncStore(options = {}) {
     return decodeFixedRangePeriod(ranges, pages, name);
   }
 
-  async function writeFixedRanges(paths, filename, deviceId, revision, encoded) {
+  async function writeFixedRanges(paths, filename, deviceId, revision, encoded, writtenFiles) {
     await ensureDirectory(fsApi, paths.fixedRangesRoot);
     const { ranges, pages } = encoded;
-    const writePart = (part, data, maxBytes) => atomicWriteJson(
-      fsApi, rangeFile(paths, filename, revision, part), { deviceId, revision, ...data }, { platform, hostPlatform, maxBytes }
-    );
+    const writePart = async (part, data, maxBytes) => {
+      const target = rangeFile(paths, filename, revision, part);
+      try {
+        await atomicWriteJson(fsApi, target, { deviceId, revision, ...data }, { platform, hostPlatform, maxBytes });
+        writtenFiles.push(target);
+      } catch (error) {
+        if (error.atomicWriteRenamed) writtenFiles.push(target);
+        throw error;
+      }
+    };
     for (const [page, rows] of pages.entries()) {
       await writePart(page, { rows }, FIXED_RANGE_PAGE_BYTES + 2048);
     }
@@ -1033,12 +1040,18 @@ function createIcloudSyncStore(options = {}) {
     }
 
     const revision = await nextDeviceRevision(deviceId, observedRevision);
+    const writtenRangeFiles = [];
+    const discardUnpublishedRanges = () => Promise.all(
+      writtenRangeFiles.splice(0).map(target => fsApi.unlink(target).catch(() => {}))
+    );
     let fixedRanges = false;
     if (encoded) {
       try {
-        await writeFixedRanges(available.paths, filename, deviceId, revision, encoded);
+        await writeFixedRanges(available.paths, filename, deviceId, revision, encoded, writtenRangeFiles);
         fixedRanges = true;
-      } catch (_) { /* publish regular usage and retry detail on the next write */ }
+      } catch (_) {
+        await discardUnpublishedRanges();
+      }
     }
     const document = {
       schemaVersion: ICLOUD_SCHEMA_VERSION,
@@ -1056,6 +1069,7 @@ function createIcloudSyncStore(options = {}) {
         maxBytes: MAX_ICLOUD_DOCUMENT_BYTES
       });
     } catch (error) {
+      if (!error.atomicWriteRenamed) await discardUnpublishedRanges();
       lastError = { category: error.code === 'document_too_large' ? 'document-too-large' : 'device-write-failed', error };
       error.code = error.code || lastError.category;
       throw error;
