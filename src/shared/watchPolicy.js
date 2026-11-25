@@ -804,7 +804,7 @@ function watchIgnoreMatcher(clientsCsv, options = {}) {
 // entry point so the widget and the headless agent cannot drift apart.
 // Tri-state on purpose: unset must fall through to the caller's value, which
 // is why parseBoolean's fallback semantics don't fit. The default is native on
-// every platform — chokidar 4 has no per-platform backend left to differ on,
+// every platform, with a backend selected by the platform watcher,
 // and the failure cases it cannot cover are handled by the watch-descriptor
 // fallback below rather than by pre-emptively polling everywhere.
 //
@@ -908,7 +908,7 @@ function watchEntriesExceed(dirs, ignored, limit) {
 
 // chokidar reads CHOKIDAR_USEPOLLING after the options it is handed and lets it
 // win, so the polling mode it actually runs can differ from the one we asked
-// for. Parsed exactly as chokidar 4 parses it; undefined when unset.
+// for. Parsed as Chokidar parses it; undefined when unset.
 function chokidarPollingEnv(env = process.env) {
   const raw = env.CHOKIDAR_USEPOLLING;
   if (raw === undefined) return undefined;
@@ -963,7 +963,16 @@ function openWatch(chokidar, config = {}, onEvent) {
     error.code = WATCH_POLLING_LIMIT_CODE;
     throw error;
   }
-  const watcher = chokidar.watch(config.dirs, watcherOptions(usePolling, ignored));
+  // Chokidar 4 treats an empty override as unset. Chokidar 6 reads the
+  // environment synchronously and rejects the zero it gets from an empty string.
+  const emptyInterval = process.env.CHOKIDAR_INTERVAL === '';
+  if (emptyInterval) delete process.env.CHOKIDAR_INTERVAL;
+  let watcher;
+  try {
+    watcher = chokidar.watch(config.dirs, watcherOptions(usePolling, ignored));
+  } finally {
+    if (emptyInterval) process.env.CHOKIDAR_INTERVAL = '';
+  }
   if (onEvent) watcher.on('all', (event, filePath) => {
     // Reuse the matcher that saw initial discovery. Keep the reported path so
     // the collector can still apply every other client's own source policy.

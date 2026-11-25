@@ -15,7 +15,7 @@ npm run typecheck  # opt-in JavaScript type checking (no emit)
 npm run verify     # lint + typecheck + test (single local entry point)
 ```
 
-Automated verification is `npm run verify`; CI (`.github/workflows/ci.yml`) runs lint + typecheck + test on push/PR across Node 22 & 24. The toolchain (ESLint 10 + the node:test glob) needs Node 22.13+ and DSH session decoding needs `zlib.zstdDecompressSync` (Node 22.15+), which is why `engines.node` is `>=22.15.0`.
+Automated verification is `npm run verify`; CI (`.github/workflows/ci.yml`) runs lint + typecheck + test on push/PR across Node 22 & 24. Chokidar 6 sets the minimum supported Node version to 22.22.0.
 
 New shared modules start with `// @ts-check`; existing files opt in when touched for a reason. Type checking uses JSDoc and emits no code.
 
