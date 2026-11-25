@@ -81,7 +81,11 @@ function deviceRecordFromAnchor(saved, options = {}) {
       ? { state: 'disabled', detected: [], withData: [] }
       : (saved.wslStatus || null);
   const trackedClients = String(clients || '').split(',').filter(Boolean);
-  const pastRanges = nativeRangesEnabled
+  // An empty WSL bundle captured with scanning disabled does not establish
+  // coverage after the setting is enabled. The regular seed still stands.
+  const wslCoverageKnown = !wslSupported || !wslScanEnabled
+    || Boolean(wsl?.allTime && wslStatus?.state && wslStatus.state !== 'disabled');
+  const pastRanges = nativeRangesEnabled && wslCoverageKnown
     ? matchingNativePastRanges(saved.nativePastRanges, currentWindows.today.key, weekStartsOn)
     : null;
   const nativeRangeSnapshot = composeNativeRanges(pastRanges, saved.today, {

@@ -472,6 +472,14 @@ test('a local cold start restores matching native ranges and keeps them through 
   assert.equal(deviceRecordFromAnchor(saved, { ...options, now: new Date(2026, 7, 9, 10) }).nativeRanges, undefined);
   assert.equal(deviceRecordFromAnchor(saved, { ...options, weekStartsOn: 0 }).nativeRanges, undefined);
   assert.equal(deviceRecordFromAnchor({ ...saved, wslBundle: { allTime: periodWith(5) } }, options).nativeRanges, undefined);
+  const windows = { ...options, wslSupported: true };
+  const emptyWsl = { today: emptyPeriod(), month: emptyPeriod(), allTime: emptyPeriod() };
+  const withoutWsl = { ...saved, wslBundle: emptyWsl, wslStatus: { state: 'disabled' } };
+  const withoutCoverage = deviceRecordFromAnchor(withoutWsl, windows);
+  assert.equal(withoutCoverage.nativeRanges, undefined);
+  assert.equal(withoutCoverage.today.totalTokens, 1_000);
+  assert.ok(deviceRecordFromAnchor(withoutWsl, { ...windows, wslScanEnabled: false }).nativeRanges);
+  assert.ok(deviceRecordFromAnchor({ ...withoutWsl, wslStatus: { state: 'no-data' } }, windows).nativeRanges);
   const withDots = { ...saved, nativePastRanges: { ...nativePastRanges, codexDotsUsage: true } };
   assert.equal(deviceRecordFromAnchor(withDots, options).nativeRanges, undefined);
   assert.ok(deviceRecordFromAnchor(withDots, { ...options, codexDotsVisible: false }).nativeRanges);
