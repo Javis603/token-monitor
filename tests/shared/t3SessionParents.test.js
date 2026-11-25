@@ -830,17 +830,30 @@ for (const sibling of ['corrupt', 'locked']) test(`a newly conflicting Antigravi
   const { collectUsageOnce, localTodayKey } = require('../../src/shared/collector');
   const s = store(t);
   const key = 'antigravity:acp-conversation';
-  s.thread('original');
+  const nativeKey = 'antigravity:native-child';
+  s.thread('parent');
+  s.thread('original', 'parent');
+  s.thread('native', 'parent');
+  s.provider('parent-provider', 'parent', 'acp-parent', 'antigravity');
   s.provider('original-provider', 'original', 'acp-conversation', 'antigravity');
+  s.provider('native-provider', 'native', 'native-child', 'antigravity');
+  s.delegation('original-provider', 'parent-provider', 'parent');
   let captured;
   const options = { clients: 'antigravity', homeDir: s.home, env: {}, osInfo: {},
     historyEnabled: false, limitsEnabled: false, wslScanEnabled: false,
     onAnchorComputed: value => { captured = value; },
-    runTokscale: async () => ({ entries: [{ client: 'antigravity', sessionId: 'acp-conversation', model: 'm', input: 20 }] }) };
+    runTokscale: async () => ({ entries: [
+      { client: 'antigravity', sessionId: 'acp-parent', model: 'm', input: 30 },
+      { client: 'antigravity', sessionId: 'acp-conversation', model: 'm', input: 20 },
+      { client: 'antigravity', sessionId: 'native-child', parentSessionId: 'acp-parent', model: 'm', input: 10 }
+    ] }) };
   const full = await collectUsageOnce(options);
   assert.equal(full.month.sessions[key].t3ThreadId, 'original');
+  assert.equal(full.month.sessions[key].parentSessionId, 'acp-parent');
+  assert.equal(full.month.sessions[nativeKey].parentSessionId, 'acp-parent');
   s.thread('competing');
   s.provider('competing-provider', 'competing', 'acp-conversation', 'antigravity');
+  s.provider('competing-native-provider', 'competing', 'native-child', 'antigravity');
   const legacyPath = path.join(path.dirname(s.file), 'state.sqlite');
   if (sibling === 'locked') {
     const legacy = new sqlite.DatabaseSync(legacyPath);
@@ -854,9 +867,11 @@ for (const sibling of ['corrupt', 'locked']) test(`a newly conflicting Antigravi
     sessionIdentityVersion: captured.sessionIdentityVersion } });
   for (const name of ['today', 'month', 'allTime']) {
     assert.equal(next[name].sessions[key].t3ThreadId, undefined);
+    assert.equal(next[name].sessions[key].parentSessionId, undefined);
+    assert.equal(next[name].sessions[nativeKey].parentSessionId, 'acp-parent');
     assert.equal(next[name].sessions[key].totalTokens, 20);
   }
-  assert.deepEqual(captured.revokedT3ThreadKeys, [key]);
+  assert.deepEqual(new Set(captured.revokedT3ThreadKeys), new Set([key, nativeKey]));
 });
 
 

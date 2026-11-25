@@ -891,10 +891,13 @@ function propagateTodayProjects(today, periods, titleMetadata = {}) {
       if (session.t3ThreadId) target.t3ThreadId = session.t3ThreadId;
       const parentClient = session.parentClient || session.client;
       const targetParentClient = target.parentClient || target.client;
-      if (session.parentSessionId && (session.parentSessionId !== target.parentSessionId || parentClient !== targetParentClient)
-        && (!target.parentSessionId || (!sessionHasPeriodUsage(period, targetParentClient, target.parentSessionId)
-          && sessionHasPeriodUsage(period, parentClient, session.parentSessionId)))) {
+      if (session.parentSessionId && ((target.t3ParentLink && !session.t3ParentLink)
+        || ((session.parentSessionId !== target.parentSessionId || parentClient !== targetParentClient)
+          && (!target.parentSessionId || (!sessionHasPeriodUsage(period, targetParentClient, target.parentSessionId)
+            && sessionHasPeriodUsage(period, parentClient, session.parentSessionId)))))) {
         target.parentSessionId = session.parentSessionId;
+        if (session.t3ParentLink) target.t3ParentLink = true;
+        else delete target.t3ParentLink;
         if (parentClient !== target.client) target.parentClient = parentClient;
         else delete target.parentClient;
       }
@@ -952,7 +955,7 @@ function propagateTodayProjects(today, periods, titleMetadata = {}) {
 // Yesterday is a closed day: it takes a session's current title, project and
 // links, but its times, context and turn state stay those of that day.
 const PAST_DAY_IDENTITY_FIELDS = Object.freeze([
-  'title', 'projectId', 'projectLabel', 'sessionKind', 'nativeSessionId', 't3ThreadId', 'parentSessionId', 'parentClient'
+  'title', 'projectId', 'projectLabel', 'sessionKind', 'nativeSessionId', 't3ThreadId', 'parentSessionId', 'parentClient', 't3ParentLink'
 ]);
 
 function propagateIdentity(source, periods, titleMetadata) {
@@ -981,10 +984,20 @@ function copySessionLinks(source, target) {
     }
     if (resolved?.parentSessionId) {
       session.parentSessionId = resolved.parentSessionId;
+      if (resolved.t3ParentLink) session.t3ParentLink = true;
+      else delete session.t3ParentLink;
       if (resolved.parentClient && resolved.parentClient !== session.client) session.parentClient = resolved.parentClient;
       else delete session.parentClient;
     }
   }
+}
+
+function revokeT3SessionLinks(session) {
+  delete session.t3ThreadId;
+  if (!session.t3ParentLink) return;
+  delete session.parentSessionId;
+  delete session.parentClient;
+  delete session.t3ParentLink;
 }
 
 // The process-wide rationing for cursor/antigravity syncs. Deliberately a single
@@ -1526,8 +1539,8 @@ async function collectUsageOnce(options) {
         if (!localSessionMetadataDeps.metadataCache.get(key)?.t3ThreadRevoked) continue;
         for (const period of [today, month, allTime, ...Object.values(todayPartitions)]) {
           const retained = period.sessions?.[key];
-          if (!retained?.t3ThreadId) continue;
-          delete retained.t3ThreadId;
+          if (!retained?.t3ThreadId && !retained?.t3ParentLink) continue;
+          revokeT3SessionLinks(retained);
           localSessionMetadataDeps.revokedT3ThreadKeys.add(key);
         }
       }
@@ -1571,7 +1584,7 @@ async function collectUsageOnce(options) {
       for (const period of Object.values(periods)) {
         if (upgradeRangeLinks) copySessionLinks(allTime, period);
         for (const key of revokedLinks) {
-          if (period.sessions[key]) delete period.sessions[key].t3ThreadId;
+          if (period.sessions[key]) revokeT3SessionLinks(period.sessions[key]);
         }
       }
       nativePastRanges = { ...nativePastRanges, periods };
@@ -2909,7 +2922,7 @@ function startCollector(options) {
           for (const period of ['today', 'month', 'allTime']) {
             for (const key of revokedLinks) {
               const row = anchor[period]?.sessions?.[key];
-              if (row) delete row.t3ThreadId;
+              if (row) revokeT3SessionLinks(row);
             }
           }
           if (captured.nativePastRanges) anchor.nativePastRanges = captured.nativePastRanges;

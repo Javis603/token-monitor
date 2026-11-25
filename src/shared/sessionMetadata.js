@@ -449,6 +449,7 @@ function applyT3SessionParents(periods, home = os.homedir(), deps = {}, targets,
       }
       if (!parent || (parent.client === session.client && parent.sessionId === session.sessionId)) continue;
       session.parentSessionId = parent.sessionId;
+      if (session.client === 'antigravity') session.t3ParentLink = true;
       if (parent.client !== session.client) session.parentClient = parent.client;
       else delete session.parentClient;
     }
