@@ -764,6 +764,7 @@ test('a pushed animation preference settles the current headline before the next
   let pluginRefreshes = 0;
   context.pluginViewHost = { refreshMotion: () => { pluginRefreshes++; } };
   context.detailTokenDisplayApi = { reset() {} };
+  context.currentLocale = () => 'en';
   api.animateTotalNumber(el, 1000, 2000, 1000);
   api.animateRowNumber(row, 100, 200, 600);
   const start = source.indexOf('function setRendererSettings(');
