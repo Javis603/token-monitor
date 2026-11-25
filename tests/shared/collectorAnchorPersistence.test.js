@@ -821,9 +821,10 @@ test('flat catalog project provenance requires a full scan instead of guessing p
   assert.ok(collectorAnchorTrust({ ...anchor, catalogProjects: { today: { 'antigravity:session': 'project-a' }, month: {}, allTime: {} } }, options));
 });
 
-for (const scenario of ['cross-client', 'antigravity', 'native', 'locked', 'partial', 'missing', 'empty', 'unsupported', 'corrupt']) test(`old persisted anchors retain identity migration through refresh and restart: ${scenario}`, async t => {
+for (const scenario of ['cross-client', 'antigravity', 'antigravity-disabled-ranges', 'native', 'locked', 'partial', 'missing', 'empty', 'unsupported', 'corrupt']) test(`old persisted anchors retain identity migration through refresh and restart: ${scenario}`, async t => {
   const nativeChild = scenario === 'native';
-  const antigravityChild = scenario === 'antigravity';
+  const antigravityChild = scenario.startsWith('antigravity');
+  const disabledRanges = scenario === 'antigravity-disabled-ranges';
   const retryable = ['locked', 'partial'].includes(scenario);
   const unavailable = ['missing', 'empty', 'unsupported', 'corrupt'].includes(scenario);
   const { DatabaseSync } = require('node:sqlite');
@@ -891,8 +892,9 @@ for (const scenario of ['cross-client', 'antigravity', 'native', 'locked', 'part
   const todayKey = localTodayKey();
   const todayDate = new Date(todayKey);
   const daysAgo = days => new Date(todayDate.getTime() - days * 86400000).toISOString().slice(0, 10);
-  const starts = { yesterday: daysAgo(1), week: daysAgo((todayDate.getUTCDay() + 6) % 7), last7: daysAgo(6), last30: daysAgo(29) };
-  const nativePastRanges = { todayKey, weekStartsOn: 1, starts,
+  const weekStartsOn = disabledRanges ? 0 : 1;
+  const starts = { yesterday: daysAgo(1), week: daysAgo((todayDate.getUTCDay() + 7 - weekStartsOn) % 7), last7: daysAgo(6), last30: daysAgo(29) };
+  const nativePastRanges = { todayKey, weekStartsOn, starts,
     periods: Object.fromEntries(Object.keys(starts).map(name => [name, period(true)])) };
   fs.writeFileSync(file, JSON.stringify({ dateKey: localTodayKey(), ...anchorPeriods,
     calendarKey: collectionCalendarKey(),
@@ -916,7 +918,7 @@ for (const scenario of ['cross-client', 'antigravity', 'native', 'locked', 'part
     }
   }
   const options = { ...baseOptions, clients: 'codex', homeDir: home, projectsEnabled: false,
-    nativeRangesEnabled: antigravityChild,
+    nativeRangesEnabled: antigravityChild && !disabledRanges,
     intervalMs: 3600000, watchEnabled: false, wslScanEnabled: false, sessionActivityPolling: false,
     runTokscale: async ({ flags }) => {
       scans.push(flags);
@@ -988,7 +990,8 @@ for (const scenario of ['cross-client', 'antigravity', 'native', 'locked', 'part
   if (antigravityChild) {
     for (const name of ['yesterday', 'last7']) {
       assert.equal(saved.nativePastRanges.periods[name].sessions[childKey].t3ThreadId, 'devin-app');
-      assert.equal(updates[0].nativeRanges[name].sessions[childKey].t3ThreadId, 'devin-app');
+      if (disabledRanges) assert.equal(updates[0].nativeRanges, undefined);
+      else assert.equal(updates[0].nativeRanges[name].sessions[childKey].t3ThreadId, 'devin-app');
       assert.equal(saved.nativePastRanges.periods[name].totalTokens, 40);
     }
   }

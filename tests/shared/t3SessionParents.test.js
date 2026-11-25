@@ -129,6 +129,22 @@ test('T3 Antigravity ACP displays its thread title and groups same-thread runs a
   const launch = sessions[`antigravity:${main}`];
   assert.equal(launch.title, 'T3 ACP title');
   assert.ok(launch.projectId);
+  const projectId = launch.projectId;
+  const catalogTitleSource = deps.metadataCache.get(`antigravity:${main}`).catalogTitleSource;
+  const nativeDb = path.join(nativeDir, 'conversation_summaries.db');
+  const otherDir = path.join(s.home, '.gemini', 'antigravity-ide');
+  fs.mkdirSync(otherDir, { recursive: true });
+  fs.copyFileSync(nativeDb, path.join(otherDir, 'conversation_summaries.db'));
+  const otherCatalog = new sqlite.DatabaseSync(path.join(otherDir, 'conversation_summaries.db'));
+  try { otherCatalog.exec('DELETE FROM conversation_summaries'); } finally { otherCatalog.close(); }
+  fs.renameSync(nativeDb, nativeDb + '.moved');
+  const coldDeps = { env: {}, metadataCache: new Map(), antigravityTitleCache: new Map(),
+    t3Titles: { [`antigravity:${main}`]: launch.title },
+    catalogTitleSources: { [`antigravity:${main}`]: catalogTitleSource },
+    catalogProjects: { today: { [`antigravity:${main}`]: projectId } } };
+  applySessionMetadata(periods, s.home, coldDeps);
+  assert.equal(coldDeps.metadataCache.get(`antigravity:${main}`).catalogProjectResolved, undefined);
+  fs.renameSync(nativeDb + '.moved', nativeDb);
   assert.equal(launch.t3ThreadId, 'parent');
   assert.equal(sessions[`antigravity:${second}`].t3ThreadId, 'parent');
   assert.equal(sessions[`antigravity:${second}`].title, 'T3 ACP title', 'historical runs share the verified thread title');
@@ -147,6 +163,9 @@ test('T3 Antigravity ACP displays its thread title and groups same-thread runs a
   s.db.exec("UPDATE orchestration_v2_projection_threads SET title = 'Renamed T3 ACP title' WHERE thread_id = 'parent'");
   applySessionMetadata(periods, s.home, deps);
   assert.equal(launch.title, 'Renamed T3 ACP title');
+  const unrelated = store(t);
+  applySessionMetadata(periods, s.home, { ...deps, t3DbPaths: [unrelated.file] });
+  assert.equal(launch.title, 'Renamed T3 ACP title', 'a miss in another store does not revoke the cached title');
   s.db.exec("UPDATE orchestration_v2_projection_threads SET title = 'New thread' WHERE thread_id = 'parent'");
   applySessionMetadata(periods, s.home, deps);
   assert.equal(launch.title, 'Native Antigravity title', 'the T3 placeholder does not replace the native title');
@@ -805,6 +824,31 @@ test('anchored SQLite metadata preserves the resolvable Month parent pair across
   const rows = require('../../src/electron/renderer/sessionRows');
   const groups = rows.groupSessionRows(rows.sessionRowsForPeriod(next.month));
   assert.equal(groups.length, 1); assert.equal(groups[0].groupRows.length, 2);
+});
+
+test('a newly conflicting Antigravity ID loses its retained T3 grouping on a Today refresh', async t => {
+  const { collectUsageOnce, localTodayKey } = require('../../src/shared/collector');
+  const s = store(t);
+  const key = 'antigravity:acp-conversation';
+  s.thread('original');
+  s.provider('original-provider', 'original', 'acp-conversation', 'antigravity');
+  let captured;
+  const options = { clients: 'antigravity', homeDir: s.home, env: {}, osInfo: {},
+    historyEnabled: false, limitsEnabled: false, wslScanEnabled: false,
+    onAnchorComputed: value => { captured = value; },
+    runTokscale: async () => ({ entries: [{ client: 'antigravity', sessionId: 'acp-conversation', model: 'm', input: 20 }] }) };
+  const full = await collectUsageOnce(options);
+  assert.equal(full.month.sessions[key].t3ThreadId, 'original');
+  s.thread('competing');
+  s.provider('competing-provider', 'competing', 'acp-conversation', 'antigravity');
+  const next = await collectUsageOnce({ ...options, todayOnlyAnchor: { dateKey: localTodayKey(),
+    today: full.today, month: full.month, allTime: full.allTime, todayPartitions: captured.todayPartitions,
+    sessionIdentityVersion: captured.sessionIdentityVersion } });
+  for (const name of ['today', 'month', 'allTime']) {
+    assert.equal(next[name].sessions[key].t3ThreadId, undefined);
+    assert.equal(next[name].sessions[key].totalTokens, 20);
+  }
+  assert.deepEqual(captured.revokedT3ThreadKeys, [key]);
 });
 
 

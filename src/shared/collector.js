@@ -1307,6 +1307,7 @@ async function collectUsageOnce(options) {
     invalidatedTitleKeys: new Set(),
     t3Titles: {},
     catalogTitleSources: {},
+    revokedT3ThreadKeys: new Set(),
     catalogProjects: { today: {}, month: {}, allTime: {}, labels: {} },
     catalogProjectRows: new WeakSet()
     // dshSessionFileCache is deliberately NOT reset here: it's module-level
@@ -1520,6 +1521,17 @@ async function collectUsageOnce(options) {
         for (const period of [today, month, allTime]) if (period.sessions?.[key]) targets.add(period.sessions[key]);
       }
       sessionIdentitiesComplete = applyT3SessionParents({ today, month, allTime }, options.homeDir || os.homedir(), localSessionMetadataDeps, targets);
+      if (sessionIdentitiesComplete) {
+        for (const key of Object.keys(today.sessions || {})) {
+          if (!localSessionMetadataDeps.metadataCache.get(key)?.t3ThreadRevoked) continue;
+          for (const period of [today, month, allTime, ...Object.values(todayPartitions)]) {
+            const retained = period.sessions?.[key];
+            if (!retained?.t3ThreadId) continue;
+            delete retained.t3ThreadId;
+            localSessionMetadataDeps.revokedT3ThreadKeys.add(key);
+          }
+        }
+      }
     } else {
       sessionIdentitiesComplete = decorateLocalPeriods({ today, month, allTime }, { retryMisses: true });
     }
@@ -1543,19 +1555,26 @@ async function collectUsageOnce(options) {
     : 1;
   const todayKey = localTodayKey(collectedAt);
   const upgradeRangeLinks = anchorUsed && sessionIdentitiesComplete && anchor.sessionIdentityVersion !== SESSION_IDENTITY_VERSION;
-  if (options.nativeRangesEnabled !== true && !upgradeRangeLinks) {
+  if (options.nativeRangesEnabled !== true && !upgradeRangeLinks && !localSessionMetadataDeps.revokedT3ThreadKeys.size) {
     // Another collector may share this anchor; only one that shows native
     // ranges reuses or publishes them.
   } else if (anchorUsed) {
     // The anchor belongs to this date (see anchorUsed). Its past days are over.
     // A persisted copy is checked like any other saved input.
-    nativePastRanges = matchingNativePastRanges(anchor.nativePastRanges, todayKey, weekStartsOn);
-    if (upgradeRangeLinks && nativePastRanges) {
+    const revokedLinks = localSessionMetadataDeps.revokedT3ThreadKeys;
+    nativePastRanges = matchingNativePastRanges(anchor.nativePastRanges, todayKey,
+      upgradeRangeLinks || revokedLinks.size ? anchor.nativePastRanges?.weekStartsOn : weekStartsOn);
+    if ((upgradeRangeLinks || revokedLinks.size) && nativePastRanges) {
       const periods = Object.fromEntries(Object.entries(nativePastRanges.periods).map(([name, period]) => [name, {
         ...period,
         sessions: Object.fromEntries(Object.entries(period.sessions || {}).map(([key, row]) => [key, { ...row }]))
       }]));
-      for (const period of Object.values(periods)) copySessionLinks(allTime, period);
+      for (const period of Object.values(periods)) {
+        if (upgradeRangeLinks) copySessionLinks(allTime, period);
+        for (const key of revokedLinks) {
+          if (period.sessions[key]) delete period.sessions[key].t3ThreadId;
+        }
+      }
       nativePastRanges = { ...nativePastRanges, periods };
     }
   } else if (nativeDays) {
@@ -1711,12 +1730,13 @@ async function collectUsageOnce(options) {
   }
 
   const codexDotsUsage = Boolean(codexLocalView?.sessionKeys?.length && periodHasUsage(codexLocalView.allTime));
-  const nativeRangeSnapshot = options.nativeRangesEnabled === true ? composeNativeRanges(nativePastRanges, today, {
-    allTimeSince,
-    wslAllTime: wslBundle.allTime,
-    codexDotsUsage,
-    titleMetadata: { ...localSessionMetadataDeps, t3Titles: anchor?.t3Titles, scanTitleClears }
-  }) : null;
+  const nativeRangeSnapshot = options.nativeRangesEnabled === true && nativePastRanges?.weekStartsOn === weekStartsOn
+    ? composeNativeRanges(nativePastRanges, today, {
+      allTimeSince,
+      wslAllTime: wslBundle.allTime,
+      codexDotsUsage,
+      titleMetadata: { ...localSessionMetadataDeps, t3Titles: anchor?.t3Titles, scanTitleClears }
+    }) : null;
 
   // One filesystem probe per tick, shared by the legacy status and the health
   // record below. Probing twice cost a second pass over every client's roots —
@@ -1806,6 +1826,7 @@ async function collectUsageOnce(options) {
       todayPartitions,
       t3Titles,
       catalogTitleSources,
+      revokedT3ThreadKeys: [...localSessionMetadataDeps.revokedT3ThreadKeys],
       catalogProjects,
       wslBundle,
       wslStatus,
@@ -2884,6 +2905,16 @@ function startCollector(options) {
           if (captured.nativePastRanges) anchor.nativePastRanges = captured.nativePastRanges;
           anchor.sessionIdentityVersion = captured.sessionIdentityVersion;
         }
+        const revokedLinks = captured.revokedT3ThreadKeys || [];
+        if (revokedLinks.length) {
+          for (const period of ['today', 'month', 'allTime']) {
+            for (const key of revokedLinks) {
+              const row = anchor[period]?.sessions?.[key];
+              if (row) delete row.t3ThreadId;
+            }
+          }
+          if (captured.nativePastRanges) anchor.nativePastRanges = captured.nativePastRanges;
+        }
         // Keep the rolling per-client today partitions fresh for targeted
         // watch ticks. WSL stays independently frozen between interval ticks.
         if (captured.todayPartitions) anchor.todayPartitions = captured.todayPartitions;
@@ -2932,7 +2963,9 @@ function startCollector(options) {
           wslAnchor = captured.wslBundle;
           wslStatusAnchor = captured.wslStatus || null;
         }
-        if (titlesChanged || projectsChanged || sourcesChanged || identitiesUpgraded) persistAnchor(tickPricingRevision, tickSourceRevision);
+        if (titlesChanged || projectsChanged || sourcesChanged || identitiesUpgraded || revokedLinks.length) {
+          persistAnchor(tickPricingRevision, tickSourceRevision);
+        }
       }
       const transformedSummary = await onUpdate?.(summary, reason);
       if (tickCursorSnapshot) publishedCursorRevision = tickCursorSnapshot.revision;

@@ -226,7 +226,9 @@ function readT3SessionRelationResult(nativeIds, deps = {}) {
   if (!ids.length) return { facts: out, status: 'complete' };
   if (!sqlite) return { facts: out, status: 'unavailable' };
   let status = 'complete';
-  let titleStoreRead = false;
+  const titleStoresRead = new Set();
+  let ownershipRead = false;
+  let ownershipIncomplete = false;
   const names = {
     t: 'orchestration_v2_projection_threads',
     p: 'orchestration_v2_projection_provider_threads',
@@ -279,7 +281,7 @@ function readT3SessionRelationResult(nativeIds, deps = {}) {
         } else if (!facts.has(key)) {
           const title = client === 'antigravity' && readTitle ? cleanT3Title(row.title) : '';
           facts.set(key, { threadId, ...(client === 'antigravity' && readTitle
-            ? { title: title && !T3_DEFAULT_TITLES.has(title.toLowerCase()) ? title : null } : {}) });
+            ? { title: title && !T3_DEFAULT_TITLES.has(title.toLowerCase()) ? title : null, titleStore: file } : {}) });
         }
       };
       // IDs live in unindexed JSON in current T3 schemas. One candidate pass
@@ -376,13 +378,15 @@ function readT3SessionRelationResult(nativeIds, deps = {}) {
       // Extended SQLite error codes retain the base code in the low byte.
       // Empty/missing stores are valid; corruption and unsupported schemas wait
       // for the next full scan, while transient contention/resource failures defer migration.
+      if (error.code !== 'ENOENT') ownershipIncomplete = true;
       const code = Number(error.errcode) & 0xff;
       if ([5, 6].includes(code) || ['EBUSY', 'EAGAIN', 'EINTR', 'EMFILE', 'ENFILE'].includes(error.code)) status = 'retryable';
       else if (error.code !== 'ENOENT' && status === 'complete') status = 'unavailable';
     } finally {
       if (db) { try { db.close(); } catch (_) {} }
       if (complete) {
-        if (readTitle) titleStoreRead = true;
+        ownershipRead = true;
+        if (readTitle) titleStoresRead.add(file);
         for (const key of conflicts) { out.delete(key); ambiguous.add(key); }
         for (const key of parentConflicts) ambiguousParents.add(key);
         for (const [key, fact] of facts) {
@@ -395,14 +399,18 @@ function readT3SessionRelationResult(nativeIds, deps = {}) {
           if (previous?.parentThreadId && fact.parentThreadId && (previous.parentThreadId !== fact.parentThreadId
             || previous.parentClient !== fact.parentClient || previous.parentNativeId !== fact.parentNativeId)) ambiguousParents.add(key);
           const merged = { ...previous, ...fact };
-          if (previous && Object.hasOwn(previous, 'title')) merged.title = previous.title;
+          if (previous?.titleStore) {
+            merged.title = previous.title;
+            merged.titleStore = previous.titleStore;
+          }
           if (ambiguousParents.has(key)) for (const field of ['parentThreadId', 'parentClient', 'parentNativeId']) delete merged[field];
           out.set(key, merged);
         }
       }
     }
   }
-  return { facts: status === 'retryable' ? new Map() : out, status, ...(deps.includeAntigravityTitles ? { titleStoreRead } : {}) };
+  return { facts: status === 'retryable' ? new Map() : out, status, ...(deps.includeAntigravityTitles ? { titleStoresRead } : {}),
+    ...(deps.includeOwnershipStatus ? { ownershipComplete: ownershipRead && !ownershipIncomplete } : {}) };
 }
 
 function readT3SessionRelations(nativeIds, deps = {}) {
