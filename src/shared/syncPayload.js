@@ -7,7 +7,7 @@ const { UPLOAD_HEADER, UPLOAD_VERSION } = require('./uploadDelta');
 const { MAX_JSON_BODY_BYTES } = require('./http');
 const { syncLimits } = require('./limits/core');
 const { stripSessionTextFromDeviceRecord } = require('./usage');
-const { uploadFixedRanges } = require('./fixedRangeClient');
+const { uploadFixedRangeVersion } = require('./fixedRangeClient');
 const { FIXED_RANGE_HEADER, FIXED_RANGE_VERSION } = require('./fixedRangeSync');
 const { isReasonixSyntheticSession } = require('./providers/reasonix/sessionGuard');
 
@@ -404,12 +404,17 @@ function createSyncPayloadUploader({ now = Date.now } = {}) {
   let acknowledged = null;
   let deltaBaseline = null;
   let acknowledgedFixedRangeAt = null;
+  /** @type {Record<string, any>[] | null} */
+  let fixedRangeBaseline = null;
   let generation = 0;
 
   function resetHistory({ preserveDelta = false } = {}) {
     acknowledged = null;
     acknowledgedFixedRangeAt = null;
-    if (!preserveDelta) deltaBaseline = null;
+    if (!preserveDelta) {
+      deltaBaseline = null;
+      fixedRangeBaseline = null;
+    }
     generation += 1;
   }
 
@@ -470,8 +475,12 @@ function createSyncPayloadUploader({ now = Date.now } = {}) {
       if (requestGeneration === generation && ack?.ok && ack.fixedRanges === 1
         && ack.deviceId === summary?.deviceId && summary.nativeRanges && fixedRangeAt !== acknowledgedFixedRangeAt) {
         try {
-          const committed = await uploadFixedRanges(fetchFn, url.replace(/\/api\/ingest$/, ''), summary, headers, options);
-          if (committed && requestGeneration === generation) acknowledgedFixedRangeAt = fixedRangeAt;
+          const committed = await uploadFixedRangeVersion(fetchFn, url.replace(/\/api\/ingest$/, ''), summary, headers, options,
+            ack.fixedRangeDelta === 1 ? fixedRangeBaseline ?? [] : []);
+          if (committed && requestGeneration === generation) {
+            acknowledgedFixedRangeAt = fixedRangeAt;
+            fixedRangeBaseline = ack.fixedRangeDelta === 1 ? committed : null;
+          }
         } catch (error) {
           options.logger?.(`fixed range upload deferred: ${error.message}`);
         }

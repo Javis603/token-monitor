@@ -15,6 +15,22 @@ const MAX_FIXED_RANGE_PAGES = 32;
 /** @typedef {Record<string, any>} JsonRecord */
 /** @typedef {[string, string, string, JsonRecord]} DetailRow */
 
+/** @param {string} left @param {string} right */
+function compareKeys(left, right) {
+  return left < right ? -1 : left > right ? 1 : 0;
+}
+
+/** @param {DetailRow} row */
+function fixedRangeRowKey(row) {
+  return JSON.stringify([row[0], row[1], row[2]]);
+}
+
+/** @param {DetailRow} left @param {DetailRow} right */
+function compareFixedRangeRows(left, right) {
+  return compareKeys(left[0], right[0]) || compareKeys(right[1], left[1])
+    || compareKeys(left[2], right[2]);
+}
+
 /** @param {unknown} value */
 function dateKey(value) {
   if (typeof value !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(value)) return '';
@@ -54,7 +70,7 @@ function encodeFixedRangeSnapshot(record, { maxPageBytes, preserveSessionTitles 
       projects: Object.keys(projects).length
     };
     for (const [kind, rows] of [['sessions', sessions], ['projects', projects]]) {
-      for (const [key, value] of Object.entries(rows)) {
+      for (const [key, value] of Object.entries(rows).sort(([a], [b]) => compareKeys(a, b))) {
         /** @type {DetailRow} */
         const row = [name, String(kind), key, value];
         const bytes = encoder.encode(JSON.stringify(row)).byteLength;
@@ -203,5 +219,5 @@ function admitFixedRangeIndex(ranges, totalPages) {
 
 module.exports = {
   FIXED_RANGE_HEADER, FIXED_RANGE_VERSION, SYNC_WEEK_STARTS_ON, FIXED_RANGE_PAGE_BYTES, MAX_FIXED_RANGE_PAGES, encodeFixedRangeSnapshot, decodeFixedRangePeriod,
-  admitFixedRangeIndex, admitFixedRangePage, rangesMatchDeviceDay
+  admitFixedRangeIndex, admitFixedRangePage, rangesMatchDeviceDay, fixedRangeRowKey, compareFixedRangeRows
 };

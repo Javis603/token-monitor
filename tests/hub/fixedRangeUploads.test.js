@@ -263,3 +263,69 @@ for (const kind of ['Node', 'Worker']) test(`${kind} cannot publish project rows
   assert.equal((await send(endpoint, { headers })).status, 404);
   assert.equal(await uploadFixedRanges(send, base, { ...rangeRecord, projectsEnabled: false }, headers), true);
 });
+
+for (const kind of ['Node', 'Worker']) test(`${kind} synchronizes changed fixed-range rows and recovers from a stale baseline`, async (t) => {
+  const { base, send } = await backend(kind, t);
+  const headers = { authorization: 'Bearer fixture', 'content-type': 'application/json' };
+  const uploader = createSyncPayloadUploader();
+  const window = { start: '2026-11-19', end: '2026-11-25' };
+  const deviceId = 'fixed-range-delta';
+  const requests = [];
+  let staleBaseline = false;
+  const transport = async (url, options) => {
+    if (options.method !== 'PUT') return send(url, options);
+    const payload = JSON.parse(options.body);
+    requests.push(payload);
+    if (staleBaseline && payload.delta && payload.page === 1) {
+      payload.delta.baseRevision = '00000000-0000-4000-8000-000000000000';
+      const response = await send(url, { ...options, body: JSON.stringify(payload) });
+      assert.equal(response.status, 409);
+      return response;
+    }
+    return send(url, options);
+  };
+  const sessions = Object.fromEntries(Array.from({ length: 2500 }, (_, i) => [`claude:s${i}`, {
+    sessionId: `s${i}`, client: 'claude', totalTokens: 10, projectLabel: 'Project'
+  }]));
+  const makeRecord = (hour, rows) => {
+    const totalTokens = Object.values(rows).reduce((sum, row) => sum + row.totalTokens, 0);
+    const period = { totalTokens, clients: { claude: totalTokens }, sessions: rows };
+    return {
+      deviceId, updatedAt: `2026-11-25T0${hour}:00:00.000Z`,
+      periodWindows: { timeZone: 'UTC', today: { key: window.end, endsAt: '2026-11-26T00:00:00.000Z' } },
+      today: period, month: period, allTime: period,
+      nativeRanges: { last7: period }, nativeRangeWindows: { last7: window }
+    };
+  };
+  const upload = async summary => {
+    const result = await uploader(transport, base + '/api/ingest', { summary, headers });
+    assert.equal((await result.response.json()).fixedRangeDelta, 1);
+    const published = await fetchFixedRange(send, base, deviceId, 'last7', window, headers);
+    const { ranges, pages } = encodeFixedRangeSnapshot(summary, { maxPageBytes: 512 * 1024 });
+    assert.deepEqual(published, JSON.parse(JSON.stringify(decodeFixedRangePeriod(ranges, pages, 'last7'))));
+  };
+  await upload(makeRecord(1, sessions));
+  const first = requests[0];
+  assert.ok(first.rows);
+  assert.ok(requests.length > 1);
+  requests.length = 0;
+  const next = { ...sessions, 'claude:s0': { ...sessions['claude:s0'], totalTokens: 15 },
+    'claude:added': { ...sessions['claude:s1'], sessionId: 'added' } };
+  delete next['claude:s1'];
+  await upload(makeRecord(2, next));
+  const delta = requests[0].delta;
+  assert.equal(delta.baseRevision, first.revision);
+  assert.deepEqual(delta.remove, ['["last7","sessions","claude:s1"]']);
+  assert.ok(delta.upsert.some(row => row[2] === 'claude:added'));
+  assert.ok(delta.upsert.some(row => row[2] === 'claude:s0' && row[3].totalTokens === 15));
+  assert.ok(JSON.stringify(requests[0]).length < JSON.stringify(first).length / 4);
+
+  requests.length = 0;
+  staleBaseline = true;
+  await upload(makeRecord(3, next));
+  assert.ok(requests[0].delta);
+  assert.ok(requests[1].delta);
+  assert.ok(requests[2].rows);
+  assert.equal(requests[2].page, 0);
+  assert.notEqual(requests[0].revision, requests[2].revision);
+});

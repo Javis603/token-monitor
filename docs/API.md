@@ -379,6 +379,8 @@ Use `?deviceId=<id>` for all requests. A PUT includes `observedAt` matching the 
 
 The Hub makes an immutable revision readable after it accepts the complete publication. An identical page replay succeeds. A conflicting replay or a replay of a superseded revision returns 409. Each usage observation accepts at most 32 replacement revisions. Sync producers use Monday as the first day of Week in their own time zone. GET without `page` returns the index. Request the desired slice with `page=<number>&revision=<revision>` and verify the selected dates. A missing publication or page returns 404. A changed revision or mismatched observation returns 409. A change to the device’s Projects setting during a staged upload requires a new publication. Titles follow the same opt-in and consent generation as ordinary ingest. Conversation content stays on the originating device.
 
+A supporting Hub also acknowledges `fixedRangeDelta: 1` in the ingest response. A producer may send a page-sized difference from the last confirmed fixed-range revision. Use `delta: {baseRevision, basePage, upsert, remove}` in place of `rows`. `upsert` carries complete changed row tuples. `remove` carries the JSON-encoded three-element row identities (range, kind, accounting key). The Hub applies the difference to that device's published base page, validates the reconstructed page against the same limits and current sharing settings, and publishes only after all resulting pages pass validation. Producers use full pages for the first publish, for pages where the difference is larger, or for a new full publication when the baseline is rejected. Hubs without this acknowledgement continue to receive full pages.
+
 ## `GET /api/stats`
 
 Returns aggregate stats for the widget.

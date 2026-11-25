@@ -612,7 +612,7 @@ function createHub({
             })) : undefined;
         const response = {
           ok: true, deviceId: record.deviceId,
-          ...(req.headers[FIXED_RANGE_HEADER] === FIXED_RANGE_VERSION ? { fixedRanges: 1 } : {}),
+          ...(req.headers[FIXED_RANGE_HEADER] === FIXED_RANGE_VERSION ? { fixedRanges: 1, fixedRangeDelta: 1 } : {}),
           ...(upload ? { upload } : {})
         };
         return sendJson(res, 200, wantsMinimalResponse(req) ? response : { ...response, stats: getStats() });

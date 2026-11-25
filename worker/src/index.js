@@ -174,6 +174,11 @@ export class HubDO {
             : payload.page < previous.pageCount
               ? await storage.get(fixedRangePageKey(deviceId, previous.revision, payload.page)) : undefined;
           published = { ...previous, rows };
+        } else if (previous?.revision && previous.revision === payload?.delta?.baseRevision
+          && Number.isSafeInteger(payload.delta.basePage) && payload.delta.basePage >= 0
+          && payload.delta.basePage < previous.pageCount) {
+          const baseRows = await storage.get(fixedRangePageKey(deviceId, previous.revision, payload.delta.basePage));
+          published = { ...previous, baseRows };
         }
         const { status, complete, snapshot } = this.fixedRangeUploads.accept(deviceId, payload, device, preserveTitles, published);
         if (status !== 200) return jsonResponse(status, {
@@ -720,7 +725,7 @@ export class HubDO {
       this.queueBroadcast();
       const response = {
         ok: true, deviceId: record.deviceId,
-        ...(request.headers.get(FIXED_RANGE_HEADER) === FIXED_RANGE_VERSION ? { fixedRanges: 1 } : {}),
+        ...(request.headers.get(FIXED_RANGE_HEADER) === FIXED_RANGE_VERSION ? { fixedRanges: 1, fixedRangeDelta: 1 } : {}),
         ...(upload ? { upload } : {})
       };
       return jsonResponse(

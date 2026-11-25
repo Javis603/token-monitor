@@ -4,7 +4,7 @@
 // @ts-check
 'use strict';
 
-const { admitFixedRangeIndex, admitFixedRangePage, decodeFixedRangePeriod, rangesMatchDeviceDay } = require('./fixedRangeSync');
+const { admitFixedRangeIndex, admitFixedRangePage, decodeFixedRangePeriod, rangesMatchDeviceDay, fixedRangeRowKey, compareFixedRangeRows } = require('./fixedRangeSync');
 
 /** @typedef {Record<string, any>} JsonRecord */
 const MAX_STAGED_UPLOADS = 4;
@@ -63,6 +63,28 @@ function sameJson(left, right) {
 }
 
 /**
+ * @param {JsonRecord} delta
+ * @param {import('./fixedRangeSync').DetailRow[]} baseRows
+ */
+function applyFixedRangePageDelta(delta, baseRows) {
+  if (!Array.isArray(delta.upsert) || !Array.isArray(delta.remove)) return null;
+  const rows = new Map(baseRows.map(row => [fixedRangeRowKey(row), row]));
+  for (const key of delta.remove) {
+    if (typeof key !== 'string' || !rows.delete(key)) return null;
+  }
+  const added = new Set();
+  for (const row of delta.upsert) {
+    if (!Array.isArray(row) || row.length !== 4 || row.slice(0, 3).some(field => typeof field !== 'string')) return null;
+    const detail = /** @type {import('./fixedRangeSync').DetailRow} */ (row);
+    const key = fixedRangeRowKey(detail);
+    if (added.has(key)) return null;
+    added.add(key);
+    rows.set(key, detail);
+  }
+  return [...rows.values()].sort(compareFixedRangeRows);
+}
+
+/**
  * Keep the currently published upload visible while receiving its replacement.
  * Each stage belongs to one device and one usage revision.
  */
@@ -90,9 +112,24 @@ function createFixedRangeUploads() {
     if (publishedTime > observationTime) return { status: 409 };
     const titleGeneration = preserveSessionTitles ? payload.sessionTitleSyncGeneration : null;
     const projectsEnabled = device.projectsEnabled !== false;
+    let rowsInput = payload.rows;
+    if (payload.delta !== undefined) {
+      const delta = payload.delta;
+      if (!delta || typeof delta !== 'object' || rowsInput !== undefined
+        || typeof delta.baseRevision !== 'string' || !Number.isSafeInteger(delta.basePage) || delta.basePage < 0) {
+        return { status: 400 };
+      }
+      if (!published?.revision || published.revision !== delta.baseRevision || published.titleGeneration !== titleGeneration) {
+        return { status: 409 };
+      }
+      const baseRows = published.pages?.[delta.basePage] ?? published.baseRows;
+      if (!Array.isArray(baseRows)) return { status: 409 };
+      rowsInput = applyFixedRangePageDelta(delta, baseRows);
+      if (!rowsInput) return { status: 400 };
+    }
     const admitPage = (/** @type {number} */ totalPages) => {
-      if (totalPages === 0) return Array.isArray(payload.rows) && payload.rows.length === 0 ? [] : null;
-      return admitFixedRangePage(payload.rows, { projectsEnabled, preserveSessionTitles });
+      if (totalPages === 0) return Array.isArray(rowsInput) && rowsInput.length === 0 ? [] : null;
+      return admitFixedRangePage(rowsInput, { projectsEnabled, preserveSessionTitles });
     };
     const indexMatches = (/** @type {JsonRecord} */ ranges, /** @type {number} */ totalPages) => (
       payload.page !== 0 || (payload.totalPages === totalPages

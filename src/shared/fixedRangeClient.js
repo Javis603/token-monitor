@@ -2,7 +2,7 @@
 'use strict';
 
 const { randomUUID } = require('node:crypto');
-const { FIXED_RANGE_PAGE_BYTES, MAX_FIXED_RANGE_PAGES, encodeFixedRangeSnapshot, decodeFixedRangePeriod } = require('./fixedRangeSync');
+const { FIXED_RANGE_PAGE_BYTES, MAX_FIXED_RANGE_PAGES, encodeFixedRangeSnapshot, decodeFixedRangePeriod, fixedRangeRowKey } = require('./fixedRangeSync');
 
 /** @typedef {Record<string, any>} JsonRecord */
 /** @typedef {(url: string, options?: RequestInit) => Promise<Response>} RangeFetch */
@@ -38,8 +38,71 @@ function* fixedRangeUploadPages(record, options = {}) {
 }
 
 /**
- * Upload only after the corresponding device record has been admitted.
- * Legacy servers can ignore the optional endpoint without rejecting usage.
+ * @param {JsonRecord[]} previous
+ * @param {JsonRecord[]} next
+ * @returns {JsonRecord[]}
+ */
+function fixedRangeDeltaPages(previous, next) {
+  const base = previous[0];
+  const index = next[0];
+  if (!base || !index || base.sessionTitleSyncGeneration !== index.sessionTitleSyncGeneration) return next;
+  return next.map(page => {
+    if (!page.rows.length) return page;
+    const name = page.rows[0][0];
+    const old = base.ranges[name];
+    const offset = page.page - index.ranges[name].firstPage;
+    if (!old || offset >= old.pageCount) return page;
+    const basePage = old.firstPage + offset;
+    const baseRows = /** @type {import('./fixedRangeSync').DetailRow[]} */ (previous[basePage].rows);
+    const oldRows = new Map(baseRows.map(row => [fixedRangeRowKey(row), JSON.stringify(row)]));
+    const upsert = [];
+    for (const row of page.rows) {
+      const key = fixedRangeRowKey(row);
+      if (oldRows.get(key) !== JSON.stringify(row)) upsert.push(row);
+      oldRows.delete(key);
+    }
+    const { rows: _rows, ...fields } = page;
+    const delta = { ...fields, delta: { baseRevision: base.revision, basePage, upsert, remove: [...oldRows.keys()] } };
+    return Buffer.byteLength(JSON.stringify(delta)) < Buffer.byteLength(JSON.stringify(page)) ? delta : page;
+  });
+}
+
+/**
+ * @param {RangeFetch} fetch
+ * @param {string} hubUrl
+ * @param {JsonRecord} record
+ * @param {HeadersInit} headers
+ * @param {{ syncSessionTitles?: boolean, sessionTitleSyncGeneration?: number }} options
+ * @param {JsonRecord[]} previous
+ */
+async function uploadFixedRangeVersion(fetch, hubUrl, record, headers, options, previous = []) {
+  const url = fixedRangeUrl(hubUrl, record.deviceId).href;
+  /** @param {JsonRecord[]} pages */
+  async function send(pages) {
+    for (const page of pages) {
+      const response = await fetch(url, { method: 'PUT', headers, body: JSON.stringify(page) });
+      if (!response.ok) {
+        await response.arrayBuffer();
+        if ([400, 404, 405, 409, 413].includes(response.status)) return response.status;
+        throw new Error(`Fixed range upload failed (${response.status})`);
+      }
+      if ((await response.json()).complete === true) return 200;
+    }
+    return 0;
+  }
+
+  let full = [...fixedRangeUploadPages(record, options)];
+  const pages = fixedRangeDeltaPages(previous, full);
+  const status = await send(pages);
+  if (status === 200) return full;
+  if (![400, 409, 413].includes(status) || !pages.some(page => page.delta)) return null;
+  // A new revision abandons any pages staged before the baseline was rejected.
+  const revision = randomUUID();
+  full = full.map(page => ({ ...page, revision }));
+  return await send(full) === 200 ? full : null;
+}
+
+/**
  * @param {RangeFetch} fetch
  * @param {string} hubUrl
  * @param {JsonRecord} record
@@ -47,18 +110,7 @@ function* fixedRangeUploadPages(record, options = {}) {
  * @param {{ syncSessionTitles?: boolean, sessionTitleSyncGeneration?: number }} options
  */
 async function uploadFixedRanges(fetch, hubUrl, record, headers, options = {}) {
-  const url = fixedRangeUrl(hubUrl, record.deviceId).href;
-  for (const page of fixedRangeUploadPages(record, options)) {
-    const response = await fetch(url, { method: 'PUT', headers, body: JSON.stringify(page) });
-    if (!response.ok) {
-      await response.arrayBuffer();
-      if (response.status === 404 || response.status === 405 || response.status === 409) return false;
-      throw new Error(`Fixed range upload failed (${response.status})`);
-    }
-    const result = await response.json();
-    if (result.complete === true) return true;
-  }
-  return false;
+  return Boolean(await uploadFixedRangeVersion(fetch, hubUrl, record, headers, options));
 }
 
 /**
@@ -92,4 +144,4 @@ async function fetchFixedRange(fetch, hubUrl, deviceId, name, window, headers, e
   return decodeFixedRangePeriod(index.ranges, pages, name);
 }
 
-module.exports = { fixedRangeUploadPages, uploadFixedRanges, fetchFixedRange };
+module.exports = { fixedRangeUploadPages, fixedRangeDeltaPages, uploadFixedRangeVersion, uploadFixedRanges, fetchFixedRange };
