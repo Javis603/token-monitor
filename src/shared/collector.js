@@ -1558,12 +1558,13 @@ async function collectUsageOnce(options) {
       for (const key of Object.keys(today.sessions || {})) {
         const metadata = localSessionMetadataDeps.metadataCache.get(key);
         if (!metadata?.t3ThreadRevoked) {
+          const savedToday = anchor.today?.sessions?.[key];
+          const currentToday = today.sessions[key];
           if (today.sessions[key].client === 'antigravity'
-            && ((anchor.today?.sessions?.[key]?.t3ThreadId && today.sessions[key].t3ThreadId
-              && anchor.today.sessions[key].t3ThreadId !== today.sessions[key].t3ThreadId)
+            && ((savedToday && currentToday.t3ThreadId && savedToday.t3ThreadId !== currentToday.t3ThreadId)
             || [[anchor.month, month], [anchor.allTime, allTime]].some(([saved, current]) => {
               const retained = saved?.sessions?.[key];
-              return retained?.t3ThreadId && t3SessionLinksChanged(retained, current.sessions?.[key]);
+              return retained && t3SessionLinksChanged(retained, current.sessions?.[key]);
             }))) localSessionMetadataDeps.changedT3ThreadKeys.add(key);
           continue;
         }

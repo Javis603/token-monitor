@@ -914,12 +914,42 @@ for (const change of ['corrupt', 'locked', 'reassigned', 'parent removed', 'inco
     assert.equal(next[name].sessions[nativeKey].parentSessionId, 'acp-parent');
     assert.equal(next[name].sessions[key].totalTokens, 20);
   }
-  if (reassigned) assert.deepEqual(new Set(captured.changedT3ThreadKeys), new Set([key, nativeKey]));
+  if (reassigned) assert.deepEqual(new Set(captured.changedT3ThreadKeys), new Set([key, nativeKey, 'antigravity:new-parent']));
   else if (parentRemoved) assert.deepEqual(captured.changedT3ThreadKeys, [key]);
   else if (incomplete) assert.deepEqual(captured.changedT3ThreadKeys, []);
   else assert.deepEqual(new Set(captured.revokedT3ThreadKeys), new Set([key, nativeKey]));
 });
 
+
+test('a saved Antigravity range gains the first verified T3 thread and parent', async t => {
+  const { collectUsageOnce, localTodayKey } = require('../../src/shared/collector');
+  const s = store(t);
+  const key = 'antigravity:child-native';
+  let captured;
+  const options = { clients: 'antigravity', homeDir: s.home, env: {}, osInfo: {},
+    allTimeSince: '2024-01-01', historyEnabled: false, limitsEnabled: false, wslScanEnabled: false,
+    nativeRangesEnabled: true,
+    onAnchorComputed: value => { captured = value; },
+    runTokscale: async () => ({ entries: ['parent-native', 'child-native'].map(sessionId =>
+      ({ client: 'antigravity', sessionId, model: 'm', input: 20 })) }) };
+  const full = await collectUsageOnce(options);
+  assert.equal(full.month.sessions[key].t3ThreadId, undefined);
+  const todayKey = localTodayKey();
+  const date = new Date(todayKey);
+  const daysAgo = days => new Date(date.getTime() - days * 86400000).toISOString().slice(0, 10);
+  const starts = { yesterday: daysAgo(1), week: daysAgo((date.getUTCDay() + 6) % 7), last7: daysAgo(6), last30: daysAgo(29) };
+  const nativePastRanges = { todayKey, weekStartsOn: 1, starts,
+    periods: Object.fromEntries(Object.keys(starts).map(name => [name, structuredClone(full.month)])) };
+  pair(s, 'antigravity', 'antigravity');
+  const next = await collectUsageOnce({ ...options, todayOnlyAnchor: { dateKey: todayKey,
+    today: full.today, month: full.month, allTime: full.allTime, todayPartitions: captured.todayPartitions,
+    sessionIdentityVersion: captured.sessionIdentityVersion, nativePastRanges } });
+  for (const range of [next.nativeRanges.yesterday, captured.nativePastRanges.periods.yesterday]) {
+    assert.equal(range.sessions[key].t3ThreadId, 'child');
+    assert.equal(range.sessions[key].parentSessionId, 'parent-native');
+    assert.equal(range.totalTokens, 40);
+  }
+});
 
 test('relationship queries retain every requested child across the 400-ID query boundary', t => {
   const s = store(t);
