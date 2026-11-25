@@ -371,6 +371,7 @@ test('breakdown rows toggle between compact and exact across all visible rows, e
   const context = {
     document,
     rendererDom,
+    window: { TokenMonitorDomReconcile: require('../../src/electron/renderer/domReconcile') },
     state,
     rowLiveMarkup: '',
     overflowText: { update() {} },
@@ -748,6 +749,7 @@ test('keyboard activation inside rebuilt tool, device, and project accordions pr
   const context = {
     document,
     rendererDom,
+    window: { TokenMonitorDomReconcile: require('../../src/electron/renderer/domReconcile') },
     els: { breakdown, sessionDetail },
     state,
     rowLiveMarkup: '',

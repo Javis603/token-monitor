@@ -24,6 +24,8 @@ test('reset restores the configured middle range from a custom selection', () =>
     let followed = 0;
     const context = {
       state, fixedPeriodRangesApi, tokenNumberAnimationApi: { normalize: value => value },
+      detailTokenDisplayApi: { reset() {} },
+      settleRowNumberAnimations() {},
       setPeriod(period) { state.period = period; return true; },
       followOpenSessionToPeriod() { followed++; }
     };
