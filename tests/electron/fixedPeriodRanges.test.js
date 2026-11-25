@@ -14,7 +14,7 @@ test('custom period tabs keep a unique supported order or fall back to the legac
     ['week', 'last7', 'yesterday']);
   assert.deepEqual(ranges.normalizePeriodTabOrder(['allTime', 'month', 'week', 'today', 'last30', 'last7', 'yesterday']),
     ['allTime', 'month', 'week', 'today', 'last30', 'last7']);
-  assert.deepEqual(ranges.PERIOD_TAB_OPTIONS.map(ranges.displayLabel), ['Day', 'YDAY', 'Week', '7D', 'Month', '30D', 'Total']);
+  assert.deepEqual(ranges.PERIOD_TAB_OPTIONS.map(ranges.displayLabel), ['DAY', 'YDAY', 'WEEK', '7D', 'MONTH', '30D', 'TOTAL']);
 });
 
 function day(date, tokens, client = 'claude', model = 'opus') {
