@@ -229,6 +229,7 @@ function buildSyncPayload(summary, {
   // shape and every Hub keep deriving ranges from History.
   delete payload.nativeRanges;
   delete payload.nativeRangeWindows;
+  delete payload.nativeRangeDays;
   const projectsEnabled = summary.projectsEnabled !== false;
   delete payload.allTimeProjectsOmitted;
   delete payload.allTimeProjectsIncomplete;

@@ -139,6 +139,10 @@ test('a watch tick adds the fresh Today to the anchored past days', async () => 
   }));
 
   assert.deepEqual(flags, [['--today']]);
+  // Only a full tick hands its past days to the session archive.
+  assert.equal(full.nativeRangeDays[dayKey(10)].sessions['claude:spanning'].totalTokens, 1000);
+  assert.equal(Object.keys(full.nativeRangeDays).length, 29);
+  assert.equal(watch.nativeRangeDays, undefined);
   assert.equal(watch.nativeRanges.last7.totalTokens, full.nativeRanges.last7.totalTokens + 200);
   assert.equal(watch.nativeRanges.last7.sessions['claude:today-session'].totalTokens, 300);
   // Today's growth never reaches Yesterday, and its published rows are not the
