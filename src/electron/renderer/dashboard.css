@@ -521,6 +521,10 @@ html.native-liquid-glass .seg-indicator {
   min-width: 0;
 }
 
+.dash-activity-col[data-stage="flow"] .dash-heatmap-title-group {
+  visibility: hidden;
+}
+
 .dash-activity-controls {
   display: flex;
   align-items: center;
@@ -2606,12 +2610,6 @@ body.flat .dash-drawer {
 }
 
 .dash-header .dash-settings-trigger { anchor-name: --dashboard-settings; }
-.dash-settings-icon {
-  width: 14px;
-  height: 14px;
-  background: currentColor;
-  mask: url("icons/actions/settings.svg") center / contain no-repeat;
-}
 .dash-settings {
   position: fixed;
   inset: 48px 12px auto auto;
@@ -2622,33 +2620,16 @@ body.flat .dash-drawer {
   max-height: calc(100vh - 60px);
   overflow: auto;
   padding: 14px;
-  background: rgb(var(--glass-rgb));
-  color: var(--text);
-  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.24);
 }
 .dash-settings:popover-open { display: grid; gap: 10px; }
 .dash-settings h2 { font-size: 14px; margin: 0; }
-.dash-settings label { display: flex; align-items: center; gap: 6px; }
-.dash-settings input { margin: 0; }
-.dash-settings fieldset {
-  margin: 0;
-  border: 1px solid var(--surface-border);
-  border-radius: 8px;
-  padding: 8px;
+.dash-settings .dash-settings-fields {
+  overflow: visible;
+  max-height: none;
+  padding: 0;
 }
-.dash-period-choices {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  margin-top: 8px;
-  gap: 6px;
-}
-.dash-setting-select { justify-content: space-between; }
-.dash-settings select {
-  background: var(--glass);
-  color: inherit;
-  border: 1px solid var(--surface-border);
-  border-radius: 6px;
-  padding: 2px 4px;
-  max-width: 55%;
-}
+.dash-settings .period-tab-settings { margin-top: 0; }
+.dash-settings .period-tab-chip { cursor: pointer; touch-action: auto; }
+.dash-settings .period-tab-chip[aria-pressed="false"] { color: var(--muted); background: transparent; }
+.dash-settings .period-tab-chip:disabled { cursor: default; opacity: 0.55; }
 .dash-band-single { grid-template-columns: minmax(0, 1fr); }

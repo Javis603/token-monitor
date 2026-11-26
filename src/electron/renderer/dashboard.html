@@ -28,33 +28,37 @@
         <div class="dash-header-actions">
           <button id="themeToggle" type="button" class="icon-button" aria-label="Theme">◐</button>
           <button id="refreshBtn" type="button" class="icon-button refresh-button" aria-label="Refresh"><span class="refresh-button-icon" aria-hidden="true"></span><span class="refresh-button-spinner" aria-hidden="true"></span></button>
-          <button id="dashSettingsTrigger" type="button" class="icon-button dash-settings-trigger" popovertarget="dashSettings" aria-label="Dashboard settings"><span class="dash-settings-icon" aria-hidden="true"></span></button>
+          <button id="dashSettingsTrigger" type="button" class="icon-button settings-icon-button dash-settings-trigger" popovertarget="dashSettings" aria-label="Dashboard settings"></button>
           <button id="minBtn" type="button" class="icon-button" aria-label="Minimize">−</button>
           <button id="closeBtn" type="button" class="icon-button" aria-label="Close">×</button>
         </div>
       </header>
-      <section id="dashSettings" class="dash-glass-card dash-settings" popover="auto" role="dialog" aria-labelledby="dashSettingsTitle">
+      <section id="dashSettings" class="settings-help-popover dash-settings" popover="auto" role="dialog" aria-labelledby="dashSettingsTitle">
         <h2 id="dashSettingsTitle" data-i18n="dashboard.settings.title">Dashboard settings</h2>
-        <fieldset>
-          <legend data-i18n="periodRange.tabsTitle">Usage range buttons</legend>
-          <label><input type="checkbox" id="dashFollowPeriods" autofocus> <span data-i18n="dashboard.settings.followPeriods">Follow main app</span></label>
-          <div id="dashPeriodChoices" class="dash-period-choices"></div>
-        </fieldset>
-        <label><input type="checkbox" id="dashShowVelocity"> <span data-i18n="dashboard.velocity.title">Live Velocity</span></label>
-        <label><input type="checkbox" id="dashShowQuotas"> <span data-i18n="home.limits">Limits</span></label>
-        <label class="dash-setting-select"><span data-i18n="dashboard.settings.stage">Overview view</span>
-          <select id="dashDefaultStage">
-            <option value="flow" data-i18n="dashboard.stage.flow">Live Flow</option>
-            <option value="3d" data-i18n="dashboard.stage.activity3d">3D</option>
-            <option value="2d" data-i18n="dashboard.stage.activity2d">2D</option>
-          </select>
-        </label>
-        <label class="dash-setting-select"><span data-i18n="dashboard.settings.heatmap">Heatmap metric</span>
-          <select id="dashDefaultMetric">
-            <option value="tokens" data-i18n="dashboard.heatmap.tokens">Tokens</option>
-            <option value="cost" data-i18n="dashboard.heatmap.cost">Cost</option>
-          </select>
-        </label>
+        <div class="settings-panel dash-settings-fields">
+          <div class="period-tab-settings">
+            <div class="edge-dock-composer-heading" id="dashPeriodChoicesLabel" data-i18n="periodRange.tabsTitle">Usage range buttons</div>
+            <label class="checkbox-label settings-item"><span class="settings-item-text" data-i18n="dashboard.settings.followPeriods">Follow main app</span><input type="checkbox" id="dashFollowPeriods" autofocus></label>
+            <div id="dashPeriodChoices" class="period-tab-list period-tab-list-shown" role="group" aria-labelledby="dashPeriodChoicesLabel"></div>
+          </div>
+          <label class="checkbox-label settings-item"><span class="settings-item-text" data-i18n="dashboard.velocity.title">Live Velocity</span><input type="checkbox" id="dashShowVelocity"></label>
+          <label class="checkbox-label settings-item"><span class="settings-item-text" data-i18n="home.limits">Limits</span><input type="checkbox" id="dashShowQuotas"></label>
+          <div class="settings-item">
+            <label for="dashDefaultStage" class="settings-item-text settings-item-title" data-i18n="dashboard.settings.stage">Overview view</label>
+            <select id="dashDefaultStage">
+              <option value="flow" data-i18n="dashboard.stage.flow">Live Flow</option>
+              <option value="3d" data-i18n="dashboard.stage.activity3d">3D</option>
+              <option value="2d" data-i18n="dashboard.stage.activity2d">2D</option>
+            </select>
+          </div>
+          <div class="settings-item">
+            <label for="dashDefaultMetric" class="settings-item-text settings-item-title" data-i18n="dashboard.settings.heatmap">Heatmap metric</label>
+            <select id="dashDefaultMetric">
+              <option value="tokens" data-i18n="dashboard.heatmap.tokens">Tokens</option>
+              <option value="cost" data-i18n="dashboard.heatmap.cost">Cost</option>
+            </select>
+          </div>
+        </div>
         <p id="dashSettingsError" class="hidden" role="alert" data-i18n="dashboard.settings.saveFailed"></p>
         <button id="dashOpenAppSettings" type="button" class="seg-btn" data-i18n="dashboard.settings.openApp">Open app settings</button>
       </section>
@@ -285,6 +289,7 @@
     <script src="statsRenderScheduler.js"></script>
     <script src="glassRendering.js"></script>
     <script src="contentBlur.js"></script>
+    <script src="selectControl.js"></script>
     <script src="accountIdentity.js"></script>
     <script src="dashboardModel.js"></script>
     <script src="activitySkyline3d.js"></script>

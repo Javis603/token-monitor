@@ -624,9 +624,10 @@ function syncDashboardSettings(settings) {
   dashboardSettings.stage.value = state.stageView;
   dashboardSettings.metric.value = state.heatmapMetric;
   const displayed = dashboardSettings.follow.checked ? dashboardPeriodTabs(settings) : visible;
-  for (const input of dashboardSettings.choices.querySelectorAll('input')) {
-    input.checked = displayed.includes(input.value);
-    input.disabled = dashboardSettings.follow.checked || (input.checked && visible.length === 1);
+  for (const button of dashboardSettings.choices.querySelectorAll('button')) {
+    const selected = displayed.includes(button.value);
+    button.setAttribute('aria-pressed', String(selected));
+    button.disabled = dashboardSettings.follow.checked || (selected && visible.length === 1);
   }
   els.velocity?.classList.toggle('hidden', !dashboardSettings.velocity.checked);
   els.quotasCard?.classList.toggle('hidden', !dashboardSettings.quotas.checked);
@@ -638,7 +639,7 @@ function populateDashboardSettings() {
   if (!dashboardSettings.choices) return;
   dashboardSettings.trigger.setAttribute('aria-label', t('dashboard.settings.title'));
   dashboardSettings.choices.innerHTML = PERIODS.map(period =>
-    `<label><input type="checkbox" value="${period}"> ${escapeHtml(t(`dashboard.period.${period}`))}</label>`
+    `<button type="button" class="tab period-tab-chip" value="${period}" aria-pressed="false">${escapeHtml(t(`dashboard.period.${period}`))}</button>`
   ).join('');
 }
 
@@ -2574,14 +2575,7 @@ function renderActivity(overview) {
   }
 
   if (isFlow) {
-    const graph = overview?.topology;
-    if (els.heatmapMeta) {
-      const liveEdges = graph?.counts?.activeEdges || 0;
-      const peak = overview?.scopedHistory?.summary?.peakDayTokens || 0;
-      els.heatmapMeta.textContent = liveEdges > 0
-        ? t('dashboard.topology.liveLinks', { count: liveEdges })
-        : (peak > 0 ? `${t('trends.peakDay')}: ${formatCompact(peak)}` : '');
-    }
+    if (els.heatmapMeta) els.heatmapMeta.textContent = '';
     heatmapMotionGeneration += 1;
     els.heatmap?.classList.remove('is-motion-pending');
     els.heatmap?.classList.add('hidden');
@@ -4675,12 +4669,25 @@ els.trendMetricBtns.forEach((b) => b.addEventListener('click', () => {
   render();
 }));
 
+const dashboardSelectControls = [dashboardSettings.stage, dashboardSettings.metric].map(select =>
+  window.TokenMonitorSelectControl?.enhance(select, { align: 'end' }));
+dashboardSettings.popover?.addEventListener('toggle', event => {
+  if (event.newState === 'closed') dashboardSelectControls.forEach(control => control?.close());
+});
+dashboardSettings.choices?.addEventListener('click', event => {
+  const button = event.target.closest('.period-tab-chip');
+  if (!button || button.disabled) return;
+  const selected = new Set(Array.from(dashboardSettings.choices.querySelectorAll('[aria-pressed="true"]'), item => item.value));
+  const wasSelected = selected.has(button.value);
+  if (wasSelected && selected.size === 1) return;
+  button.setAttribute('aria-pressed', String(!wasSelected));
+  if (wasSelected) selected.delete(button.value);
+  else selected.add(button.value);
+  void saveDashboardSettings({ dashboardVisiblePeriods: [...selected] });
+});
 dashboardSettings.popover?.addEventListener('change', (event) => {
   const input = event.target;
-  if (dashboardSettings.choices.contains(input)) {
-    const selected = Array.from(dashboardSettings.choices.querySelectorAll('input:checked'), item => item.value);
-    if (selected.length) void saveDashboardSettings({ dashboardVisiblePeriods: selected });
-  } else if (input === dashboardSettings.follow) {
+  if (input === dashboardSettings.follow) {
     void saveDashboardSettings({ dashboardFollowPeriodTabs: input.checked });
   } else if (input === dashboardSettings.velocity) {
     void saveDashboardSettings({ dashboardShowVelocity: input.checked });
