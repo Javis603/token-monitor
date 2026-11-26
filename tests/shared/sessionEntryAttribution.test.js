@@ -169,11 +169,15 @@ test('a verified identity conflict revokes the entry attribution', t => {
     // conflict still unattributes it.
     b: { client: 'codex', sessionId: conflictId, totalTokens: 5, sessionEntry: 't3' }
   } }) };
-  applyT3SessionParents(periods, s.home, { env: {} });
+  const revokedT3ThreadKeys = new Set();
+  applyT3SessionParents(periods, s.home, { env: {}, revokedT3ThreadKeys });
   const session = periods.today.sessions['codex:dup-native'];
   assert.equal(session.t3ThreadId, undefined);
   assert.equal(session.sessionEntry, undefined);
   assert.equal(periods.today.sessions[`codex:${conflictId}`].sessionEntry, undefined);
+  // The entry-only conflict is recorded, so the collector's retained-range
+  // refresh can clear the stale attribution from anchor and past-day rows.
+  assert.ok(revokedT3ThreadKeys.has(`codex:${conflictId}`));
 });
 
 function antigravityFixture(t, { corruptState = false } = {}) {
@@ -336,8 +340,79 @@ test('entry trend splits add back up to the untouched total curve', () => {
   const partialUnknown = entryTrendPoints(points, partialDays, 'unknown');
   assert.equal(partialUnknown[0].tokens, 100 - 70);
   assert.equal(t3[0].tokens + 30 + partialUnknown[0].tokens, points[0].tokens);
-  // Month rows carry no session detail and fall into the unknown bucket.
-  const monthly = [{ month: '2026-11', tokens: 70 }];
-  assert.equal(entryTrendPoints(monthly, days, 'unknown', { labelKey: 'month' })[0].tokens, 70);
-  assert.equal(entryTrendPoints(monthly, days, 't3', { labelKey: 'month' })[0].tokens, 0);
+});
+
+test('monthly trend points resolve through the retained daily detail of their days', () => {
+  const days = {
+    '2026-11-25': { sessions: {
+      a: { totalTokens: 40, sessionEntry: 't3' },
+      b: { totalTokens: 30, sessionEntry: 'codex-cli' }
+    } },
+    '2026-11-20': { sessions: {
+      c: { totalTokens: 60, sessionEntry: 't3' }
+    } },
+    // A covered month outside the daily window keeps its own answer.
+    '2026-10-04': { sessions: {
+      d: { totalTokens: 80, sessionEntry: 'antigravity-cli' }
+    } }
+  };
+  const monthly = [
+    { month: '2026-11', tokens: 500 },
+    { month: '2026-10', tokens: 80 },
+    { month: '2026-09', tokens: 200 }
+  ];
+  const t3 = entryTrendPoints(monthly, days, 't3', { labelKey: 'month' });
+  const cli = entryTrendPoints(monthly, days, 'codex-cli', { labelKey: 'month' });
+  const ag = entryTrendPoints(monthly, days, 'antigravity-cli', { labelKey: 'month' });
+  const unknown = entryTrendPoints(monthly, days, 'unknown', { labelKey: 'month' });
+  // Covered days split by their sessions; the month the detail undercounts
+  // rides the remainder in the unknown bucket.
+  assert.equal(t3[0].tokens, 100);
+  assert.equal(cli[0].tokens, 30);
+  assert.equal(unknown[0].tokens, 500 - 130);
+  assert.equal(t3[0].tokens + cli[0].tokens + unknown[0].tokens, 500);
+  // A fully covered month needs no unknown remainder.
+  assert.equal(ag[1].tokens, 80);
+  assert.equal(unknown[1].tokens, 0);
+  // A month without any covered day counts entirely as unknown.
+  assert.equal(unknown[2].tokens, 200);
+  assert.equal(t3[2].tokens, 0);
+});
+
+test('entry trend choices expose the entries the detail attributes and the unknown remainder', () => {
+  const charts = require('../../src/electron/renderer/usageCharts');
+  const { entryTrendChoices } = charts;
+  // A day whose detail undercounts still offers unknown.
+  const partial = [{ date: '2026-11-25', tokens: 100 }];
+  const partialDays = { '2026-11-25': { sessions: {
+    a: { totalTokens: 40, sessionEntry: 't3' },
+    b: { totalTokens: 30, sessionEntry: 'codex-cli' }
+  } } };
+  assert.deepEqual(entryTrendChoices(partial, partialDays), ['codex-cli', 't3', 'unknown']);
+  // Fully covered detail with unattributed sessions keeps offering unknown.
+  const fullDays = { '2026-11-25': { sessions: {
+    a: { totalTokens: 40, sessionEntry: 't3' },
+    b: { totalTokens: 60 }
+  } } };
+  assert.deepEqual(entryTrendChoices(partial, fullDays), ['t3', 'unknown']);
+  // A day with usage and no detail offers unknown alone.
+  const bareDays = { '2026-11-24': { sessions: {
+    a: { totalTokens: 40, sessionEntry: 't3' }
+  } } };
+  assert.deepEqual(entryTrendChoices([{ date: '2026-11-23', tokens: 50 }], bareDays), ['unknown']);
+  // Monthly points aggregate the choices of their covered days.
+  const monthlyDays = {
+    '2026-11-25': { sessions: { a: { totalTokens: 40, sessionEntry: 't3' } } },
+    '2026-11-20': { sessions: { b: { totalTokens: 30, sessionEntry: 'codex-cli' } } }
+  };
+  assert.deepEqual(
+    entryTrendChoices([{ month: '2026-11', tokens: 200 }], monthlyDays, { labelKey: 'month' }),
+    ['codex-cli', 't3', 'unknown']
+  );
+  // A month covered exactly, with every session attributed, offers no unknown.
+  const exactDays = { '2026-11-25': { sessions: { a: { totalTokens: 40, sessionEntry: 't3' } } } };
+  assert.deepEqual(
+    entryTrendChoices([{ month: '2026-11', tokens: 40 }], exactDays, { labelKey: 'month' }),
+    ['t3']
+  );
 });

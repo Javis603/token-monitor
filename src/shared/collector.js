@@ -1628,7 +1628,13 @@ async function collectUsageOnce(options) {
         if (revoked) {
           for (const period of [today, month, allTime, ...Object.values(todayPartitions)]) {
             const retained = period.sessions?.[key];
-            if (!retained?.t3ThreadId && !retained?.t3ParentLink) continue;
+            if (!retained) continue;
+            if (!retained.t3ThreadId && !retained.t3ParentLink) {
+              // An entry-only row has no link to revoke, but its launch-entry
+              // attribution came from the identity the conflict invalidated.
+              delete retained.sessionEntry;
+              continue;
+            }
             revokeT3SessionLinks(retained);
             delete retained.sessionEntry;
             localSessionMetadataDeps.revokedT3ThreadKeys.add(key);
@@ -1932,8 +1938,14 @@ async function collectUsageOnce(options) {
       const { metadataCache, revokedT3ThreadKeys } = localSessionMetadataDeps;
       for (const period of Object.values(days)) {
         for (const [key, row] of Object.entries(period.sessions)) {
-          if (!(row.t3ThreadId || row.t3ParentLink)) continue;
-          if (!revokedT3ThreadKeys.has(key) && !metadataCache.get(key)?.t3ThreadRevoked) continue;
+          const revoked = revokedT3ThreadKeys.has(key) || metadataCache.get(key)?.t3ThreadRevoked;
+          if (!(row.t3ThreadId || row.t3ParentLink)) {
+            // Entry-only rows keep no link to revoke; the invalidated identity
+            // still unattributes them.
+            if (revoked) delete row.sessionEntry;
+            continue;
+          }
+          if (!revoked) continue;
           revokeT3SessionLinks(row);
           delete row.sessionEntry;
           revokedT3ThreadKeys.add(key);

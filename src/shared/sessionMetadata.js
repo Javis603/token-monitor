@@ -446,9 +446,12 @@ function applyT3SessionParents(periods, home = os.homedir(), deps = {}, targets,
     }
     // A conflict unattributes the session even when nothing links it yet: a
     // record that arrived holding only `sessionEntry: 't3'` loses that answer
-    // the same way it would lose a stored thread id.
+    // the same way it would lose a stored thread id. Recording the key lets
+    // the retained-range refresh clear the stale attribution from the anchor
+    // and the past-day rows as well.
     if (conflict) {
       delete session.sessionEntry;
+      deps.revokedT3ThreadKeys?.add(`${session.client}:${session.sessionId}`);
       continue;
     }
     if (link && matches.every(fact => fact.threadId === link.threadId)) {

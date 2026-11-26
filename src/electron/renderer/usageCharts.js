@@ -427,46 +427,103 @@
     return result;
   }
 
+  // Session-detail groups for one trend point. A day key reads that day's
+  // retained detail; a month key reads every covered day of that month, so the
+  // long-range monthly curve (all-time and fixed-range views) can filter by
+  // the same retained detail the daily windows use. Keys without a usable
+  // shape have no detail at all.
+  function entryTrendGroups(key, days) {
+    if (/^\d{4}-\d{2}-\d{2}$/.test(key)) {
+      const sessions = days[key]?.sessions;
+      return sessions && typeof sessions === 'object' ? [sessions] : [];
+    }
+    if (/^\d{4}-\d{2}$/.test(key)) {
+      const groups = [];
+      for (const [day, period] of Object.entries(days)) {
+        if (!day.startsWith(`${key}-`)) continue;
+        const sessions = period?.sessions;
+        if (sessions && typeof sessions === 'object') groups.push(sessions);
+      }
+      return groups;
+    }
+    return [];
+  }
+
   // Trend points filtered by launch entry, derived from the collector's
   // per-day session detail instead of the daily rows themselves: those carry
-  // no session identity. A day the session detail covers splits by the
-  // sessions' own attribution, and whatever the detail does not account for
+  // no session identity. A point the session detail covers splits by the
+  // sessions' own attribution, and everything the detail does not attribute —
+  // uncovered days, unattributed sessions, a point the detail undercounts —
   // rides in the unknown bucket so each entry split still adds up to the
-  // untouched total curve (a detail whose sessions overcount the day cannot
-  // be rebalanced without inventing values, so unknown floors at zero). A day
-  // without session detail counts entirely as unknown, and a total that
-  // predates attribution never moves because of it. Session detail is
-  // wire-normalized upstream, so an entry there is a bounded value or absent,
-  // and absent is the unknown bucket.
+  // untouched total curve (a detail that overcounts cannot be rebalanced
+  // without inventing values, so the bucket floors at zero). A point without
+  // session detail counts entirely as unknown, and a total that predates
+  // attribution never moves because of it. Session detail is wire-normalized
+  // upstream, so an entry there is a bounded value or absent, and absent is
+  // the unknown bucket.
   function entryTrendPoints(points, daySessions, entry, { labelKey = 'date', metric = 'tokens' } = {}) {
     if (!Array.isArray(points)) return [];
     const selected = typeof entry === 'string' ? entry : '';
     if (!selected) return points;
     const days = daySessions && typeof daySessions === 'object' ? daySessions : {};
     return points.map((point) => {
-      const key = String(point?.[labelKey] || '').slice(0, 10);
-      const period = /^\d{4}-\d{2}-\d{2}$/.test(key) ? days[key] : null;
-      const sessions = period?.sessions && typeof period.sessions === 'object' ? period.sessions : null;
+      const groups = entryTrendGroups(String(point?.[labelKey] || ''), days);
       const value = { ...point };
-      if (!sessions) {
-        value[metric] = selected === 'unknown' ? Math.max(0, n(point?.[metric])) : 0;
+      const pointValue = Math.max(0, n(point?.[metric]));
+      if (groups.length === 0) {
+        value[metric] = selected === 'unknown' ? pointValue : 0;
         return value;
       }
       let sum = 0;
-      let dayTotal = 0;
-      for (const session of Object.values(sessions)) {
-        const attributed = typeof session?.sessionEntry === 'string' ? session.sessionEntry : '';
-        const tokens = Math.max(0, n(session?.totalTokens));
-        dayTotal += tokens;
-        if (selected === 'unknown' ? !attributed : attributed === selected) sum += tokens;
+      let recognized = 0;
+      for (const sessions of groups) {
+        for (const session of Object.values(sessions)) {
+          const tokens = Math.max(0, n(session?.totalTokens));
+          const attributed = typeof session?.sessionEntry === 'string' && session.sessionEntry
+            ? session.sessionEntry : '';
+          if (attributed) recognized += tokens;
+          if (attributed === selected) sum += tokens;
+        }
       }
-      // The retained detail is not guaranteed to account for the whole day the
-      // history row reports, so the unknown bucket absorbs the remainder
-      // instead of letting the entry splits fall short of the total curve.
-      if (selected === 'unknown') sum += Math.max(0, n(point?.[metric]) - dayTotal);
-      value[metric] = sum;
+      // Everything the retained detail does not attribute — uncovered days,
+      // unattributed sessions, a point the detail undercounts — is what the
+      // unknown bucket holds: the point's value minus the attributed sessions,
+      // so the entry splits still add up to the untouched total curve. A
+      // detail that overcounts cannot be rebalanced without inventing values,
+      // so the bucket floors at zero.
+      value[metric] = selected === 'unknown' ? Math.max(0, pointValue - recognized) : sum;
       return value;
     });
+  }
+
+  // The launch entries a trend curve can actually be split into: every entry
+  // the retained detail attributes, plus unknown when any usage would land
+  // there — unattributed sessions, a point with usage but no detail, or a
+  // point the detail undercounts. Days the detail fully accounts for keep the
+  // choices unchanged.
+  function entryTrendChoices(points, daySessions, { labelKey = 'date', metric = 'tokens' } = {}) {
+    const values = new Set();
+    let unknown = false;
+    const days = daySessions && typeof daySessions === 'object' ? daySessions : {};
+    for (const point of Array.isArray(points) ? points : []) {
+      const groups = entryTrendGroups(String(point?.[labelKey] || ''), days);
+      const pointValue = Math.max(0, n(point?.[metric]));
+      let allSessions = 0;
+      for (const sessions of groups) {
+        for (const session of Object.values(sessions)) {
+          const tokens = Math.max(0, n(session?.totalTokens));
+          allSessions += tokens;
+          const attributed = typeof session?.sessionEntry === 'string' && session.sessionEntry
+            ? session.sessionEntry : '';
+          if (attributed) values.add(attributed);
+          else unknown = true;
+        }
+      }
+      if (pointValue - allSessions > 0) unknown = true;
+    }
+    const choices = [...values].sort();
+    if (unknown) choices.push('unknown');
+    return choices;
   }
 
   // Brand colours come from the vendor presentation table. One shared, mutable
@@ -783,7 +840,7 @@
   return {
     localDayKey, weekStartKey, dailyBarsChart, candleChart, computeHeatmapIntensities, contribHeatmap, rollingYearHeatmap, statsCards, sparklinePreview,
     areaLineChart, areaLineSvg,
-    selectPreviewSeries, patchTodayBar, entryTrendPoints, sparklineSvg,
+    selectPreviewSeries, patchTodayBar, entryTrendPoints, entryTrendChoices, sparklineSvg,
     applyVendorColors, modelColors, clientColors, fallbackModelColors, modelVendorFor, modelColor, clampDaily, dailyWindow,
     barsChartSvg, candleChartSvg, heatmapSvg, statsCardsHtml, statCardColumnWidths
   };

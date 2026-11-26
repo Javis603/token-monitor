@@ -6597,29 +6597,6 @@ function bindTrendTooltip(spark, model, points, labelKey, metric) {
   select(points.length - 1);
 }
 
-// The launch entries the retained per-day session detail can actually split
-// the trend into. A day whose sessions carry several entries contributes each
-// of them; a day with usage but no retained session detail contributes only
-// the unknown bucket, so the strip still offers it when the curve holds
-// unattributable usage.
-function trendEntryChoices(points, days, labelKey) {
-  const values = new Set();
-  for (const point of Array.isArray(points) ? points : []) {
-    const key = String(point?.[labelKey] || '').slice(0, 10);
-    const sessions = days?.[key]?.sessions;
-    if (!sessions || typeof sessions !== 'object') {
-      if (Number(point?.tokens) > 0) values.add('unknown');
-      continue;
-    }
-    for (const session of Object.values(sessions)) {
-      values.add(typeof session?.sessionEntry === 'string' && session.sessionEntry ? session.sessionEntry : 'unknown');
-    }
-  }
-  const choices = [...values].filter(value => value !== 'unknown').sort();
-  if (values.has('unknown')) choices.push('unknown');
-  return choices;
-}
-
 function renderTrends() {
   const charts = window.TokenMonitorUsageCharts;
   const previousBars = captureTrendBarMotion();
@@ -6636,7 +6613,7 @@ function renderTrends() {
   // days it does not cover land entirely in the unknown bucket, so the split
   // always adds back up to the untouched total curve.
   const entryDays = state.stats?.dailySessionPeriods;
-  const entryChoices = trendEntryChoices(patchedPoints, entryDays, labelKey);
+  const entryChoices = charts.entryTrendChoices(patchedPoints, entryDays, { labelKey, metric });
   if (state.trendEntryFilter && !entryChoices.includes(state.trendEntryFilter)) state.trendEntryFilter = '';
   const entryActive = Boolean(state.trendEntryFilter) && entryChoices.length >= 2;
   const finalPoints = entryActive
