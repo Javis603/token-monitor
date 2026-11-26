@@ -18877,9 +18877,10 @@ function trayProviderIconDemand() {
 
 // A provider that starts reporting usage after startup needs its mark delivered
 // before the tray can pick it. An id counts as requested once a current
-// delivery has tried it, so a mark that failed to load cannot turn every stats
-// push into another delivery, while one dropped by a superseded delivery is
-// asked for again. Ids the current delivery is still loading are left to it.
+// delivery has sent its mark to main or failed to load it, so a failed mark
+// cannot turn every stats push into another delivery, while one dropped by a
+// superseded delivery is asked for again. Ids the current delivery is still
+// loading are left to it.
 function syncTrayProviderIconDemand() {
   if (!state.settings || !window.tokenMonitor.setTrayIcons) return;
   if (trayProviderIconDemand().some((id) => !trayProviderIconsRequested.has(id) && !trayProviderIconsLoading.has(id))) {
@@ -18910,6 +18911,7 @@ async function deliverTrayProviderIcons(showBadge = state.settings?.showTrayProv
   }
   for (const id of Object.keys(trayProviderImages)) if (id.startsWith('plugin:') && !sources[id]) delete trayProviderImages[id];
   const icons = {};
+  const failed = [];
   for (const [id, path] of Object.entries(sources)) {
     try {
       // Built-in marks never change, so a redelivery for the badge or the system
@@ -18918,20 +18920,20 @@ async function deliverTrayProviderIcons(showBadge = state.settings?.showTrayProv
         ? await loadImage(path)
         : trayProviderImages[id] || await loadTrayProviderMark(path);
       if (!trayProviderIconDeliveryGuard.isCurrent(deliveryId)) return;
-      trayProviderIconsRequested.add(id);
       trayProviderImages[id] = img;
       trayProviderImageIds.set(img, id);
       if (!id.startsWith('plugin:')) icons[id] = providerImageToPngDataUrl(img, 44, showBadge, { trayInk: true, standalone: true });
     } catch (_) {
       if (!trayProviderIconDeliveryGuard.isCurrent(deliveryId)) return;
-      trayProviderIconsRequested.add(id);
+      failed.push(id);
       if (id.startsWith('plugin:')) delete trayProviderImages[id];
     }
   }
   if (!trayProviderIconDeliveryGuard.isCurrent(deliveryId)) return;
-  trayProviderIconsLoading = new Set();
   if (Object.keys(icons).length) await window.tokenMonitor.setTrayIcons(icons);
+  for (const id of [...Object.keys(icons), ...failed]) trayProviderIconsRequested.add(id);
   if (!trayProviderIconDeliveryGuard.isCurrent(deliveryId)) return;
+  trayProviderIconsLoading = new Set();
   // Provider images may unlock a richer bars icon now that they're cached.
   maybeUpdateBarsIcon();
   renderFloatingBubbleContent();

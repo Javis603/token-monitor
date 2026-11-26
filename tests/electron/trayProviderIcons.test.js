@@ -241,6 +241,30 @@ test('a mark dropped by a superseded delivery is requested again when it returns
   assert.ok(context.trayProviderImages.chatgpt);
 });
 
+test('a mark loaded by a superseded delivery is sent once it returns to demand', async () => {
+  let finishApp;
+  const sent = [];
+  const { context, pick } = trayMarkDeliveryFixture((source) => {
+    if (source.endsWith('tray-token-monitor.png') && !finishApp) return new Promise((resolve) => { finishApp = resolve; });
+    return Promise.resolve({});
+  });
+  context.window.tokenMonitor.setTrayIcons = async (icons) => { sent.push(...Object.keys(icons)); };
+  pick('claude-brand');
+  const superseded = context.deliverTrayProviderIcons();
+  await new Promise((resolve) => setImmediate(resolve));
+  pick('chatgpt');
+  await context.deliverTrayProviderIcons();
+  finishApp({});
+  await superseded;
+  assert.ok(context.trayProviderImages['claude-brand'], 'the superseded delivery cached the mark');
+  assert.equal(sent.includes('claude-brand'), false, 'but never sent it to main');
+
+  pick('claude-brand');
+  context.syncTrayProviderIconDemand();
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(sent.includes('claude-brand'), true);
+});
+
 test('a mark that failed to load is not retried on every stats push', async () => {
   let loads = 0;
   const { context, pick } = trayMarkDeliveryFixture((source) => {
