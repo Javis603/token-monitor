@@ -45,8 +45,9 @@ const els = {
   heroTokens: document.getElementById('dashHeroTokens'),
   heroApprox: document.getElementById('dashHeroApprox'),
   heroCost: document.getElementById('dashHeroCost'),
+  heroCacheSep: document.getElementById('dashHeroCacheSep'),
+  heroCacheItem: document.getElementById('dashHeroCacheItem'),
   heroCache: document.getElementById('dashHeroCache'),
-  heroStreak: document.getElementById('dashHeroStreak'),
   heroRibbon: document.getElementById('dashHeroRibbon'),
   heroAnatomy: document.getElementById('dashHeroAnatomy'),
   velocity: document.getElementById('dashVelocity'),
@@ -159,13 +160,11 @@ let lastTopologyEdgeSig = '';
 let lastQuotasStructureSig = '';
 let lastWorkStructureSig = '';
 let lastBreakdownStructureSig = '';
-let pendingVisualBandFromHeight = 0;
 const metricTextAnimations = new WeakMap();
 let topologyLayoutFrame = 0;
 let topologyScrollFrame = 0;
 let topologyResizeObserver = null;
 let lastRenderedTab = state.tab;
-let pendingRevealSelector = '';
 let activeHover = null;
 let spotlightFrame = 0;
 let spotlightVisible = false;
@@ -364,19 +363,23 @@ function animateHeatmapEntry() {
   startWhenVisible();
 }
 
-function animateSectionReveal(targets, { staggerMs = 26 } = {}) {
+function animateSectionReveal(targets) {
   if (prefersReducedMotion() || document.hidden) return;
   const list = Array.from(targets || []).filter((el) => el && el.isConnected && !el.classList?.contains('hidden'));
-  list.forEach((node, idx) => {
+  list.forEach((node) => {
     node.animate?.(
-      [{ opacity: 0.4, transform: 'translateY(6px)' }, { opacity: 1, transform: 'none' }],
-      { duration: 220, delay: Math.min(idx, 5) * staggerMs, easing: 'cubic-bezier(0.22, 1, 0.36, 1)', fill: 'backwards' }
+      [{ opacity: 0.72 }, { opacity: 1 }],
+      { duration: 160, easing: 'cubic-bezier(0.22, 1, 0.36, 1)', fill: 'backwards' }
     );
   });
 }
 
 function syncSegIndicator(container, { animate = true } = {}) {
-  if (!container || container.classList?.contains('hidden')) return;
+  if (!container) return;
+  if (container.classList?.contains('hidden')) {
+    container.querySelector(':scope > .seg-indicator')?.classList.remove('is-ready');
+    return;
+  }
   const active = container.querySelector('.seg-btn.active, .dash-tab.active, .range-btn.active');
   let indicator = container.querySelector(':scope > .seg-indicator');
   if (!indicator) {
@@ -408,6 +411,15 @@ function syncAllSegIndicators({ animate = true } = {}) {
   document.querySelectorAll('.seg[data-control]').forEach((seg) => syncSegIndicator(seg, { animate }));
 }
 
+function activateSegButton(buttons, activeBtn) {
+  buttons.forEach((btn) => {
+    const active = btn === activeBtn;
+    btn.classList.toggle('active', active);
+    if (btn.hasAttribute('aria-pressed')) btn.setAttribute('aria-pressed', String(active));
+  });
+  syncSegIndicator(activeBtn?.parentElement || null);
+}
+
 function t(key, params) { return i18n.translate(state.locale, key, params); }
 
 function effectiveCompactTokenUnits() {
@@ -426,6 +438,9 @@ function applyTranslations() {
   document.querySelectorAll('[data-i18n]').forEach((node) => { node.textContent = t(node.getAttribute('data-i18n')); });
   const brandMark = document.querySelector('.dash-brand-mark');
   if (brandMark) brandMark.setAttribute('aria-label', t('dashboard.title'));
+  if (els.refreshBtn && !manualRefreshBusy && !refreshFeedbackTimer) {
+    els.refreshBtn.setAttribute('aria-label', t('refreshButton.label'));
+  }
   document.documentElement.lang = state.locale;
 }
 
@@ -817,7 +832,7 @@ function renderBreakdown(overview) {
       const color = displayColor(row.color);
       const motionKey = `${g.titleKey}:${encodeURIComponent(row.id)}`;
       const iconHtml = row.iconClass
-        ? `<span class="dash-bd-icon row-icon ${escapeHtml(row.iconClass)}" data-c="${color}" aria-hidden="true"></span>`
+        ? `<span class="dash-bd-icon row-icon ${escapeHtml(row.iconClass)}" aria-hidden="true"></span>`
         : `<span class="dash-bd-swatch" data-c="${color}"></span>`;
       return `<div class="dash-bd-row" data-bd-kind="${g.kind}" data-bd-id="${escapeHtml(row.id)}">`
         + `<span class="dash-bd-name">${iconHtml}<span class="dash-bd-name-text">${escapeHtml(row.label)}</span></span>`
@@ -852,7 +867,7 @@ function captureListSnapshot(container, rowSelector, keyFn, barSelector) {
   return { scrollTop: container.scrollTop || 0, rowTops, barScales };
 }
 
-function animateListSnapshot(container, rowSelector, keyFn, barSelector, snapshot, { staggerMs = 14 } = {}) {
+function animateListSnapshot(container, rowSelector, keyFn, barSelector, snapshot, { staggerMs = 8 } = {}) {
   if (!container || prefersReducedMotion() || document.hidden || state.motion === 'none') return;
   let enterIndex = 0;
   container.querySelectorAll(rowSelector).forEach((row) => {
@@ -868,8 +883,8 @@ function animateListSnapshot(container, rowSelector, keyFn, barSelector, snapsho
       }
     } else {
       row.animate?.(
-        [{ opacity: 0, transform: 'translateY(5px)' }, { opacity: 1, transform: 'none' }],
-        { duration: 220, delay: Math.min(enterIndex++, 8) * staggerMs, easing: 'cubic-bezier(0.22, 1, 0.36, 1)', fill: 'backwards' }
+        [{ opacity: 0 }, { opacity: 1 }],
+        { duration: 160, delay: Math.min(enterIndex++, 6) * staggerMs, easing: 'cubic-bezier(0.22, 1, 0.36, 1)', fill: 'backwards' }
       );
     }
     if (barSelector) {
@@ -1171,12 +1186,12 @@ function renderHero(overview) {
       whole: hero.unpricedTokens > 0 && !(hero.cost > 0)
     });
   }
+  const hasCacheHit = hero.cacheHitRate != null;
   if (els.heroCache) {
-    els.heroCache.textContent = hero.cacheHitRate != null ? `${Math.round(hero.cacheHitRate * 100)}%` : '—';
+    els.heroCache.textContent = hasCacheHit ? `${Math.round(hero.cacheHitRate * 100)}%` : '—';
   }
-  if (els.heroStreak) {
-    els.heroStreak.textContent = hero.streak > 0 ? `${hero.streak}d` : `${hero.activeDays}d`;
-  }
+  els.heroCacheSep?.classList.toggle('hidden', !hasCacheHit);
+  els.heroCacheItem?.classList.toggle('hidden', !hasCacheHit);
 
   if (els.heroRibbon) {
     const visibleTools = (tools || []).filter((tRow) => tRow.tokens > 0).slice(0, 8);
@@ -1318,7 +1333,7 @@ function renderVelocity(overview) {
     els.velocityModels.innerHTML = models.map((m) => {
       const color = displayColor(m.color);
       const iconHtml = m.iconClass
-        ? `<span class="row-icon ${escapeHtml(m.iconClass)}" data-c="${color}" aria-hidden="true"></span>`
+        ? `<span class="row-icon ${escapeHtml(m.iconClass)}" aria-hidden="true"></span>`
         : `<span class="dash-bd-swatch" data-c="${color}"></span>`;
       return `<div class="dash-velocity-model">`
         + iconHtml
@@ -1488,7 +1503,7 @@ function renderQuotas(overview) {
   els.quotas.innerHTML = accounts.map((acc) => {
     const accColor = displayColor(acc.color || charts.clientColors[acc.providerId] || '#6ab4f0');
     const iconHtml = acc.iconClass
-      ? `<span class="${escapeHtml(acc.iconClass)}" data-c="${accColor}" aria-hidden="true"></span>`
+      ? `<span class="${escapeHtml(acc.iconClass)}" aria-hidden="true"></span>`
       : `<span class="home-list-mark" data-c="${accColor}" aria-hidden="true"></span>`;
     const resetsCount = Math.max(0, Number(acc.resetCount || 0));
     const accountDisplayName = escapeHtml(acc.name || acc.providerId);
@@ -1607,7 +1622,7 @@ function sessionRowParts(s, overview) {
 function renderSessionRowsHtml(list, overview) {
   return list.slice(0, 12).map((s) => {
     const iconHtml = s.iconClass
-      ? `<span class="dash-session-brand row-icon ${escapeHtml(s.iconClass)}" data-c="${displayColor(s.color)}" aria-hidden="true"></span>`
+      ? `<span class="dash-session-brand row-icon ${escapeHtml(s.iconClass)}" aria-hidden="true"></span>`
       : `<span class="dash-bd-swatch" data-c="${displayColor(s.color)}"></span>`;
     const stateHtml = sessionStateIconHtml(s.activityState);
     const { joinedMeta, subExtrasHtml } = sessionRowParts(s, overview);
@@ -2142,6 +2157,25 @@ function renderTopology(overview) {
   const maxHubTokens = graph.hubs.reduce((mx, h) => Math.max(mx, h.tokens), 0) || 1;
   const existingCanvas = els.topology.querySelector('.dash-topo-canvas');
 
+  const activeDevEdgeMap = new Map();
+  for (const e of graph.devToHub || []) {
+    if (!e.active) continue;
+    const prev = activeDevEdgeMap.get(e.from);
+    if (!prev || Number(e.tokens || 0) > Number(prev.tokens || 0)) {
+      activeDevEdgeMap.set(e.from, e);
+    }
+  }
+  const activeHubColorMap = new Map();
+  for (const e of graph.hubToEnd || []) {
+    if (e.active && e.color && !activeHubColorMap.has(e.from)) {
+      activeHubColorMap.set(e.from, e.color);
+    }
+  }
+  for (const e of graph.devToHub || []) {
+    if (e.active && e.color && !activeHubColorMap.has(e.to)) {
+      activeHubColorMap.set(e.to, e.color);
+    }
+  }
   const hubRateMap = new Map();
   for (const e of graph.devToHub || []) {
     if (e.active) hubRateMap.set(e.to, Math.max(hubRateMap.get(e.to) || 0, Number(e.liveRate || 0)));
@@ -2168,22 +2202,24 @@ function renderTopology(overview) {
     graph.devices.forEach((d) => {
       const node = nodeByKey.get(`device:${d.id}`);
       if (!node) return;
-      const active = d.liveTokPerSec > 0 || d.activeSessionCount > 0;
+      const devEdge = activeDevEdgeMap.get(d.id) || null;
+      const hasLiveFlow = Boolean(devEdge);
       const selected = state.selectedDeviceId === d.id;
-      const accent = active ? 'var(--success, #34d399)' : 'var(--accent, #b7ead4)';
-      node.classList.toggle('is-active', active);
-      applyNodeSpeedClass(node, active, d.liveTokPerSec);
+      const accent = hasLiveFlow ? displayColor(devEdge.color || '#6ab4f0') : 'rgba(var(--overlay-rgb), 0.45)';
+      const barColor = hasLiveFlow || d.liveTokPerSec > 0 ? 'rgba(var(--overlay-rgb), 0.56)' : 'rgba(var(--overlay-rgb), 0.34)';
+      node.classList.toggle('is-active', hasLiveFlow);
+      applyNodeSpeedClass(node, hasLiveFlow, d.liveTokPerSec);
       node.classList.toggle('is-selected', selected);
       node.classList.toggle('is-stale', Boolean(d.stale));
       node.setAttribute('data-node-accent', accent);
       node.style.setProperty('--node-accent', accent);
-      node.querySelector('.topo-port')?.classList.toggle('is-live', active);
+      node.querySelector('.topo-port')?.classList.toggle('is-live', hasLiveFlow);
       const titleEl = node.querySelector('.topo-node-title');
       if (titleEl) titleEl.textContent = d.name;
       const valEl = node.querySelector('.topo-node-val');
       if (valEl) valEl.textContent = formatCompact(d.tokens);
       const subLeftHtml = d.liveTokPerSec > 0
-        ? `<span class="topo-live-rate">${Math.round(d.liveTokPerSec)} tok/s</span>`
+        ? `<span class="topo-live-rate is-rate">${Math.round(d.liveTokPerSec)} tok/s</span>`
         : escapeHtml(d.activeWorkspace || (d.isLocal ? t('dashboard.devices.you') : ''));
       const subRightText = d.activeSessionCount > 0 ? t('dashboard.fleet.activeAgents', { count: d.activeSessionCount }) : '';
       const subLeftEl = node.querySelector('.topo-node-sub-text');
@@ -2194,9 +2230,9 @@ function renderTopology(overview) {
       const barFill = node.querySelector('.topo-mini-bar-fill');
       if (barFill) {
         barFill.setAttribute('data-w', shareScale);
-        barFill.setAttribute('data-c', accent);
+        barFill.setAttribute('data-c', barColor);
         barFill.style.setProperty('--bar-scale', shareScale);
-        barFill.style.background = accent;
+        barFill.style.background = barColor;
       }
     });
 
@@ -2205,9 +2241,11 @@ function renderTopology(overview) {
       if (!node) return;
       const active = h.activeSessionCount > 0;
       const titleText = h.isGeneral ? t('dashboard.topology.generalWorkspace') : h.name;
-      const accent = displayColor(h.color || '#73bdf5');
+      const accent = displayColor(activeHubColorMap.get(h.id) || h.color || '#73bdf5');
       node.classList.toggle('is-active', active);
       applyNodeSpeedClass(node, active, hubRateMap.get(h.id) || 0);
+      node.setAttribute('data-node-accent', accent);
+      node.style.setProperty('--node-accent', accent);
       node.querySelectorAll('.topo-port').forEach((p) => p.classList.toggle('is-live', active));
       const titleEl = node.querySelector('.topo-node-title');
       if (titleEl) titleEl.textContent = titleText;
@@ -2305,12 +2343,14 @@ function renderTopology(overview) {
   lastTopologyEdgeSig = '';
 
   const devicesHtml = graph.devices.map((d) => {
-    const active = d.liveTokPerSec > 0 || d.activeSessionCount > 0;
+    const devEdge = activeDevEdgeMap.get(d.id) || null;
+    const hasLiveFlow = Boolean(devEdge);
     const selected = state.selectedDeviceId === d.id;
-    const accent = active ? 'var(--success, #34d399)' : 'var(--accent, #b7ead4)';
-    const cls = ['topo-node', 'topo-node--device', active ? 'is-active' : '', nodeSpeedClass(active, d.liveTokPerSec), selected ? 'is-selected' : '', d.stale ? 'is-stale' : ''].filter(Boolean).join(' ');
+    const accent = hasLiveFlow ? displayColor(devEdge.color || '#6ab4f0') : 'rgba(var(--overlay-rgb), 0.45)';
+    const barColor = hasLiveFlow || d.liveTokPerSec > 0 ? 'rgba(var(--overlay-rgb), 0.56)' : 'rgba(var(--overlay-rgb), 0.34)';
+    const cls = ['topo-node', 'topo-node--device', hasLiveFlow ? 'is-active' : '', nodeSpeedClass(hasLiveFlow, d.liveTokPerSec), selected ? 'is-selected' : '', d.stale ? 'is-stale' : ''].filter(Boolean).join(' ');
     const subLeft = d.liveTokPerSec > 0
-      ? `<span class="topo-live-rate">${Math.round(d.liveTokPerSec)} tok/s</span>`
+      ? `<span class="topo-live-rate is-rate">${Math.round(d.liveTokPerSec)} tok/s</span>`
       : escapeHtml(d.activeWorkspace || (d.isLocal ? t('dashboard.devices.you') : ''));
     const subRight = d.activeSessionCount > 0 ? t('dashboard.fleet.activeAgents', { count: d.activeSessionCount }) : '';
     const shareScale = Math.max(0.03, Math.min(1, d.share || 0)).toFixed(3);
@@ -2320,19 +2360,19 @@ function renderTopology(overview) {
       + `<span class="topo-node-val">${escapeHtml(formatCompact(d.tokens))}</span>`
       + `</div>`
       + `<div class="topo-node-sub"><span class="topo-node-sub-text">${subLeft}</span><span>${escapeHtml(subRight)}</span></div>`
-      + `<div class="topo-mini-bar"><div class="topo-mini-bar-fill" data-w="${shareScale}" data-c="${accent}"></div></div>`
-      + `<span class="topo-port topo-port--out${active ? ' is-live' : ''}" data-port="dev:${escapeHtml(d.id)}"></span>`
+      + `<div class="topo-mini-bar"><div class="topo-mini-bar-fill" data-w="${shareScale}" data-c="${barColor}"></div></div>`
+      + `<span class="topo-port topo-port--out${hasLiveFlow ? ' is-live' : ''}" data-port="dev:${escapeHtml(d.id)}"></span>`
       + `</div>`;
   }).join('');
 
   const hubsHtml = graph.hubs.map((h) => {
     const active = h.activeSessionCount > 0;
     const titleText = h.isGeneral ? t('dashboard.topology.generalWorkspace') : h.name;
-    const accent = displayColor(h.color || '#73bdf5');
+    const accent = displayColor(activeHubColorMap.get(h.id) || h.color || '#73bdf5');
     const hubCls = ['topo-node', 'topo-node--hub', active ? 'is-active' : '', nodeSpeedClass(active, hubRateMap.get(h.id) || 0)].filter(Boolean).join(' ');
     const iconHtml = isSessionMode
       ? `<span class="row-icon row-icon-project" aria-hidden="true"></span>`
-      : (h.iconClass ? `<span class="dash-bd-icon row-icon ${escapeHtml(h.iconClass)}" data-c="${accent}" aria-hidden="true"></span>` : `<span class="dash-bd-swatch" data-c="${accent}"></span>`);
+      : (h.iconClass ? `<span class="dash-bd-icon row-icon ${escapeHtml(h.iconClass)}" aria-hidden="true"></span>` : `<span class="dash-bd-swatch" data-c="${accent}"></span>`);
     const subLeft = isSessionMode ? (h.clients || []).slice(0, 2).join(' · ') : '';
     const subRight = active ? `<span class="topo-live-rate">${escapeHtml(t('dashboard.fleet.activeAgents', { count: h.activeSessionCount }))}</span>` : escapeHtml(formatCost(h.cost, h.unpricedTokens));
     const fillScale = Math.max(0.04, Math.min(1, h.tokens / maxHubTokens)).toFixed(3);
@@ -2353,7 +2393,7 @@ function renderTopology(overview) {
     const accent = displayColor(ep.color || '#6ab4f0');
     const epCls = ['topo-node', 'topo-node--endpoint', ep.isActive ? 'is-active' : '', nodeSpeedClass(Boolean(ep.isActive), endRateMap.get(ep.id) || 0)].filter(Boolean).join(' ');
     const iconHtml = ep.iconClass
-      ? `<span class="dash-session-brand row-icon ${escapeHtml(ep.iconClass)}" data-c="${accent}" aria-hidden="true"></span>`
+      ? `<span class="dash-session-brand row-icon ${escapeHtml(ep.iconClass)}" aria-hidden="true"></span>`
       : `<span class="dash-bd-swatch" data-c="${accent}"></span>`;
     const stateHtml = isSessionMode ? sessionStateIconHtml(ep.activityState) : '';
     const subLeft = ep.latestModel && ep.latestModel !== ep.title ? ep.latestModel : (ep.clientLabel || '');
@@ -2567,8 +2607,8 @@ function renderActivity(overview) {
         });
         if (!hideHeatmapForEntry && state.motion === 'update' && !prefersReducedMotion() && !document.hidden) {
           els.heatmap.querySelector('.iso-towers-layer')?.animate?.(
-            [{ opacity: 0.35, transform: 'translateY(6px)' }, { opacity: 1, transform: 'none' }],
-            { duration: 260, easing: 'cubic-bezier(0.22, 1, 0.36, 1)' }
+            [{ opacity: 0.58 }, { opacity: 1 }],
+            { duration: 180, easing: 'cubic-bezier(0.22, 1, 0.36, 1)' }
           );
         }
       } else {
@@ -2725,7 +2765,6 @@ function openDrawer(payload) {
     els.drawerSubtitle.textContent = t(payload.kind === 'model' ? 'dashboard.stack.model' : 'dashboard.stack.client');
     if (els.drawerIcon && item.iconClass) {
       els.drawerIcon.className = `dash-drawer-icon row-icon ${item.iconClass}`;
-      els.drawerIcon.style.color = displayColor(item.color);
     }
     const subRows = (item.models || []).slice(0, 8).map((m) =>
       `<div class="dash-bd-row"><span class="dash-bd-name"><span class="dash-bd-swatch" data-c="${displayColor(m.color)}"></span><span class="dash-bd-name-text">${escapeHtml(m.id)}</span></span><div class="dash-bd-bar-bg"><div class="dash-bd-bar-fill" data-w="${(item.tokens > 0 ? m.tokens / item.tokens : 0).toFixed(4)}" data-c="${displayColor(m.color)}"></div></div><span class="dash-bd-val">${escapeHtml(formatCompact(m.tokens))}</span><span class="dash-bd-pct"></span></div>`
@@ -2782,7 +2821,6 @@ function openDrawer(payload) {
     els.drawerSubtitle.textContent = [s.clientLabel, s.projectLabel, s.deviceName || s.sourceDevice?.name].filter(Boolean).join(' · ');
     if (els.drawerIcon && s.iconClass) {
       els.drawerIcon.className = `dash-drawer-icon row-icon ${s.iconClass}`;
-      els.drawerIcon.style.color = displayColor(s.color);
     }
     const baseGrid = drawerStatGrid([
       [t('dashboard.hero.tokens'), formatCompact(s.totalTokens)],
@@ -2894,35 +2932,12 @@ function renderNow() {
   }
 
   syncAllSegIndicators({ animate: !prefersReducedMotion() });
-  if (pendingVisualBandFromHeight > 0) {
-    const fromH = pendingVisualBandFromHeight;
-    pendingVisualBandFromHeight = 0;
-    if (!prefersReducedMotion() && !document.hidden && els.visualBand && state.tab === 'activity') {
-      const toH = els.visualBand.getBoundingClientRect?.().height || 0;
-      if (Math.abs(toH - fromH) >= 4) {
-        for (const anim of els.visualBand.getAnimations?.() || []) anim.cancel();
-        const anim = els.visualBand.animate?.(
-          [{ height: `${fromH}px`, overflow: 'hidden' }, { height: `${toH}px`, overflow: 'hidden' }],
-          { duration: 280, easing: 'cubic-bezier(0.22, 1, 0.36, 1)' }
-        );
-        if (anim) {
-          anim.onfinish = () => {
-            if (state.stageView === 'flow' && state.overview?.topology) layoutTopologyLinks(state.overview.topology);
-          };
-        }
-      }
-    }
-  }
   if (lastRenderedTab !== state.tab) {
     lastRenderedTab = state.tab;
     const targets = state.tab === 'trends'
       ? els.trendsPane.querySelectorAll('.dash-trends-open, .dash-ledger-open')
       : els.activityPane.querySelectorAll('.dash-hero-band, .dash-visual-band, .dash-cards, .dash-lower-band');
     animateSectionReveal(targets);
-  } else if (pendingRevealSelector) {
-    const target = document.querySelectorAll(pendingRevealSelector);
-    pendingRevealSelector = '';
-    animateSectionReveal(target, { staggerMs: 0 });
   }
 
   refreshActiveHover();
@@ -3156,6 +3171,73 @@ function currentLiveRatesByDevice() {
   return out;
 }
 
+const REFRESH_BUTTON_FEEDBACK_MS = 1400;
+let refreshFeedbackTimer = null;
+let manualRefreshBusy = false;
+
+function clearRefreshBtnFeedbackTimer() {
+  if (!refreshFeedbackTimer) return;
+  clearTimeout(refreshFeedbackTimer);
+  refreshFeedbackTimer = null;
+}
+
+function setRefreshBtnState(status = 'idle') {
+  if (!els?.refreshBtn) return;
+  els.refreshBtn.classList.toggle('is-refreshing', status === 'refreshing');
+  els.refreshBtn.classList.toggle('is-refreshed', status === 'refreshed');
+  els.refreshBtn.classList.toggle('is-refresh-error', status === 'error');
+  els.refreshBtn.disabled = status === 'refreshing';
+  if (status === 'refreshing') {
+    els.refreshBtn.setAttribute('aria-label', t('refreshButton.refreshing'));
+    els.refreshBtn.setAttribute('aria-busy', 'true');
+  } else if (status === 'refreshed') {
+    els.refreshBtn.setAttribute('aria-label', t('refreshButton.refreshed'));
+    els.refreshBtn.setAttribute('aria-busy', 'false');
+  } else if (status === 'error') {
+    els.refreshBtn.setAttribute('aria-label', t('refreshButton.failed'));
+    els.refreshBtn.setAttribute('aria-busy', 'false');
+  } else {
+    els.refreshBtn.setAttribute('aria-label', t('refreshButton.label'));
+    els.refreshBtn.removeAttribute('aria-busy');
+  }
+}
+
+function settleRefreshBtnState(status) {
+  clearRefreshBtnFeedbackTimer();
+  setRefreshBtnState(status);
+  refreshFeedbackTimer = setTimeout(() => {
+    refreshFeedbackTimer = null;
+    setRefreshBtnState('idle');
+  }, REFRESH_BUTTON_FEEDBACK_MS);
+}
+
+async function manualRefresh() {
+  if (manualRefreshBusy) return;
+  manualRefreshBusy = true;
+  clearRefreshBtnFeedbackTimer();
+  setRefreshBtnState('refreshing');
+  try {
+    state.motion = state.history ? 'update' : 'entry';
+    const stats = typeof window.tokenMonitor.getStats === 'function'
+      ? await window.tokenMonitor.getStats({ force: true, forceHistory: true, forceSelfSync: true, feedback: true })
+      : null;
+    const history = await window.tokenMonitor.getDashboardHistory({ includeDevices: true });
+    state.history = history;
+    if (stats) {
+      state.stats = stats;
+      observeStatsRates(stats);
+    }
+    render();
+    settleRefreshBtnState('refreshed');
+  } catch (error) {
+    state.motion = 'none';
+    console.log(`[dashboard] manual refresh failed: ${error.message}`);
+    settleRefreshBtnState('error');
+  } finally {
+    manualRefreshBusy = false;
+  }
+}
+
 let refreshRunning = false;
 let refreshQueued = false;
 
@@ -3165,9 +3247,6 @@ async function refresh() {
     return;
   }
   refreshRunning = true;
-  if (typeof els !== 'undefined' && els?.refreshBtn) {
-    els.refreshBtn.classList.add('is-refreshing');
-  }
   try {
     state.motion = state.history ? 'update' : 'entry';
     const historyPromise = window.tokenMonitor.getDashboardHistory({ includeDevices: true });
@@ -3186,9 +3265,6 @@ async function refresh() {
     console.log(`[dashboard] history failed: ${error.message}`);
   } finally {
     refreshRunning = false;
-    if (typeof els !== 'undefined' && els?.refreshBtn) {
-      els.refreshBtn.classList.remove('is-refreshing');
-    }
     if (refreshQueued && !document.hidden) {
       refreshQueued = false;
       void refresh();
@@ -3375,6 +3451,7 @@ els.stackBtns.forEach((b) => b.addEventListener('click', () => {
   state.stackBy = b.dataset.stack;
   state.soloKey = null;
   state.motion = 'series';
+  activateSegButton(els.stackBtns, b);
   render();
 }));
 
@@ -3383,6 +3460,7 @@ els.modeBtns.forEach((b) => b.addEventListener('click', () => {
   hideTooltip();
   state.mode = b.dataset.mode;
   state.motion = 'update';
+  activateSegButton(els.modeBtns, b);
   render();
 }));
 
@@ -3391,6 +3469,7 @@ els.trendMetricBtns.forEach((b) => b.addEventListener('click', () => {
   hideTooltip();
   state.trendMetric = b.dataset.tmetric;
   state.motion = 'update';
+  activateSegButton(els.trendMetricBtns, b);
   render();
 }));
 
@@ -3399,17 +3478,14 @@ els.stageViewBtns.forEach((b) => b.addEventListener('click', () => {
   if (!nextView || state.stageView === nextView) return;
   hideTooltip();
   clearTopologyFocus();
-  const prevBandH = els.visualBand?.getBoundingClientRect?.().height || 0;
-  if (prevBandH > 0) pendingVisualBandFromHeight = prevBandH;
   state.stageView = nextView;
   if (nextView === '2d' || nextView === '3d') {
     state.heatmapView = nextView;
-    pendingRevealSelector = '';
     state.motion = 'entry';
   } else {
-    pendingRevealSelector = '#dashTopology';
     state.motion = 'update';
   }
+  activateSegButton(els.stageViewBtns, b);
   render();
   window.tokenMonitor.updateSettings?.({ dashboardStageView: state.stageView });
 }));
@@ -3419,6 +3495,7 @@ els.heatmapMetricBtns.forEach((b) => b.addEventListener('click', () => {
   hideTooltip();
   state.heatmapMetric = b.dataset.val;
   state.motion = 'update';
+  activateSegButton(els.heatmapMetricBtns, b);
   render();
   window.tokenMonitor.updateSettings({ heatmapMetric: state.heatmapMetric });
 }));
@@ -3427,7 +3504,7 @@ els.breakdownModeBtns.forEach((b) => b.addEventListener('click', () => {
   if (state.breakdownMode === b.dataset.bd) return;
   state.breakdownMode = b.dataset.bd;
   state.motion = 'update';
-  pendingRevealSelector = '#dashBreakdown';
+  activateSegButton(els.breakdownModeBtns, b);
   render();
 }));
 
@@ -3435,7 +3512,7 @@ els.workModeBtns.forEach((b) => b.addEventListener('click', () => {
   if (state.workMode === b.dataset.work) return;
   state.workMode = b.dataset.work;
   state.motion = 'update';
-  pendingRevealSelector = '#dashWorkPanel';
+  activateSegButton(els.workModeBtns, b);
   render();
 }));
 
@@ -3581,7 +3658,7 @@ els.themeToggle.addEventListener('click', () => {
   els.body.classList.toggle('flat', state.flat);
   window.tokenMonitor.updateSettings({ dashboardFlat: state.flat });
 });
-els.refreshBtn.addEventListener('click', refresh);
+els.refreshBtn.addEventListener('click', () => { void manualRefresh(); });
 els.minBtn.addEventListener('click', () => window.tokenMonitor.dashboard.minimize());
 els.closeBtn.addEventListener('click', () => window.tokenMonitor.dashboard.close());
 

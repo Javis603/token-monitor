@@ -412,18 +412,29 @@ html.native-liquid-glass .seg-indicator {
   transition: background-color 140ms ease, border-color 140ms ease;
 }
 
-.icon-button:hover {
+.icon-button:hover:not(:disabled) {
   background: rgba(var(--overlay-rgb), 0.12);
   border-color: var(--surface-border);
 }
 
-.icon-button.is-refreshing {
-  animation: dashRefreshSpin 720ms linear infinite;
+.icon-button.refresh-button {
+  width: 26px;
+  height: 26px;
+  border-radius: 7px;
+  font-size: 14px;
 }
 
-@keyframes dashRefreshSpin {
-  from { transform: rotate(0deg); }
-  to { transform: rotate(360deg); }
+.dash-shell .row-icon:not(.dash-brand-mark),
+.dash-shell .limit-icon,
+.dash-drawer .row-icon {
+  color: var(--text);
+  opacity: 0.78;
+}
+
+.topo-node.is-active .row-icon,
+.dash-session-row:hover .row-icon,
+.dash-bd-row:hover .row-icon {
+  opacity: 0.94;
 }
 
 /* Dashboard Stage & Unified Whisper-Glass Card System */
@@ -535,6 +546,7 @@ html.native-liquid-glass .seg-indicator {
 .dash-hero-eyebrow {
   display: flex;
   align-items: center;
+  justify-content: space-between;
   gap: 8px;
   min-height: 18px;
 }
@@ -551,12 +563,20 @@ html.native-liquid-glass .seg-indicator {
   display: inline-flex;
   align-items: center;
   gap: 5px;
-  padding: 2px 8px;
-  border-radius: 999px;
-  font-size: 10px;
-  font-weight: 600;
-  background: color-mix(in srgb, var(--success, #34d399) 14%, transparent);
-  color: var(--success, #34d399);
+  font-size: 10.5px;
+  font-weight: 500;
+  color: var(--text);
+  opacity: 0.88;
+}
+
+.dash-hero-active::before {
+  content: '';
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  flex: none;
+  background: var(--success, #34d399);
+  box-shadow: 0 0 8px color-mix(in srgb, var(--success, #34d399) 70%, transparent);
 }
 
 .dash-hero-figure-row {
@@ -646,6 +666,7 @@ html.native-liquid-glass .seg-indicator {
   align-items: center;
   gap: 14px;
   flex-wrap: wrap;
+  min-height: 16px;
   font-size: 11px;
   color: var(--readable-muted, var(--muted));
 }
@@ -708,7 +729,8 @@ html.native-liquid-glass .seg-indicator {
 }
 
 .dash-velocity-status.is-live {
-  color: var(--success, #34d399);
+  color: var(--text);
+  opacity: 0.88;
 }
 
 .dash-velocity-status.is-live .dash-velocity-dot {
@@ -875,14 +897,14 @@ html.native-liquid-glass .seg-indicator {
 .dash-activity-col {
   display: flex;
   flex-direction: column;
-  min-height: 0;
+  min-height: 368px;
 }
 
 /* Optical Flow Topology Canvas */
 .dash-topo-wrap {
   position: relative;
   flex: 1 1 auto;
-  min-height: 224px;
+  min-height: 296px;
   border-radius: 0;
   padding: 4px 2px 2px;
   display: flex;
@@ -1165,9 +1187,28 @@ html.native-liquid-glass .seg-indicator {
 }
 
 .topo-live-rate {
-  color: var(--success, #34d399);
-  font-weight: 600;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  color: var(--text);
+  opacity: 0.9;
+  font-weight: 550;
   white-space: nowrap;
+}
+
+.topo-live-rate::before {
+  content: '';
+  width: 4.5px;
+  height: 4.5px;
+  border-radius: 50%;
+  flex: none;
+  background: var(--node-accent, color-mix(in srgb, var(--success, #34d399) 76%, #ffffff 24%));
+  box-shadow: 0 0 5px color-mix(in srgb, var(--node-accent, var(--success, #34d399)) 50%, transparent);
+}
+
+.topo-live-rate.is-rate::before {
+  background: color-mix(in srgb, var(--success, #34d399) 74%, #ffffff 26%);
+  box-shadow: 0 0 5px color-mix(in srgb, var(--success, #34d399) 45%, transparent);
 }
 
 .topo-mini-bar {
@@ -1432,10 +1473,11 @@ html.native-liquid-glass .seg-indicator {
   flex: 1 1 auto;
   display: flex;
   flex-direction: column;
+  align-items: center;
   justify-content: center;
   width: 100%;
   min-width: 0;
-  min-height: 172px;
+  min-height: 296px;
   overflow-x: auto;
   overflow-y: hidden;
   scrollbar-width: none;
@@ -1684,6 +1726,7 @@ html.native-liquid-glass .seg-indicator {
 .dash-attribution-col {
   display: flex;
   flex-direction: column;
+  min-height: 320px;
 }
 
 .dash-breakdown {
@@ -1951,14 +1994,25 @@ html.native-liquid-glass .seg-indicator {
 .dash-live-chip {
   display: inline-flex;
   align-items: center;
-  gap: 4px;
-  padding: 1px 6px;
+  gap: 4.5px;
+  padding: 1px 6.5px 1px 5.5px;
   border-radius: 999px;
   font-size: 9.5px;
-  font-weight: 600;
-  color: var(--success, #34d399);
-  background: color-mix(in srgb, var(--success, #34d399) 14%, transparent);
+  font-weight: 550;
+  color: var(--text);
+  border: 1px solid rgba(var(--line-rgb), 0.11);
+  background: rgba(var(--overlay-rgb), 0.04);
   flex: none;
+}
+
+.dash-live-chip::before {
+  content: '';
+  width: 4.5px;
+  height: 4.5px;
+  border-radius: 50%;
+  flex: none;
+  background: color-mix(in srgb, var(--success, #34d399) 76%, #ffffff 24%);
+  box-shadow: 0 0 5px color-mix(in srgb, var(--success, #34d399) 46%, transparent);
 }
 
 .dash-session-metrics,

@@ -27,7 +27,7 @@
 
         <div class="dash-header-actions">
           <button id="themeToggle" type="button" class="icon-button" aria-label="Theme">◐</button>
-          <button id="refreshBtn" type="button" class="icon-button" aria-label="Refresh">↻</button>
+          <button id="refreshBtn" type="button" class="icon-button refresh-button" aria-label="Refresh"><span class="refresh-button-icon" aria-hidden="true"></span><span class="refresh-button-spinner" aria-hidden="true"></span></button>
           <button id="minBtn" type="button" class="icon-button" aria-label="Minimize">−</button>
           <button id="closeBtn" type="button" class="icon-button" aria-label="Close">×</button>
         </div>
@@ -48,15 +48,10 @@
                 </div>
                 <div class="dash-hero-sub-row">
                   <span id="dashHeroCost" class="dash-hero-cost">—</span>
-                  <span class="dash-hero-meta-sep" aria-hidden="true">·</span>
-                  <span class="dash-hero-meta-item">
+                  <span id="dashHeroCacheSep" class="dash-hero-meta-sep" aria-hidden="true">·</span>
+                  <span id="dashHeroCacheItem" class="dash-hero-meta-item">
                     <span class="dash-hero-meta-k" data-i18n="dashboard.hero.cacheHit">Cache hit</span>
                     <strong id="dashHeroCache" class="dash-hero-meta-v">—</strong>
-                  </span>
-                  <span class="dash-hero-meta-sep" aria-hidden="true">·</span>
-                  <span class="dash-hero-meta-item">
-                    <span class="dash-hero-meta-k" data-i18n="dashboard.hero.streak">Streak</span>
-                    <strong id="dashHeroStreak" class="dash-hero-meta-v">—</strong>
                   </span>
                 </div>
                 <div class="dash-hero-tracks">
@@ -96,14 +91,14 @@
                     <span id="dashHeatmapMeta" class="dash-surface-sub"></span>
                   </div>
                   <div class="dash-activity-controls">
+                    <div id="dashHeatmapMetricControl" class="seg seg--sm hidden" data-control="heatmapMetric">
+                      <button type="button" class="seg-btn" data-val="tokens" aria-pressed="false" data-i18n="dashboard.heatmap.tokens">Tokens</button>
+                      <button type="button" class="seg-btn active" data-val="cost" aria-pressed="true" data-i18n="dashboard.heatmap.cost">Cost</button>
+                    </div>
                     <div class="seg seg--sm" data-control="stageView">
                       <button type="button" class="seg-btn active" data-view="flow" aria-pressed="true" data-i18n="dashboard.stage.flow">Live Flow</button>
                       <button type="button" class="seg-btn" data-view="3d" aria-pressed="false" data-i18n="dashboard.stage.activity3d">3D</button>
                       <button type="button" class="seg-btn" data-view="2d" aria-pressed="false" data-i18n="dashboard.stage.activity2d">2D</button>
-                    </div>
-                    <div id="dashHeatmapMetricControl" class="seg seg--sm hidden" data-control="heatmapMetric">
-                      <button type="button" class="seg-btn" data-val="tokens" aria-pressed="false" data-i18n="dashboard.heatmap.tokens">Tokens</button>
-                      <button type="button" class="seg-btn active" data-val="cost" aria-pressed="true" data-i18n="dashboard.heatmap.cost">Cost</button>
                     </div>
                   </div>
                 </div>
@@ -160,10 +155,6 @@
             <div class="dash-glass-card dash-trends-open">
               <div class="dash-controls">
                 <div class="dash-control-row">
-                  <div class="seg" data-control="stack">
-                    <button type="button" class="seg-btn active" data-stack="client" data-i18n="dashboard.stack.client">By tool</button>
-                    <button type="button" class="seg-btn" data-stack="model" data-i18n="dashboard.stack.model">By model</button>
-                  </div>
                   <div class="seg" data-control="mode">
                     <button type="button" class="seg-btn active" data-mode="bars" data-i18n="dashboard.mode.bars">Bars</button>
                     <button type="button" class="seg-btn" data-mode="kline" data-i18n="dashboard.mode.kline">K-line</button>
@@ -171,6 +162,10 @@
                   <div class="seg" data-control="trendMetric">
                     <button type="button" class="seg-btn active" data-tmetric="tokens" data-i18n="dashboard.heatmap.tokens">Tokens</button>
                     <button type="button" class="seg-btn" data-tmetric="cost" data-i18n="dashboard.heatmap.cost">Cost</button>
+                  </div>
+                  <div class="seg" data-control="stack">
+                    <button type="button" class="seg-btn active" data-stack="client" data-i18n="dashboard.stack.client">By tool</button>
+                    <button type="button" class="seg-btn" data-stack="model" data-i18n="dashboard.stack.model">By model</button>
                   </div>
                   <div id="rangeSelect" class="dash-range-group"></div>
                 </div>

@@ -369,7 +369,8 @@ test('dashboard.js fetches history over IPC and renders both tabs', () => {
   assert.match(css, /topoPortHubOut/);
   assert.match(css, /topoPortArrive/);
   assert.doesNotMatch(css, /topo-more-btn|topo-collapse-btn|dash-topo-wrap\.is-expanded/);
-  assert.match(js, /pendingVisualBandFromHeight/);
+  assert.doesNotMatch(js, /pendingVisualBandFromHeight|pendingRevealSelector/);
+  assert.match(js, /function activateSegButton/);
   assert.match(js, /function renderHeatLegend/);
   assert.match(js, /function updateHeroTokens[\s\S]*?!document\.hidden/);
   assert.match(js, /function renderTopology/);
@@ -764,4 +765,115 @@ test('widget bottom-left viewSwitcherMenu offers Usage Dashboard launcher', () =
   assert.match(app, /window\.tokenMonitor\.openDashboard\(\)/);
   assert.match(css, /\.view-switcher-menu-separator/);
   assert.match(css, /\.view-switcher-menu-action/);
+});
+
+test('dashboard refresh button reuses native stationary spinner markup and invokes full manual rescan', async () => {
+  const html = read('src', 'electron', 'renderer', 'dashboard.html');
+  const css = read('src', 'electron', 'renderer', 'dashboard.css');
+  const js = read('src', 'electron', 'renderer', 'dashboard.js');
+
+  assert.match(html, /id="refreshBtn"[^>]*class="icon-button refresh-button"[^>]*><span class="refresh-button-icon"[^>]*><\/span><span class="refresh-button-spinner"/);
+  assert.doesNotMatch(css, /dashRefreshSpin|\.icon-button\.is-refreshing/);
+  assert.match(css, /\.icon-button\.refresh-button\s*\{/);
+
+  const silentRefreshBody = /async function refresh\(\)\s*\{([\s\S]*?)\n\}\n\nasync function boot/.exec(js);
+  assert.ok(silentRefreshBody, 'silent refresh function exists');
+  assert.doesNotMatch(silentRefreshBody[1], /is-refreshing/, 'silent background refreshes must not spin the manual refresh button');
+
+  const classes = new Set();
+  const attrs = new Map();
+  const refreshBtn = {
+    disabled: false,
+    classList: {
+      toggle(name, on) {
+        if (on) classes.add(name);
+        else classes.delete(name);
+      }
+    },
+    setAttribute(k, v) { attrs.set(k, v); },
+    removeAttribute(k) { attrs.delete(k); }
+  };
+  const calls = [];
+  let timerFn = null;
+  const context = {
+    els: { refreshBtn },
+    state: { history: null, stats: null, motion: 'none' },
+    t: (k) => k,
+    observeStatsRates: (s) => calls.push(['rates', s]),
+    render: () => calls.push(['render']),
+    console: { log() {} },
+    setTimeout: (fn) => { timerFn = fn; return 1; },
+    clearTimeout() {},
+    window: {
+      tokenMonitor: {
+        getStats: async (opts) => {
+          calls.push(['getStats', opts]);
+          return { periods: { today: { totalTokens: 12 } } };
+        },
+        getDashboardHistory: async (opts) => {
+          calls.push(['getDashboardHistory', opts]);
+          return { daily: [{ date: '2026-11-26', tokens: 12 }] };
+        }
+      }
+    }
+  };
+  vm.runInNewContext(
+    `${js.slice(js.indexOf('const REFRESH_BUTTON_FEEDBACK_MS'), js.indexOf('\nlet refreshRunning = false;'))}`,
+    context
+  );
+
+  await context.manualRefresh();
+  assert.deepEqual(JSON.parse(JSON.stringify(calls)), [
+    ['getStats', { force: true, forceHistory: true, forceSelfSync: true, feedback: true }],
+    ['getDashboardHistory', { includeDevices: true }],
+    ['rates', { periods: { today: { totalTokens: 12 } } }],
+    ['render']
+  ]);
+  assert.equal(refreshBtn.disabled, false);
+  assert.equal(classes.has('is-refreshed'), true);
+  assert.equal(classes.has('is-refreshing'), false);
+  assert.ok(typeof timerFn === 'function');
+  timerFn();
+  assert.equal(classes.has('is-refreshed'), false);
+  assert.equal(attrs.get('aria-label'), 'refreshButton.label');
+});
+
+test('dashboard hero removes redundant streak, aligns borderless active status, and stabilizes switching controls', () => {
+  const html = read('src', 'electron', 'renderer', 'dashboard.html');
+  const css = read('src', 'electron', 'renderer', 'dashboard.css');
+  const js = read('src', 'electron', 'renderer', 'dashboard.js');
+
+  assert.doesNotMatch(html, /dashHeroStreak|dashboard\.hero\.streak/);
+  assert.doesNotMatch(js, /heroStreak|hero\.streak/);
+  assert.match(css, /\.dash-hero-eyebrow\s*\{[^}]*justify-content:\s*space-between/);
+  assert.doesNotMatch(css, /\.dash-hero-active\s*\{[^}]*border:\s*1px/);
+
+  // Non-shifting controls: secondary/conditionally hidden groups precede stable primary switches.
+  const activityCtrls = /class="dash-activity-controls">([\s\S]*?)<\/div>\s*<\/div>\s*<div id="dashTopology"/.exec(html);
+  assert.ok(activityCtrls);
+  assert.ok(
+    activityCtrls[1].indexOf('id="dashHeatmapMetricControl"') < activityCtrls[1].indexOf('data-control="stageView"'),
+    'Live Flow / 3D / 2D stays anchored on the right edge when Tokens / Cost toggles visibility'
+  );
+  const trendCtrls = /class="dash-control-row">([\s\S]*?)<div id="rangeSelect"/.exec(html);
+  assert.ok(trendCtrls);
+  assert.ok(
+    trendCtrls[1].indexOf('data-control="mode"') < trendCtrls[1].indexOf('data-control="stack"')
+    && trendCtrls[1].indexOf('data-control="trendMetric"') < trendCtrls[1].indexOf('data-control="stack"'),
+    'Bars / K-line and Tokens / Cost precede By tool / By model so toggling K-line never shifts them sideways'
+  );
+
+  // Switch transitions avoid vertical bounce offsets that cause panels to jump.
+  const revealBody = /function animateSectionReveal\([\s\S]*?\n\}/.exec(js);
+  assert.ok(revealBody);
+  assert.doesNotMatch(revealBody[0], /translateY/);
+  const listAnimBody = /function animateListSnapshot\([\s\S]*?\n\}\n\nlet statCardMeasureCanvas/.exec(js);
+  assert.ok(listAnimBody);
+  assert.doesNotMatch(listAnimBody[0], /translateY\(5px\)/);
+
+  // Provider icons stay monochrome while progress bars / limit meters keep brand colors.
+  assert.match(css, /\.dash-shell \.row-icon:not\(\.dash-brand-mark\)/);
+  assert.doesNotMatch(js, /class="[^"]*\brow-icon\b[^"]*"\s+data-c="/);
+  assert.doesNotMatch(js, /class="\$\{escapeHtml\(acc\.iconClass\)\}"\s+data-c="/);
+  assert.doesNotMatch(js, /els\.drawerIcon\.style\.color\s*=\s*displayColor/);
 });
