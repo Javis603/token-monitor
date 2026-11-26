@@ -14,6 +14,7 @@ const { applySessionMetadata, projectIdentity } = require('../../src/shared/sess
 const { readSessionDetail } = require('../../src/shared/sessionDetail');
 const { readSessionActivity } = require('../../src/shared/providers/codex/sessionActivity');
 const { buildLocalUsageView } = require('../../src/shared/providers/codex/localUsage');
+const { symlinkOrSkip } = require('../helpers/symlink');
 
 const NATIVE_ID = '11111111-1111-4111-8111-111111111111';
 const ID = `rollout-2026-10-12T12-00-00-${NATIVE_ID}`;
@@ -256,7 +257,7 @@ test('compressed Codex discovery respects configured roots and bounded non-symli
   assert.equal(resolveSessionFile('codex', ID, path.join(f.home, 'other'), { env }), f.compressed);
   assert.equal(resolveSessionFile('codex', ID, path.join(f.home, 'other'), { env, useEnvRoots: false }), '');
   const root = path.join(f.codexHome, 'sessions');
-  fs.symlinkSync(f.compressed, path.join(root, 'linked.jsonl.zst'));
+  if (!symlinkOrSkip(t, f.compressed, path.join(root, 'linked.jsonl.zst'))) return;
   assert.equal(resolveSessionFile('codex', 'linked', f.home, { env: {} }), '');
   let dir = root;
   for (let index = 0; index < 33; index++) dir = path.join(dir, 'nested');

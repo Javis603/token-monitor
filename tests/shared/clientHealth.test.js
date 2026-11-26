@@ -576,7 +576,10 @@ test('source observations keep exact files, optional roots and WSL health in syn
   os.homedir = () => homeDir;
   delete process.env.GEMINI_CLI_HOME;
   try {
-    const options = { homeDir, platform: process.platform, env: {}, wslDetected: ['hermes'] };
+    // On Windows the tokscale config root comes from the native Roaming folder,
+    // not the stubbed home, so name it here to keep the cache check hermetic.
+    const env = { TOKSCALE_CONFIG_DIR: path.join(homeDir, '.config', 'tokscale') };
+    const options = { homeDir, platform: process.platform, env, wslDetected: ['hermes'] };
     const dbDir = path.join(homeDir, '.zcode', 'cli', 'db');
     const capture = path.join(homeDir, '.config', 'tokscale', 'headless', 'codex');
     fs.mkdirSync(dbDir, { recursive: true });
