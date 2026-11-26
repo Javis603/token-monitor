@@ -534,9 +534,13 @@ function applySessionMetadata(periods, home, deps = {}) {
       if (session.client === 'codex' && meta.nativeSessionId) session.nativeSessionId = meta.nativeSessionId;
       // A catalog title is not evidence about transcript state or activity.
       if (meta.titleOnly === true) continue;
+      if (meta.lastUsedAt && (!session.lastUsedAt || Date.parse(meta.lastUsedAt) > Date.parse(session.lastUsedAt))) session.lastUsedAt = meta.lastUsedAt;
       if (meta.catalogOnly === true) {
+        // Antigravity supplies a turn reading independently of its title and
+        // workspace fields. Older catalogs may supply only the latter.
+        if (typeof meta.turnEnded === 'boolean') session.turnEnded = meta.turnEnded;
         // A summary may supply a missing workspace, but a decoded scan path
-        // remains authoritative. Catalog changes never clear turn state.
+        // remains authoritative.
         const sources = deps.catalogProjects?.[periodName];
         const owned = deps.catalogProjectRows?.has(session);
         if (meta.projectId && (!session.projectId || owned)) {
@@ -559,7 +563,6 @@ function applySessionMetadata(periods, home, deps = {}) {
         continue;
       }
       if (meta.startedAt && (!session.startedAt || Date.parse(meta.startedAt) < Date.parse(session.startedAt))) session.startedAt = meta.startedAt;
-      if (meta.lastUsedAt && (!session.lastUsedAt || Date.parse(meta.lastUsedAt) > Date.parse(session.lastUsedAt))) session.lastUsedAt = meta.lastUsedAt;
       if (meta.projectId) session.projectId = meta.projectId;
       if (meta.projectLabel) session.projectLabel = meta.projectLabel;
       if (meta.sessionKind) session.sessionKind = meta.sessionKind;
