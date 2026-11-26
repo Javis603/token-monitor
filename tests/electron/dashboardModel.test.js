@@ -549,3 +549,806 @@ test('dashboard session resolution honors sessionWithActivity overlays and proje
   assert.equal(matches[0].totalTokens, 300);
   assert.equal(matches[0].resumedFromPriorPeriod, false);
 });
+
+test('buildQuotaAccounts respects canonical limitProviderHiddenItems keys from limitUsageItemId', () => {
+  const usageItems = require('../../src/shared/limits/usageItems');
+  const sessionWin = { kind: 'session', label: 'Session', remainingPercent: 80 };
+  const weeklyWin = { kind: 'weekly', label: 'Weekly', remainingPercent: 55 };
+  const creditsWin = { kind: 'billing', label: 'Credits', metric: 'credits', remaining: 12.5, currency: 'USD' };
+
+  const stats = {
+    limits: {
+      providers: [
+        {
+          provider: 'codex',
+          accountKey: 'cx-1',
+          windows: [sessionWin, weeklyWin, creditsWin]
+        }
+      ]
+    }
+  };
+  const settings = {
+    limitProviderHiddenItems: {
+      codex: [
+        usageItems.limitUsageItemId(sessionWin, 'codex'),
+        'credits'
+      ]
+    }
+  };
+
+  const accounts = model.buildQuotaAccounts(stats, settings, Date.now());
+  assert.equal(accounts.length, 1);
+  assert.deepEqual(accounts[0].windows.map((w) => w.kind), ['weekly']);
+});
+
+test('missing period never substitutes sessions from today or month', () => {
+  const now = Date.now();
+  const nowIso = new Date(now).toISOString();
+  const statsMissingYesterday = {
+    localDeviceId: 'mac-1',
+    devices: [{ deviceId: 'mac-1', displayName: 'MacBook', periods: { today: { totalTokens: 500 }, month: { totalTokens: 5000 } } }],
+    periods: {
+      today: {
+        totalTokens: 500,
+        sessions: { 'codex:t1': { client: 'codex', title: 'Today Session', totalTokens: 500, lastUsedAt: nowIso, sourceDevice: { deviceId: 'mac-1' } } }
+      },
+      month: {
+        totalTokens: 5000,
+        sessions: { 'codex:m1': { client: 'codex', title: 'Month Session', totalTokens: 5000, lastUsedAt: '2026-11-01T10:00:00.000Z', sourceDevice: { deviceId: 'mac-1' } } }
+      }
+    }
+  };
+
+  const ydayOverview = model.buildScopedOverview({ stats: statsMissingYesterday, periodKey: 'yesterday', nowMs: now });
+  assert.equal(ydayOverview.sessions.length, 0);
+  assert.equal(ydayOverview.fleet.machines[0].sessionCount, 0);
+
+  // When today itself is missing while month has historical sessions, month sessions must not leak into today.
+  const statsMissingToday = {
+    localDeviceId: 'mac-1',
+    devices: [{ deviceId: 'mac-1', displayName: 'MacBook', periods: { month: { totalTokens: 5000 } } }],
+    periods: {
+      month: {
+        totalTokens: 5000,
+        sessions: { 'codex:m1': { client: 'codex', title: 'Old Month Session', totalTokens: 5000, lastUsedAt: '2026-11-01T10:00:00.000Z', sourceDevice: { deviceId: 'mac-1' } } }
+      }
+    }
+  };
+  const todayOverview = model.buildScopedOverview({ stats: statsMissingToday, periodKey: 'today', nowMs: now });
+  assert.equal(todayOverview.sessions.some((s) => s.key === 'codex:m1'), false);
+});
+
+test('buildLiveVelocityModel isolates sparkline history per selected device without leaking fleet aggregate points', () => {
+  const now = 1_760_000_000_000;
+  const sample = {
+    speed: 140,
+    burn: 8400,
+    deviceCount: 2,
+    idle: false,
+    devices: [
+      { id: 'mac-1', name: 'Mac', models: [{ model: 'claude-sonnet-4-5', speed: 80, burn: 4800 }] },
+      { id: 'pc-2', name: 'Workstation', models: [{ model: 'gpt-5', speed: 60, burn: 3600 }] }
+    ]
+  };
+  const fleetSamples = [
+    { at: now - 4000, speed: 90, burn: 5400 },
+    { at: now - 1000, speed: 140, burn: 8400 }
+  ];
+
+  // Unattributed fleet sample array must not be drawn when viewing a single machine.
+  const noDeviceSeries = model.buildLiveVelocityModel({ sample, rateSamples: fleetSamples, rateMode: 'speed', selectedDeviceId: 'pc-2', now });
+  assert.deepEqual(noDeviceSeries.points, []);
+
+  // Device-scoped series should render its own sparkline.
+  const withDeviceSeries = model.buildLiveVelocityModel({
+    sample,
+    rateSamples: fleetSamples,
+    rateSamplesByDevice: {
+      'pc-2': [
+        { at: now - 5000, speed: 30, burn: 1800 },
+        { at: now - 2000, speed: 60, burn: 3600 }
+      ]
+    },
+    rateMode: 'speed',
+    selectedDeviceId: 'pc-2',
+    now
+  });
+  assert.equal(withDeviceSeries.points.length, 2);
+  assert.ok(withDeviceSeries.points[0].y > withDeviceSeries.points[1].y);
+
+  // Per-sample `.devices` metadata also projects cleanly per selected machine.
+  const embeddedSamples = [
+    { at: now - 5000, speed: 90, burn: 5400, devices: [{ id: 'mac-1', models: [{ speed: 90, burn: 5400 }] }] },
+    { at: now - 2000, speed: 140, burn: 8400, devices: [{ id: 'mac-1', models: [{ speed: 80, burn: 4800 }] }, { id: 'pc-2', models: [{ speed: 60, burn: 3600 }] }] }
+  ];
+  const projectedSeries = model.buildLiveVelocityModel({ sample, rateSamples: embeddedSamples, rateMode: 'speed', selectedDeviceId: 'pc-2', now });
+  assert.equal(projectedSeries.points.length, 1);
+});
+
+test('computeSessionDetailAnatomy aggregates exchanges[].tokens from session:getDetail payloads', () => {
+  const anatomy = model.computeSessionDetailAnatomy({
+    found: true,
+    totals: { totalTokens: 1000, costUsd: 0.4, exchangeCount: 2, turnCount: 2 },
+    exchanges: [
+      { tokens: { input: 100, cacheRead: 400, cacheWrite: 50, output: 150, total: 700 } },
+      { tokens: { input: 50, cacheRead: 200, cacheWrite: 0, output: 50, total: 300 } }
+    ]
+  });
+  assert.equal(anatomy.totalTokens, 1000);
+  assert.equal(anatomy.cacheRead, 600);
+  assert.equal(anatomy.cacheWrite, 50);
+  assert.equal(anatomy.cacheMiss, 150);
+  assert.equal(anatomy.output, 200);
+  assert.equal(anatomy.unclassified, 0);
+  assert.equal(anatomy.cacheHitRate, 600 / 750);
+
+  const fallback = model.computeSessionDetailAnatomy({
+    found: true,
+    totals: { totalTokens: 450, costUsd: 0, exchangeCount: 0, turnCount: 0 },
+    exchanges: []
+  });
+  assert.equal(fallback.totalTokens, 450);
+  assert.equal(fallback.unclassified, 450);
+  assert.equal(fallback.segments[0].key, 'unclassified');
+});
+
+test('buildTopologyGraph tools mode does not fabricate device or model links for unattributed entries', () => {
+  const overview = model.buildScopedOverview({
+    stats: {
+      localDeviceId: 'mac-1',
+      devices: [
+        { deviceId: 'mac-1', displayName: 'Mac', periods: { allTime: { totalTokens: 5000, costUsd: 1.5, clients: { codex: 5000 } } } },
+        { deviceId: 'pc-2', displayName: 'Linux Box', periods: { allTime: { totalTokens: 1000, costUsd: 0.3 } } }
+      ],
+      periods: {
+        allTime: {
+          totalTokens: 6000,
+          costUsd: 1.8,
+          clients: { codex: 5000, claude: 1000 },
+          clientModels: { codex: { 'gpt-6.2-sol': 5000 } },
+          models: { 'gpt-6.2-sol': 5000, 'claude-sonnet-4-5': 1000 }
+        }
+      }
+    },
+    periodKey: 'allTime'
+  });
+
+  const graph = overview.topology;
+  assert.equal(graph.mode, 'tools');
+  assert.equal(graph.devToHub.some((e) => e.from === 'pc-2'), false, 'real device with no client attribution must not inherit fleet tools');
+  assert.equal(graph.hubToEnd.some((e) => e.to === 'model:claude-sonnet-4-5'), false, 'unmapped models must not be attributed to hubs[0]');
+});
+
+test('buildQuotaAccounts normalizes CSV limitProviders and respects limitsEnabled: false', () => {
+  const stats = {
+    limits: {
+      providers: [
+        { provider: 'claude', accountKey: 'cl-1', windows: [{ kind: 'session', label: 'Session', remainingPercent: 80 }] },
+        { provider: 'codex', accountKey: 'cx-1', windows: [{ kind: 'session', label: 'Session', remainingPercent: 45 }] }
+      ]
+    }
+  };
+
+  const onlyCodex = model.buildQuotaAccounts(stats, { limitProviders: 'codex' }, Date.now());
+  assert.deepEqual(onlyCodex.map((a) => a.providerId), ['codex']);
+
+  const noneSelected = model.buildQuotaAccounts(stats, { limitProviders: '' }, Date.now());
+  assert.deepEqual(noneSelected, []);
+
+  const masterOff = model.buildQuotaAccounts(stats, { limitsEnabled: false, limitProviders: 'claude,codex' }, Date.now());
+  assert.deepEqual(masterOff, []);
+});
+
+test('buildQuotaAccounts preserves MiMo expired plan metadata without fabricating zero percent', () => {
+  const accounts = model.buildQuotaAccounts({
+    limits: {
+      providers: [
+        {
+          provider: 'mimo',
+          accountKey: 'mimo-1',
+          balance: { planStatus: 'expired' },
+          windows: [{ kind: 'billing', label: 'Credits', metric: 'credits', remaining: 5.25, currency: 'USD' }]
+        }
+      ]
+    }
+  }, {}, Date.now());
+
+  assert.equal(accounts.length, 1);
+  const expiredWin = accounts[0].windows[0];
+  assert.equal(expiredWin.planStatus, 'expired');
+  assert.equal(expiredWin.showMeter, false);
+  assert.equal(expiredWin.remainingPercent, null);
+});
+
+test('buildLiveVelocityModel computes exact per-device totals from real tracker samples including unattributed devices', () => {
+  const { createLiveTokenRateGroupTracker } = require('../../src/electron/renderer/tokenRatePresentation');
+  let now = 1_760_000_000_000;
+  const baseDev1 = {
+    timedOutputTokens: 0,
+    timedTokens: 0,
+    timedDurationMs: 0,
+    modelThroughput: {
+      'm-1': { timedOutputTokens: 0, timedTokens: 0, timedDurationMs: 0 },
+      'm-2': { timedOutputTokens: 0, timedTokens: 0, timedDurationMs: 0 }
+    }
+  };
+  const nextDev1 = {
+    timedOutputTokens: 150,
+    timedTokens: 600,
+    timedDurationMs: 1000,
+    modelThroughput: {
+      'm-1': { timedOutputTokens: 150, timedTokens: 600, timedDurationMs: 1000 },
+      'm-2': { timedOutputTokens: 150, timedTokens: 600, timedDurationMs: 1000 }
+    }
+  };
+  const baseDev2 = { timedOutputTokens: 0, timedTokens: 0, timedDurationMs: 0 };
+  const nextDev2 = { timedOutputTokens: 100, timedTokens: 400, timedDurationMs: 1000 };
+
+  const fleetTracker = createLiveTokenRateGroupTracker({ now: () => now, activeMs: 12_000 });
+  const dev1Tracker = createLiveTokenRateGroupTracker({ now: () => now, activeMs: 12_000 });
+  const dev2Tracker = createLiveTokenRateGroupTracker({ now: () => now, activeMs: 12_000 });
+
+  fleetTracker.observe([{ id: 'dev-1', name: 'Dev 1', period: baseDev1 }, { id: 'dev-2', name: 'Dev 2', period: baseDev2 }]);
+  dev1Tracker.observe([{ id: 'dev-1', name: 'Dev 1', period: baseDev1 }]);
+  dev2Tracker.observe([{ id: 'dev-2', name: 'Dev 2', period: baseDev2 }]);
+
+  now += 1000;
+  const fleetSample = fleetTracker.observe([{ id: 'dev-1', name: 'Dev 1', period: nextDev1 }, { id: 'dev-2', name: 'Dev 2', period: nextDev2 }]).sample;
+  const dev1Sample = dev1Tracker.observe([{ id: 'dev-1', name: 'Dev 1', period: nextDev1 }]).sample;
+  const dev2Sample = dev2Tracker.observe([{ id: 'dev-2', name: 'Dev 2', period: nextDev2 }]).sample;
+
+  const deviceRateSamples = { 'dev-1': dev1Sample, 'dev-2': dev2Sample };
+  const rateSamplesByDevice = {
+    'dev-1': [{ at: dev1Sample.sampledAt, speed: dev1Sample.speed, burn: dev1Sample.burn }],
+    'dev-2': [{ at: dev2Sample.sampledAt, speed: dev2Sample.speed, burn: dev2Sample.burn }]
+  };
+
+  const fleetVel = model.buildLiveVelocityModel({ sample: fleetSample, deviceRateSamples, rateSamplesByDevice, selectedDeviceId: 'all', now });
+  assert.equal(fleetVel.primaryValue, 250);
+
+  const dev1Vel = model.buildLiveVelocityModel({ sample: fleetSample, deviceRateSamples, rateSamplesByDevice, selectedDeviceId: 'dev-1', now });
+  assert.equal(dev1Vel.hasSample, true);
+  assert.equal(dev1Vel.primaryValue, 150);
+
+  const dev2Vel = model.buildLiveVelocityModel({ sample: fleetSample, deviceRateSamples, rateSamplesByDevice, selectedDeviceId: 'dev-2', now });
+  assert.equal(dev2Vel.hasSample, true);
+  assert.equal(dev2Vel.primaryValue, 100);
+  assert.equal(dev2Vel.points.length, 1);
+});
+
+test('buildScopedOverview dailyLedger leaves deltaPercent null across missing calendar days', () => {
+  const overview = model.buildScopedOverview({
+    history: {
+      daily: [
+        { date: '2026-11-10', tokens: 1000, cost: 1 },
+        { date: '2026-11-25', tokens: 2000, cost: 2 },
+        { date: '2026-11-26', tokens: 3000, cost: 3 }
+      ]
+    },
+    periodKey: 'allTime'
+  });
+
+  const nov26 = overview.dailyLedger.find((r) => r.date === '2026-11-26');
+  const nov25 = overview.dailyLedger.find((r) => r.date === '2026-11-25');
+  const nov10 = overview.dailyLedger.find((r) => r.date === '2026-11-10');
+  assert.equal(nov26.deltaPercent, 50);
+  assert.equal(nov25.deltaPercent, null, 'Nov 25 compared to non-adjacent Nov 10 must not report a daily delta');
+  assert.equal(nov10.deltaPercent, null);
+});
+
+test('synced topology and session scoping leave ambiguous and unproven sessions unassigned and never fabricate a local machine', () => {
+  const { projectSessionDeviceStats } = require('../../src/electron/sessionDeviceSources');
+  const nowIso = new Date().toISOString();
+  const rawStats = {
+    localDeviceId: 'mac-local',
+    devices: [
+      {
+        deviceId: 'mac-local',
+        displayName: 'MacBook',
+        platform: 'darwin',
+        periods: {
+          today: {
+            totalTokens: 3000,
+            costUsd: 1.5,
+            clients: { codex: 3000 },
+            sessions: {
+              'codex:shared': { client: 'codex', sessionId: 'shared', totalTokens: 500 },
+              'codex:local-only': { client: 'codex', sessionId: 'local-only', totalTokens: 2500 }
+            }
+          }
+        }
+      },
+      {
+        deviceId: 'linux-remote',
+        displayName: 'Linux Box',
+        platform: 'linux',
+        periods: {
+          today: {
+            totalTokens: 500,
+            costUsd: 0.2,
+            clients: { codex: 500 },
+            sessions: {
+              'codex:shared': { client: 'codex', sessionId: 'shared', totalTokens: 500 }
+            }
+          }
+        }
+      }
+    ],
+    periods: {
+      today: {
+        totalTokens: 3900,
+        costUsd: 1.9,
+        clients: { codex: 3900 },
+        sessions: {
+          'codex:shared': { client: 'codex', sessionId: 'shared', projectLabel: 'SharedRepo', totalTokens: 1000, costUsd: 0.5, lastUsedAt: nowIso },
+          'codex:explicit-ambig': { client: 'codex', sessionId: 'explicit-ambig', projectLabel: 'AmbigRepo', totalTokens: 400, costUsd: 0.2, lastUsedAt: nowIso, sourceDevice: { ambiguous: true } },
+          'codex:local-only': { client: 'codex', sessionId: 'local-only', projectLabel: 'LocalRepo', totalTokens: 2500, costUsd: 1.2, lastUsedAt: nowIso }
+        }
+      }
+    }
+  };
+
+  const projected = projectSessionDeviceStats(rawStats, 'mac-local');
+  assert.equal(projected.periods.today.sessions['codex:shared'].sourceDevice, undefined);
+  assert.equal(projected.periods.today.sessions['codex:local-only'].sourceDevice?.deviceId, 'mac-local');
+
+  const syncedSettings = { hubMode: 'client', hubUrl: 'https://hub.example', deviceId: 'mac-local' };
+  const allOverview = model.buildScopedOverview({ stats: projected, periodKey: 'today', settings: syncedSettings });
+  assert.equal(allOverview.topology.mode, 'sessions');
+  const sharedEp = allOverview.topology.endpoints.find((e) => e.id === 'codex:shared');
+  const ambigEp = allOverview.topology.endpoints.find((e) => e.id === 'codex:explicit-ambig');
+  const localEp = allOverview.topology.endpoints.find((e) => e.id === 'codex:local-only');
+  assert.equal(sharedEp?.deviceId, '', 'shared synced session without positive owner must remain unassigned');
+  assert.equal(ambigEp?.deviceId, '', 'explicitly ambiguous session must remain unassigned');
+  assert.equal(localEp?.deviceId, 'mac-local');
+  assert.equal(allOverview.topology.devToHub.some((e) => e.to === 'ws:sharedrepo' || e.to === 'ws:ambigrepo'), false);
+  assert.equal(allOverview.topology.devToHub.some((e) => e.from === 'mac-local' && e.to === 'ws:localrepo'), true);
+
+  const localOverview = model.buildScopedOverview({
+    stats: projected,
+    periodKey: 'today',
+    selectedDeviceId: 'mac-local',
+    settings: syncedSettings
+  });
+  assert.deepEqual(localOverview.sessions.map((s) => s.key), ['codex:local-only']);
+
+  const syncedNoDevices = model.buildScopedOverview({
+    stats: { localDeviceId: 'mac-local', devices: [], periods: { today: { totalTokens: 500, sessions: {} } } },
+    periodKey: 'today',
+    settings: syncedSettings
+  });
+  assert.deepEqual(syncedNoDevices.topology.devices, [], 'synced view with no devices must not fabricate a local node');
+});
+
+test('fleet and topology agree on shared running sessions, remote-only local badges, and local mode with saved hubUrl', () => {
+  const { projectSessionDeviceStats } = require('../../src/electron/sessionDeviceSources');
+  const nowIso = new Date().toISOString();
+
+  // 1. Shared running session leaves mac-local fleet summary free of unowned active agent/workspace
+  const sharedRunningRaw = {
+    localDeviceId: 'mac-local',
+    devices: [
+      {
+        deviceId: 'mac-local',
+        displayName: 'MacBook',
+        platform: 'darwin',
+        periods: {
+          today: {
+            totalTokens: 1000,
+            costUsd: 0.5,
+            clients: { codex: 1000 },
+            sessions: { 'codex:shared': { client: 'codex', sessionId: 'shared', totalTokens: 500 } }
+          }
+        }
+      },
+      {
+        deviceId: 'linux-remote',
+        displayName: 'Linux Box',
+        platform: 'linux',
+        periods: {
+          today: {
+            totalTokens: 500,
+            costUsd: 0.25,
+            clients: { codex: 500 },
+            sessions: { 'codex:shared': { client: 'codex', sessionId: 'shared', totalTokens: 500 } }
+          }
+        }
+      }
+    ],
+    periods: {
+      today: {
+        totalTokens: 1500,
+        costUsd: 0.75,
+        clients: { codex: 1500 },
+        sessions: {
+          'codex:shared': {
+            client: 'codex',
+            sessionId: 'shared',
+            projectLabel: 'SharedWorkspace',
+            totalTokens: 1000,
+            status: 'running',
+            lastUsedAt: nowIso
+          }
+        }
+      }
+    }
+  };
+  const sharedProjected = projectSessionDeviceStats(sharedRunningRaw, 'mac-local');
+  const sharedOverview = model.buildScopedOverview({
+    stats: sharedProjected,
+    periodKey: 'today',
+    settings: { hubMode: 'client', hubUrl: 'https://hub.example', deviceId: 'mac-local' },
+    nowMs: Date.parse(nowIso)
+  });
+  const macMachine = sharedOverview.fleet.machines.find((m) => m.deviceId === 'mac-local');
+  assert.equal(macMachine.activeSessionCount, 0, 'fleet mac summary must not count shared unowned running session');
+  assert.equal(macMachine.sessionCount, 0);
+  assert.equal(macMachine.activeWorkspace, '');
+  assert.equal(sharedOverview.topology.endpoints.find((e) => e.id === 'codex:shared')?.deviceId, '');
+
+  // 2. Single remote machine + local native session never marks remote machine local or routes native session through it
+  const remoteWithNative = model.buildScopedOverview({
+    stats: {
+      localDeviceId: 'mac-local',
+      devices: [
+        { deviceId: 'linux-remote', displayName: 'Linux Box', platform: 'linux', periods: { today: { totalTokens: 400, clients: { codex: 400 } } } }
+      ],
+      nativeSessions: {
+        today: {
+          'reasonix:n1': {
+            client: 'reasonix',
+            sessionId: 'n1',
+            projectLabel: 'LocalNative',
+            totalTokens: 300,
+            lastUsedAt: nowIso
+          }
+        }
+      },
+      periods: {
+        today: { totalTokens: 700, costUsd: 0.3, sessions: {} }
+      }
+    },
+    periodKey: 'today',
+    settings: { hubMode: 'client', hubUrl: 'https://hub.example', deviceId: 'mac-local' },
+    statsMode: 'sync'
+  });
+  const remoteMachine = remoteWithNative.fleet.machines.find((m) => m.deviceId === 'linux-remote');
+  assert.equal(remoteMachine.isLocal, false, 'single remote machine must not be labeled local');
+  assert.equal(remoteWithNative.topology.devices.find((d) => d.id === 'linux-remote')?.isLocal, false);
+  assert.equal(
+    remoteWithNative.topology.devToHub.some((e) => e.from === 'linux-remote' && e.to === 'ws:localnative'),
+    false,
+    'local native session must not connect through remote machine'
+  );
+
+  // 3. Switched to Local Only while retaining saved hubUrl still attributes local last7 session cleanly
+  const localWithSavedUrl = model.buildScopedOverview({
+    stats: {
+      localDeviceId: 'mac-local',
+      devices: [
+        { deviceId: 'mac-local', displayName: 'MacBook', platform: 'darwin', periods: { last7: { totalTokens: 500, clients: { codex: 500 } } } }
+      ],
+      periods: {
+        last7: {
+          totalTokens: 500,
+          costUsd: 0.2,
+          sessions: {
+            'codex:l7': { client: 'codex', sessionId: 'l7', projectLabel: 'Local7Repo', totalTokens: 500, lastUsedAt: nowIso }
+          }
+        }
+      }
+    },
+    periodKey: 'last7',
+    settings: { hubMode: 'local', hubUrl: 'https://hub.example', deviceId: 'mac-local' },
+    statsMode: 'local'
+  });
+  assert.equal(localWithSavedUrl.isSynced, false);
+  assert.equal(localWithSavedUrl.sessions[0]?.isLocalDevice, true);
+  assert.equal(localWithSavedUrl.topology.endpoints[0]?.deviceId, 'mac-local');
+});
+
+test('buildSessionList folds subagents, background reviews, and Grok Bot runs while preserving Fleet and Topology parity', () => {
+  const now = Date.now();
+  const nowIso = new Date(now).toISOString();
+  const earlierIso = new Date(now - 60_000).toISOString();
+
+  const stats = {
+    localDeviceId: 'mac-1',
+    devices: [
+      { deviceId: 'mac-1', displayName: 'MacBook', platform: 'darwin', periods: { today: { totalTokens: 6000, costUsd: 3.0, clients: { antigravity: 4500, codex: 1000, cursor: 500 } } } },
+      { deviceId: 'linux-2', displayName: 'Linux Box', platform: 'linux', periods: { today: { totalTokens: 400, costUsd: 0.2, clients: { codex: 400 } } } }
+    ],
+    periods: {
+      today: {
+        totalTokens: 6400,
+        costUsd: 3.2,
+        sessions: {
+          'antigravity:parent-1': {
+            client: 'antigravity',
+            sessionId: 'parent-1',
+            title: 'Parent Orchestrator',
+            projectLabel: 'Token Monitor',
+            latestModel: 'gemini-3-pro',
+            models: { 'gemini-3-pro': 2000 },
+            totalTokens: 2000,
+            costUsd: 1.0,
+            lastUsedAt: earlierIso,
+            turnEnded: true,
+            sourceDevice: { deviceId: 'mac-1', name: 'MacBook' }
+          },
+          'antigravity:child-1': {
+            client: 'antigravity',
+            sessionId: 'child-1',
+            title: 'Worker Alpha',
+            projectLabel: 'Token Monitor',
+            parentClient: 'antigravity',
+            parentSessionId: 'parent-1',
+            latestModel: 'gemini-3-flash',
+            models: { 'gemini-3-flash': 1500 },
+            totalTokens: 1500,
+            costUsd: 0.75,
+            lastUsedAt: nowIso,
+            turnEnded: false,
+            sourceDevice: { deviceId: 'mac-1', name: 'MacBook' }
+          },
+          'antigravity:child-2': {
+            client: 'antigravity',
+            sessionId: 'child-2',
+            title: 'Worker Beta',
+            projectLabel: 'Token Monitor',
+            parentClient: 'antigravity',
+            parentSessionId: 'parent-1',
+            latestModel: 'claude-sonnet-4-5',
+            models: { 'claude-sonnet-4-5': 1000 },
+            totalTokens: 1000,
+            costUsd: 0.5,
+            lastUsedAt: earlierIso,
+            turnEnded: true,
+            sourceDevice: { deviceId: 'mac-1', name: 'MacBook' }
+          },
+          'codex:rev-1': {
+            client: 'codex',
+            sessionId: 'rev-1',
+            sessionKind: 'background-review',
+            projectLabel: 'RepoA',
+            latestModel: 'gpt-6.2-sol',
+            totalTokens: 1000,
+            costUsd: 0.5,
+            lastUsedAt: nowIso,
+            turnEnded: true,
+            sourceDevice: { deviceId: 'mac-1', name: 'MacBook' }
+          },
+          'codex:rev-2': {
+            client: 'codex',
+            sessionId: 'rev-2',
+            sessionKind: 'background-review',
+            projectLabel: 'RepoB',
+            latestModel: 'gpt-6.2-sol',
+            totalTokens: 400,
+            costUsd: 0.2,
+            lastUsedAt: earlierIso,
+            turnEnded: true,
+            sourceDevice: { deviceId: 'linux-2', name: 'Linux Box' }
+          },
+          'cursor:grok-1': {
+            client: 'cursor',
+            sessionId: 'grok-1',
+            latestModel: 'grok-bot-1',
+            models: { 'grok-bot-1': 500 },
+            totalTokens: 500,
+            costUsd: 0.25,
+            lastUsedAt: earlierIso,
+            sourceDevice: { deviceId: 'mac-1', name: 'MacBook' }
+          },
+          'reasonix:synth-1': {
+            client: 'reasonix',
+            sessionId: 'reasonix-stats:hidden',
+            totalTokens: 9999,
+            lastUsedAt: nowIso
+          }
+        }
+      }
+    }
+  };
+
+  const overview = model.buildScopedOverview({
+    stats,
+    periodKey: 'today',
+    nowMs: now,
+    sessionLabels: {
+      subagent: 'Subagent',
+      subagentCount: (c) => `${c} subagents`,
+      backgroundReviews: 'Codex Auto Review',
+      backgroundReviewCount: (c) => `${c} background runs`,
+      grokBot: 'Grok Bot',
+      grokBotCount: (c) => `${c} activity records`
+    }
+  });
+
+  // Only 3 top-level rows: parent subagent group, Codex Auto Review, Grok Bot (Reasonix synthetic row excluded)
+  assert.equal(overview.sessions.length, 3);
+  const parentGroup = overview.sessions.find((s) => s.subagentGroup);
+  assert.ok(parentGroup, 'parent + 2 children should fold into one subagent group');
+  assert.equal(parentGroup.title, 'Parent Orchestrator');
+  assert.equal(parentGroup.totalTokens, 4500);
+  assert.equal(parentGroup.costUsd, 2.25);
+  assert.equal(parentGroup.subagentCount, 2);
+  assert.equal(parentGroup.modelLabel, 'gemini-3-pro +2');
+  assert.equal(parentGroup.isActive, true, 'running child propagates running state onto parent group');
+  assert.equal(parentGroup.groupRows.length, 3);
+  assert.equal(parentGroup.sourceDevice?.deviceId, 'mac-1');
+
+  const reviewGroup = overview.sessions.find((s) => s.groupKind === 'background-review');
+  assert.ok(reviewGroup);
+  assert.equal(reviewGroup.title, 'Codex Auto Review');
+  assert.equal(reviewGroup.totalTokens, 1400);
+  assert.equal(reviewGroup.groupCount, 2);
+  assert.equal(reviewGroup.projectLabel, '', 'multi-workspace synthetic group leaves projectLabel empty');
+  assert.equal(reviewGroup.sourceDevice, null, 'multi-device synthetic group leaves sourceDevice null');
+
+  const grokGroup = overview.sessions.find((s) => s.groupKind === 'grok-bot');
+  assert.ok(grokGroup);
+  assert.equal(grokGroup.title, 'Grok Bot');
+  assert.equal(grokGroup.groupCount, 1);
+  assert.equal(grokGroup.sourceDevice?.deviceId, 'mac-1', 'single-owner synthetic group preserves owner device');
+
+  const mac = overview.fleet.machines.find((m) => m.deviceId === 'mac-1');
+  assert.equal(mac.activeSessionCount, 1, 'fleet active count reflects folded parent group rather than individual children');
+  assert.equal(mac.sessionCount, 3, 'mac owns parent group + its review group + grok group');
+
+  const ep = overview.topology.endpoints.find((e) => e.id === parentGroup.key);
+  assert.ok(ep);
+  assert.equal(ep.subagentCount, 2);
+  assert.equal(ep.modelLabel, 'gemini-3-pro +2');
+});
+
+test('buildScopedOverview keeps mixed-device subagent group unowned and splits Live Flow edges by member device', () => {
+  const now = Date.now();
+  const nowIso = new Date(now).toISOString();
+
+  const stats = {
+    localDeviceId: 'dev-mac',
+    devices: [
+      { deviceId: 'dev-mac', displayName: 'Mac', platform: 'darwin', periods: { today: { totalTokens: 100, costUsd: 0.1, clients: { codex: 100 } } } },
+      { deviceId: 'dev-pc', displayName: 'PC', platform: 'win32', periods: { today: { totalTokens: 900, costUsd: 0.9, clients: { codex: 900 } } } }
+    ],
+    periods: {
+      today: {
+        totalTokens: 1000,
+        costUsd: 1.0,
+        sessions: {
+          'codex:p1': {
+            client: 'codex',
+            sessionId: 'p1',
+            title: 'Mixed Parent',
+            projectLabel: 'Token Monitor',
+            latestModel: 'gpt-6.2-sol',
+            models: { 'gpt-6.2-sol': 100 },
+            totalTokens: 100,
+            costUsd: 0.1,
+            lastUsedAt: nowIso,
+            turnEnded: true,
+            sourceDevice: { deviceId: 'dev-mac', name: 'Mac' }
+          },
+          'codex:c1': {
+            client: 'codex',
+            sessionId: 'c1',
+            title: 'Mixed Child',
+            projectLabel: 'Token Monitor',
+            parentClient: 'codex',
+            parentSessionId: 'p1',
+            latestModel: 'gpt-6.2-sol',
+            models: { 'gpt-6.2-sol': 900 },
+            totalTokens: 900,
+            costUsd: 0.9,
+            lastUsedAt: nowIso,
+            turnEnded: false,
+            sourceDevice: { deviceId: 'dev-pc', name: 'PC' }
+          }
+        }
+      }
+    }
+  };
+
+  const overview = model.buildScopedOverview({ stats, periodKey: 'today', nowMs: now });
+  const mixedGroup = overview.sessions.find((s) => s.subagentGroup);
+  assert.ok(mixedGroup);
+  assert.equal(mixedGroup.totalTokens, 1000);
+  assert.equal(mixedGroup.sourceDevice, null, 'mixed-device subagent group must not claim single owner');
+  assert.equal(mixedGroup.deviceName, '');
+
+  const ep = overview.topology.endpoints.find((e) => e.id === mixedGroup.key);
+  assert.ok(ep);
+  assert.equal(ep.deviceId, '');
+  assert.deepEqual(ep.memberDeviceIds.sort(), ['dev-mac', 'dev-pc']);
+
+  const macEdge = overview.topology.devToHub.find((e) => e.from === 'dev-mac' && e.to === 'ws:token monitor');
+  const pcEdge = overview.topology.devToHub.find((e) => e.from === 'dev-pc' && e.to === 'ws:token monitor');
+  assert.equal(macEdge?.tokens, 100, 'Mac-to-workspace edge should attribute only Mac member tokens');
+  assert.equal(pcEdge?.tokens, 900, 'PC-to-workspace edge should attribute only PC member tokens');
+
+  assert.deepEqual(overview.workspaces[0]?.devices?.slice().sort(), ['Mac', 'PC']);
+});
+
+test('buildScopedOverview ignores stale selectedDeviceId when fleet shrinks to one surviving device', () => {
+  const today = new Date().toISOString().slice(0, 10);
+  const stats = {
+    localDeviceId: 'dev-a',
+    devices: [
+      { deviceId: 'dev-a', displayName: 'Mac', platform: 'darwin', periods: { today: { totalTokens: 300, costUsd: 0.3 } } }
+    ],
+    periods: {
+      today: { totalTokens: 300, costUsd: 0.3, sessions: {} }
+    }
+  };
+  const history = {
+    daily: [{ date: today, tokens: 900, cost: 0.9 }],
+    deviceHistories: [
+      { deviceId: 'dev-a', history: { daily: [{ date: today, tokens: 300, cost: 0.3 }] } }
+    ]
+  };
+
+  const overview = model.buildScopedOverview({
+    stats,
+    history,
+    periodKey: 'today',
+    selectedDeviceId: 'dev-a'
+  });
+  assert.equal(overview.fleet.isFleetMode, false);
+  assert.equal(overview.activeMachine, null, 'single-device fleet must not produce a machine-scoped activeMachine');
+  assert.equal(overview.dailyLedger[0]?.tokens, 900, 'daily ledger must use aggregate tokens matching All Devices Trends');
+});
+
+test('buildTopologyGraph does not attribute duplicate-named Desktop workspace edges to an unowning device', () => {
+  const nowIso = new Date().toISOString();
+  const stats = {
+    localDeviceId: 'dev-1',
+    devices: [
+      { deviceId: 'dev-1', displayName: 'Desktop', platform: 'win32', periods: { today: { totalTokens: 0, costUsd: 0 } } },
+      { deviceId: 'dev-2', displayName: 'Desktop', platform: 'linux', periods: { today: { totalTokens: 100, costUsd: 0.1, clients: { codex: 100 } } } }
+    ],
+    periods: {
+      today: {
+        totalTokens: 100,
+        costUsd: 0.1,
+        sessions: {
+          'codex:s1': {
+            client: 'codex',
+            sessionId: 's1',
+            title: 'Remote Desktop Task',
+            projectLabel: 'Repo',
+            latestModel: 'gpt-6.2-sol',
+            totalTokens: 100,
+            costUsd: 0.1,
+            lastUsedAt: nowIso,
+            sourceDevice: { deviceId: 'dev-2', name: 'Desktop' }
+          }
+        }
+      }
+    }
+  };
+
+  const overview = model.buildScopedOverview({ stats, periodKey: 'today', settings: { hubMode: 'client' } });
+  assert.equal(overview.topology.devToHub.length, 1);
+  assert.equal(overview.topology.devToHub[0].from, 'dev-2');
+  assert.equal(overview.topology.devToHub[0].tokens, 100);
+
+  // Even when endpoints are omitted (workspace fallback path), duplicate display names must not manufacture a dev-1 edge
+  const fallbackTopo = model.buildTopologyGraph(overview, { maxEndpoints: 0 });
+  assert.equal(fallbackTopo.devToHub.length, 1);
+  assert.equal(fallbackTopo.devToHub[0].from, 'dev-2');
+  assert.equal(fallbackTopo.devToHub[0].tokens, 100);
+});
+
+
+test('a confirmed zero-token device retains a zero Live Flow edge when its session is outside the visible endpoints', () => {
+  const overview = {
+    fleet: { machines: [{ deviceId: 'a', tokens: 40 }, { deviceId: 'b', tokens: 0 }] },
+    sessions: [{ key: 'a', projectLabel: 'Repo', deviceId: 'a', totalTokens: 40 }],
+    workspaces: [{ name: 'Repo', tokens: 40, deviceIds: ['a', 'b'], deviceTokens: { a: 40, b: 0 } }],
+    hero: { tokens: 40 }
+  };
+  const graph = model.buildTopologyGraph(overview, { maxEndpoints: 1 });
+  assert.equal(graph.devToHub.find(edge => edge.from === 'a')?.tokens, 40);
+  assert.equal(graph.devToHub.find(edge => edge.from === 'b')?.tokens, 0);
+});

@@ -68,22 +68,29 @@ test('Dock keeps omissions in the existing tooltip and never prints zero for an 
 });
 
 test('Dashboard heat tooltip distinguishes known cost, missing price and a genuine zero rate', () => {
-  const tooltip = {};
+  const createElement = () => ({
+    textContent: '',
+    children: [],
+    append(...nodes) { this.children.push(...nodes); }
+  });
+  const tooltip = { replaceChildren(...nodes) { this.children = nodes; } };
+  const readings = () => tooltip.children.flatMap(node =>
+    node.children.length ? node.children.map(child => child.textContent) : [node.textContent]);
   const context = {
-    state: { locale: 'en' }, els: { tooltip }, longDate: String, formatCompact: String,
+    state: { locale: 'en' }, els: { tooltip }, document: { createElement }, longDate: String, formatCompact: String,
     currencyApi: { normalizeCurrency: () => 'USD', formatCurrencyFromUsd: (cost) => `$${cost.toFixed(2)}` },
-    t: (_key, params) => `${params.tokens} excluded`, positionTooltip() {}
+    t: (key, params) => params ? `${params.tokens} excluded` : key, positionTooltip() {}
   };
   vm.runInNewContext(functionSource('dashboard.js', 'formatCost', 'function formatCostCompact(')
     + functionSource('dashboard.js', 'showHeatTooltip', '\nlet refreshRunning'), context);
   const view = dotsView(['unknown']);
   const history = normalizeHistory(parseGraphResult(view.graph), { todayKey: '2026-10-07' });
   context.showHeatTooltip('2026-10-07', history.daily[0], {});
-  assert.match(tooltip.innerHTML, /100 excluded/);
-  assert.match(tooltip.innerHTML, /—/);
-  assert.doesNotMatch(tooltip.innerHTML, /\$0\.00/);
+  assert.ok(readings().includes('100 excluded'));
+  assert.ok(readings().includes('—'));
+  assert.ok(!readings().includes('$0.00'));
   context.showHeatTooltip('2026-10-07', { tokens: 200, cost: 1.2, unpricedTokens: 100 }, {});
-  assert.match(tooltip.innerHTML, /\$1\.20/);
-  assert.match(tooltip.innerHTML, /100 excluded/);
+  assert.ok(readings().includes('$1.20'));
+  assert.ok(readings().includes('100 excluded'));
   assert.equal(context.formatCost(0, 0), '$0.00');
 });

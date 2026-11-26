@@ -13,6 +13,11 @@ test('clampCamera normalizes yaw into [-pi, pi] and clamps pitch, zoom, and pan'
   assert.equal(clamped.panX, 320);
   assert.equal(clamped.panY, -200);
 
+  const clampedZoomed = skyline.clampCamera({ yaw: 0.26, pitch: 0.54, zoom: 2.35, panX: 700, panY: -450 });
+  assert.equal(clampedZoomed.zoom, 2.35);
+  assert.equal(clampedZoomed.panX, 700, 'zoomed camera expands panX range up to zoom-scaled bound');
+  assert.equal(clampedZoomed.panY, -450, 'zoomed camera expands panY range up to zoom-scaled bound');
+
   const clampedLow = skyline.clampCamera({ yaw: -Math.PI * 2.5, pitch: 0.01, zoom: 9 });
   assert.ok(clampedLow.yaw <= Math.PI && clampedLow.yaw >= -Math.PI);
   assert.equal(clampedLow.pitch, 0.22);
@@ -110,4 +115,133 @@ test('hitTestPolygons returns the topmost painted tower when overlapping', () =>
   assert.equal(skyline.hitTestPolygons(125, 125, painted)?.date, '2026-10-08');
   assert.equal(skyline.hitTestPolygons(104, 104, painted)?.date, '2026-10-01');
   assert.equal(skyline.hitTestPolygons(10, 10, painted), null);
+});
+
+test('createSkylineController pans on zoomed wheel, horizontal/shift wheel, and middle-drag without trapping default vertical scroll', () => {
+  const origRaf = global.requestAnimationFrame;
+  const origCancelRaf = global.cancelAnimationFrame;
+  global.requestAnimationFrame = () => 1;
+  global.cancelAnimationFrame = () => {};
+
+  try {
+    const listeners = new Map();
+    const classSet = new Set();
+    const grad = { addColorStop() {} };
+    const ctxStub = {
+      setTransform() {},
+      clearRect() {},
+      beginPath() {},
+      moveTo() {},
+      lineTo() {},
+      closePath() {},
+      fill() {},
+      stroke() {},
+      save() {},
+      restore() {},
+      clip() {},
+      fillText() {},
+      createLinearGradient: () => grad
+    };
+    const canvasStub = {
+      className: '',
+      width: 800,
+      height: 320,
+      setAttribute() {},
+      getContext: () => ctxStub,
+      getBoundingClientRect: () => ({ left: 0, top: 0, width: 800, height: 320 }),
+      setPointerCapture() {},
+      releasePointerCapture() {},
+      addEventListener(type, fn) { listeners.set(type, fn); },
+      removeEventListener(type) { listeners.delete(type); }
+    };
+    const hostEl = {
+      clientWidth: 800,
+      clientHeight: 320,
+      classList: {
+        toggle(cls, force) { if (force) classSet.add(cls); else classSet.delete(cls); },
+        remove(...clsList) { for (const c of clsList) classSet.delete(c); }
+      },
+      ownerDocument: {
+        documentElement: {},
+        defaultView: { devicePixelRatio: 1, getComputedStyle: () => ({ fontFamily: 'sans-serif', getPropertyValue: () => '' }) },
+        createElement: () => canvasStub
+      },
+      replaceChildren() {}
+    };
+
+    let interacts = 0;
+    const hoverEvents = [];
+    const ctrl = skyline.createSkylineController(hostEl, {
+      onInteract: () => { interacts += 1; },
+      onHover: (hit) => { hoverEvents.push(hit); }
+    });
+    ctrl.setData({ cells: [{ date: '2026-11-26', col: 0, row: 3, tokens: 100, cost: 1, intensity: 2 }], weeks: 1, reducedMotion: true });
+
+    const wheel = listeners.get('wheel');
+    const pointerdown = listeners.get('pointerdown');
+    const pointermove = listeners.get('pointermove');
+    const pointerup = listeners.get('pointerup');
+    const mousedown = listeners.get('mousedown');
+
+    // Hover the center tower first so we verify Ctrl-wheel zoom clears stale tooltip/hover state
+    const vp = { width: 800, height: 320 };
+    const projected = skyline.projectPoint(0, 0.2, 0, ctrl.getState().camera, vp);
+    pointermove({ clientX: projected.x, clientY: projected.y });
+    assert.equal(ctrl.getState().hoveredDate, '2026-11-26');
+    assert.ok(hoverEvents.at(-1)?.cell?.date === '2026-11-26');
+
+    // Ctrl+wheel zoom must clear hoveredDate and emit null hover immediately
+    let zoomClearedHover = false;
+    wheel({ deltaX: 0, deltaY: -40, deltaMode: 0, ctrlKey: true, metaKey: false, shiftKey: false, preventDefault() { zoomClearedHover = true; } });
+    assert.equal(zoomClearedHover, true);
+    assert.equal(ctrl.getState().hoveredDate, '', 'zoom must clear hovered tower state');
+    assert.equal(hoverEvents.at(-1), null, 'zoom must clear open hover tooltip');
+    ctrl.setPreset('iso');
+
+    // 1. Default 1x vertical wheel lets parent page scroll
+    let prevented = false;
+    wheel({ deltaX: 0, deltaY: 80, deltaMode: 0, ctrlKey: false, metaKey: false, shiftKey: false, preventDefault() { prevented = true; } });
+    assert.equal(prevented, false, 'default 1x vertical scroll must not prevent page scrolling');
+
+    // 2. Horizontal trackpad swipe and Shift+wheel pan horizontally at 1x zoom
+    prevented = false;
+    wheel({ deltaX: 60, deltaY: 0, deltaMode: 0, ctrlKey: false, metaKey: false, shiftKey: false, preventDefault() { prevented = true; } });
+    assert.equal(prevented, true);
+    assert.equal(ctrl.getState().camera.panX, -60);
+
+    prevented = false;
+    wheel({ deltaX: 0, deltaY: 40, deltaMode: 0, ctrlKey: false, metaKey: false, shiftKey: true, preventDefault() { prevented = true; } });
+    assert.equal(prevented, true);
+    assert.equal(ctrl.getState().camera.panX, -100);
+
+    // 3. Ctrl+wheel zooms in, and subsequent plain wheel pans both X and Y across expanded bounds
+    prevented = false;
+    wheel({ deltaX: 0, deltaY: -120, deltaMode: 0, ctrlKey: true, metaKey: false, shiftKey: false, preventDefault() { prevented = true; } });
+    assert.equal(prevented, true);
+    assert.ok(ctrl.getState().camera.zoom > 1.02);
+
+    prevented = false;
+    wheel({ deltaX: -50, deltaY: 90, deltaMode: 0, ctrlKey: false, metaKey: false, shiftKey: false, preventDefault() { prevented = true; } });
+    assert.equal(prevented, true);
+    assert.equal(ctrl.getState().camera.panX, -50);
+    assert.equal(ctrl.getState().camera.panY, -90);
+
+    // 4. Middle-mouse press prevents Chromium autoscroll and drags to pan
+    let middlePrevented = false;
+    mousedown({ button: 1, preventDefault() { middlePrevented = true; } });
+    assert.equal(middlePrevented, true);
+    let pointerMidPrevented = false;
+    pointerdown({ button: 1, shiftKey: false, clientX: 200, clientY: 150, pointerId: 1, preventDefault() { pointerMidPrevented = true; } });
+    assert.equal(pointerMidPrevented, true);
+    assert.equal(classSet.has('is-panning'), true);
+    pointermove({ clientX: 280, clientY: 180 });
+    pointerup({ pointerId: 1 });
+    assert.equal(ctrl.getState().camera.panX, 30);
+    assert.equal(ctrl.getState().camera.panY, -60);
+    assert.ok(interacts > 0);
+    ctrl.destroy();
+  } finally {
+    global.requestAnimationFrame = origRaf;
+    global.cancelAnimationFrame = origCancelRaf;
+  }
 });

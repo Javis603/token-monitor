@@ -17,12 +17,16 @@
     isNode ? require('../../shared/clientCatalog') : win?.TokenMonitorClientCatalog,
     isNode ? require('./fixedPeriodRanges') : win?.TokenMonitorFixedPeriodRanges,
     isNode ? require('../../shared/limits/providers') : win?.TokenMonitorLimitProviders,
+    isNode ? require('../../shared/limits/usageItems') : win?.TokenMonitorLimitUsageItems,
+    isNode ? require('./limits/providerOrder') : win?.TokenMonitorLimitProviderOrder,
     isNode ? require('./tokenRatePresentation') : win?.TokenMonitorTokenRate,
-    isNode ? require('./accountIdentity') : win?.TokenMonitorAccountIdentity
+    isNode ? require('./accountIdentity') : win?.TokenMonitorAccountIdentity,
+    isNode ? require('./sessionRows') : win?.TokenMonitorSessionRows,
+    isNode ? require('../../shared/providers/reasonix/sessionGuard') : win?.TokenMonitorReasonixSessionGuard
   );
   if (isNode) module.exports = api;
   if (win) win.TokenMonitorDashboardModel = api;
-})(typeof window !== 'undefined' ? window : null, /** @param {any} usageCharts @param {any} vendorPresentation @param {any} deviceKindApi @param {any} deviceBreakdown @param {any} projectRowsApi @param {any} homeOverviewApi @param {any} balanceDisplay @param {any} sessionLive @param {any} clientCatalog @param {any} fixedPeriodRanges @param {any} limitProvidersApi @param {any} tokenRateApi @param {any} accountIdentityApi */ function createDashboardModelApi(
+})(typeof window !== 'undefined' ? window : null, /** @param {any} usageCharts @param {any} vendorPresentation @param {any} deviceKindApi @param {any} deviceBreakdown @param {any} projectRowsApi @param {any} homeOverviewApi @param {any} balanceDisplay @param {any} sessionLive @param {any} clientCatalog @param {any} fixedPeriodRanges @param {any} limitProvidersApi @param {any} limitUsageItemsApi @param {any} limitProviderOrderApi @param {any} tokenRateApi @param {any} accountIdentityApi @param {any} sessionRowsApi @param {any} reasonixSessionGuard */ function createDashboardModelApi(
   usageCharts,
   vendorPresentation,
   deviceKindApi,
@@ -34,8 +38,12 @@
   clientCatalog,
   fixedPeriodRanges,
   limitProvidersApi,
+  limitUsageItemsApi,
+  limitProviderOrderApi,
   tokenRateApi,
-  accountIdentityApi
+  accountIdentityApi,
+  sessionRowsApi,
+  reasonixSessionGuard
 ) {
   /** @param {unknown} value */
   function n(value) {
@@ -74,6 +82,47 @@
   }
 
   /**
+   * Returns true when the active snapshot/source represents a multi-device or Hub-synced view
+   * rather than local single-device mode.
+   *
+   * @param {any} stats
+   * @param {any} [settings]
+   * @param {string} [statsMode]
+   */
+  function isSyncedStatsContext(stats, settings, statsMode = '') {
+    const devices = Array.isArray(stats?.devices) ? stats.devices : [];
+    const localId = String(stats?.localDeviceId || settings?.deviceId || '').trim();
+    if (devices.length > 1) return true;
+    if (devices.length === 1) {
+      const onlyId = String(devices[0]?.deviceId || devices[0]?.id || '').trim();
+      if (onlyId && (!localId || onlyId !== localId)) return true;
+    }
+    const activeMode = String(stats?.mode || statsMode || '').trim();
+    if (activeMode === 'local') return false;
+    if (activeMode === 'sync') return true;
+    const hubMode = String(settings?.hubMode || '').trim();
+    if (hubMode === 'local') return false;
+    if (hubMode === 'client' || hubMode === 'host' || hubMode === 'icloud') return true;
+    return Boolean(String(settings?.hubUrl || '').trim());
+  }
+
+  /**
+   * Single ownership rule shared by fleet summaries, session rows, and topology attribution.
+   *
+   * @param {any} session
+   * @param {{ isNativeLocal?: boolean, localId?: string, synced?: boolean }} [options]
+   */
+  function resolveOwnedSessionDeviceId(session, options = {}) {
+    if (session?.sourceDevice?.ambiguous === true) return '';
+    const explicitId = String(session?.sourceDevice?.deviceId || '').trim();
+    if (explicitId) return explicitId;
+    if (session?.sourceDevice) return '';
+    const localId = String(options.localId || '').trim();
+    if ((options.isNativeLocal === true || options.synced !== true) && localId) return localId;
+    return '';
+  }
+
+  /**
    * Collects deduplicated session entries for `periodKey` with `sessionWithActivity` applied,
    * plus still-active (`running` / `waiting`) cross-day sessions from `month` / `allTime`
    * when viewing `today` (with today accounting zeroed out).
@@ -83,11 +132,11 @@
    * @param {any} aggregatePeriod
    * @param {number} nowMs
    * @param {{ includeNative?: boolean }} [options]
-   * @returns {Array<[string, any]>}
+   * @returns {Array<[string, any, boolean, string]>}
    */
   function collectPeriodSessionEntries(stats, periodKey, aggregatePeriod, nowMs, options = {}) {
     const includeNative = options.includeNative !== false;
-    /** @type {Array<[string, any]>} */
+    /** @type {Array<[string, any, boolean, string]>} */
     const collected = [];
     const seen = new Set();
 
@@ -100,15 +149,17 @@
 
     for (const [key, rawSession] of Object.entries(aggregatePeriod?.sessions || {})) {
       if (!rawSession || typeof rawSession !== 'object' || seen.has(key)) continue;
+      if (reasonixSessionGuard?.isReasonixSyntheticSession?.(rawSession, key)) continue;
       seen.add(key);
-      collected.push([key, resolveSession(key, rawSession, aggregatePeriod)]);
+      collected.push([key, resolveSession(key, rawSession, aggregatePeriod), false, periodKey]);
     }
 
     if (includeNative) {
       for (const [key, rawSession] of Object.entries(stats?.nativeSessions?.[periodKey] || {})) {
         if (!rawSession || typeof rawSession !== 'object' || seen.has(key)) continue;
+        if (reasonixSessionGuard?.isReasonixSyntheticSession?.(rawSession, key)) continue;
         seen.add(key);
-        collected.push([key, resolveSession(key, rawSession, aggregatePeriod)]);
+        collected.push([key, resolveSession(key, rawSession, aggregatePeriod), true, periodKey]);
       }
     }
 
@@ -118,6 +169,7 @@
         if (!retainedPeriod || typeof retainedPeriod !== 'object') continue;
         for (const [key, rawSession] of Object.entries(retainedPeriod.sessions || {})) {
           if (!rawSession || typeof rawSession !== 'object' || seen.has(key)) continue;
+          if (reasonixSessionGuard?.isReasonixSyntheticSession?.(rawSession, key)) continue;
           if (rawSession.sessionKind === 'background-review') continue;
           const resolved = resolveSession(key, rawSession, retainedPeriod);
           const activityState = sessionLive?.sessionActivityState?.(resolved, nowMs) || 'idle';
@@ -131,7 +183,9 @@
               costUsd: 0,
               unpricedTokens: 0,
               resumedFromPriorPeriod: true
-            }
+            },
+            false,
+            fallbackKey
           ]);
         }
       }
@@ -301,6 +355,7 @@
    *   periodKey?: string,
    *   liveRatesByDevice?: Record<string, number>,
    *   settings?: any,
+   *   statsMode?: string,
    *   nowMs?: number
    * }} options
    */
@@ -309,6 +364,7 @@
     const history = options.history || null;
     const periodKey = options.periodKey || 'today';
     const settings = options.settings || {};
+    const synced = isSyncedStatsContext(stats, settings, options.statsMode);
     const nowMs = Number.isFinite(Number(options.nowMs)) ? Number(options.nowMs) : Date.now();
     const liveRatesByDevice = options.liveRatesByDevice || {};
 
@@ -329,15 +385,20 @@
     const ids = new Set([...deviceMap.keys(), ...historyMap.keys()]);
     const localId = String(stats?.localDeviceId || settings?.deviceId || '').trim();
 
-    const livePeriod = stats?.periods?.[periodKey] || stats?.periods?.today || stats?.periods?.month || null;
+    const livePeriod = stats?.periods?.[periodKey] || null;
     /** @type {Map<string, any[]>} */
     const sessionsByDevice = new Map();
-    for (const [, session] of collectPeriodSessionEntries(stats, periodKey, livePeriod, nowMs, { includeNative: true })) {
-      const devId = String(session?.sourceDevice?.deviceId || (!session?.sourceDevice && localId ? localId : '')).trim();
-      if (!devId) continue;
-      const list = sessionsByDevice.get(devId) || [];
-      list.push(session);
-      sessionsByDevice.set(devId, list);
+    for (const deviceId of ids) {
+      const scoped = buildSessionList({
+        stats,
+        periodData: livePeriod,
+        periodKey,
+        selectedDeviceId: deviceId,
+        settings,
+        statsMode: options.statsMode,
+        nowMs
+      });
+      if (scoped.length > 0) sessionsByDevice.set(deviceId, scoped);
     }
 
     const machinesRaw = Array.from(ids).map((deviceId) => {
@@ -356,9 +417,9 @@
       let newestTs = 0;
 
       for (const s of devSessions) {
-        const state = sessionLive?.sessionActivityState?.(s, nowMs) || 'idle';
+        const state = s?.activityState || sessionLive?.sessionActivityState?.(s, nowMs) || 'idle';
         if (state === 'running' || state === 'waiting') runningCount += 1;
-        const ts = Date.parse(String(s?.lastUsedAt || s?.updatedAt || '')) || 0;
+        const ts = n(s?.sortTime) || Date.parse(String(s?.lastUsedAt || s?.updatedAt || '')) || 0;
         const label = String(s?.projectLabel || s?.title || '').trim();
         if (label && (ts >= newestTs || !activeWorkspace)) {
           newestTs = ts;
@@ -389,7 +450,11 @@
         name: deviceBreakdown?.deviceLabel?.(mergedDevice) || deviceId,
         platformLabel: deviceBreakdown?.devicePlatformLabel?.(mergedDevice.platform, mergedDevice.osName, mergedDevice.osVersion) || '',
         deviceKind: iconKind,
-        isLocal: Boolean((localId && deviceId === localId) || ids.size === 1 || mergedDevice.isLocal === true),
+        isLocal: Boolean(
+          (localId && deviceId === localId)
+          || mergedDevice.isLocal === true
+          || (!synced && !localId && ids.size === 1)
+        ),
         stale: mergedDevice.stale === true,
         online: mergedDevice.stale !== true && ids.size > 0,
         updatedAt: mergedDevice.updatedAt || '',
@@ -529,6 +594,46 @@
   }
 
   /**
+   * Computes Token Anatomy from a `session:getDetail` IPC payload (`totals` + `exchanges[].tokens`).
+   * In `sessionDetail.js`, each exchange's `tokens.input` is already uncached prompt input
+   * (excluding `cacheRead` and `cacheWrite`).
+   *
+   * @param {any} detail
+   */
+  function computeSessionDetailAnatomy(detail) {
+    if (!detail || detail.found !== true) return computeTokenAnatomy(null);
+    const exchanges = Array.isArray(detail.exchanges) ? detail.exchanges : [];
+    let uncachedInput = 0;
+    let outputTokens = 0;
+    let cacheReadTokens = 0;
+    let cacheWriteTokens = 0;
+    let exchangeTotal = 0;
+    for (const ex of exchanges) {
+      const tok = ex?.tokens;
+      if (!tok || typeof tok !== 'object') continue;
+      uncachedInput += Math.max(0, n(tok.input));
+      outputTokens += Math.max(0, n(tok.output));
+      cacheReadTokens += Math.max(0, n(tok.cacheRead));
+      cacheWriteTokens += Math.max(0, n(tok.cacheWrite));
+      exchangeTotal += Math.max(0, n(tok.total));
+    }
+    const componentSum = uncachedInput + outputTokens + cacheReadTokens + cacheWriteTokens;
+    const totalTokens = Math.max(exchangeTotal, Math.max(0, n(detail.totals?.totalTokens)));
+    if (componentSum === 0 && totalTokens > 0) {
+      return computeTokenAnatomy({ totalTokens, unclassifiedTokens: totalTokens });
+    }
+    const normalizedTotal = Math.max(totalTokens, componentSum);
+    return computeTokenAnatomy({
+      totalTokens: normalizedTotal,
+      inputTokens: uncachedInput + cacheReadTokens + cacheWriteTokens,
+      outputTokens,
+      cacheReadTokens,
+      cacheWriteTokens,
+      unclassifiedTokens: Math.max(0, normalizedTotal - componentSum)
+    });
+  }
+
+  /**
    * Builds ranked tool (client) breakdown rows for a period (or daily series fallback).
    *
    * @param {any} periodData
@@ -656,16 +761,33 @@
    * @param {number} [nowMs]
    */
   function buildQuotaAccounts(stats, settings, nowMs = Date.now()) {
+    if (settings?.limitsEnabled === false) return [];
     const providers = stats?.limits?.providers;
     if (!Array.isArray(providers) || providers.length === 0) return [];
     const catalog = limitProvidersApi?.LIMIT_PROVIDER_CATALOG || [];
     const showUsed = Boolean(settings?.showLimitUsed);
 
-    const enabled = settings?.limitsEnabled === false
-      ? []
-      : Array.isArray(settings?.limitProviders) && settings.limitProviders.length > 0
-        ? settings.limitProviders
-        : catalog.map(/** @param {any} p */ (p) => p.id);
+    const providerOptions = catalog.length > 0
+      ? catalog.map((/** @type {any} */ p) => ({ id: String(p.id || '').toLowerCase(), label: p.label }))
+      : providers.map((/** @type {any} */ p) => ({ id: String(p.provider || '').toLowerCase(), label: p.provider }));
+    const knownOptionIds = new Set(providerOptions.map((/** @type {any} */ opt) => opt.id));
+    for (const p of providers) {
+      const pid = String(p?.provider || '').trim().toLowerCase();
+      if (pid && !knownOptionIds.has(pid)) {
+        knownOptionIds.add(pid);
+        providerOptions.push({ id: pid, label: p.provider });
+      }
+    }
+
+    const hasExplicitSelection = settings?.limitProviders !== undefined && settings?.limitProviders !== null;
+    const enabled = hasExplicitSelection
+      ? (limitProviderOrderApi?.normalizeLimitProviderSelection
+          ? limitProviderOrderApi.normalizeLimitProviderSelection(settings.limitProviders, providerOptions)
+          : (Array.isArray(settings.limitProviders)
+              ? settings.limitProviders
+              : String(settings.limitProviders || '').split(',').map((/** @type {string} */ s) => s.trim().toLowerCase()).filter(Boolean)))
+      : providerOptions.map(/** @param {any} p */ (p) => p.id);
+    if (enabled.length === 0) return [];
 
     const colors = { ...(usageCharts?.clientColors || {}), factory: usageCharts?.clientColors?.droid || '#888888' };
     const maskEmail = settings?.maskLimitAccountEmails === true;
@@ -677,19 +799,16 @@
       return label.replace(/^[a-z]/, (letter) => letter.toUpperCase());
     };
     /** @param {string} providerId @param {any} win */
-    const isWindowHidden = (providerId, win) => {
-      const hidden = settings?.limitProviderHiddenItems?.[providerId];
-      if (!Array.isArray(hidden)) return false;
-      const winId = String(win?.id || win?.kind || win?.label || '').toLowerCase();
-      return hidden.includes(winId);
-    };
+    const isWindowHidden = (providerId, win) => (
+      limitUsageItemsApi?.isLimitWindowHidden
+        ? limitUsageItemsApi.isLimitWindowHidden(settings?.limitProviderHiddenItems, providerId, win)
+        : false
+    );
 
     const accounts = homeOverviewApi?.homeLimitAccountsForProviders
       ? homeOverviewApi.homeLimitAccountsForProviders({
           providers,
-          providerOptions: catalog.length > 0
-            ? catalog
-            : providers.map((/** @type {any} */ p) => ({ id: p.provider, label: p.provider })),
+          providerOptions,
           enabledProviderIds: enabled,
           colors,
           limit: 24,
@@ -723,6 +842,8 @@
       const windows = rawWindows.map(/** @param {any} win */ (win) => {
         const isCredits = balanceDisplay ? balanceDisplay.isCreditsWindow(win) : win.metric === 'credits';
         const remainingPct = win.remainingPercent == null ? null : Math.max(0, Math.min(100, Number(win.remainingPercent)));
+        const showMeter = win.showMeter !== false && remainingPct != null;
+        const planStatus = String(win.planStatus || '');
         const usedPct = remainingPct == null ? null : 100 - remainingPct;
         const fillPct = remainingPct == null
           ? 0
@@ -741,6 +862,8 @@
           ...win,
           isCredits,
           showUsed,
+          showMeter,
+          planStatus,
           remainingPercent: remainingPct,
           fillPercent: fillPct,
           pacePercent: pacePct,
@@ -767,6 +890,15 @@
    *   periodKey?: string,
    *   selectedDeviceId?: string,
    *   settings?: any,
+   *   statsMode?: string,
+   *   labels?: {
+   *     subagent?: string,
+   *     subagentCount?: (count: number) => string,
+   *     backgroundReviews?: string,
+   *     backgroundReviewCount?: (count: number) => string,
+   *     grokBot?: string,
+   *     grokBotCount?: (count: number) => string
+   *   },
    *   nowMs?: number
    * }} options
    */
@@ -774,15 +906,14 @@
     const stats = options.stats || null;
     const periodKey = options.periodKey || 'today';
     const selectedDeviceId = options.selectedDeviceId || 'all';
+    const labels = options.labels || {};
+    const titlesHidden = options.settings?.sessionTitlesEnabled === false;
     const nowMs = Number.isFinite(Number(options.nowMs)) ? Number(options.nowMs) : Date.now();
     const showContextUsed = options.settings?.sessionContextMetric !== 'remaining';
 
     const aggregatePeriod = stats?.periods?.[periodKey]
-      || options.periodData
-      || stats?.periods?.today
-      || stats?.periods?.month
-      || null;
-    const localId = String(stats?.localDeviceId || '').trim();
+      || (options.periodData && options.periodData.derivedFromHistory !== true ? options.periodData : null);
+    const localId = String(stats?.localDeviceId || options.settings?.deviceId || '').trim();
     const includeNative = selectedDeviceId === 'all' || (Boolean(localId) && selectedDeviceId === localId);
     const collectedSessions = collectPeriodSessionEntries(stats, periodKey, aggregatePeriod, nowMs, { includeNative });
 
@@ -802,13 +933,32 @@
       });
     }
 
+    const synced = isSyncedStatsContext(stats, options.settings, options.statsMode);
+    const isGrokBotFn = sessionRowsApi?.isGrokBotSession || sessionLive?.isGrokBotSession;
+    const periodSessionMap = Object.fromEntries(collectedSessions.map(([k, s]) => [k, s]));
+    const botIdSet = new Set(
+      Array.isArray(stats?.grokBotSessionIds)
+        ? stats.grokBotSessionIds
+        : (sessionRowsApi?.grokBotSessionIdsForMaps
+            ? sessionRowsApi.grokBotSessionIdsForMaps(
+                [periodSessionMap],
+                Object.values(stats?.periods || {}).map((p) => p?.sessions)
+              )
+            : [])
+    );
+
     /** @type {any[]} */
-    const entries = [];
-    for (const [key, session] of collectedSessions) {
-      const devId = String(session?.sourceDevice?.deviceId || (!session?.sourceDevice && localId ? localId : '')).trim();
+    const rawEntries = [];
+    /** @type {Map<string, any>} */
+    const rawEntryByKey = new Map();
+    /** @type {any[]} */
+    const groupInputs = [];
+    for (const [key, session, isNativeLocal, sourcePeriodKey] of collectedSessions) {
+      const devId = resolveOwnedSessionDeviceId(session, { isNativeLocal, localId, synced });
       if (selectedDeviceId !== 'all' && devId !== selectedDeviceId) continue;
 
-      const client = canonicalClientKey(session.client || key.split(':')[0] || '');
+      const rawClient = String(session.client || key.split(':')[0] || '').trim();
+      const client = canonicalClientKey(rawClient);
       const activityState = sessionLive?.sessionActivityState?.(session, nowMs) || 'idle';
       const context = activityState !== 'idle'
         ? (session.context || sessionLive?.sessionContextForRow?.(session, nowMs) || null)
@@ -816,30 +966,62 @@
       const promptCache = sessionLive?.sessionPromptCacheForRow?.(session, nowMs) || null;
       const isActive = activityState === 'running' || activityState === 'waiting';
       const ts = Date.parse(String(session.lastUsedAt || session.updatedAt || '')) || 0;
-      const latestModel = String(session.latestModel || Object.keys(session.models || {})[0] || '');
-      const title = String(session.title || session.name || session.projectLabel || session.sessionId || key).trim();
+      const models = session.models || (session.model ? { [session.model]: n(session.totalTokens) } : {});
+      const latestModel = String(session.latestModel || Object.keys(models)[0] || '');
+      const modelLabel = sessionRowsApi?.sessionModelLabel
+        ? sessionRowsApi.sessionModelLabel({ client, models, latestModel })
+        : latestModel;
+      const rawTitle = titlesHidden
+        ? ''
+        : String(sessionRowsApi?.sessionTitleForDisplay?.(session) || session.title || session.name || '').trim();
+      const titled = Boolean(rawTitle);
+      const projectLabel = String(session.projectLabel || '').trim();
+      const rawSessionId = String(session.sessionId || '').trim()
+        || (key.startsWith(`${rawClient}:`) ? key.slice(rawClient.length + 1) : (key.startsWith(`${client}:`) ? key.slice(client.length + 1) : key));
+      const sessionId = session.sessionId || key;
+      const title = rawTitle || projectLabel || sessionId;
       const matchedDevice = devId ? deviceLookup.get(devId) : null;
       const rawSrcKind = session?.sourceDevice?.deviceKind ? deviceKindApi?.normalizeDeviceKind?.(session.sourceDevice.deviceKind) : '';
       const deviceKind = matchedDevice?.deviceKind || (rawSrcKind === 'computer' ? 'desktop' : rawSrcKind) || '';
       const deviceName = matchedDevice?.name || String(session?.sourceDevice?.name || '').trim();
       const isLocalDevice = Boolean(matchedDevice?.isLocal || (stats?.localDeviceId && devId && devId === stats.localDeviceId));
 
-      entries.push({
+      const clientLabel = session.clientLabel || clientDisplayLabel(client);
+      const color = clientColor(client);
+      const archived = sessionLive?.isArchivedSession?.(session) === true;
+      const backgroundReview = String(session.sessionKind || '').trim() === 'background-review';
+      const parentSessionId = String(session.parentSessionId || '').trim();
+      const rawParentClient = String(session.parentClient || rawClient).trim();
+      const parentClient = canonicalClientKey(rawParentClient);
+      const subagent = Boolean(parentSessionId)
+        && (parentClient !== client || parentSessionId !== rawSessionId)
+        && !backgroundReview;
+      const grokBot = client === 'cursor'
+        && (Boolean(isGrokBotFn?.(session, key)) || botIdSet.has(rawSessionId));
+      const reasoningEffort = sessionLive?.isSessionReasoningEffortClient?.(client)
+        ? sessionLive?.normalizeReasoningEffort?.(session.reasoningEffort)
+        : null;
+
+      const rawEntry = {
         key,
-        sessionId: session.sessionId || key,
+        sessionId,
         client,
-        clientLabel: session.clientLabel || clientDisplayLabel(client),
-        color: clientColor(client),
+        clientLabel,
+        color,
         iconClass: hasBrandMask(client) ? `row-icon-${client}` : '',
         title,
-        projectLabel: String(session.projectLabel || '').trim(),
+        titled,
+        projectLabel,
         latestModel,
+        modelLabel,
+        models,
+        reasoningEffort,
         totalTokens: Math.max(0, n(session.totalTokens)),
         costUsd: Math.max(0, n(session.costUsd)),
         unpricedTokens: Math.max(0, n(session.unpricedTokens)),
         activityState,
         isActive,
-        archived: sessionLive?.isArchivedSession?.(session) === true,
+        archived,
         resumedFromPriorPeriod: session.resumedFromPriorPeriod === true,
         context: context ? {
           ...context,
@@ -847,14 +1029,210 @@
         } : null,
         promptCache,
         subagentCount: Math.max(0, n(session.subagentCount)),
+        isSubagent: subagent,
+        backgroundReview,
+        grokBot,
+        groupCount: 0,
+        groupKind: '',
+        groupDetail: '',
+        sessionGroup: '',
+        subagentGroup: false,
+        groupRows: null,
         sourceDevice: session.sourceDevice || null,
         deviceName,
         deviceKind,
         isLocalDevice,
+        isNativeLocal: Boolean(isNativeLocal),
+        sourcePeriodKey: String(sourcePeriodKey || periodKey),
+        snapshotId: stats?.snapshot?.id ?? null,
+        snapshotSource: stats?.snapshot?.source ?? null,
         lastUsedAt: session.lastUsedAt || session.updatedAt || '',
         sortTime: ts,
         raw: session
+      };
+
+      rawEntries.push(rawEntry);
+      const rowKey = `session:${key}`;
+      rawEntryByKey.set(rowKey, rawEntry);
+      groupInputs.push({
+        key: rowKey,
+        kind: 'session',
+        client,
+        clientLabel,
+        nativeSessionId: String(session.nativeSessionId || '').trim(),
+        t3ThreadId: String(session.t3ThreadId || '').trim(),
+        name: titled ? rawTitle : [clientLabel, modelLabel, reasoningEffort].filter(Boolean).join(' · '),
+        titled,
+        projectLabel,
+        latestModel: latestModel || undefined,
+        reasoningEffort: reasoningEffort || undefined,
+        modelTokens: models,
+        value: rawEntry.totalTokens,
+        cost: rawEntry.costUsd,
+        ...(rawEntry.unpricedTokens > 0 ? { unpricedTokens: rawEntry.unpricedTokens } : {}),
+        tokenDataUnavailable: session.tokenDataUnavailable === true,
+        backgroundReview: backgroundReview || undefined,
+        subagent: subagent || undefined,
+        subagentLabel: subagent ? (labels.subagent || 'Subagent') : undefined,
+        parentKey: subagent ? `session:${rawParentClient}:${parentSessionId}` : undefined,
+        rawParentKey: subagent ? `session:${rawParentClient}:${parentSessionId}` : undefined,
+        canonicalParentKey: subagent ? `session:${parentClient}:${parentSessionId}` : undefined,
+        grokBot: grokBot || undefined,
+        activityState,
+        running: activityState === 'running' || undefined,
+        archived: archived || undefined,
+        color,
+        sourceDevice: session.sourceDevice || null,
+        sortTime: ts
       });
+    }
+
+    for (const item of groupInputs) {
+      if (!item.subagent || !item.rawParentKey) continue;
+      item.parentKey = rawEntryByKey.has(item.rawParentKey)
+        ? item.rawParentKey
+        : (item.canonicalParentKey && rawEntryByKey.has(item.canonicalParentKey) ? item.canonicalParentKey : item.rawParentKey);
+      delete item.rawParentKey;
+      delete item.canonicalParentKey;
+    }
+
+    /** @type {any[]} */
+    let entries;
+    if (sessionRowsApi?.groupSessionRows && groupInputs.length > 0) {
+      const groupedRows = sessionRowsApi.groupSessionRows(groupInputs, {
+        sortBy: 'recent',
+        subagents: {
+          countLabel: typeof labels.subagentCount === 'function' ? labels.subagentCount : undefined,
+          includeModelTooltip: false
+        },
+        backgroundReviews: {
+          label: labels.backgroundReviews || 'Codex Auto Review',
+          countLabel: typeof labels.backgroundReviewCount === 'function' ? labels.backgroundReviewCount : undefined
+        },
+        grokBot: {
+          label: labels.grokBot || 'Grok Bot',
+          countLabel: typeof labels.grokBotCount === 'function' ? labels.grokBotCount : undefined
+        }
+      });
+      entries = groupedRows.map((/** @type {any} */ grouped) => {
+        if (!grouped?.sessionGroup) {
+          return rawEntryByKey.get(grouped?.key) || null;
+        }
+        const members = (grouped.groupRows || [])
+          .map((/** @type {any} */ row) => {
+            const base = rawEntryByKey.get(row.key);
+            return base ? { ...base, groupRole: row.groupRole || 'member' } : null;
+          })
+          .filter(Boolean);
+        const mainMember = members[0];
+        if (!mainMember) return null;
+        const isSubagentGroup = grouped.subagentGroup === true;
+        /** @type {Record<string, number>} */
+        const aggModels = {};
+        for (const member of members) {
+          for (const [mKey, mVal] of Object.entries(member.models || {})) {
+            aggModels[mKey] = (aggModels[mKey] || 0) + Math.max(0, n(mVal));
+          }
+        }
+        const groupModelLabel = String(
+          grouped.modelLabel
+          || (sessionRowsApi?.sessionModelLabel ? sessionRowsApi.sessionModelLabel({
+            client: grouped.client || mainMember.client,
+            models: aggModels,
+            latestModel: mainMember.latestModel
+          }) : '')
+          || mainMember.modelLabel
+          || ''
+        );
+        const distinctProjects = new Set(
+          members.map((/** @type {any} */ m) => m.projectLabel).filter(Boolean)
+        );
+        const groupProjectLabel = isSubagentGroup
+          ? (mainMember.projectLabel || members.find((/** @type {any} */ m) => m.projectLabel)?.projectLabel || '')
+          : (distinctProjects.size === 1 ? Array.from(distinctProjects)[0] : '');
+
+        let groupSourceDevice = null;
+        let groupDeviceName = '';
+        let groupDeviceKind = '';
+        let groupIsLocalDevice = false;
+        let groupIsNativeLocal = false;
+        const groupSourcePeriodKey = mainMember.sourcePeriodKey || periodKey;
+        const groupResumedFromPriorPeriod = isSubagentGroup
+          && Boolean(mainMember.resumedFromPriorPeriod)
+          && members.every((/** @type {any} */ m) => m.resumedFromPriorPeriod === true);
+        const devIds = members.map((/** @type {any} */ m) => resolveOwnedSessionDeviceId(m, {
+          isNativeLocal: m.isNativeLocal,
+          localId,
+          synced
+        }));
+        const uniqueDevIds = new Set(devIds);
+        if (uniqueDevIds.size === 1 && devIds[0]) {
+          groupSourceDevice = mainMember.sourceDevice || null;
+          groupDeviceName = mainMember.deviceName || '';
+          groupDeviceKind = mainMember.deviceKind || '';
+          groupIsLocalDevice = Boolean(mainMember.isLocalDevice);
+          groupIsNativeLocal = Boolean(mainMember.isNativeLocal);
+        }
+
+        const aggActivityState = ['running', 'waiting'].find((st) => members.some((/** @type {any} */ m) => m.activityState === st))
+          || mainMember.activityState
+          || 'idle';
+        const groupSortTime = members.reduce((/** @type {number} */ mx, /** @type {any} */ m) => Math.max(mx, n(m.sortTime)), 0);
+        const groupLastUsedAt = groupSortTime > 0
+          ? new Date(groupSortTime).toISOString()
+          : (mainMember.lastUsedAt || '');
+        const groupKind = isSubagentGroup
+          ? 'subagents'
+          : (grouped.sessionGroup === 'cursor-grok-bot' ? 'grok-bot' : 'background-review');
+
+        return {
+          key: grouped.key,
+          sessionId: isSubagentGroup ? mainMember.sessionId : grouped.sessionGroup,
+          client: mainMember.client,
+          clientLabel: mainMember.clientLabel,
+          color: mainMember.color,
+          iconClass: mainMember.iconClass,
+          title: isSubagentGroup ? (mainMember.title || String(grouped.name || '')) : String(grouped.name || ''),
+          titled: isSubagentGroup ? Boolean(mainMember.titled) : true,
+          projectLabel: groupProjectLabel,
+          latestModel: mainMember.latestModel,
+          modelLabel: groupModelLabel,
+          models: aggModels,
+          reasoningEffort: isSubagentGroup ? mainMember.reasoningEffort : null,
+          totalTokens: Math.max(0, n(grouped.value)),
+          costUsd: Math.max(0, n(grouped.cost)),
+          unpricedTokens: Math.max(0, n(grouped.unpricedTokens)),
+          activityState: aggActivityState,
+          isActive: aggActivityState === 'running' || aggActivityState === 'waiting',
+          archived: members.every((/** @type {any} */ m) => m.archived === true),
+          resumedFromPriorPeriod: groupResumedFromPriorPeriod,
+          context: isSubagentGroup ? mainMember.context : null,
+          promptCache: isSubagentGroup ? mainMember.promptCache : null,
+          subagentCount: isSubagentGroup ? Math.max(0, n(grouped.subagentCount)) : 0,
+          isSubagent: false,
+          backgroundReview: groupKind === 'background-review',
+          grokBot: groupKind === 'grok-bot',
+          groupCount: members.length,
+          groupKind,
+          groupDetail: String(grouped.groupDetail || grouped.detail || ''),
+          sessionGroup: String(grouped.sessionGroup),
+          subagentGroup: isSubagentGroup,
+          groupRows: members,
+          sourceDevice: groupSourceDevice,
+          deviceName: groupDeviceName,
+          deviceKind: groupDeviceKind,
+          isLocalDevice: groupIsLocalDevice,
+          isNativeLocal: groupIsNativeLocal,
+          sourcePeriodKey: groupSourcePeriodKey,
+          snapshotId: stats?.snapshot?.id ?? null,
+          snapshotSource: stats?.snapshot?.source ?? null,
+          lastUsedAt: groupLastUsedAt,
+          sortTime: groupSortTime,
+          raw: mainMember.raw
+        };
+      }).filter(Boolean);
+    } else {
+      entries = rawEntries;
     }
 
     entries.sort((a, b) => {
@@ -878,6 +1256,8 @@
    *   periodKey?: string,
    *   selectedDeviceId?: string,
    *   sessions?: any[],
+   *   settings?: any,
+   *   statsMode?: string,
    *   colorFor?: (id: string) => string
    * }} options
    */
@@ -888,11 +1268,14 @@
     const aggregatePeriod = stats?.periods?.[periodKey] || options.periodData || null;
     if (!aggregatePeriod || !projectRowsApi?.projectRowsForPeriod) return [];
 
+    const localId = String(stats?.localDeviceId || options.settings?.deviceId || '').trim();
+    const synced = isSyncedStatsContext(stats, options.settings, options.statsMode);
+
     let scopedPeriod = aggregatePeriod;
     if (selectedDeviceId !== 'all') {
       const filteredSessions = Object.fromEntries(
         Object.entries(aggregatePeriod.sessions || {})
-          .filter(([, s]) => String(s?.sourceDevice?.deviceId || '').trim() === selectedDeviceId)
+          .filter(([, s]) => resolveOwnedSessionDeviceId(s, { isNativeLocal: false, localId, synced }) === selectedDeviceId)
       );
       scopedPeriod = { sessions: filteredSessions };
     }
@@ -908,12 +1291,12 @@
       clientLabels: clientCatalog?.CLIENT_LABELS || {},
       modelColor,
       fallbackColors: usageCharts?.fallbackModelColors || ['#6ab4f0'],
-      nativeProjects: selectedDeviceId === 'all' || selectedDeviceId === stats?.localDeviceId
+      nativeProjects: selectedDeviceId === 'all' || (Boolean(localId) && selectedDeviceId === localId)
         ? stats?.nativeProjects?.[periodKey]
         : undefined
     });
 
-    /** @type {Map<string, { activeSessionCount: number, devices: Set<string> }>} */
+    /** @type {Map<string, { activeSessionCount: number, devices: Set<string>, deviceTokens: Map<string, number>, activeDeviceIds: Set<string> }>} */
     const metaByProject = new Map();
     const sessionSource = Array.isArray(options.sessions) && options.sessions.length > 0
       ? options.sessions
@@ -923,13 +1306,37 @@
       if (!labelKey) continue;
       let meta = metaByProject.get(labelKey);
       if (!meta) {
-        meta = { activeSessionCount: 0, devices: new Set() };
+        meta = { activeSessionCount: 0, devices: new Set(), deviceTokens: new Map(), activeDeviceIds: new Set() };
         metaByProject.set(labelKey, meta);
       }
       const act = s?.activityState || sessionLive?.sessionActivityState?.(s, Date.now());
       if (act === 'running' || act === 'waiting') meta.activeSessionCount += 1;
-      const devName = String(s?.deviceName || s?.sourceDevice?.name || '').trim();
-      if (devName) meta.devices.add(devName);
+      /** @param {any} entry */
+      const recordMemberDevice = (entry) => {
+        const confirmedDevId = resolveOwnedSessionDeviceId(entry, {
+          isNativeLocal: entry?.isNativeLocal === true,
+          localId,
+          synced
+        });
+        const confirmedDevName = String(
+          entry?.deviceName
+          || (entry?.sourceDevice?.ambiguous !== true ? entry?.sourceDevice?.name : '')
+          || ''
+        ).trim();
+        if (confirmedDevName) meta.devices.add(confirmedDevName);
+        if (confirmedDevId) {
+          meta.deviceTokens.set(confirmedDevId, (meta.deviceTokens.get(confirmedDevId) || 0) + Math.max(0, n(entry?.totalTokens)));
+          const entryAct = entry?.activityState || sessionLive?.sessionActivityState?.(entry, Date.now());
+          if (entry?.isActive === true || entryAct === 'running' || entryAct === 'waiting') {
+            meta.activeDeviceIds.add(confirmedDevId);
+          }
+        }
+      };
+      if (Array.isArray(s?.groupRows) && s.groupRows.length > 0) {
+        for (const member of s.groupRows) recordMemberDevice(member);
+      } else {
+        recordMemberDevice(s);
+      }
     }
 
     const maxTokens = rows[0]?.value || 1;
@@ -942,7 +1349,10 @@
         share: n(row.value) / totalTokens,
         relWidth: n(row.value) / maxTokens,
         activeSessionCount: meta?.activeSessionCount || 0,
-        devices: meta ? Array.from(meta.devices) : []
+        devices: meta ? Array.from(meta.devices) : [],
+        deviceIds: meta ? Array.from(meta.deviceTokens.keys()) : [],
+        deviceTokens: meta ? Object.fromEntries(meta.deviceTokens) : {},
+        activeDeviceIds: meta ? Array.from(meta.activeDeviceIds) : []
       };
     });
   }
@@ -952,7 +1362,9 @@
    *
    * @param {{
    *   sample?: any,
+   *   deviceRateSamples?: Record<string, any> | Map<string, any>,
    *   rateSamples?: any[],
+   *   rateSamplesByDevice?: Record<string, any[]> | Map<string, any[]>,
    *   rateMode?: 'speed' | 'burn',
    *   selectedDeviceId?: string,
    *   now?: number
@@ -966,25 +1378,53 @@
     const rateSamples = Array.isArray(options.rateSamples) ? options.rateSamples : [];
     const deviceSamples = Array.isArray(sample?.devices) ? sample.devices : [];
 
+    /** @param {any} mapOrObj @param {string} key */
+    const mapLookup = (mapOrObj, key) => {
+      if (!mapOrObj || !key) return null;
+      if (mapOrObj instanceof Map) return mapOrObj.get(key) ?? null;
+      if (typeof mapOrObj === 'object' && Object.hasOwn(mapOrObj, key)) return mapOrObj[key];
+      return null;
+    };
+
+    const directDeviceSample = selectedDeviceId !== 'all'
+      ? mapLookup(options.deviceRateSamples, selectedDeviceId)
+      : null;
+
     const matchingDevices = selectedDeviceId !== 'all'
-      ? deviceSamples.filter((/** @type {any} */ d) => String(d?.id || '') === selectedDeviceId)
+      ? (Array.isArray(directDeviceSample?.devices) && directDeviceSample.devices.length > 0
+          ? directDeviceSample.devices
+          : deviceSamples.filter((/** @type {any} */ d) => String(d?.id || '') === selectedDeviceId))
       : deviceSamples;
 
     let speed = n(sample?.speed);
     let burnVal = n(sample?.burn);
+    let hasSample = Boolean(sample);
+    let idle = Boolean(sample?.idle);
+
     if (selectedDeviceId !== 'all') {
-      speed = 0;
-      burnVal = 0;
-      for (const dev of matchingDevices) {
-        for (const m of dev?.models || []) {
-          speed += n(m?.speed);
-          burnVal += n(m?.burn);
+      if (directDeviceSample) {
+        hasSample = true;
+        idle = Boolean(directDeviceSample.idle);
+        speed = n(directDeviceSample.speed);
+        burnVal = n(directDeviceSample.burn);
+      } else {
+        speed = 0;
+        burnVal = 0;
+        for (const dev of matchingDevices) {
+          if (dev?.speed != null || dev?.burn != null) {
+            speed += n(dev?.speed);
+            burnVal += n(dev?.burn);
+          } else {
+            for (const m of dev?.models || []) {
+              speed += n(m?.speed);
+              burnVal += n(m?.burn);
+            }
+          }
         }
+        hasSample = Boolean(sample) && matchingDevices.length > 0;
       }
     }
 
-    const hasSample = Boolean(sample) && (selectedDeviceId === 'all' || matchingDevices.length > 0);
-    const idle = Boolean(sample?.idle);
     const primaryValue = hasSample ? (burn ? burnVal : speed) : null;
     const secondaryValue = hasSample ? (burn ? speed : burnVal) : null;
 
@@ -1031,8 +1471,34 @@
         };
       });
 
+    let scopedRateSamples = rateSamples;
+    if (selectedDeviceId !== 'all') {
+      const directSeries = mapLookup(options.rateSamplesByDevice, selectedDeviceId);
+      if (Array.isArray(directSeries)) {
+        scopedRateSamples = directSeries;
+      } else {
+        scopedRateSamples = rateSamples
+          .filter((/** @type {any} */ entry) => Array.isArray(entry?.devices))
+          .map((/** @type {any} */ entry) => {
+            const dev = entry.devices.find((/** @type {any} */ d) => String(d?.id || '') === selectedDeviceId);
+            if (!dev) return null;
+            if (dev.speed != null || dev.burn != null) {
+              return { at: entry.at, speed: n(dev.speed), burn: n(dev.burn) };
+            }
+            let devSpeed = 0;
+            let devBurn = 0;
+            for (const m of dev?.models || []) {
+              devSpeed += n(m?.speed);
+              devBurn += n(m?.burn);
+            }
+            return { at: entry.at, speed: devSpeed, burn: devBurn };
+          })
+          .filter(Boolean);
+      }
+    }
+
     const chart = tokenRateApi?.liveTokenRateChart
-      ? tokenRateApi.liveTokenRateChart(rateSamples, now, burn ? 'burn' : 'speed')
+      ? tokenRateApi.liveTokenRateChart(scopedRateSamples, now, burn ? 'burn' : 'speed')
       : { points: [], peak: 1 };
 
     return {
@@ -1043,7 +1509,7 @@
       secondaryValue,
       speed,
       burn: burnVal,
-      deviceCount: n(sample?.deviceCount || matchingDevices.length),
+      deviceCount: selectedDeviceId !== 'all' ? (hasSample ? 1 : 0) : n(sample?.deviceCount || matchingDevices.length),
       points: Array.isArray(chart?.points) ? chart.points : [],
       models
     };
@@ -1358,7 +1824,8 @@
    *   tools?: any[],
    *   models?: any[],
    *   sessions?: any[],
-   *   workspaces?: any[]
+   *   workspaces?: any[],
+   *   isSynced?: boolean
    * }} [overview]
    * @param {{
    *   maxDevices?: number,
@@ -1417,7 +1884,7 @@
         raw: m
       }));
 
-    if (devices.length === 0 && (n(hero.tokens) > 0 || sessions.length > 0 || tools.length > 0)) {
+    if (devices.length === 0 && !overview?.isSynced && (n(hero.tokens) > 0 || sessions.length > 0 || tools.length > 0)) {
       devices = [{
         id: 'local',
         deviceId: 'local',
@@ -1442,12 +1909,20 @@
 
     /** @type {Map<string, any>} */
     const deviceById = new Map(devices.map((d) => [d.id, d]));
-    const fallbackDeviceId = devices.find((d) => d.isLocal)?.id || devices[0]?.id || '';
-    /** @param {string | undefined} rawId */
-    const resolveDeviceId = (rawId) => {
-      const id = String(rawId || '').trim();
-      if (!id) return fallbackDeviceId;
-      return deviceById.has(id) ? id : '';
+    const singleLocalFallbackId = !overview?.isSynced && devices.length === 1 && devices[0]?.isLocal
+      ? devices[0].id
+      : '';
+    /** @param {any} session */
+    const resolveSessionDeviceId = (session) => {
+      if (session?.sourceDevice?.ambiguous === true) return '';
+      const explicitId = String(session?.sourceDevice?.deviceId || '').trim();
+      if (explicitId) return deviceById.has(explicitId) ? explicitId : '';
+      if (session?.sourceDevice) return '';
+      if (session?.isNativeLocal === true) {
+        const localDev = devices.find((d) => d.isLocal);
+        return localDev ? localDev.id : '';
+      }
+      return singleLocalFallbackId;
     };
 
     if (devices.length === 0) {
@@ -1553,74 +2028,123 @@
       const endpoints = sessions
         .filter((s) => visibleHubSet.has(sessionHubKey(s)))
         .slice(0, maxEndpoints)
-        .map((s) => ({
-          id: String(s.key),
-          hubId: sessionHubKey(s),
-          deviceId: resolveDeviceId(s.sourceDevice?.deviceId),
-          title: String(s.title || s.sessionId || s.key),
-          client: String(s.client || ''),
-          clientLabel: String(s.clientLabel || ''),
-          projectLabel: String(s.projectLabel || ''),
-          latestModel: String(s.latestModel || ''),
-          iconClass: String(s.iconClass || ''),
-          color: String(s.color || '#6ab4f0'),
-          totalTokens: Math.max(0, n(s.totalTokens)),
-          costUsd: Math.max(0, n(s.costUsd)),
-          unpricedTokens: Math.max(0, n(s.unpricedTokens)),
-          activityState: String(s.activityState || 'idle'),
-          isActive: Boolean(s.isActive),
-          context: s.context || null,
-          subagentCount: Math.max(0, n(s.subagentCount)),
-          deviceName: String(s.deviceName || s.sourceDevice?.name || ''),
-          raw: s
-        }));
+        .map((s) => {
+          const epDeviceId = resolveSessionDeviceId(s);
+          const memberDeviceIds = Array.isArray(s.groupRows) && s.groupRows.length > 0
+            ? Array.from(new Set(s.groupRows.map((/** @type {any} */ m) => resolveSessionDeviceId(m)).filter(Boolean)))
+            : (epDeviceId ? [epDeviceId] : []);
+          return {
+            id: String(s.key),
+            hubId: sessionHubKey(s),
+            deviceId: epDeviceId,
+            memberDeviceIds,
+            title: String(s.title || s.sessionId || s.key),
+            client: String(s.client || ''),
+            clientLabel: String(s.clientLabel || ''),
+            projectLabel: String(s.projectLabel || ''),
+            latestModel: String(s.latestModel || ''),
+            modelLabel: String(s.modelLabel || s.latestModel || ''),
+            iconClass: String(s.iconClass || ''),
+            color: String(s.color || '#6ab4f0'),
+            totalTokens: Math.max(0, n(s.totalTokens)),
+            costUsd: Math.max(0, n(s.costUsd)),
+            unpricedTokens: Math.max(0, n(s.unpricedTokens)),
+            activityState: String(s.activityState || 'idle'),
+            isActive: Boolean(s.isActive),
+            context: s.context || null,
+            subagentCount: Math.max(0, n(s.subagentCount)),
+            groupCount: Math.max(0, n(s.groupCount)),
+            groupKind: String(s.groupKind || ''),
+            groupDetail: String(s.groupDetail || ''),
+            sessionGroup: String(s.sessionGroup || ''),
+            deviceName: String(s.deviceName || s.sourceDevice?.name || ''),
+            raw: s
+          };
+        });
 
       const totalEndTokens = endpoints.reduce((sum, ep) => sum + ep.totalTokens, 0) || 1;
 
       /** @type {Map<string, any>} */
       const devToHubMap = new Map();
-      for (const ep of endpoints) {
-        if (!ep.deviceId || !ep.hubId) continue;
-        const edgeKey = `${ep.deviceId}->${ep.hubId}`;
+      /**
+       * Accumulates directed device-to-workspace tokens and activity onto the Live Flow edge map.
+       *
+       * @param {string} devId
+       * @param {string} hubId
+       * @param {number} edgeTokens
+       * @param {string} edgeColor
+       * @param {boolean} isEdgeActive
+       * @param {number} countIncrement
+       */
+      const addDevToHubEdge = (devId, hubId, edgeTokens, edgeColor, isEdgeActive, countIncrement) => {
+        if (!devId || !hubId) return;
+        const edgeKey = `${devId}->${hubId}`;
         let edge = devToHubMap.get(edgeKey);
         if (!edge) {
-          const dev = deviceById.get(ep.deviceId);
+          const dev = deviceById.get(devId);
           edge = {
             id: `d2h:${edgeKey}`,
-            from: ep.deviceId,
-            to: ep.hubId,
+            from: devId,
+            to: hubId,
             tokens: 0,
             share: 0,
             active: false,
             liveRate: dev ? n(dev.liveTokPerSec) : 0,
-            color: ep.color,
+            color: edgeColor,
             sessionCount: 0
           };
           devToHubMap.set(edgeKey, edge);
         }
-        edge.tokens += ep.totalTokens;
-        edge.sessionCount += 1;
-        if (ep.isActive) {
+        edge.tokens += Math.max(0, n(edgeTokens));
+        edge.sessionCount += countIncrement;
+        if (isEdgeActive) {
           edge.active = true;
-          edge.color = ep.color;
+          edge.color = edgeColor;
+        }
+      };
+
+      for (const ep of endpoints) {
+        if (!ep.hubId) continue;
+        if (ep.deviceId) {
+          addDevToHubEdge(ep.deviceId, ep.hubId, ep.totalTokens, ep.color, ep.isActive, 1);
+        } else if (Array.isArray(ep.raw?.groupRows) && ep.raw.groupRows.length > 0) {
+          /** @type {Set<string>} */
+          const seenMemberDevs = new Set();
+          for (const member of ep.raw.groupRows) {
+            const memberDevId = resolveSessionDeviceId(member);
+            if (!memberDevId) continue;
+            const countIncrement = seenMemberDevs.has(memberDevId) ? 0 : 1;
+            seenMemberDevs.add(memberDevId);
+            addDevToHubEdge(
+              memberDevId,
+              ep.hubId,
+              Math.max(0, n(member.totalTokens)),
+              String(member.color || ep.color || '#6ab4f0'),
+              Boolean(member.isActive),
+              countIncrement
+            );
+          }
         }
       }
 
-      // Connect devices directly referenced by a workspace even if no session endpoint matched it.
+      // Connect confirmed owning devices referenced by a workspace when no visible session endpoint matched them.
       for (const hub of hubs) {
-        const rawDevices = Array.isArray(hub.raw?.devices) ? hub.raw.devices : [];
-        for (const devName of rawDevices) {
-          const matchedDev = devices.find((d) => d.name === devName);
+        const confirmedDeviceIds = Array.isArray(hub.raw?.deviceIds) ? hub.raw.deviceIds : [];
+        const wsDeviceTokens = hub.raw?.deviceTokens && typeof hub.raw.deviceTokens === 'object' ? hub.raw.deviceTokens : {};
+        const wsActiveDeviceIds = new Set(Array.isArray(hub.raw?.activeDeviceIds) ? hub.raw.activeDeviceIds : []);
+        for (const devId of confirmedDeviceIds) {
+          const matchedDev = deviceById.get(devId);
           if (!matchedDev) continue;
           const edgeKey = `${matchedDev.id}->${hub.id}`;
           if (!devToHubMap.has(edgeKey)) {
+            const devTokens = Math.max(0, n(wsDeviceTokens[matchedDev.id]));
             devToHubMap.set(edgeKey, {
               id: `d2h:${edgeKey}`,
               from: matchedDev.id,
               to: hub.id,
-              tokens: Math.round(hub.tokens / Math.max(1, rawDevices.length)),
+              tokens: Object.hasOwn(wsDeviceTokens, matchedDev.id) ? devTokens : Math.round(hub.tokens / Math.max(1, confirmedDeviceIds.length)),
               share: 0,
-              active: hub.activeSessionCount > 0 && matchedDev.liveTokPerSec > 0,
+              active: wsActiveDeviceIds.has(matchedDev.id) || (hub.activeSessionCount > 0 && matchedDev.liveTokPerSec > 0),
               liveRate: n(matchedDev.liveTokPerSec),
               color: hub.color,
               sessionCount: 0
@@ -1634,7 +2158,12 @@
       for (const edge of devToHub) edge.share = edge.tokens / maxD2H;
 
       const hubToEnd = endpoints.map((ep) => {
-        const dev = deviceById.get(ep.deviceId);
+        const devIds = ep.deviceId ? [ep.deviceId] : (ep.memberDeviceIds || []);
+        const maxLiveRate = devIds.reduce(
+          /** @param {number} mx @param {string} dId */
+          (mx, dId) => Math.max(mx, n(deviceById.get(dId)?.liveTokPerSec)),
+          0
+        );
         return {
           id: `h2e:${ep.hubId}->${ep.id}`,
           from: ep.hubId,
@@ -1643,7 +2172,7 @@
           share: ep.totalTokens / totalEndTokens,
           active: ep.isActive,
           state: ep.activityState,
-          liveRate: ep.isActive ? Math.max(1, n(dev?.liveTokPerSec)) : 0,
+          liveRate: ep.isActive ? Math.max(1, maxLiveRate) : 0,
           color: ep.color
         };
       });
@@ -1719,11 +2248,11 @@
     for (const dev of devices) {
       /** @type {any[]} */
       const rawClients = Array.isArray(dev.topClients) ? dev.topClients : [];
-      const clientList = rawClients.length > 0
-        ? rawClients.filter((/** @type {any} */ c) => hubByToolId.has(c.id))
-        : hubs.map((h) => ({ id: h.toolId, tokens: h.tokens, color: h.color }));
-      const effectiveList = clientList.length > 0 ? clientList : hubs.slice(0, 1).map((h) => ({ id: h.toolId, tokens: h.tokens, color: h.color }));
-      for (const c of effectiveList) {
+      const matchedClients = rawClients.filter((/** @type {any} */ c) => hubByToolId.has(c.id));
+      const clientList = matchedClients.length > 0
+        ? matchedClients
+        : (dev.raw == null ? hubs.map((h) => ({ id: h.toolId, tokens: h.tokens, color: h.color })) : []);
+      for (const c of clientList) {
         const hub = hubByToolId.get(c.id);
         if (!hub) continue;
         devToHub.push({
@@ -1744,36 +2273,17 @@
 
     /** @type {any[]} */
     const hubToEnd = [];
-    /** @type {Set<string>} */
-    const linkedModels = new Set();
     for (const hub of hubs) {
       for (const mod of hub.raw?.models || []) {
         const epId = `model:${mod.id}`;
         const ep = endpoints.find((item) => item.id === epId);
         if (!ep) continue;
-        linkedModels.add(epId);
         hubToEnd.push({
           id: `h2e:${hub.id}->${ep.id}`,
           from: hub.id,
           to: ep.id,
           tokens: Math.max(0, n(mod.tokens)),
           share: ep.totalTokens > 0 ? Math.min(1, n(mod.tokens) / ep.totalTokens) : 0,
-          active: false,
-          state: 'idle',
-          liveRate: 0,
-          color: ep.color
-        });
-      }
-    }
-    if (hubs[0]) {
-      for (const ep of endpoints) {
-        if (linkedModels.has(ep.id)) continue;
-        hubToEnd.push({
-          id: `h2e:${hubs[0].id}->${ep.id}`,
-          from: hubs[0].id,
-          to: ep.id,
-          tokens: ep.totalTokens,
-          share: 0.6,
           active: false,
           state: 'idle',
           liveRate: 0,
@@ -1818,10 +2328,15 @@
    *   periodKey?: string,
    *   selectedDeviceId?: string,
    *   settings?: any,
+   *   statsMode?: string,
    *   liveRatesByDevice?: Record<string, number>,
    *   rateSample?: any,
+   *   deviceRateSamples?: Record<string, any> | Map<string, any>,
    *   rateSamples?: any[],
+   *   rateSamplesByDevice?: Record<string, any[]> | Map<string, any[]>,
+   *   syncedPagesLoaded?: boolean,
    *   rateMode?: 'speed' | 'burn',
+   *   sessionLabels?: any,
    *   topology?: { maxDevices?: number, maxHubs?: number, maxEndpoints?: number },
    *   nowMs?: number
    * }} options
@@ -1832,6 +2347,7 @@
     const periodKey = options.periodKey || 'today';
     const selectedDeviceId = options.selectedDeviceId || 'all';
     const settings = options.settings || {};
+    const statsMode = String(options.statsMode || '');
     const nowMs = Number.isFinite(Number(options.nowMs)) ? Number(options.nowMs) : Date.now();
 
     const fleet = buildFleetModel({
@@ -1840,10 +2356,11 @@
       periodKey,
       liveRatesByDevice: options.liveRatesByDevice,
       settings,
+      statsMode,
       nowMs
     });
 
-    const activeMachine = selectedDeviceId !== 'all'
+    const activeMachine = fleet.isFleetMode && selectedDeviceId !== 'all'
       ? fleet.machines.find((m) => m.deviceId === selectedDeviceId) || null
       : null;
 
@@ -1863,44 +2380,65 @@
 
     const tools = buildToolRows(periodData, scopedHistory.daily, totalTokens);
     const models = buildModelRows(periodData, scopedHistory.daily, totalTokens);
-    const sessions = buildSessionList({
+    const derivedIncomplete = Boolean(
+      stats?.syncedFixedPeriodDetailsAvailable?.[periodKey] === false
+    );
+    const sessions = derivedIncomplete ? [] : buildSessionList({
       stats,
       periodData,
       periodKey,
       selectedDeviceId: activeMachine ? activeMachine.deviceId : 'all',
       settings,
+      statsMode,
+      labels: options.sessionLabels,
       nowMs
     });
-    const workspaces = buildWorkspaceList({
+    const workspaces = derivedIncomplete ? [] : buildWorkspaceList({
       stats,
       periodData,
       periodKey,
       selectedDeviceId: activeMachine ? activeMachine.deviceId : 'all',
+      settings,
+      statsMode,
       sessions
     });
     const quotas = buildQuotaAccounts(stats, settings, nowMs);
 
     const velocity = buildLiveVelocityModel({
       sample: options.rateSample || null,
+      deviceRateSamples: options.deviceRateSamples,
       rateSamples: options.rateSamples || [],
+      rateSamplesByDevice: options.rateSamplesByDevice,
       rateMode: options.rateMode === 'burn' ? 'burn' : 'speed',
       selectedDeviceId: activeMachine ? activeMachine.deviceId : 'all',
       now: nowMs
     });
 
+    const activeRawDevice = activeMachine && Array.isArray(stats?.devices)
+      ? stats.devices.find((/** @type {any} */ d) => String(d?.deviceId || d?.id || '').trim() === activeMachine.deviceId)
+      : null;
+    const omittedSessionCount = activeMachine
+      ? Math.max(0, n(activeRawDevice?.sessionDetailsOmitted?.[periodKey]))
+      : Math.max(0, n(stats?.sessionDetailsOmitted?.[periodKey]));
+    const sessionsIncomplete = (omittedSessionCount > 0 && options.syncedPagesLoaded !== true) || derivedIncomplete;
+
     const dailyLedger = (scopedHistory.daily || [])
       .slice()
       .sort(/** @param {any} a @param {any} b */ (a, b) => String(b?.date || '').localeCompare(String(a?.date || '')))
       .map(/** @param {any} row @param {number} index @param {any[]} list */ (row, index, list) => {
+        const curDate = String(row?.date || '').slice(0, 10);
         const prev = list[index + 1];
+        const prevDate = String(prev?.date || '').slice(0, 10);
+        const expectedPrevDate = fixedPeriodRanges?.dayKeyAddDays ? fixedPeriodRanges.dayKeyAddDays(curDate, -1) : '';
+        const isConsecutiveDay = Boolean(expectedPrevDate && prevDate === expectedPrevDate);
         const prevTokens = n(prev?.tokens);
         const curTokens = n(row?.tokens);
-        const deltaPercent = prev && prevTokens > 0 ? ((curTokens - prevTokens) / prevTokens) * 100 : null;
+        const deltaPercent = isConsecutiveDay && prev && prevTokens > 0 ? ((curTokens - prevTokens) / prevTokens) * 100 : null;
         const topClientEntry = Object.entries(foldClientNumbers(
           Object.fromEntries(Object.entries(row?.perClient || {}).map(([k, v]) => [k, /** @type {any} */ (v)?.tokens]))
         )).sort((a, b) => b[1] - a[1])[0];
         return {
-          date: String(row?.date || '').slice(0, 10),
+          date: curDate,
           tokens: curTokens,
           cost: n(row?.cost),
           unpricedTokens: n(row?.unpricedTokens),
@@ -1916,6 +2454,9 @@
       scopedHistory,
       periodData,
       periodKey,
+      isSynced: isSyncedStatsContext(stats, settings, statsMode),
+      omittedSessionCount,
+      sessionsIncomplete,
       hero: {
         tokens: totalTokens,
         cost: totalCost,
@@ -1949,6 +2490,7 @@
     buildFleetModel,
     selectScopedHistory,
     computeTokenAnatomy,
+    computeSessionDetailAnatomy,
     buildToolRows,
     buildModelRows,
     buildQuotaAccounts,

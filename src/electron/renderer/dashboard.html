@@ -18,7 +18,7 @@
         </div>
 
         <div class="dash-header-center">
-          <div id="periodSelect" class="seg dash-period-seg" role="tablist" aria-label="Period"></div>
+          <div id="periodSelect" class="seg dash-period-seg" role="group" aria-label="Period"></div>
           <nav class="dash-tabs" aria-label="Dashboard views">
             <button id="activityTab" type="button" class="dash-tab active" data-tab="activity" data-i18n="dashboard.tab.activity">Overview</button>
             <button id="trendsTab" type="button" class="dash-tab" data-tab="trends" data-i18n="dashboard.tab.trends">Trends</button>
@@ -28,10 +28,36 @@
         <div class="dash-header-actions">
           <button id="themeToggle" type="button" class="icon-button" aria-label="Theme">◐</button>
           <button id="refreshBtn" type="button" class="icon-button refresh-button" aria-label="Refresh"><span class="refresh-button-icon" aria-hidden="true"></span><span class="refresh-button-spinner" aria-hidden="true"></span></button>
+          <button id="dashSettingsTrigger" type="button" class="icon-button dash-settings-trigger" popovertarget="dashSettings" aria-label="Dashboard settings"><span class="dash-settings-icon" aria-hidden="true"></span></button>
           <button id="minBtn" type="button" class="icon-button" aria-label="Minimize">−</button>
           <button id="closeBtn" type="button" class="icon-button" aria-label="Close">×</button>
         </div>
       </header>
+      <section id="dashSettings" class="dash-glass-card dash-settings" popover="auto" role="dialog" aria-labelledby="dashSettingsTitle">
+        <h2 id="dashSettingsTitle" data-i18n="dashboard.settings.title">Dashboard settings</h2>
+        <fieldset>
+          <legend data-i18n="periodRange.tabsTitle">Usage range buttons</legend>
+          <label><input type="checkbox" id="dashFollowPeriods" autofocus> <span data-i18n="dashboard.settings.followPeriods">Follow main app</span></label>
+          <div id="dashPeriodChoices" class="dash-period-choices"></div>
+        </fieldset>
+        <label><input type="checkbox" id="dashShowVelocity"> <span data-i18n="dashboard.velocity.title">Live Velocity</span></label>
+        <label><input type="checkbox" id="dashShowQuotas"> <span data-i18n="home.limits">Limits</span></label>
+        <label class="dash-setting-select"><span data-i18n="dashboard.settings.stage">Overview view</span>
+          <select id="dashDefaultStage">
+            <option value="flow" data-i18n="dashboard.stage.flow">Live Flow</option>
+            <option value="3d" data-i18n="dashboard.stage.activity3d">3D</option>
+            <option value="2d" data-i18n="dashboard.stage.activity2d">2D</option>
+          </select>
+        </label>
+        <label class="dash-setting-select"><span data-i18n="dashboard.settings.heatmap">Heatmap metric</span>
+          <select id="dashDefaultMetric">
+            <option value="tokens" data-i18n="dashboard.heatmap.tokens">Tokens</option>
+            <option value="cost" data-i18n="dashboard.heatmap.cost">Cost</option>
+          </select>
+        </label>
+        <p id="dashSettingsError" class="hidden" role="alert" data-i18n="dashboard.settings.saveFailed"></p>
+        <button id="dashOpenAppSettings" type="button" class="seg-btn" data-i18n="dashboard.settings.openApp">Open app settings</button>
+      </section>
 
       <div id="dashWorkspace" class="dash-workspace" data-fleet="single">
         <main class="dash-stage">
@@ -106,7 +132,7 @@
                 <div id="dashSkylineStage" class="dash-skyline-stage hidden">
                   <div id="dashSkylineCanvasHost" class="dash-skyline-canvas-host"></div>
                   <div id="dashSkylineToolLegend" class="dash-skyline-tool-legend hidden"></div>
-                  <div id="dashSkylineHint" class="dash-skyline-hint" data-i18n="dashboard.skyline.hint">Drag to orbit · Right-drag to pan · Double-click to reset</div>
+                  <div id="dashSkylineHint" class="dash-skyline-hint" data-i18n="dashboard.skyline.hint">Drag to orbit · Scroll or right/middle-drag to pan · Double-click to reset</div>
                   <div id="dashSkylineHud" class="dash-skyline-hud">
                     <div class="seg seg--sm seg--xs" data-control="skylineColor">
                       <button type="button" class="seg-btn active" data-color="heat" aria-pressed="true" data-i18n="dashboard.skyline.colorHeat">Heat</button>
@@ -214,7 +240,7 @@
             <div id="dashDrawerSubtitle" class="dash-drawer-subtitle"></div>
           </div>
         </div>
-        <button id="dashDrawerClose" type="button" class="icon-button" aria-label="Close">×</button>
+        <button id="dashDrawerClose" type="button" autofocus class="icon-button" aria-label="Close">×</button>
       </div>
       <div id="dashDrawerBody" class="dash-drawer-body"></div>
     </aside>
@@ -224,6 +250,9 @@
     <script src="../../shared/vendorPresentation.js"></script>
     <script src="rowIconMasks.js"></script>
     <script src="../../shared/limits/providers.js"></script>
+    <script src="../../shared/limits/windowLabels.js"></script>
+    <script src="../../shared/limits/usageItems.js"></script>
+    <script src="limits/providerOrder.js"></script>
     <script src="../../shared/compactTokens.js"></script>
     <script src="../../shared/limits/balanceDisplay.js"></script>
     <script src="homeOverview.js"></script>
@@ -237,6 +266,12 @@
     <script src="projectRows.js"></script>
     <script src="../../shared/sessionActivityProviders.js"></script>
     <script src="../../shared/sessionLive.js"></script>
+    <script src="../../shared/providers/reasonix/sessionGuard.js"></script>
+    <script src="sessionRows.js"></script>
+    <script src="../../shared/sessionActivityProjection.js"></script>
+    <script src="../sessionTitleDisplay.js"></script>
+    <script src="allTimeSessions.js"></script>
+    <script src="domReconcile.js"></script>
     <script src="fixedPeriodRanges.js"></script>
     <script src="tokenRatePresentation.js"></script>
     <script src="../tokenNumberAnimation.js"></script>

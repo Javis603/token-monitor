@@ -56,6 +56,7 @@ contextBridge.exposeInMainWorld('tokenMonitor', {
   },
   dashboard: {
     ready: () => ipcRenderer.send('dashboard:ready'),
+    openAppSettings: () => ipcRenderer.send('dashboard:openAppSettings'),
     minimize: () => ipcRenderer.send('dashboard:minimize'),
     close: () => ipcRenderer.send('dashboard:close')
   },

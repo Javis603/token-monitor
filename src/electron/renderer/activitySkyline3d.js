@@ -78,12 +78,16 @@
   function clampCamera(cam = {}) {
     const rawPanX = typeof cam.panX === 'number' && Number.isFinite(cam.panX) ? cam.panX : 0;
     const rawPanY = typeof cam.panY === 'number' && Number.isFinite(cam.panY) ? cam.panY : 0;
+    const zoom = clamp(Number.isFinite(cam.zoom) ? Number(cam.zoom) : CAMERA_PRESETS.iso.zoom, MIN_ZOOM, MAX_ZOOM);
+    const panScale = Math.max(1, zoom);
+    const maxPanX = Math.round(MAX_PAN_X * panScale);
+    const maxPanY = Math.round(MAX_PAN_Y * panScale);
     return {
       yaw: normalizeYaw(cam.yaw ?? CAMERA_PRESETS.iso.yaw),
       pitch: clamp(Number.isFinite(cam.pitch) ? Number(cam.pitch) : CAMERA_PRESETS.iso.pitch, MIN_PITCH, MAX_PITCH),
-      zoom: clamp(Number.isFinite(cam.zoom) ? Number(cam.zoom) : CAMERA_PRESETS.iso.zoom, MIN_ZOOM, MAX_ZOOM),
-      panX: clamp(rawPanX, -MAX_PAN_X, MAX_PAN_X),
-      panY: clamp(rawPanY, -MAX_PAN_Y, MAX_PAN_Y)
+      zoom,
+      panX: clamp(rawPanX, -maxPanX, maxPanX),
+      panY: clamp(rawPanY, -maxPanY, maxPanY)
     };
   }
 
@@ -634,6 +638,14 @@
       else requestFrame();
     }
 
+    function clearHover({ notify = true } = {}) {
+      if (hoveredDate) {
+        hoveredDate = '';
+        drawFrame();
+      }
+      if (notify) callbacks.onHover?.(null);
+    }
+
     /** @param {string} name */
     function setPreset(name) {
       const preset = CAMERA_PRESETS[name] || CAMERA_PRESETS.iso;
@@ -641,6 +653,7 @@
       presetActive = true;
       velYaw = 0;
       velPitch = 0;
+      clearHover();
       if (reducedMotion) {
         camera = { ...targetCamera };
         drawFrame();
@@ -649,12 +662,28 @@
       }
     }
 
+    /** @param {number} zoom */
+    function panLimits(zoom) {
+      const z = Math.max(1, Number(zoom) || 1);
+      const panScale = z;
+      return {
+        limX: Math.min(Math.round(MAX_PAN_X * panScale), Math.round(width * (0.42 + (z - 1) * 0.52))),
+        limY: Math.min(Math.round(MAX_PAN_Y * panScale), Math.round(height * (0.42 + (z - 1) * 0.52)))
+      };
+    }
+
     /** @param {number} delta */
     function zoomBy(delta) {
       const base = presetActive ? targetCamera : camera;
-      const next = clampCamera({ ...base, zoom: base.zoom + delta });
-      targetCamera = next;
+      const clampedZoom = clampCamera({ ...base, zoom: base.zoom + delta });
+      const { limX, limY } = panLimits(clampedZoom.zoom);
+      targetCamera = clampCamera({
+        ...clampedZoom,
+        panX: clamp(Number(clampedZoom.panX || 0), -limX, limX),
+        panY: clamp(Number(clampedZoom.panY || 0), -limY, limY)
+      });
       presetActive = true;
+      clearHover();
       if (reducedMotion) {
         camera = { ...targetCamera };
         drawFrame();
@@ -1068,6 +1097,7 @@
     function onPointerDown(ev) {
       const isPan = ev.button === 2 || ev.button === 1 || (ev.button === 0 && ev.shiftKey);
       if (!isPan && ev.button !== 0) return;
+      if (isPan) ev.preventDefault();
       dragMode = isPan ? 'pan' : 'orbit';
       dragMoved = false;
       presetActive = false;
@@ -1102,8 +1132,7 @@
           callbacks.onInteract?.();
         }
         if (dragMode === 'pan') {
-          const limX = Math.min(MAX_PAN_X, Math.round(width * 0.42));
-          const limY = Math.min(MAX_PAN_Y, Math.round(height * 0.42));
+          const { limX, limY } = panLimits(camera.zoom);
           camera = clampCamera({
             yaw: camera.yaw,
             pitch: camera.pitch,
@@ -1166,17 +1195,64 @@
       ev.preventDefault();
     }
 
+    /** @param {MouseEvent} ev */
+    function onMouseDown(ev) {
+      if (ev.button === 1) ev.preventDefault();
+    }
+
+    /** @param {MouseEvent} ev */
+    function onAuxClick(ev) {
+      if (ev.button === 1) ev.preventDefault();
+    }
+
     /** @param {WheelEvent} ev */
     function onWheel(ev) {
-      if (!ev.ctrlKey && !ev.metaKey) return;
+      const base = presetActive ? targetCamera : camera;
+      if (ev.ctrlKey || ev.metaKey) {
+        ev.preventDefault();
+        callbacks.onInteract?.();
+        const coeff = ev.ctrlKey && !ev.metaKey ? 0.01 : 0.0038;
+        const delta = clamp(-ev.deltaY * coeff, -0.18, 0.18);
+        const zoomed = clampCamera({ ...base, zoom: base.zoom + delta });
+        const { limX, limY } = panLimits(zoomed.zoom);
+        targetCamera = clampCamera({
+          ...zoomed,
+          panX: clamp(Number(zoomed.panX || 0), -limX, limX),
+          panY: clamp(Number(zoomed.panY || 0), -limY, limY)
+        });
+        presetActive = false;
+        camera = { ...targetCamera };
+        clearHover();
+        requestFrame();
+        return;
+      }
+
+      const modeScale = ev.deltaMode === 1 ? 16 : (ev.deltaMode === 2 ? 120 : 1);
+      const normX = (Number(ev.deltaX) || 0) * modeScale;
+      const normY = (Number(ev.deltaY) || 0) * modeScale;
+      const isZoomedIn = base.zoom > 1.02;
+      const isHorizontal = Math.abs(normX) > Math.abs(normY) && Math.abs(normX) > 0;
+      const isShiftPan = ev.shiftKey && (Math.abs(normX) > 0 || Math.abs(normY) > 0);
+      if (!(isZoomedIn || isHorizontal || isShiftPan)) return;
+
       ev.preventDefault();
       callbacks.onInteract?.();
-      const coeff = ev.ctrlKey && !ev.metaKey ? 0.01 : 0.0038;
-      const delta = clamp(-ev.deltaY * coeff, -0.18, 0.18);
-      const base = presetActive ? targetCamera : camera;
-      targetCamera = clampCamera({ ...base, zoom: base.zoom + delta });
+      const useShiftAxis = ev.shiftKey && Math.abs(normX) === 0;
+      const dx = useShiftAxis ? -normY : -normX;
+      const dy = isZoomedIn && !useShiftAxis ? -normY : 0;
+      const { limX, limY } = panLimits(base.zoom);
+      targetCamera = clampCamera({
+        yaw: base.yaw,
+        pitch: base.pitch,
+        zoom: base.zoom,
+        panX: clamp(Number(base.panX || 0) + dx, -limX, limX),
+        panY: clamp(Number(base.panY || 0) + dy, -limY, limY)
+      });
       presetActive = false;
+      velYaw = 0;
+      velPitch = 0;
       camera = { ...targetCamera };
+      clearHover();
       requestFrame();
     }
 
@@ -1187,6 +1263,8 @@
     canvas.addEventListener('pointerleave', onPointerLeave);
     canvas.addEventListener('dblclick', onDblClick);
     canvas.addEventListener('contextmenu', onContextMenu);
+    canvas.addEventListener('mousedown', onMouseDown);
+    canvas.addEventListener('auxclick', onAuxClick);
     canvas.addEventListener('wheel', onWheel, { passive: false });
 
     function destroy() {
@@ -1200,6 +1278,8 @@
       canvas.removeEventListener('pointerleave', onPointerLeave);
       canvas.removeEventListener('dblclick', onDblClick);
       canvas.removeEventListener('contextmenu', onContextMenu);
+      canvas.removeEventListener('mousedown', onMouseDown);
+      canvas.removeEventListener('auxclick', onAuxClick);
       canvas.removeEventListener('wheel', onWheel);
       hostEl.classList.remove('is-dragging', 'is-panning');
       hostEl.replaceChildren();

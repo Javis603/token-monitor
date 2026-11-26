@@ -270,10 +270,14 @@ html.native-high-contrast .dash-drawer {
   align-items: center;
   gap: 10px;
   min-width: 0;
+  flex-shrink: 1;
+}
+.dash-period-seg {
+  min-width: 0;
   overflow-x: auto;
   scrollbar-width: none;
 }
-.dash-header-center::-webkit-scrollbar { display: none; }
+.dash-period-seg > .seg-btn, .dash-tabs { flex: none; }
 
 /* Segmented Controls + Native App-Grade Sliding Pill Indicators */
 .seg,
@@ -2415,6 +2419,46 @@ html.native-liquid-glass .dash-skyline-reset-btn {
   margin-bottom: 6px;
 }
 
+.dash-drawer-back {
+  align-self: flex-start;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  max-width: 100%;
+  padding: 5px 10px;
+  border-radius: 8px;
+  border: 1px solid rgba(var(--line-rgb), 0.12);
+  background: rgba(var(--overlay-rgb), 0.045);
+  color: var(--text);
+  font-size: 11.5px;
+  font-weight: 550;
+  cursor: pointer;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.dash-drawer-back:hover {
+  background: rgba(var(--overlay-rgb), 0.09);
+}
+
+.dash-drawer-member-row {
+  cursor: pointer;
+  border-radius: 8px;
+  padding: 6px 8px;
+  transition: background-color 140ms ease;
+}
+.dash-drawer-member-row:hover {
+  background: rgba(var(--overlay-rgb), 0.05);
+}
+.dash-drawer-member-meta {
+  display: block;
+  font-size: 10.5px;
+  color: var(--readable-muted, var(--muted));
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
 /* Frosted Blur Tooltip (popover="manual" + contentBlur.js top-layer surface, anchored above cursor) */
 .dash-tooltip {
   position: fixed;
@@ -2536,3 +2580,75 @@ body.flat .dash-drawer {
     opacity: 0 !important;
   }
 }
+
+/* Keyboard Focus Rings (styles.css clears default button outlines) */
+:is(
+  .seg-btn,
+  .dash-tab,
+  .range-btn,
+  .icon-button,
+  .dash-device-trigger,
+  .dash-device-menu-item,
+  .dash-velocity-figure,
+  .dash-skyline-reset-btn,
+  .dash-session-row,
+  .dash-project-row,
+  .dash-device-row,
+  .dash-bd-row[data-bd-kind],
+  .dash-ledger-row[data-day],
+  .dash-legend-row,
+  .topo-node[data-topo-kind],
+  .dash-drawer-back,
+  .dash-drawer-member-row
+):focus-visible {
+  outline: 1.5px solid rgba(var(--accent-rgb), 0.78);
+  outline-offset: 2px;
+}
+
+.dash-header .dash-settings-trigger { anchor-name: --dashboard-settings; }
+.dash-settings-icon {
+  width: 14px;
+  height: 14px;
+  background: currentColor;
+  mask: url("icons/actions/settings.svg") center / contain no-repeat;
+}
+.dash-settings {
+  position: fixed;
+  inset: 48px 12px auto auto;
+  top: max(8px, calc(anchor(--dashboard-settings bottom, 40px) + 8px));
+  right: max(8px, anchor(--dashboard-settings right, 12px));
+  margin: 0;
+  width: min(320px, calc(100vw - 16px));
+  max-height: calc(100vh - 60px);
+  overflow: auto;
+  padding: 14px;
+  background: rgb(var(--glass-rgb));
+  color: var(--text);
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.24);
+}
+.dash-settings:popover-open { display: grid; gap: 10px; }
+.dash-settings h2 { font-size: 14px; margin: 0; }
+.dash-settings label { display: flex; align-items: center; gap: 6px; }
+.dash-settings input { margin: 0; }
+.dash-settings fieldset {
+  margin: 0;
+  border: 1px solid var(--surface-border);
+  border-radius: 8px;
+  padding: 8px;
+}
+.dash-period-choices {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  margin-top: 8px;
+  gap: 6px;
+}
+.dash-setting-select { justify-content: space-between; }
+.dash-settings select {
+  background: var(--glass);
+  color: inherit;
+  border: 1px solid var(--surface-border);
+  border-radius: 6px;
+  padding: 2px 4px;
+  max-width: 55%;
+}
+.dash-band-single { grid-template-columns: minmax(0, 1fr); }

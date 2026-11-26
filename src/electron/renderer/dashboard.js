@@ -19,7 +19,12 @@ const homeLimitMotionApi = window.TokenMonitorHomeLimitMotion;
 const limitResetMotionApi = window.TokenMonitorLimitResetMotion;
 const limitResetAnimatorApi = window.TokenMonitorLimitResetAnimator;
 const sessionLiveApi = window.TokenMonitorSessionLive;
+const sessionActivityProjectionApi = window.TokenMonitorSessionActivityProjection;
+const sessionTitleDisplayApi = window.TokenMonitorSessionTitleDisplay;
+const allTimeSessionsApi = window.TokenMonitorAllTimeSessions;
+const fixedPeriodRangesApi = window.TokenMonitorFixedPeriodRanges;
 const skylineApi = window.TokenMonitorActivitySkyline3D;
+const rendererDom = window.TokenMonitorDomReconcile.create();
 
 // Canonical brand colours captured before overrides (clientColors is shared by reference).
 const BRAND_VENDOR_COLORS = { ...charts.modelColors };
@@ -115,6 +120,19 @@ contentBlurApi?.create?.({
 });
 
 const PERIODS = ['today', 'yesterday', 'week', 'last7', 'last30', 'month', 'allTime'];
+const dashboardSettings = {
+  popover: document.getElementById('dashSettings'),
+  trigger: document.getElementById('dashSettingsTrigger'),
+  choices: document.getElementById('dashPeriodChoices'),
+  follow: document.getElementById('dashFollowPeriods'),
+  velocity: document.getElementById('dashShowVelocity'),
+  quotas: document.getElementById('dashShowQuotas'),
+  stage: document.getElementById('dashDefaultStage'),
+  metric: document.getElementById('dashDefaultMetric'),
+  error: document.getElementById('dashSettingsError')
+};
+let dashboardSettingsSave = Promise.resolve();
+let periodTabsSignature = '';
 const RANGES = ['7', '30', '90', '365', 'all'];
 const state = {
   tab: 'activity',
@@ -145,6 +163,7 @@ const state = {
   motion: 'none',
   reduceMotion: 'system',
   streamConnected: false,
+  statsMode: '',
   overview: null,
   drawer: null
 };
@@ -166,8 +185,6 @@ let heroSettleTimer = 0;
 let drawerRequestToken = 0;
 let lastHeatmapGridSig = '';
 let lastHeatmapValuesSig = '';
-let lastTopologyStructureSig = '';
-let lastTopologyEdgeSig = '';
 let lastQuotasStructureSig = '';
 let lastWorkStructureSig = '';
 let lastBreakdownStructureSig = '';
@@ -192,6 +209,8 @@ const deviceRateTracker = tokenRateApi?.createLiveTokenRateGroupTracker
 const rateHistory = tokenRateApi?.createLiveTokenRateHistory
   ? tokenRateApi.createLiveTokenRateHistory()
   : null;
+const deviceRateTrackers = new Map();
+let rateExpiryTimer = null;
 
 const homeLimitMotion = homeLimitMotionApi && limitResetMotionApi && limitResetAnimatorApi && numberAnimationApi
   ? homeLimitMotionApi.createHomeLimitMotion({
@@ -233,11 +252,12 @@ function captureGeometry(root, selector = '[data-motion-key]') {
 function animateChartGeometry(previous, { fromZero = false } = {}) {
   if (state.motion === 'none' || prefersReducedMotion()) return;
   if (state.chartKind === 'candle') {
-    animateCandles();
+    if (fromZero) animateCandles();
     return;
   }
   const shapes = Array.from(els.chart.querySelectorAll('.bar-stack[data-motion-key]'));
   shapes.forEach((shape, index) => {
+    for (const animation of shape.getAnimations()) animation.cancel();
     const target = shape.getBoundingClientRect();
     const old = !fromZero && previous.get(shape.dataset.motionKey);
     let first;
@@ -456,6 +476,7 @@ function applyTranslations() {
     els.refreshBtn.setAttribute('aria-label', t('refreshButton.label'));
   }
   if (els.skylineReset) els.skylineReset.setAttribute('aria-label', t('dashboard.skyline.reset'));
+  els.periodSelect?.setAttribute('aria-label', t('periodRange.tabsTitle'));
   document.documentElement.lang = state.locale;
 }
 
@@ -581,28 +602,92 @@ function chartSize() {
   return { w: Math.max(320, els.chart.clientWidth || 860), h: Math.max(220, els.chart.clientHeight || 290) };
 }
 
+function dashboardPeriodChoices(settings) {
+  return settings.dashboardVisiblePeriods?.length
+    ? PERIODS.filter(period => settings.dashboardVisiblePeriods.includes(period))
+    : PERIODS;
+}
+
+function dashboardPeriodTabs(settings) {
+  if (!settings.dashboardFollowPeriodTabs) return dashboardPeriodChoices(settings);
+  const order = fixedPeriodRangesApi.normalizePeriodTabOrder(settings.periodTabOrder);
+  if (order.length) return order;
+  return ['today', fixedPeriodRangesApi.normalizeMonthMode(settings.periodMonthMode), 'allTime'];
+}
+
+function syncDashboardSettings(settings) {
+  if (!dashboardSettings.popover) return;
+  const visible = dashboardPeriodChoices(settings);
+  dashboardSettings.follow.checked = settings.dashboardFollowPeriodTabs === true;
+  dashboardSettings.velocity.checked = settings.dashboardShowVelocity !== false;
+  dashboardSettings.quotas.checked = settings.dashboardShowQuotas !== false;
+  dashboardSettings.stage.value = state.stageView;
+  dashboardSettings.metric.value = state.heatmapMetric;
+  const displayed = dashboardSettings.follow.checked ? dashboardPeriodTabs(settings) : visible;
+  for (const input of dashboardSettings.choices.querySelectorAll('input')) {
+    input.checked = displayed.includes(input.value);
+    input.disabled = dashboardSettings.follow.checked || (input.checked && visible.length === 1);
+  }
+  els.velocity?.classList.toggle('hidden', !dashboardSettings.velocity.checked);
+  els.quotasCard?.classList.toggle('hidden', !dashboardSettings.quotas.checked);
+  els.velocity?.parentElement?.classList.toggle('dash-band-single', !dashboardSettings.velocity.checked);
+  els.visualBand?.classList.toggle('dash-band-single', !dashboardSettings.quotas.checked);
+}
+
+function populateDashboardSettings() {
+  if (!dashboardSettings.choices) return;
+  dashboardSettings.trigger.setAttribute('aria-label', t('dashboard.settings.title'));
+  dashboardSettings.choices.innerHTML = PERIODS.map(period =>
+    `<label><input type="checkbox" value="${period}"> ${escapeHtml(t(`dashboard.period.${period}`))}</label>`
+  ).join('');
+}
+
+function saveDashboardSettings(patch) {
+  dashboardSettingsSave = dashboardSettingsSave.then(async () => {
+    dashboardSettings.error.classList.add('hidden');
+    try {
+      await window.tokenMonitor.updateSettings(patch);
+    } catch (_) {
+      dashboardSettings.error.classList.remove('hidden');
+      syncDashboardSettings(state.settings);
+    }
+  });
+}
+
 function populatePeriodSelect() {
   if (!els.periodSelect) return;
-  els.periodSelect.innerHTML = PERIODS.map((p) =>
-    `<button type="button" class="seg-btn${p === state.periodKey ? ' active' : ''}" data-period="${p}" role="tab" aria-selected="${p === state.periodKey}">${escapeHtml(t(`dashboard.period.${p}`))}</button>`
+  const periods = dashboardPeriodTabs(state.settings);
+  const selectionChanged = !periods.includes(state.periodKey);
+  if (selectionChanged) state.periodKey = periods.includes(state.settings.defaultUsageRange)
+    ? state.settings.defaultUsageRange
+    : periods[0];
+  const signature = JSON.stringify([state.locale, periods]);
+  if (periodTabsSignature === signature) return false;
+  periodTabsSignature = signature;
+  els.periodSelect.innerHTML = periods.map((p) =>
+    `<button type="button" class="seg-btn${p === state.periodKey ? ' active' : ''}" data-period="${p}" aria-pressed="${p === state.periodKey}">${escapeHtml(t(`dashboard.period.${p}`))}</button>`
   ).join('');
   els.periodSelect.querySelectorAll('.seg-btn').forEach((btn) => {
     btn.addEventListener('click', () => {
       const nextPeriod = btn.dataset.period;
       if (!nextPeriod || state.periodKey === nextPeriod) return;
       hideTooltip();
+      closeDrawer();
       state.periodKey = nextPeriod;
       state.motion = 'update';
       els.periodSelect.querySelectorAll('.seg-btn').forEach((b) => {
         const active = b.dataset.period === nextPeriod;
         b.classList.toggle('active', active);
-        b.setAttribute('aria-selected', String(active));
+        b.setAttribute('aria-pressed', String(active));
       });
       syncSegIndicator(els.periodSelect);
+      if (nextPeriod === 'allTime') allTimeSessions?.ensure?.();
+      ensureSyncedSessionPages?.();
       render();
     });
   });
   syncSegIndicator(els.periodSelect, { animate: false });
+  return selectionChanged;
 }
 
 function populateRangeSelect() {
@@ -674,6 +759,33 @@ function applySwatchColors(root) {
   });
 }
 
+function findByDataset(root, selector, predicate) {
+  if (!root) return null;
+  for (const el of root.querySelectorAll(selector)) {
+    if (predicate(el)) return el;
+  }
+  return null;
+}
+
+function withPreservedFocus(container, rowSelector, keyOf, renderFn) {
+  const active = typeof document !== 'undefined' ? document.activeElement : null;
+  const inside = Boolean(container && active && container.contains?.(active));
+  const matchedRow = inside ? active.closest?.(rowSelector) : null;
+  const focusKey = matchedRow ? keyOf(matchedRow) : '';
+  renderFn();
+  if (!focusKey || !container) return;
+  const nextRow = findByDataset(container, rowSelector, (el) => keyOf(el) === focusKey);
+  if (nextRow && nextRow !== active) nextRow.focus?.({ preventScroll: true });
+}
+
+function handleKeyboardClick(ev) {
+  if (ev.key !== 'Enter' && ev.key !== ' ') return;
+  const target = ev.target?.closest?.('[role="button"][tabindex="0"]');
+  if (!target) return;
+  if (ev.key === ' ') ev.preventDefault();
+  target.click();
+}
+
 function renderLegend(model) {
   const totals = {};
   for (const bar of model.bars) for (const s of bar.segments) totals[s.key] = (totals[s.key] || 0) + s.value;
@@ -681,28 +793,43 @@ function renderLegend(model) {
   const rows = (model.keys || []).map((k) => ({ key: k, value: totals[k] || 0 }))
     .filter((r) => r.value > 0)
     .sort((a, b) => b.value - a.value);
-  els.legend.innerHTML = rows.map((r) => {
-    const soloCls = state.soloKey === r.key ? ' is-solo' : (state.soloKey && state.soloKey !== r.key ? ' is-dimmed' : '');
-    return `<div class="dash-legend-row${soloCls}" data-legend-key="${escapeHtml(r.key)}">`
-      + `<span class="dash-legend-name"><span class="dash-legend-swatch" data-c="${colorFor(r.key)}"></span>${escapeHtml(r.key)}</span>`
-      + `<span class="dash-legend-val">${state.trendMetric === 'cost' ? formatCost(r.value) : formatCompact(r.value)}</span>`
-      + `<span class="dash-legend-pct">${(r.value / grand * 100).toFixed(1)}%</span>`
-      + `</div>`;
-  }).join('');
-  applySwatchColors(els.legend);
-  els.legend.querySelectorAll('.dash-legend-row').forEach((row) => {
-    row.addEventListener('click', () => {
-      const key = row.dataset.legendKey;
-      state.soloKey = state.soloKey === key ? null : key;
-      renderTrends();
+  withPreservedFocus(els.legend, '.dash-legend-row[data-legend-key]', (r) => r.dataset.legendKey || '', () => {
+    els.legend.innerHTML = rows.map((r) => {
+      const soloCls = state.soloKey === r.key ? ' is-solo' : (state.soloKey && state.soloKey !== r.key ? ' is-dimmed' : '');
+      return `<div class="dash-legend-row${soloCls}" data-legend-key="${escapeHtml(r.key)}" tabindex="0" role="button">`
+        + `<span class="dash-legend-name"><span class="dash-legend-swatch" data-c="${colorFor(r.key)}"></span>${escapeHtml(r.key)}</span>`
+        + `<span class="dash-legend-val">${state.trendMetric === 'cost' ? formatCost(r.value) : formatCompact(r.value)}</span>`
+        + `<span class="dash-legend-pct">${(r.value / grand * 100).toFixed(1)}%</span>`
+        + `</div>`;
+    }).join('');
+    applySwatchColors(els.legend);
+    els.legend.querySelectorAll('.dash-legend-row').forEach((row) => {
+      row.addEventListener('click', () => {
+        const key = row.dataset.legendKey;
+        state.soloKey = state.soloKey === key ? null : key;
+        renderTrends();
+      });
     });
   });
 }
 
 function renderDailyLedger(overview) {
   if (!els.dailyLedger) return;
-  const rangeDays = state.range === 'all' ? 0 : Number(state.range);
-  const rows = rangeDays > 0 ? (overview?.dailyLedger || []).slice(0, rangeDays) : (overview?.dailyLedger || []);
+  const allRows = overview?.dailyLedger || [];
+  let rows = allRows;
+  if (state.range !== 'all') {
+    const rangeDays = Math.max(1, Number(state.range) || 0);
+    const calendarWindow = charts.dailyWindow
+      ? charts.dailyWindow(allRows, { days: rangeDays, todayKey: todayKey() })
+      : [];
+    if (calendarWindow.length > 0) {
+      const startDate = calendarWindow[0].date;
+      const endDate = calendarWindow[calendarWindow.length - 1].date;
+      rows = allRows.filter((r) => r.date >= startDate && r.date <= endDate);
+    } else {
+      rows = [];
+    }
+  }
   if (els.ledgerMeta) els.ledgerMeta.textContent = rows.length ? `${rows.length}d` : '';
   if (rows.length === 0) {
     els.dailyLedger.innerHTML = `<div class="dash-quotas-empty">${escapeHtml(t('dashboard.empty'))}</div>`;
@@ -722,7 +849,7 @@ function renderDailyLedger(overview) {
     const toolHtml = row.topClient
       ? `<span class="dash-bd-swatch" data-c="${displayColor(row.topClient.color)}"></span><span>${escapeHtml(row.topClient.label)}</span>`
       : '—';
-    return `<div class="dash-ledger-row" data-day="${escapeHtml(row.date)}">`
+    return `<div class="dash-ledger-row" data-day="${escapeHtml(row.date)}" tabindex="0" role="button">`
       + `<span>${escapeHtml(shortDate(row.date))}</span>`
       + `<span class="dash-ledger-tool">${toolHtml}</span>`
       + `<span class="dash-ledger-num">${escapeHtml(formatCompact(row.tokens))}</span>`
@@ -730,31 +857,49 @@ function renderDailyLedger(overview) {
       + `<span class="dash-ledger-delta${deltaCls}">${escapeHtml(deltaText)}</span>`
       + `</div>`;
   }).join('');
-  els.dailyLedger.innerHTML = head + body;
-  applySwatchColors(els.dailyLedger);
-  els.dailyLedger.querySelectorAll('.dash-ledger-row[data-day]').forEach((row) => {
-    row.addEventListener('click', () => {
-      const target = rows.find((d) => d.date === row.dataset.day);
-      if (target) openDrawer({ kind: 'day', day: target });
+  withPreservedFocus(els.dailyLedger, '.dash-ledger-row[data-day]', (r) => r.dataset.day || '', () => {
+    els.dailyLedger.innerHTML = head + body;
+    applySwatchColors(els.dailyLedger);
+    els.dailyLedger.querySelectorAll('.dash-ledger-row[data-day]').forEach((row) => {
+      row.addEventListener('click', () => {
+        const target = rows.find((d) => d.date === row.dataset.day);
+        if (target) openDrawer({ kind: 'day', day: target });
+      });
     });
   });
 }
 
+const renderedMarkup = new WeakMap();
+
+function patchDashboardMarkup(container, html, beforePatch) {
+  if (renderedMarkup.get(container) === html) return false;
+  beforePatch?.();
+  const staged = container.cloneNode(false);
+  staged.innerHTML = html;
+  rendererDom.reconcileChildren(container, Array.from(staged.childNodes));
+  renderedMarkup.set(container, html);
+  return true;
+}
+
 function renderTrends() {
   const previousKind = state.chartKind;
-  const previousGeometry = captureGeometry(els.chart, '.bar-stack[data-motion-key]');
-  const scopedHistory = state.selectedDeviceId === 'all'
+  let previousGeometry;
+  const captureBars = () => { previousGeometry = captureGeometry(els.chart, '.bar-stack[data-motion-key]'); };
+  const effectiveDeviceId = state.overview?.fleet
+    ? (state.overview.fleet.isFleetMode && state.overview.activeMachine ? state.overview.activeMachine.deviceId : 'all')
+    : state.selectedDeviceId;
+  const scopedHistory = effectiveDeviceId === 'all'
     ? null
-    : modelApi.selectScopedHistory(state.history, state.selectedDeviceId);
+    : (state.overview?.scopedHistory || modelApi.selectScopedHistory(state.history, effectiveDeviceId));
   // Give each calendar day a slot even when history has no record for it.
-  const daily = state.selectedDeviceId === 'all'
+  const daily = effectiveDeviceId === 'all'
     ? charts.dailyWindow(state.history?.daily || [], {
       days: state.range === 'all' ? 0 : Number(state.range)
     })
     : charts.dailyWindow(scopedHistory?.daily || [], {
       days: state.range === 'all' ? 0 : Number(state.range)
     });
-  if (daily.length === 0) { els.chart.innerHTML = ''; els.legend.innerHTML = ''; state.chartModel = null; return; }
+  if (daily.length === 0) { patchDashboardMarkup(els.chart, ''); els.legend.innerHTML = ''; state.chartModel = null; return; }
   const pad = { padTop: 10, padRight: 14, padBottom: 24, padLeft: 56 };
   const metric = state.trendMetric === 'cost' ? 'cost' : 'tokens';
   const formatAxisTick = metric === 'cost' ? formatCostCompact : formatCompact;
@@ -768,8 +913,10 @@ function renderTrends() {
     const model = charts.candleChart(daily, { width: w, height: h, gap: 0.4, metric, bucketDays, ...pad });
     state.chartModel = model; state.chartKind = 'candle';
     const every = axisEvery(model.candles);
-    els.chart.innerHTML = charts.candleChartSvg(model, { yTicks: 4, formatTick: formatAxisTick, axisLabel: (c, i) => (i % every === 0 ? shortDate(c.key) : '') });
-    animateChartGeometry(previousGeometry, { fromZero: state.motion === 'entry' || previousKind !== 'candle' });
+    const html = charts.candleChartSvg(model, { yTicks: 4, formatTick: formatAxisTick, axisLabel: (c, i) => (i % every === 0 ? shortDate(c.key) : '') });
+    if (patchDashboardMarkup(els.chart, html)) {
+      animateChartGeometry(null, { fromZero: state.motion === 'entry' || previousKind !== 'candle' });
+    }
     return;
   }
 
@@ -780,14 +927,13 @@ function renderTrends() {
   const model = charts.dailyBarsChart(daily, { width: w, height: h, gap: 0.3, stackBy: state.stackBy, metric, ...pad });
   state.chartModel = model; state.chartKind = 'bars';
   const every = axisEvery(model.bars);
-  els.chart.innerHTML = charts.barsChartSvg(model, { colorFor, yTicks: 4, formatTick: formatAxisTick, axisLabel: (bar, i) => (i % every === 0 ? shortDate(bar.label) : '') });
-  if (state.soloKey) {
-    const soloColor = colorFor(state.soloKey);
-    els.chart.querySelectorAll('.bar-seg').forEach((seg) => {
-      if (seg.getAttribute('fill') !== soloColor) seg.classList.add('is-dimmed');
-    });
-  }
-  animateChartGeometry(previousGeometry, { fromZero: state.motion === 'entry' || state.motion === 'series' || previousKind !== 'bars' });
+  const html = charts.barsChartSvg(model, { colorFor, yTicks: 4, formatTick: formatAxisTick, axisLabel: (bar, i) => (i % every === 0 ? shortDate(bar.label) : '') });
+  const changed = patchDashboardMarkup(els.chart, html, captureBars);
+  const soloColor = state.soloKey ? colorFor(state.soloKey) : '';
+  els.chart.querySelectorAll('.bar-seg').forEach((seg) => {
+    seg.classList.toggle('is-dimmed', Boolean(soloColor && seg.getAttribute('fill') !== soloColor));
+  });
+  if (changed) animateChartGeometry(previousGeometry, { fromZero: state.motion === 'entry' || state.motion === 'series' || previousKind !== 'bars' });
 }
 
 function renderBreakdown(overview) {
@@ -843,24 +989,26 @@ function renderBreakdown(overview) {
   const snapshot = captureListSnapshot(elsBreakdown, '.dash-bd-row', keyOf, '.dash-bd-bar-fill');
   lastBreakdownStructureSig = nextSig;
 
-  elsBreakdown.innerHTML = groups.map((g) => {
-    const html = g.rows.map((row) => {
-      const pctGrand = (row.share * 100).toFixed(1);
-      const color = displayColor(row.color);
-      const motionKey = `${g.titleKey}:${encodeURIComponent(row.id)}`;
-      const iconHtml = row.iconClass
-        ? `<span class="dash-bd-icon row-icon ${escapeHtml(row.iconClass)}" aria-hidden="true"></span>`
-        : `<span class="dash-bd-swatch" data-c="${color}"></span>`;
-      return `<div class="dash-bd-row" data-bd-kind="${g.kind}" data-bd-id="${escapeHtml(row.id)}">`
-        + `<span class="dash-bd-name">${iconHtml}<span class="dash-bd-name-text">${escapeHtml(row.label)}</span></span>`
-        + `<div class="dash-bd-bar-bg"><div class="dash-bd-bar-fill" data-motion-key="${motionKey}" data-w="${row.relWidth.toFixed(4)}" data-c="${color}"></div></div>`
-        + `<span class="dash-bd-val">${escapeHtml(formatCompact(row.tokens))}</span>`
-        + `<span class="dash-bd-pct">${pctGrand}%</span>`
-        + `</div>`;
+  withPreservedFocus(elsBreakdown, '.dash-bd-row[data-bd-kind]', keyOf, () => {
+    elsBreakdown.innerHTML = groups.map((g) => {
+      const html = g.rows.map((row) => {
+        const pctGrand = (row.share * 100).toFixed(1);
+        const color = displayColor(row.color);
+        const motionKey = `${g.titleKey}:${encodeURIComponent(row.id)}`;
+        const iconHtml = row.iconClass
+          ? `<span class="dash-bd-icon row-icon ${escapeHtml(row.iconClass)}" aria-hidden="true"></span>`
+          : `<span class="dash-bd-swatch" data-c="${color}"></span>`;
+        return `<div class="dash-bd-row" data-bd-kind="${g.kind}" data-bd-id="${escapeHtml(row.id)}" tabindex="0" role="button">`
+          + `<span class="dash-bd-name">${iconHtml}<span class="dash-bd-name-text">${escapeHtml(row.label)}</span></span>`
+          + `<div class="dash-bd-bar-bg"><div class="dash-bd-bar-fill" data-motion-key="${motionKey}" data-w="${row.relWidth.toFixed(4)}" data-c="${color}"></div></div>`
+          + `<span class="dash-bd-val">${escapeHtml(formatCompact(row.tokens))}</span>`
+          + `<span class="dash-bd-pct">${pctGrand}%</span>`
+          + `</div>`;
+      }).join('');
+      return `<div class="dash-breakdown-group"><div class="dash-breakdown-title" data-i18n="${g.titleKey}">${escapeHtml(t(g.titleKey))}</div>${html}</div>`;
     }).join('');
-    return `<div class="dash-breakdown-group"><div class="dash-breakdown-title" data-i18n="${g.titleKey}">${escapeHtml(t(g.titleKey))}</div>${html}</div>`;
-  }).join('');
-  applySwatchColors(elsBreakdown);
+    applySwatchColors(elsBreakdown);
+  });
   animateListSnapshot(elsBreakdown, '.dash-bd-row', keyOf, '.dash-bd-bar-fill', snapshot);
 }
 
@@ -987,6 +1135,7 @@ function renderDeviceSelector(fleet) {
   if (!els.deviceScope || !els.deviceTrigger || !els.deviceMenu || !fleet) return;
   const machines = fleet.machines || [];
   if (machines.length === 0) {
+    state.selectedDeviceId = 'all';
     els.deviceScope.classList.add('hidden');
     setDeviceMenuOpen(false);
     return;
@@ -1004,6 +1153,9 @@ function renderDeviceSelector(fleet) {
   }
 
   const active = machines.find((m) => m.deviceId === state.selectedDeviceId) || null;
+  if (!active && state.selectedDeviceId !== 'all') {
+    state.selectedDeviceId = 'all';
+  }
   const triggerLabel = active
     ? `${active.name}${active.share > 0 ? ` · ${Math.round(active.share * 100)}%` : ''}`
     : `${t('dashboard.fleet.all')} · ${fleet.fleetTotals.onlineCount}/${machines.length}`;
@@ -1017,11 +1169,18 @@ function renderDeviceSelector(fleet) {
 
   els.deviceTrigger.onclick = (ev) => {
     ev.stopPropagation();
+    if (!state.deviceMenuOpen) renderDeviceMenu(fleet);
     setDeviceMenuOpen(!state.deviceMenuOpen);
+    if (state.deviceMenuOpen && ev.detail === 0) els.deviceMenu.querySelector('[aria-checked="true"]')?.focus();
   };
 
+  if (state.deviceMenuOpen) renderDeviceMenu(fleet);
+}
+
+function renderDeviceMenu(fleet) {
+  const machines = fleet.machines;
   const allSelected = state.selectedDeviceId === 'all';
-  const allItem = `<button type="button" class="dash-device-menu-item is-all${allSelected ? ' is-selected' : ''}" data-device="all" role="menuitemradio" aria-checked="${allSelected}">`
+  const allItem = `<button type="button" class="dash-device-menu-item is-all${allSelected ? ' is-selected' : ''}" data-device="all" data-key="all" role="menuitemradio" aria-checked="${allSelected}">`
     + `<span class="dash-device-menu-meta"><span class="dash-device-menu-name">${escapeHtml(t('dashboard.fleet.all'))}</span><span class="dash-device-menu-sub">${escapeHtml(t('dashboard.fleet.machineCount', { count: machines.length }))}</span></span>`
     + `<span class="dash-device-menu-val">${escapeHtml(formatCompact(fleet.fleetTotals.tokens))}</span>`
     + `<span class="dash-device-menu-share">100%</span>`
@@ -1035,7 +1194,7 @@ function renderDeviceSelector(fleet) {
     else if (m.activeWorkspace) subParts.push(m.activeWorkspace);
     else if (m.platformLabel) subParts.push(m.platformLabel);
     const pct = fleet.fleetTotals.tokens > 0 ? `${Math.round(m.share * 100)}%` : '—';
-    return `<button type="button" class="dash-device-menu-item${selected ? ' is-selected' : ''}" data-device="${escapeHtml(m.deviceId)}" role="menuitemradio" aria-checked="${selected}">`
+    return `<button type="button" class="dash-device-menu-item${selected ? ' is-selected' : ''}" data-device="${escapeHtml(m.deviceId)}" data-key="${escapeHtml(m.deviceId)}" role="menuitemradio" aria-checked="${selected}">`
       + `<span class="device-kind-icon device-kind-${escapeHtml(m.deviceKind)}" aria-hidden="true"></span>`
       + `<span class="dash-device-menu-meta"><span class="dash-device-menu-name">${escapeHtml(m.name)}</span><span class="dash-device-menu-sub">${escapeHtml(subParts.join(' · ') || '—')}</span></span>`
       + `<span class="dash-device-menu-val">${escapeHtml(formatCompact(m.tokens))}</span>`
@@ -1043,19 +1202,7 @@ function renderDeviceSelector(fleet) {
       + `</button>`;
   }).join('');
 
-  els.deviceMenu.innerHTML = `${allItem}<div class="dash-device-menu-sep" role="separator"></div>${machineItems}`;
-  els.deviceMenu.querySelectorAll('.dash-device-menu-item').forEach((item) => {
-    item.addEventListener('click', (ev) => {
-      ev.stopPropagation();
-      const id = item.dataset.device || 'all';
-      setDeviceMenuOpen(false);
-      if (state.selectedDeviceId === id) return;
-      hideTooltip();
-      state.selectedDeviceId = id;
-      state.motion = 'update';
-      render();
-    });
-  });
+  patchDashboardMarkup(els.deviceMenu, `${allItem}<div class="dash-device-menu-sep" role="separator"></div>${machineItems}`);
 }
 
 function animateMetricText(el, nextText, { value = null, format = null, period = false, whole = false, immediate = false } = {}) {
@@ -1063,6 +1210,10 @@ function animateMetricText(el, nextText, { value = null, format = null, period =
   const text = String(nextText ?? '');
   const prev = metricTextAnimations.get(el) || { text: '', value: null, settle: null, timer: 0 };
   if (el.dataset) el.dataset.metricText = text;
+  if (prev.text === text && !immediate && !prefersReducedMotion() && !document.hidden) {
+    prev.value = value;
+    return;
+  }
 
   const canAnimate = !immediate
     && numberAnimationApi
@@ -1119,6 +1270,7 @@ function updateHeroTokens(text, value, scopeKey) {
     && !prefersReducedMotion()
     && !document.hidden;
   lastHeroRender = { text, value, scopeKey };
+  if (previous.text === text && previous.scopeKey === scopeKey && !prefersReducedMotion() && !document.hidden) return;
 
   if (!canAnimate) {
     settleHeroNumber?.();
@@ -1398,6 +1550,19 @@ function quotaWindowFlags(win, { vendorColors, highlightLow }) {
   return { isExhausted, isCritical, isLow, isValueLow, isUntouched };
 }
 
+function quotaMotionKey(acc, labelText) {
+  return JSON.stringify([acc?.key ?? '', acc?.name ?? '', labelText ?? '']);
+}
+
+function formatQuotaWindowReading(win, shownPct) {
+  if (win?.planStatus === 'expired') return t('limits.mimo.planExpired');
+  if (String(win?.detail || '').toLowerCase() === 'unlimited') return t('settings.thirdparty.unlimited');
+  if (win?.value) return win.value;
+  if (win?.isCredits) return win.creditsText || win.detail || '—';
+  if (win?.remainingPercent == null) return win?.detail || '—';
+  return `${shownPct}%`;
+}
+
 function renderQuotas(overview) {
   if (!els.quotas) return;
   const accounts = overview?.quotas || [];
@@ -1436,7 +1601,9 @@ function renderQuotas(overview) {
         formatQuotaWindowLabel(w, acc.providerId, acc.windows),
         Boolean(w.pacePercent != null),
         Boolean(w.isCredits),
-        Boolean(!w.isCredits && !w.value && w.remainingPercent != null)
+        Boolean(w.showMeter !== false && w.remainingPercent != null),
+        Boolean(!w.isCredits && !w.value && w.planStatus !== 'expired' && w.remainingPercent != null),
+        String(w.planStatus || '')
       ])
     ])
   ]);
@@ -1450,15 +1617,16 @@ function renderQuotas(overview) {
       const accColor = displayColor(acc.color || charts.clientColors[acc.providerId] || '#6ab4f0');
       for (const win of acc.windows || []) {
         const labelText = formatQuotaWindowLabel(win, acc.providerId, acc.windows);
-        const motionKey = `${acc.key}\0${acc.name}\0${labelText}`;
+        const motionKey = quotaMotionKey(acc, labelText);
         const row = rowByKey.get(motionKey);
         if (!row) continue;
         const resetShort = formatResetShort(win.resetsAt);
-        const isPercent = !win.isCredits && !win.value && win.remainingPercent != null;
+        const hasMeter = win.showMeter !== false && win.remainingPercent != null;
+        const isPercent = !win.isCredits && !win.value && win.planStatus !== 'expired' && win.remainingPercent != null;
         const shownPct = win.remainingPercent != null
           ? (win.showUsed ? Math.round(100 - win.remainingPercent) : Math.round(win.remainingPercent))
           : 0;
-        const readingText = win.value || (win.isCredits ? (win.creditsText || '—') : `${shownPct}%`);
+        const readingText = formatQuotaWindowReading(win, shownPct);
         const flags = quotaWindowFlags(win, { vendorColors, highlightLow });
 
         row.classList.toggle('is-low', flags.isLow);
@@ -1474,7 +1642,7 @@ function renderQuotas(overview) {
         if (resetEl) resetEl.textContent = resetShort;
 
         const track = row.querySelector('.home-limit-track');
-        if (track) {
+        if (track && hasMeter) {
           track.setAttribute('data-limit-fill', win.fillPercent.toFixed(1));
           if (win.pacePercent != null) track.setAttribute('data-limit-pace', win.pacePercent.toFixed(1));
           else {
@@ -1502,6 +1670,9 @@ function renderQuotas(overview) {
           if (isPercent) {
             valEl.setAttribute('data-limit-motion-value', String(shownPct));
             valEl.setAttribute('data-limit-motion-text', readingText);
+          } else {
+            valEl.removeAttribute('data-limit-motion-value');
+            valEl.removeAttribute('data-limit-motion-text');
           }
           valEl.textContent = readingText;
         }
@@ -1534,11 +1705,12 @@ function renderQuotas(overview) {
     const windowsHtml = (acc.windows || []).map((win) => {
       const labelText = formatQuotaWindowLabel(win, acc.providerId, acc.windows);
       const resetShort = formatResetShort(win.resetsAt);
-      const isPercent = !win.isCredits && !win.value && win.remainingPercent != null;
+      const hasMeter = win.showMeter !== false && win.remainingPercent != null;
+      const isPercent = !win.isCredits && !win.value && win.planStatus !== 'expired' && win.remainingPercent != null;
       const shownPct = win.remainingPercent != null
         ? (win.showUsed ? Math.round(100 - win.remainingPercent) : Math.round(win.remainingPercent))
         : 0;
-      const readingText = win.value || (win.isCredits ? (win.creditsText || '—') : `${shownPct}%`);
+      const readingText = formatQuotaWindowReading(win, shownPct);
       const flags = quotaWindowFlags(win, { vendorColors, highlightLow });
       const rowClasses = [
         'home-limit-window',
@@ -1547,7 +1719,7 @@ function renderQuotas(overview) {
         flags.isExhausted ? 'is-exhausted' : '',
         flags.isUntouched ? 'is-untouched' : ''
       ].filter(Boolean).join(' ');
-      const motionKey = `${acc.key}\0${acc.name}\0${labelText}`;
+      const motionKey = quotaMotionKey(acc, labelText);
       const paceHtml = win.pacePercent != null
         ? `<span class="home-limit-pace" aria-hidden="true"></span>`
         : '';
@@ -1557,6 +1729,9 @@ function renderQuotas(overview) {
         win.pacePercent != null ? `data-limit-pace="${win.pacePercent.toFixed(1)}"` : '',
         !flags.isExhausted ? `data-limit-color="${accColor}"` : ''
       ].filter(Boolean).join(' ');
+      const trackHtml = hasMeter
+        ? `<div ${trackAttrs}><div class="home-limit-meter" aria-hidden="true"><span class="home-limit-ghost"></span><span class="home-limit-fill"></span></div><span class="home-limit-tip" aria-hidden="true"></span>${paceHtml}</div>`
+        : '';
       const valClasses = [
         'home-list-value',
         (flags.isExhausted || flags.isCritical) ? 'home-limit-value-critical' : '',
@@ -1571,7 +1746,7 @@ function renderQuotas(overview) {
       return `<div class="${rowClasses}" data-limit-motion-key="${escapeHtml(motionKey)}"${win.remainingPercent != null ? ` data-limit-remaining-percent="${win.remainingPercent}"` : ''}${win.resetsAt ? ` data-limit-reset-at="${escapeHtml(win.resetsAt)}"` : ''}>`
         + `<span class="home-limit-window-label">${escapeHtml(labelText)}</span>`
         + `<span class="home-limit-reset">${escapeHtml(resetShort)}</span>`
-        + `<div ${trackAttrs}><div class="home-limit-meter" aria-hidden="true"><span class="home-limit-ghost"></span><span class="home-limit-fill"></span></div><span class="home-limit-tip" aria-hidden="true"></span>${paceHtml}</div>`
+        + trackHtml
         + `<span ${readingAttrs}>${escapeHtml(readingText)}</span>`
         + `</div>`;
     }).join('');
@@ -1587,6 +1762,28 @@ function renderQuotas(overview) {
   if (homeLimitMotion) {
     homeLimitMotion.animate(els.quotas, motionSnapshot, { entry: state.motion === 'entry' || isFirstMount });
   }
+}
+
+function sessionGroupBadgeLabel(s) {
+  if (!s) return '';
+  if (s.subagentCount > 0) return t('sessions.subagentCount', { count: s.subagentCount });
+  if (s.groupKind === 'background-review' && s.groupCount > 0) {
+    return t('sessions.backgroundReviewCount', { count: s.groupCount });
+  }
+  if (s.groupKind === 'grok-bot' && s.groupCount > 0) {
+    return t('sessions.grokBotCount', { count: s.groupCount });
+  }
+  return '';
+}
+
+function topologyEndpointSubText(ep, isSessionMode) {
+  if (!isSessionMode) return ep.latestModel && ep.latestModel !== ep.title ? ep.latestModel : (ep.clientLabel || '');
+  const countLabel = sessionGroupBadgeLabel(ep);
+  const rawModel = ep.modelLabel || ep.latestModel;
+  const modelOrClient = (ep.groupKind === 'background-review' || ep.groupKind === 'grok-bot')
+    ? (rawModel && rawModel !== ep.title ? rawModel : '')
+    : (rawModel && rawModel !== ep.title ? rawModel : (ep.clientLabel || ''));
+  return [modelOrClient, countLabel].filter(Boolean).join(' · ');
 }
 
 function sessionStateIconHtml(activityState) {
@@ -1611,11 +1808,13 @@ function sessionRowParts(s, overview) {
     metaParts.push(`${devIcon}<span>${escapeHtml(s.deviceName || s.sourceDevice?.name)}</span>`);
   }
   if (s.projectLabel) metaParts.push(`<span>${escapeHtml(s.projectLabel)}</span>`);
-  if (s.latestModel) metaParts.push(`<span>${escapeHtml(s.latestModel)}</span>`);
+  const modelText = s.modelLabel || s.latestModel;
+  if (modelText) metaParts.push(`<span>${escapeHtml(modelText)}</span>`);
 
   const subExtras = [];
-  if (s.subagentCount > 0) {
-    subExtras.push(`<span class="dash-session-badge">+${s.subagentCount}</span>`);
+  const groupBadge = sessionGroupBadgeLabel(s);
+  if (groupBadge) {
+    subExtras.push(`<span class="dash-session-badge">${escapeHtml(groupBadge)}</span>`);
   }
   if (s.context) {
     const toneAttr = s.context.tone ? ` data-tone="${escapeHtml(s.context.tone)}"` : '';
@@ -1643,7 +1842,7 @@ function renderSessionRowsHtml(list, overview) {
       : `<span class="dash-bd-swatch" data-c="${displayColor(s.color)}"></span>`;
     const stateHtml = sessionStateIconHtml(s.activityState);
     const { joinedMeta, subExtrasHtml } = sessionRowParts(s, overview);
-    return `<div class="dash-session-row state-${escapeHtml(s.activityState)}" data-session-key="${escapeHtml(s.key)}">`
+    return `<div class="dash-session-row state-${escapeHtml(s.activityState)}" data-session-key="${escapeHtml(s.key)}" tabindex="0" role="button">`
       + `<span class="dash-session-lead">${iconHtml}${stateHtml}</span>`
       + `<div class="dash-session-body">`
       + `<div class="dash-session-title"><span class="dash-session-title-text">${escapeHtml(s.title)}</span></div>`
@@ -1690,7 +1889,7 @@ function renderWorkPanel(overview) {
     const nextSig = JSON.stringify(['devices', state.locale, state.selectedDeviceId, machines.map((m) => m.deviceId)]);
     if (nextSig === lastWorkStructureSig) {
       machines.forEach((m) => {
-        const row = els.workPanel.querySelector(`.dash-device-row[data-device-id="${CSS.escape ? CSS.escape(m.deviceId) : m.deviceId}"]`);
+        const row = findByDataset(els.workPanel, '.dash-device-row[data-device-id]', (r) => r.dataset.deviceId === m.deviceId);
         if (!row) return;
         row.classList.toggle('is-selected', state.selectedDeviceId === m.deviceId);
         row.classList.toggle('is-stale', Boolean(m.stale));
@@ -1721,36 +1920,38 @@ function renderWorkPanel(overview) {
     const snapshot = captureListSnapshot(els.workPanel, '.dash-device-row, .dash-project-row, .dash-session-row', rowKey, '.dash-project-bar-fill');
     lastWorkStructureSig = nextSig;
 
-    els.workPanel.innerHTML = machines.map((m) => {
-      const selected = state.selectedDeviceId === m.deviceId;
-      const cls = [
-        'dash-device-row',
-        selected ? 'is-selected' : '',
-        m.stale ? 'is-stale' : '',
-        m.activeSessionCount > 0 ? 'is-running' : ''
-      ].filter(Boolean).join(' ');
-      const subParts = [];
-      if (m.activeSessionCount > 0) subParts.push(t('dashboard.fleet.activeAgents', { count: m.activeSessionCount }));
-      if (m.liveTokPerSec > 0) subParts.push(`${Math.round(m.liveTokPerSec)} tok/s`);
-      if (m.activeWorkspace) subParts.push(m.activeWorkspace);
-      else if (m.platformLabel) subParts.push(m.platformLabel);
-      const badge = m.isLocal ? `<span class="dash-session-badge">${escapeHtml(t('dashboard.devices.you'))}</span>` : '';
-      const pct = fleet.fleetTotals.tokens > 0 ? `${Math.round(m.share * 100)}%` : '—';
-      const relW = Math.max(0.02, Math.min(1, m.share || 0)).toFixed(4);
-      return `<div class="${cls}" data-device-id="${escapeHtml(m.deviceId)}">`
-        + `<span class="dash-session-lead"><span class="device-kind-icon device-kind-${escapeHtml(m.deviceKind)}" aria-hidden="true"></span><span class="dash-session-live-ring" aria-hidden="true"></span></span>`
-        + `<div class="dash-session-body">`
-        + `<div class="dash-session-title"><span class="dash-session-title-text">${escapeHtml(m.name)}</span>${badge}</div>`
-        + `<div class="dash-session-sub"><span class="dash-session-meta-text">${escapeHtml(subParts.join(' · ') || '—')}</span></div>`
-        + `<div class="dash-project-bar"><div class="dash-project-bar-fill" data-w="${relW}" data-c="var(--accent, #b7ead4)"></div></div>`
-        + `</div>`
-        + `<div class="dash-session-metrics">`
-        + `<span class="dash-row-tokens">${escapeHtml(formatCompact(m.tokens))}</span>`
-        + `<span class="dash-row-cost">${escapeHtml(pct)}</span>`
-        + `</div>`
-        + `</div>`;
-    }).join('');
-    applySwatchColors(els.workPanel);
+    withPreservedFocus(els.workPanel, '.dash-device-row[data-device-id]', (r) => r.dataset.deviceId || '', () => {
+      els.workPanel.innerHTML = machines.map((m) => {
+        const selected = state.selectedDeviceId === m.deviceId;
+        const cls = [
+          'dash-device-row',
+          selected ? 'is-selected' : '',
+          m.stale ? 'is-stale' : '',
+          m.activeSessionCount > 0 ? 'is-running' : ''
+        ].filter(Boolean).join(' ');
+        const subParts = [];
+        if (m.activeSessionCount > 0) subParts.push(t('dashboard.fleet.activeAgents', { count: m.activeSessionCount }));
+        if (m.liveTokPerSec > 0) subParts.push(`${Math.round(m.liveTokPerSec)} tok/s`);
+        if (m.activeWorkspace) subParts.push(m.activeWorkspace);
+        else if (m.platformLabel) subParts.push(m.platformLabel);
+        const badge = m.isLocal ? `<span class="dash-session-badge">${escapeHtml(t('dashboard.devices.you'))}</span>` : '';
+        const pct = fleet.fleetTotals.tokens > 0 ? `${Math.round(m.share * 100)}%` : '—';
+        const relW = Math.max(0.02, Math.min(1, m.share || 0)).toFixed(4);
+        return `<div class="${cls}" data-device-id="${escapeHtml(m.deviceId)}" tabindex="0" role="button">`
+          + `<span class="dash-session-lead"><span class="device-kind-icon device-kind-${escapeHtml(m.deviceKind)}" aria-hidden="true"></span><span class="dash-session-live-ring" aria-hidden="true"></span></span>`
+          + `<div class="dash-session-body">`
+          + `<div class="dash-session-title"><span class="dash-session-title-text">${escapeHtml(m.name)}</span>${badge}</div>`
+          + `<div class="dash-session-sub"><span class="dash-session-meta-text">${escapeHtml(subParts.join(' · ') || '—')}</span></div>`
+          + `<div class="dash-project-bar"><div class="dash-project-bar-fill" data-w="${relW}" data-c="var(--accent, #b7ead4)"></div></div>`
+          + `</div>`
+          + `<div class="dash-session-metrics">`
+          + `<span class="dash-row-tokens">${escapeHtml(formatCompact(m.tokens))}</span>`
+          + `<span class="dash-row-cost">${escapeHtml(pct)}</span>`
+          + `</div>`
+          + `</div>`;
+      }).join('');
+      applySwatchColors(els.workPanel);
+    });
     animateListSnapshot(els.workPanel, '.dash-device-row', (r) => r.dataset.deviceId, '.dash-project-bar-fill', snapshot);
     return;
   }
@@ -1759,7 +1960,7 @@ function renderWorkPanel(overview) {
     const workspaces = overview?.workspaces || [];
     if (workspaces.length === 0) {
       lastWorkStructureSig = '';
-      els.workPanel.innerHTML = `<div class="dash-quotas-empty">${escapeHtml(t('dashboard.work.emptyWorkspaces'))}</div>`;
+      els.workPanel.innerHTML = `<div class="dash-quotas-empty">${escapeHtml(t(overview?.sessionsIncomplete ? 'sessions.incomplete' : 'dashboard.work.emptyWorkspaces'))}</div>`;
       return;
     }
     const visibleWs = workspaces.slice(0, 12);
@@ -1795,41 +1996,47 @@ function renderWorkPanel(overview) {
     const snapshot = captureListSnapshot(els.workPanel, '.dash-device-row, .dash-project-row, .dash-session-row', rowKey, '.dash-project-bar-fill');
     lastWorkStructureSig = nextSig;
 
-    els.workPanel.innerHTML = visibleWs.map((ws) => {
-      const clientsLabel = (ws.clients || []).slice(0, 3).join(' · ');
-      const devsLabel = (ws.devices || []).slice(0, 2).join(', ');
-      const subParts = [devsLabel, clientsLabel].filter(Boolean).join(' · ');
-      const liveChip = ws.activeSessionCount > 0
-        ? `<span class="dash-live-chip">${escapeHtml(t('dashboard.fleet.activeAgents', { count: ws.activeSessionCount }))}</span>`
-        : '';
-      return `<div class="dash-project-row" data-ws-key="${escapeHtml(ws.key)}">`
-        + `<span class="dash-session-lead"><span class="row-icon row-icon-project" aria-hidden="true"></span></span>`
-        + `<div class="dash-project-body">`
-        + `<div class="dash-project-title"><span class="dash-session-title-text">${escapeHtml(ws.name)}</span>${liveChip}</div>`
-        + `<div class="dash-project-sub"><span class="dash-session-meta-text">${escapeHtml(subParts || '')}</span></div>`
-        + `<div class="dash-project-bar"><div class="dash-project-bar-fill" data-w="${ws.relWidth.toFixed(4)}" data-bg="${escapeHtml(ws.barBackground)}"></div></div>`
-        + `</div>`
-        + `<div class="dash-project-metrics">`
-        + `<span class="dash-row-tokens">${escapeHtml(formatCompact(ws.tokens))}</span>`
-        + `<span class="dash-row-cost">${escapeHtml(formatCost(ws.cost, ws.unpricedTokens))}</span>`
-        + `</div>`
-        + `</div>`;
-    }).join('');
-    applySwatchColors(els.workPanel);
+    withPreservedFocus(els.workPanel, '.dash-project-row[data-ws-key]', (r) => r.dataset.wsKey || '', () => {
+      els.workPanel.innerHTML = visibleWs.map((ws) => {
+        const clientsLabel = (ws.clients || []).slice(0, 3).join(' · ');
+        const devsLabel = (ws.devices || []).slice(0, 2).join(', ');
+        const subParts = [devsLabel, clientsLabel].filter(Boolean).join(' · ');
+        const liveChip = ws.activeSessionCount > 0
+          ? `<span class="dash-live-chip">${escapeHtml(t('dashboard.fleet.activeAgents', { count: ws.activeSessionCount }))}</span>`
+          : '';
+        return `<div class="dash-project-row" data-ws-key="${escapeHtml(ws.key)}" tabindex="0" role="button">`
+          + `<span class="dash-session-lead"><span class="row-icon row-icon-project" aria-hidden="true"></span></span>`
+          + `<div class="dash-project-body">`
+          + `<div class="dash-project-title"><span class="dash-session-title-text">${escapeHtml(ws.name)}</span>${liveChip}</div>`
+          + `<div class="dash-project-sub"><span class="dash-session-meta-text">${escapeHtml(subParts || '')}</span></div>`
+          + `<div class="dash-project-bar"><div class="dash-project-bar-fill" data-w="${ws.relWidth.toFixed(4)}" data-bg="${escapeHtml(ws.barBackground)}"></div></div>`
+          + `</div>`
+          + `<div class="dash-project-metrics">`
+          + `<span class="dash-row-tokens">${escapeHtml(formatCompact(ws.tokens))}</span>`
+          + `<span class="dash-row-cost">${escapeHtml(formatCost(ws.cost, ws.unpricedTokens))}</span>`
+          + `</div>`
+          + `</div>`;
+      }).join('');
+      applySwatchColors(els.workPanel);
+    });
     animateListSnapshot(els.workPanel, '.dash-project-row', (r) => r.dataset.wsKey, '.dash-project-bar-fill', snapshot);
     return;
   }
 
   const list = state.workMode === 'running' ? runningSessions : allSessions;
+  const incompleteFooter = state.workMode === 'sessions' && overview?.sessionsIncomplete
+    ? `<div class="dash-quotas-empty">${escapeHtml(t('sessions.incomplete'))}</div>`
+    : '';
   if (list.length === 0) {
     lastWorkStructureSig = '';
-    const emptyKey = state.workMode === 'running' ? 'dashboard.work.emptyRunning' : 'dashboard.work.emptySessions';
+    const emptyKey = overview?.sessionsIncomplete ? 'sessions.incomplete'
+      : state.workMode === 'running' ? 'dashboard.work.emptyRunning' : 'dashboard.work.emptySessions';
     els.workPanel.innerHTML = `<div class="dash-quotas-empty">${escapeHtml(t(emptyKey))}</div>`;
     return;
   }
 
   const visibleSessions = list.slice(0, 12);
-  const nextSig = JSON.stringify([state.workMode, state.locale, visibleSessions.map((s) => s.key)]);
+  const nextSig = JSON.stringify([state.workMode, state.locale, Boolean(overview?.sessionsIncomplete), visibleSessions.map((s) => s.key)]);
   if (nextSig === lastWorkStructureSig) {
     const rowMap = new Map();
     els.workPanel.querySelectorAll('.dash-session-row').forEach((r) => rowMap.set(r.dataset.sessionKey, r));
@@ -1848,10 +2055,13 @@ function renderWorkPanel(overview) {
       if (titleEl) titleEl.textContent = s.title;
       const subEl = row.querySelector('.dash-session-sub');
       const prevContextFill = subEl?.querySelector('.home-session-context-fill');
+      const groupBadge = sessionGroupBadgeLabel(s);
+      const badgeEl = subEl?.querySelector?.('.dash-session-badge:not(.is-warm)') || null;
       const { joinedMeta, subExtrasHtml } = sessionRowParts(s, overview);
-      if (subEl && s.context && prevContextFill) {
+      if (subEl && s.context && prevContextFill && Boolean(groupBadge) === Boolean(badgeEl)) {
         const metaSpan = subEl.querySelector('.dash-session-meta-text');
         if (metaSpan) metaSpan.innerHTML = joinedMeta;
+        if (badgeEl) badgeEl.textContent = groupBadge;
         const scale = Math.max(0, Math.min(1, Number(s.context.displayPercent || 0) / 100)).toFixed(3);
         const ctxWrap = subEl.querySelector('.home-session-context');
         if (ctxWrap) {
@@ -1878,8 +2088,10 @@ function renderWorkPanel(overview) {
   const snapshot = captureListSnapshot(els.workPanel, '.dash-device-row, .dash-project-row, .dash-session-row', rowKey, '.home-session-context-fill');
   lastWorkStructureSig = nextSig;
 
-  els.workPanel.innerHTML = renderSessionRowsHtml(list, overview);
-  applySwatchColors(els.workPanel);
+  withPreservedFocus(els.workPanel, '.dash-session-row[data-session-key]', (r) => r.dataset.sessionKey || '', () => {
+    els.workPanel.innerHTML = renderSessionRowsHtml(list, overview) + incompleteFooter;
+    applySwatchColors(els.workPanel);
+  });
   animateListSnapshot(els.workPanel, '.dash-session-row', (r) => r.dataset.sessionKey, '.home-session-context-fill', snapshot);
 }
 
@@ -1896,7 +2108,9 @@ function topologyLineage(graph, kind, id) {
     }
     for (const edge of graph.hubToEnd || []) {
       const ep = graph.endpoints?.find((item) => item.id === edge.to);
-      const matchesDev = graph.mode === 'sessions' ? ep?.deviceId === id : relatedNodes.has(`hub:${edge.from}`);
+      const matchesDev = graph.mode === 'sessions'
+        ? (ep?.deviceId === id || (Array.isArray(ep?.memberDeviceIds) && ep.memberDeviceIds.includes(id)))
+        : relatedNodes.has(`hub:${edge.from}`);
       if (matchesDev && relatedNodes.has(`hub:${edge.from}`)) {
         relatedEdges.add(edge.id);
         relatedNodes.add(`endpoint:${edge.to}`);
@@ -1915,6 +2129,7 @@ function topologyLineage(graph, kind, id) {
     }
   } else if (kind === 'endpoint') {
     const ep = graph.endpoints?.find((item) => item.id === id);
+    const epHasMemberDevs = Array.isArray(ep?.memberDeviceIds) && ep.memberDeviceIds.length > 0;
     const matchedHubs = new Set();
     for (const edge of graph.hubToEnd || []) {
       if (edge.to !== id) continue;
@@ -1924,7 +2139,10 @@ function topologyLineage(graph, kind, id) {
     }
     for (const edge of graph.devToHub || []) {
       if (!matchedHubs.has(edge.to)) continue;
-      if (graph.mode !== 'sessions' || !ep?.deviceId || ep.deviceId === edge.from) {
+      if (graph.mode !== 'sessions'
+        || (!ep?.deviceId && !epHasMemberDevs)
+        || ep?.deviceId === edge.from
+        || (epHasMemberDevs && ep.memberDeviceIds.includes(edge.from))) {
         relatedEdges.add(edge.id);
         relatedNodes.add(`device:${edge.from}`);
       }
@@ -1984,7 +2202,9 @@ function showTopologyTooltip(kind, id, anchorEl) {
     head = ep.title;
     rows.push([t('dashboard.hero.tokens'), formatCompact(ep.totalTokens)]);
     rows.push([t('dashboard.hero.cost'), formatCost(ep.costUsd, ep.unpricedTokens)]);
-    if (ep.latestModel) rows.push([t('dashboard.stack.model'), ep.latestModel]);
+    if (ep.modelLabel || ep.latestModel) rows.push([t('dashboard.stack.model'), ep.modelLabel || ep.latestModel]);
+    const groupBadge = sessionGroupBadgeLabel(ep);
+    if (groupBadge) rows.push([t('dashboard.work.sessions'), groupBadge]);
     if (ep.context) rows.push([t('dashboard.sessions.context'), `${ep.context.displayPercent}%`]);
   }
   if (!head) return;
@@ -2011,7 +2231,7 @@ function syncTopologyScrollFades(canvas) {
   });
 }
 
-function layoutTopologyLinks(graph, { edgeActiveSig = '' } = {}) {
+function layoutTopologyLinks(graph) {
   if (!els.topology || !graph) return;
   const canvas = els.topology.querySelector('.dash-topo-canvas');
   const svg = els.topology.querySelector('.dash-topo-links');
@@ -2070,36 +2290,7 @@ function layoutTopologyLinks(graph, { edgeActiveSig = '' } = {}) {
     g.style?.setProperty?.('--edge-vis', vis >= 0.99 ? '1' : vis.toFixed(3));
   };
 
-  if (edgeActiveSig && edgeActiveSig === lastTopologyEdgeSig && edgeSpecs.length > 0) {
-    const existingById = new Map();
-    svg.querySelectorAll('g.topo-edge[data-edge-id]').forEach((g) => {
-      existingById.set(g.getAttribute('data-edge-id'), g);
-    });
-    if (edgeSpecs.every((s) => existingById.has(s.edge.id))) {
-      for (const spec of edgeSpecs) {
-        const g = existingById.get(spec.edge.id);
-        applyEdgeVisibility(g, spec.vis);
-        const base = g.querySelector('.topo-edge-base');
-        if (base) {
-          if (base.getAttribute('d') !== spec.d) {
-            g.querySelectorAll('path').forEach((p) => p.setAttribute('d', spec.d));
-          }
-          if (base.getAttribute('stroke-width') !== spec.sw) {
-            base.setAttribute('stroke-width', spec.sw);
-            g.querySelector('.topo-edge-aura')?.setAttribute('stroke-width', (spec.swNum + 3.2).toFixed(2));
-            g.querySelector('.topo-beam-tail')?.setAttribute('stroke-width', (spec.swNum + 1.8).toFixed(2));
-            g.querySelector('.topo-beam-body')?.setAttribute('stroke-width', Math.max(1.5, spec.swNum + 0.35).toFixed(2));
-          }
-        }
-      }
-      if (activeHover?.kind === 'topo') applyTopologyFocus(activeHover.nodeKind, activeHover.nodeId);
-      return;
-    }
-  }
-
   const reduced = prefersReducedMotion();
-  let hop1ActiveIdx = 0;
-  let hop2ActiveIdx = 0;
   const edgesHtml = edgeSpecs.map(({ edge, hop, d, color, swNum, sw }) => {
     const active = Boolean(edge.active);
     const classes = ['topo-edge', `topo-edge--hop${hop}`];
@@ -2108,7 +2299,7 @@ function layoutTopologyLinks(graph, { edgeActiveSig = '' } = {}) {
       classes.push('is-active');
       if (!reduced) {
         const tier = topologyEdgeSpeedTier(edge.liveRate);
-        const branchIdx = hop === 1 ? (hop1ActiveIdx++ % 4) : (hop2ActiveIdx++ % 4);
+        const branchIdx = Array.from(edge.id).reduce((sum, char) => sum + char.charCodeAt(0), 0) % 4;
         classes.push(`topo-speed-${tier}`, `topo-branch-${branchIdx}`);
         activeLayers = `<path class="topo-edge-aura" stroke="${escapeHtml(color)}" stroke-width="${(swNum + 3.2).toFixed(2)}" d="${d}"></path>`
           + `<path class="topo-beam-tail" pathLength="100" stroke="${escapeHtml(color)}" stroke-width="${(swNum + 1.8).toFixed(2)}" d="${d}"></path>`
@@ -2116,17 +2307,16 @@ function layoutTopologyLinks(graph, { edgeActiveSig = '' } = {}) {
           + `<path class="topo-beam-head" pathLength="100" stroke-width="1.25" d="${d}"></path>`;
       }
     }
-    return `<g class="${classes.join(' ')}" data-edge-id="${escapeHtml(edge.id)}">`
+    return `<g class="${classes.join(' ')}" data-edge-id="${escapeHtml(edge.id)}" data-key="${escapeHtml(edge.id)}">`
       + `<path class="topo-edge-base" stroke="${escapeHtml(color)}" stroke-width="${sw}" d="${d}"></path>`
       + activeLayers
       + `</g>`;
   }).join('');
 
-  lastTopologyEdgeSig = edgeActiveSig;
-  svg.innerHTML = `<defs>`
+  patchDashboardMarkup(svg, `<defs>`
     + `<filter id="dashTopoBeamGlow" x="-30%" y="-30%" width="160%" height="160%"><feGaussianBlur stdDeviation="2.4" result="b"></feGaussianBlur><feMerge><feMergeNode in="b"></feMergeNode><feMergeNode in="SourceGraphic"></feMergeNode></feMerge></filter>`
     + `<filter id="dashTopoAmbientGlow" x="-40%" y="-40%" width="180%" height="180%"><feGaussianBlur stdDeviation="5"></feGaussianBlur></filter>`
-    + `</defs>${edgesHtml}`;
+    + `</defs>${edgesHtml}`);
 
   const edgeSpecById = new Map(edgeSpecs.map((spec) => [spec.edge.id, spec]));
   svg.querySelectorAll('g.topo-edge[data-edge-id]').forEach((g) => {
@@ -2139,37 +2329,17 @@ function layoutTopologyLinks(graph, { edgeActiveSig = '' } = {}) {
   }
 }
 
-function topologyEdgeActiveSignature(graph, structureSig) {
-  return JSON.stringify([
-    structureSig,
-    (graph.devToHub || []).map((e) => [e.id, Boolean(e.active), e.active ? topologyEdgeSpeedTier(e.liveRate) : 0]),
-    (graph.hubToEnd || []).map((e) => [e.id, Boolean(e.active), e.active ? topologyEdgeSpeedTier(e.liveRate) : 0])
-  ]);
-}
-
 function renderTopology(overview) {
   if (!els.topology) return;
   const graph = overview?.topology;
   if (!graph || !graph.devices?.length) {
-    lastTopologyStructureSig = '';
-    lastTopologyEdgeSig = '';
-    els.topology.innerHTML = `<div class="dash-quotas-empty">${escapeHtml(t('dashboard.topology.empty'))}</div>`;
+    topologyResizeObserver?.disconnect();
+    topologyResizeObserver = null;
+    patchDashboardMarkup(els.topology, `<div class="dash-quotas-empty">${escapeHtml(t('dashboard.topology.empty'))}</div>`);
     return;
   }
 
   const reduced = prefersReducedMotion();
-  const structureSig = JSON.stringify([
-    graph.mode,
-    state.selectedDeviceId,
-    state.locale,
-    reduced,
-    graph.devices.map((d) => d.id),
-    graph.hubs.map((h) => h.id),
-    graph.endpoints.map((ep) => ep.id),
-    graph.devToHub.map((e) => e.id),
-    graph.hubToEnd.map((e) => e.id)
-  ]);
-  const edgeActiveSig = topologyEdgeActiveSignature(graph, structureSig);
   const isSessionMode = graph.mode === 'sessions';
   const maxHubTokens = graph.hubs.reduce((mx, h) => Math.max(mx, h.tokens), 0) || 1;
   const existingCanvas = els.topology.querySelector('.dash-topo-canvas');
@@ -2204,160 +2374,7 @@ function renderTopology(overview) {
   for (const e of graph.hubToEnd || []) {
     if (e.active) endRateMap.set(e.to, Math.max(endRateMap.get(e.to) || 0, Number(e.liveRate || 0)));
   }
-  const applyNodeSpeedClass = (node, active, rate) => {
-    node.classList.remove('topo-speed-1', 'topo-speed-2', 'topo-speed-3');
-    if (active && !reduced) node.classList.add(`topo-speed-${topologyEdgeSpeedTier(rate)}`);
-  };
   const nodeSpeedClass = (active, rate) => (active && !reduced ? `topo-speed-${topologyEdgeSpeedTier(rate)}` : '');
-
-  if (structureSig === lastTopologyStructureSig && existingCanvas) {
-    const nodeByKey = new Map();
-    existingCanvas.querySelectorAll('.topo-node[data-topo-kind]').forEach((node) => {
-      nodeByKey.set(`${node.dataset.topoKind}:${node.dataset.topoId}`, node);
-    });
-
-    graph.devices.forEach((d) => {
-      const node = nodeByKey.get(`device:${d.id}`);
-      if (!node) return;
-      const devEdge = activeDevEdgeMap.get(d.id) || null;
-      const hasLiveFlow = Boolean(devEdge);
-      const selected = state.selectedDeviceId === d.id;
-      const accent = hasLiveFlow ? displayColor(devEdge.color || '#6ab4f0') : 'rgba(var(--overlay-rgb), 0.45)';
-      const barColor = hasLiveFlow || d.liveTokPerSec > 0 ? 'rgba(var(--overlay-rgb), 0.56)' : 'rgba(var(--overlay-rgb), 0.34)';
-      node.classList.toggle('is-active', hasLiveFlow);
-      applyNodeSpeedClass(node, hasLiveFlow, d.liveTokPerSec);
-      node.classList.toggle('is-selected', selected);
-      node.classList.toggle('is-stale', Boolean(d.stale));
-      node.setAttribute('data-node-accent', accent);
-      node.style.setProperty('--node-accent', accent);
-      node.querySelector('.topo-port')?.classList.toggle('is-live', hasLiveFlow);
-      const titleEl = node.querySelector('.topo-node-title');
-      if (titleEl) titleEl.textContent = d.name;
-      const valEl = node.querySelector('.topo-node-val');
-      if (valEl) valEl.textContent = formatCompact(d.tokens);
-      const subLeftHtml = d.liveTokPerSec > 0
-        ? `<span class="topo-live-rate is-rate">${Math.round(d.liveTokPerSec)} tok/s</span>`
-        : escapeHtml(d.activeWorkspace || (d.isLocal ? t('dashboard.devices.you') : ''));
-      const subRightText = d.activeSessionCount > 0 ? t('dashboard.fleet.activeAgents', { count: d.activeSessionCount }) : '';
-      const subLeftEl = node.querySelector('.topo-node-sub-text');
-      const subRightEl = node.querySelector('.topo-node-sub > :last-child');
-      if (subLeftEl) subLeftEl.innerHTML = subLeftHtml;
-      if (subRightEl) subRightEl.textContent = subRightText;
-      const shareScale = Math.max(0.03, Math.min(1, d.share || 0)).toFixed(3);
-      const barFill = node.querySelector('.topo-mini-bar-fill');
-      if (barFill) {
-        barFill.setAttribute('data-w', shareScale);
-        barFill.setAttribute('data-c', barColor);
-        barFill.style.setProperty('--bar-scale', shareScale);
-        barFill.style.background = barColor;
-      }
-    });
-
-    graph.hubs.forEach((h) => {
-      const node = nodeByKey.get(`hub:${h.id}`);
-      if (!node) return;
-      const active = h.activeSessionCount > 0;
-      const titleText = h.isGeneral ? t('dashboard.topology.generalWorkspace') : h.name;
-      const accent = displayColor(activeHubColorMap.get(h.id) || h.color || '#73bdf5');
-      node.classList.toggle('is-active', active);
-      applyNodeSpeedClass(node, active, hubRateMap.get(h.id) || 0);
-      node.setAttribute('data-node-accent', accent);
-      node.style.setProperty('--node-accent', accent);
-      node.querySelectorAll('.topo-port').forEach((p) => p.classList.toggle('is-live', active));
-      const titleEl = node.querySelector('.topo-node-title');
-      if (titleEl) titleEl.textContent = titleText;
-      const valEl = node.querySelector('.topo-node-val');
-      if (valEl) valEl.textContent = formatCompact(h.tokens);
-      const subLeft = isSessionMode ? (h.clients || []).slice(0, 2).join(' · ') : '';
-      const subRightHtml = active ? `<span class="topo-live-rate">${escapeHtml(t('dashboard.fleet.activeAgents', { count: h.activeSessionCount }))}</span>` : escapeHtml(formatCost(h.cost, h.unpricedTokens));
-      const subLeftEl = node.querySelector('.topo-node-sub-text');
-      const subRightEl = node.querySelector('.topo-node-sub > :last-child');
-      if (subLeftEl) subLeftEl.textContent = subLeft;
-      if (subRightEl) subRightEl.innerHTML = subRightHtml;
-      const fillScale = Math.max(0.04, Math.min(1, h.tokens / maxHubTokens)).toFixed(3);
-      const barFill = node.querySelector('.topo-mini-bar-fill');
-      if (barFill) {
-        barFill.setAttribute('data-w', fillScale);
-        barFill.style.setProperty('--bar-scale', fillScale);
-        if (h.barBackground) barFill.style.background = h.barBackground;
-        else barFill.style.background = accent;
-      }
-    });
-
-    graph.endpoints.forEach((ep) => {
-      const node = nodeByKey.get(`endpoint:${ep.id}`);
-      if (!node) return;
-      node.classList.toggle('is-active', Boolean(ep.isActive));
-      applyNodeSpeedClass(node, Boolean(ep.isActive), endRateMap.get(ep.id) || 0);
-      node.querySelector('.topo-port')?.classList.toggle('is-live', Boolean(ep.isActive));
-      if (isSessionMode) {
-        const stateNode = node.querySelector('.home-session-state');
-        if (stateNode && stateNode.dataset.state !== ep.activityState) {
-          const tmp = document.createElement('div');
-          tmp.innerHTML = sessionStateIconHtml(ep.activityState);
-          if (tmp.firstElementChild) stateNode.replaceWith(tmp.firstElementChild);
-        }
-      }
-      const titleEl = node.querySelector('.topo-node-title');
-      if (titleEl) titleEl.textContent = ep.title;
-      const valEl = node.querySelector('.topo-node-val');
-      if (valEl) valEl.textContent = formatCompact(ep.totalTokens);
-      const subLeft = ep.latestModel && ep.latestModel !== ep.title ? ep.latestModel : (ep.clientLabel || '');
-      const subLeftEl = node.querySelector('.topo-node-sub-text');
-      if (subLeftEl) subLeftEl.textContent = subLeft;
-      const subEl = node.querySelector('.topo-node-sub');
-      const prevCtxFill = subEl?.querySelector('.home-session-context-fill');
-      if (ep.context && prevCtxFill) {
-        const scale = Math.max(0, Math.min(1, Number(ep.context.displayPercent || 0) / 100)).toFixed(3);
-        const ctxWrap = subEl.querySelector('.home-session-context');
-        if (ctxWrap) {
-          if (ep.context.tone) ctxWrap.setAttribute('data-tone', ep.context.tone);
-          else ctxWrap.removeAttribute('data-tone');
-        }
-        prevCtxFill.setAttribute('data-w', scale);
-        prevCtxFill.style.setProperty('--bar-scale', scale);
-        const ctxVal = subEl.querySelector('.home-session-context-value');
-        if (ctxVal) ctxVal.textContent = `${ep.context.displayPercent}%`;
-      } else if (subEl) {
-        const rightMeta = ep.context
-          ? `<span class="home-session-context"${ep.context.tone ? ` data-tone="${escapeHtml(ep.context.tone)}"` : ''}><span class="home-session-context-meter"><span class="home-session-context-fill" data-w="${Math.max(0, Math.min(1, Number(ep.context.displayPercent || 0) / 100)).toFixed(3)}"></span></span><span class="home-session-context-value">${ep.context.displayPercent}%</span></span>`
-          : `<span>${escapeHtml(formatCost(ep.costUsd, ep.unpricedTokens))}</span>`;
-        const oldLast = subEl.querySelector(':scope > :last-child');
-        if (oldLast) {
-          const tmp = document.createElement('div');
-          tmp.innerHTML = rightMeta;
-          if (tmp.firstElementChild) oldLast.replaceWith(tmp.firstElementChild);
-          applySwatchColors(subEl);
-        }
-      }
-    });
-
-    if (topologyLayoutFrame) cancelAnimationFrame(topologyLayoutFrame);
-    topologyLayoutFrame = requestAnimationFrame(() => {
-      topologyLayoutFrame = 0;
-      syncTopologyScrollFades(existingCanvas);
-      layoutTopologyLinks(graph, { edgeActiveSig });
-    });
-    return;
-  }
-
-  const prevScrollTops = new Map();
-  if (existingCanvas) {
-    existingCanvas.querySelectorAll('.dash-topo-col-scroll[data-topo-col]').forEach((scroller) => {
-      if (scroller.scrollTop > 0) prevScrollTops.set(scroller.getAttribute('data-topo-col'), scroller.scrollTop);
-    });
-  }
-
-  const prevNodeRects = new Map();
-  if (existingCanvas && !reduced && !document.hidden) {
-    existingCanvas.querySelectorAll('.topo-node[data-topo-kind]').forEach((node) => {
-      const r = node.getBoundingClientRect();
-      if (r.width > 0 && r.height > 0) prevNodeRects.set(`${node.dataset.topoKind}:${node.dataset.topoId}`, r);
-    });
-  }
-  const hadCanvas = Boolean(existingCanvas);
-  lastTopologyStructureSig = structureSig;
-  lastTopologyEdgeSig = '';
 
   const devicesHtml = graph.devices.map((d) => {
     const devEdge = activeDevEdgeMap.get(d.id) || null;
@@ -2371,7 +2388,7 @@ function renderTopology(overview) {
       : escapeHtml(d.activeWorkspace || (d.isLocal ? t('dashboard.devices.you') : ''));
     const subRight = d.activeSessionCount > 0 ? t('dashboard.fleet.activeAgents', { count: d.activeSessionCount }) : '';
     const shareScale = Math.max(0.03, Math.min(1, d.share || 0)).toFixed(3);
-    return `<div class="${cls}" data-topo-kind="device" data-topo-id="${escapeHtml(d.id)}" data-node-accent="${accent}">`
+    return `<div class="${cls}" data-topo-kind="device" data-topo-id="${escapeHtml(d.id)}" data-key="device:${escapeHtml(d.id)}" data-node-accent="${accent}" tabindex="0" role="button">`
       + `<div class="topo-node-top">`
       + `<span class="topo-node-ident"><span class="device-kind-icon device-kind-${escapeHtml(d.deviceKind)}" aria-hidden="true"></span><span class="topo-node-title">${escapeHtml(d.name)}</span></span>`
       + `<span class="topo-node-val">${escapeHtml(formatCompact(d.tokens))}</span>`
@@ -2394,7 +2411,7 @@ function renderTopology(overview) {
     const subRight = active ? `<span class="topo-live-rate">${escapeHtml(t('dashboard.fleet.activeAgents', { count: h.activeSessionCount }))}</span>` : escapeHtml(formatCost(h.cost, h.unpricedTokens));
     const fillScale = Math.max(0.04, Math.min(1, h.tokens / maxHubTokens)).toFixed(3);
     const barAttr = h.barBackground ? `data-bg="${escapeHtml(h.barBackground)}"` : `data-c="${accent}"`;
-    return `<div class="${hubCls}" data-topo-kind="hub" data-topo-id="${escapeHtml(h.id)}" data-node-accent="${accent}">`
+    return `<div class="${hubCls}" data-topo-kind="hub" data-topo-id="${escapeHtml(h.id)}" data-key="hub:${escapeHtml(h.id)}" data-node-accent="${accent}" tabindex="0" role="button">`
       + `<span class="topo-port topo-port--in${active ? ' is-live' : ''}" data-port="hub-in:${escapeHtml(h.id)}"></span>`
       + `<div class="topo-node-top">`
       + `<span class="topo-node-ident">${iconHtml}<span class="topo-node-title">${escapeHtml(titleText)}</span></span>`
@@ -2413,11 +2430,11 @@ function renderTopology(overview) {
       ? `<span class="dash-session-brand row-icon ${escapeHtml(ep.iconClass)}" aria-hidden="true"></span>`
       : `<span class="dash-bd-swatch" data-c="${accent}"></span>`;
     const stateHtml = isSessionMode ? sessionStateIconHtml(ep.activityState) : '';
-    const subLeft = ep.latestModel && ep.latestModel !== ep.title ? ep.latestModel : (ep.clientLabel || '');
+    const subLeft = topologyEndpointSubText(ep, isSessionMode);
     const rightMeta = ep.context
       ? `<span class="home-session-context"${ep.context.tone ? ` data-tone="${escapeHtml(ep.context.tone)}"` : ''}><span class="home-session-context-meter"><span class="home-session-context-fill" data-w="${Math.max(0, Math.min(1, Number(ep.context.displayPercent || 0) / 100)).toFixed(3)}"></span></span><span class="home-session-context-value">${ep.context.displayPercent}%</span></span>`
       : `<span>${escapeHtml(formatCost(ep.costUsd, ep.unpricedTokens))}</span>`;
-    return `<div class="${epCls}" data-topo-kind="endpoint" data-topo-id="${escapeHtml(ep.id)}" data-node-accent="${accent}">`
+    return `<div class="${epCls}" data-topo-kind="endpoint" data-topo-id="${escapeHtml(ep.id)}" data-key="endpoint:${escapeHtml(ep.id)}" data-node-accent="${accent}" tabindex="0" role="button">`
       + `<span class="topo-port topo-port--in${ep.isActive ? ' is-live' : ''}" data-port="end:${escapeHtml(ep.id)}"></span>`
       + `<div class="topo-node-top">`
       + `<span class="topo-node-ident">${iconHtml}${stateHtml}<span class="topo-node-title">${escapeHtml(ep.title)}</span></span>`
@@ -2430,30 +2447,23 @@ function renderTopology(overview) {
   const hubColTitle = t(isSessionMode ? 'dashboard.topology.colWorkspaces' : 'dashboard.topology.colTools');
   const endColTitle = t(isSessionMode ? 'dashboard.topology.colSessions' : 'dashboard.topology.colModels');
 
-  els.topology.innerHTML = `<div class="dash-topo-canvas">`
-    + `<svg class="dash-topo-links" aria-hidden="true"></svg>`
+  // Keep the scroll containers and focused nodes on membership/rank changes.
+  // The link layer owns its SVG children and stays mounted through node updates.
+  const changed = patchDashboardMarkup(els.topology, `<div class="dash-topo-canvas">`
+    + `<svg class="dash-topo-links" data-dom-island aria-hidden="true"></svg>`
     + `<div class="dash-topo-col"><div class="dash-topo-col-head"><span>${escapeHtml(t('dashboard.topology.colDevices'))}</span><span>${graph.counts.devices}</span></div><div class="dash-topo-col-scroll" data-topo-col="devices">${devicesHtml}</div></div>`
     + `<div class="dash-topo-col"><div class="dash-topo-col-head"><span>${escapeHtml(hubColTitle)}</span><span>${graph.counts.hubs}</span></div><div class="dash-topo-col-scroll" data-topo-col="hubs">${hubsHtml}</div></div>`
     + `<div class="dash-topo-col"><div class="dash-topo-col-head"><span>${escapeHtml(endColTitle)}</span><span>${graph.counts.endpoints}</span></div><div class="dash-topo-col-scroll" data-topo-col="endpoints">${endsHtml}</div></div>`
-    + `</div>`;
+    + `</div>`);
 
-  applySwatchColors(els.topology);
-
+  if (changed) applySwatchColors(els.topology);
   const canvas = els.topology.querySelector('.dash-topo-canvas');
-  if (canvas && prevScrollTops.size > 0) {
-    canvas.querySelectorAll('.dash-topo-col-scroll[data-topo-col]').forEach((scroller) => {
-      const savedTop = prevScrollTops.get(scroller.getAttribute('data-topo-col'));
-      if (savedTop) scroller.scrollTop = savedTop;
-    });
-  }
-  syncTopologyScrollFades(canvas);
-
-  if (canvas && typeof ResizeObserver === 'function') {
+  if (canvas && canvas !== existingCanvas && typeof ResizeObserver === 'function') {
     topologyResizeObserver?.disconnect();
     topologyResizeObserver = new ResizeObserver(() => {
       if (state.stageView === 'flow' && state.overview?.topology) {
         syncTopologyScrollFades(canvas);
-        layoutTopologyLinks(state.overview.topology, { edgeActiveSig });
+        layoutTopologyLinks(state.overview.topology);
       }
     });
     topologyResizeObserver.observe(canvas);
@@ -2463,34 +2473,7 @@ function renderTopology(overview) {
   topologyLayoutFrame = requestAnimationFrame(() => {
     topologyLayoutFrame = 0;
     syncTopologyScrollFades(canvas);
-    layoutTopologyLinks(graph, { edgeActiveSig });
-    if (!reduced && !document.hidden && canvas) {
-      let enterIdx = 0;
-      canvas.querySelectorAll('.topo-node[data-topo-kind]').forEach((node) => {
-        const key = `${node.dataset.topoKind}:${node.dataset.topoId}`;
-        const oldRect = hadCanvas ? prevNodeRects.get(key) : null;
-        if (oldRect) {
-          const nextRect = node.getBoundingClientRect();
-          const dx = oldRect.left - nextRect.left;
-          const dy = oldRect.top - nextRect.top;
-          if (Math.abs(dx) >= 0.5 || Math.abs(dy) >= 0.5) {
-            node.animate?.(
-              [{ transform: `translate(${dx}px, ${dy}px)` }, { transform: 'none' }],
-              { duration: 320, easing: 'cubic-bezier(0.22, 1, 0.36, 1)', fill: 'backwards' }
-            );
-          }
-        } else {
-          node.animate?.(
-            [{ opacity: 0, transform: 'translateY(6px)' }, { opacity: 1, transform: 'none' }],
-            { duration: 240, delay: Math.min(enterIdx++, 10) * 18, easing: 'cubic-bezier(0.22, 1, 0.36, 1)', fill: 'backwards' }
-          );
-        }
-      });
-      canvas.querySelector('.dash-topo-links')?.animate?.(
-        [{ opacity: 0 }, { opacity: 1 }],
-        { duration: 240, easing: 'ease', fill: 'backwards' }
-      );
-    }
+    layoutTopologyLinks(graph);
   });
 }
 
@@ -2866,8 +2849,8 @@ function renderActivity(overview) {
 
   balanceStatCards();
   renderHero(overview);
-  renderVelocity(overview);
-  renderQuotas(overview);
+  if (state.settings?.dashboardShowVelocity !== false) renderVelocity(overview);
+  if (state.settings?.dashboardShowQuotas !== false) renderQuotas(overview);
   renderWorkPanel(overview);
   renderBreakdown(overview);
 }
@@ -2885,6 +2868,129 @@ function closeDrawer() {
     try { els.drawer.hidePopover(); } catch (_) {}
   }
   els.drawerScrim?.classList.add('hidden');
+}
+
+function isRemoteSession(session) {
+  if (!session) return true;
+  if (session.sourceDevice?.ambiguous === true) return true;
+  const srcId = String(session.sourceDevice?.deviceId || '').trim();
+  const localId = String(state.stats?.localDeviceId || state.settings?.deviceId || '').trim();
+  if (srcId) {
+    return !localId || srcId !== localId;
+  }
+  if (session.sourceDevice) return true;
+  if (session.isNativeLocal === true) return false;
+  return isSyncedStatsContext(state.stats, state.settings, state.statsMode);
+}
+
+function isSyncedStatsContext(stats = state.stats, settings = state.settings, statsMode = state.statsMode) {
+  const devices = Array.isArray(stats?.devices) ? stats.devices : [];
+  const localId = String(stats?.localDeviceId || settings?.deviceId || '').trim();
+  if (devices.length > 1) return true;
+  if (devices.length === 1) {
+    const onlyId = String(devices[0]?.deviceId || devices[0]?.id || '').trim();
+    if (onlyId && (!localId || onlyId !== localId)) return true;
+  }
+  const activeMode = String(stats?.mode || statsMode || '').trim();
+  if (activeMode === 'local') return false;
+  if (activeMode === 'sync') return true;
+  const hubMode = String(settings?.hubMode || '').trim();
+  if (hubMode === 'local') return false;
+  if (hubMode === 'client' || hubMode === 'host' || hubMode === 'icloud') return true;
+  return Boolean(String(settings?.hubUrl || '').trim());
+}
+
+function hasPendingSyncedOwnership(stats = state.stats, periodKey = state.periodKey) {
+  const derived = Boolean(typeof fixedPeriodRangesApi !== 'undefined' && fixedPeriodRangesApi?.isDerived?.(periodKey));
+  if (periodKey !== 'today' && periodKey !== 'month' && !derived) return false;
+  if (!isSyncedStatsContext(stats, state.settings, state.statsMode)) return false;
+  if (derived) {
+    return Boolean(typeof syncedSessionPagesKeyFor === 'function' && syncedSessionPagesKeyFor(stats, periodKey))
+      && !isSyncedSessionPagesLoaded(stats, periodKey);
+  }
+  if (!(stats?.sessionDetailsOmitted?.[periodKey] > 0)) return false;
+  return !isSyncedSessionPagesLoaded(stats, periodKey);
+}
+
+function hasUnresolvedSyncedOmissions(stats = state.stats, periodKey = state.periodKey) {
+  return hasPendingSyncedOwnership(stats, periodKey);
+}
+
+function reconcileSyncedSessionOwnership(displayedSession, authoritativeSession, { allowAdoptUnowned = false } = {}) {
+  const localId = String(state.stats?.localDeviceId || state.settings?.deviceId || '').trim();
+  const displayedOwnerId = displayedSession?.sourceDevice?.ambiguous === true
+    ? ''
+    : String(displayedSession?.sourceDevice?.deviceId || '').trim();
+  const confirmedNextOwner = Boolean(authoritativeSession?.sourceDevice?.deviceId)
+    && authoritativeSession?.sourceDevice?.ambiguous !== true;
+  const nextOwnerId = confirmedNextOwner ? String(authoritativeSession.sourceDevice.deviceId).trim() : '';
+  const ownerMatches = Boolean(nextOwnerId) && (
+    displayedOwnerId ? nextOwnerId === displayedOwnerId : allowAdoptUnowned
+  );
+  if (ownerMatches) {
+    return {
+      session: {
+        ...displayedSession,
+        sourceDevice: authoritativeSession.sourceDevice,
+        deviceName: authoritativeSession.sourceDevice.name || displayedSession.deviceName || ''
+      },
+      confirmedOwner: true
+    };
+  }
+  if (displayedOwnerId && (!localId || displayedOwnerId !== localId)) {
+    return {
+      session: {
+        ...displayedSession,
+        sourceDevice: displayedSession.sourceDevice,
+        deviceName: displayedSession.deviceName || displayedSession.sourceDevice?.name || ''
+      },
+      confirmedOwner: false
+    };
+  }
+  return {
+    session: {
+      ...displayedSession,
+      sourceDevice: null,
+      deviceName: ''
+    },
+    confirmedOwner: false
+  };
+}
+
+function loadSessionDrawerDetail(s, token, baseGrid) {
+  if (typeof window.tokenMonitor?.getSessionDetail !== 'function') return;
+  const periodKey = s.sourcePeriodKey || state.periodKey;
+  const owner = String(s.sourceDevice?.deviceId || state.stats?.localDeviceId || state.settings?.deviceId || '');
+  const deviceWindows = state.stats?.syncedFixedPeriodDeviceWindows?.[periodKey];
+  const nativeWindow = deviceWindows ? (Object.hasOwn(deviceWindows, owner) ? deviceWindows[owner] : null)
+    : state.stats?.nativeRangeWindows?.[periodKey];
+  const fixedRange = fixedPeriodRangesApi?.isDerived?.(periodKey)
+    ? (nativeWindow?.start && nativeWindow?.end
+      ? nativeWindow
+      : fixedPeriodRangesApi.rangeForSelection?.(periodKey, { locale: state.settings?.locale || state.locale }))
+    : null;
+  const detailPeriod = fixedRange?.start && fixedRange?.end
+    ? `range:${fixedRange.start}:${fixedRange.end}`
+    : (periodKey === 'allTime' ? 'total' : periodKey);
+  void window.tokenMonitor.getSessionDetail({
+    client: s.client,
+    sessionId: s.sessionId,
+    period: detailPeriod,
+    sessionCost: s.costUsd,
+    snapshotSource: state.stats?.snapshot?.source
+  }).then((detail) => {
+    if (token !== drawerRequestToken || !detail || detail.found !== true) return;
+    const anatomy = modelApi?.computeSessionDetailAnatomy?.(detail) || modelApi?.computeTokenAnatomy?.(detail);
+    const segsHtml = (anatomy?.segments || []).map((seg) =>
+      `<div class="dash-bd-row"><span class="dash-bd-name"><span class="dash-bd-name-text">${escapeHtml(t(seg.labelKey))}</span></span><div class="dash-bd-bar-bg"><div class="dash-bd-bar-fill" data-w="${seg.share.toFixed(4)}" data-c="#73bdf5"></div></div><span class="dash-bd-val">${escapeHtml(formatCompact(seg.tokens))}</span><span class="dash-bd-pct">${(seg.share * 100).toFixed(0)}%</span></div>`
+    ).join('');
+    const currentBaseGrid = typeof state.drawer?.detailBaseGrid === 'string'
+      ? state.drawer.detailBaseGrid
+      : baseGrid;
+    els.drawerBody.innerHTML = currentBaseGrid
+      + (segsHtml ? `<div><div class="dash-drawer-section-title">${escapeHtml(t('dashboard.anatomy.title'))}</div>${segsHtml}</div>` : '');
+    applySwatchColors(els.drawerBody);
+  }).catch(() => {});
 }
 
 function openDrawer(payload) {
@@ -2976,35 +3082,144 @@ function openDrawer(payload) {
 
   if (payload.kind === 'session') {
     const s = payload.session;
-    els.drawerTitle.textContent = s.title;
-    els.drawerSubtitle.textContent = [s.clientLabel, s.projectLabel, s.deviceName || s.sourceDevice?.name].filter(Boolean).join(' · ');
-    if (els.drawerIcon && s.iconClass) {
-      els.drawerIcon.className = `dash-drawer-icon row-icon ${s.iconClass}`;
-    }
-    const baseGrid = drawerStatGrid([
-      [t('dashboard.hero.tokens'), formatCompact(s.totalTokens)],
-      [t('dashboard.hero.cost'), formatCost(s.costUsd, s.unpricedTokens)],
-      [t('dashboard.sessions.context'), s.context ? `${s.context.percentUsed}%` : '—'],
-      [t('dashboard.sessions.cacheWarm'), s.promptCache ? t('session.cacheEstimate', { minutes: s.promptCache.minutes }) : '—']
-    ]);
-    els.drawerBody.innerHTML = baseGrid;
+    const renderMemberRow = (member, idx) => {
+      const swatch = typeof displayColor === 'function' ? displayColor(member.color || '#6ab4f0') : (member.color || '#6ab4f0');
+      const title = member.title || member.modelLabel || member.clientLabel || member.sessionId || '';
+      const meta = [member.modelLabel || member.latestModel, member.projectLabel, formatCost(member.costUsd, member.unpricedTokens)].filter(Boolean).join(' · ');
+      return `<div class="dash-bd-row dash-drawer-member-row" data-drawer-member-idx="${idx}" tabindex="0" role="button">`
+        + `<span class="dash-bd-name"><span class="dash-bd-swatch" data-c="${swatch}"></span><span class="dash-bd-name-text">${escapeHtml(title)}</span></span>`
+        + `<span class="dash-bd-val">${escapeHtml(formatCompact(member.totalTokens))}</span>`
+        + `<span class="dash-bd-pct">${escapeHtml(meta)}</span>`
+        + `</div>`;
+    };
+    const renderGroupMembersSection = (sess) => {
+      const rows = Array.isArray(sess?.groupRows) ? sess.groupRows : [];
+      if (!rows.length) return '';
+      const indexed = rows.map((member, index) => ({ member, index }));
+      if (sess.subagentGroup) {
+        const mainEntries = indexed.filter((item) => item.member.groupRole === 'main');
+        const childEntries = indexed.filter((item) => item.member.groupRole !== 'main');
+        const sections = [];
+        if (mainEntries.length > 0) {
+          sections.push(mainEntries.map((item) => renderMemberRow(item.member, item.index)).join(''));
+        }
+        if (childEntries.length > 0) {
+          const heading = sess.subagentCount > 0
+            ? `${t('sessions.subagent')} · ${sess.subagentCount}`
+            : t('sessions.subagent');
+          sections.push(
+            `<div class="dash-drawer-section-title">${escapeHtml(heading)}</div>`
+            + childEntries.slice(0, 50).map((item) => renderMemberRow(item.member, item.index)).join('')
+          );
+        }
+        return sections.join('');
+      }
+      const badgeText = typeof sessionGroupBadgeLabel === 'function' ? sessionGroupBadgeLabel(sess) : '';
+      return (badgeText ? `<div class="dash-drawer-section-title">${escapeHtml(badgeText)}</div>` : '')
+        + indexed.slice(0, 50).map((item) => renderMemberRow(item.member, item.index)).join('');
+    };
 
-    if (typeof window.tokenMonitor?.getSessionDetail === 'function') {
-      void window.tokenMonitor.getSessionDetail({
-        client: s.client,
-        sessionId: s.sessionId,
-        period: state.periodKey,
-        sessionCost: s.costUsd
-      }).then((detail) => {
-        if (token !== drawerRequestToken || !detail || detail.found !== true) return;
-        const anatomy = modelApi?.computeTokenAnatomy?.(detail);
-        const segsHtml = (anatomy?.segments || []).map((seg) =>
-          `<div class="dash-bd-row"><span class="dash-bd-name"><span class="dash-bd-name-text">${escapeHtml(t(seg.labelKey))}</span></span><div class="dash-bd-bar-bg"><div class="dash-bd-bar-fill" data-w="${seg.share.toFixed(4)}" data-c="#73bdf5"></div></div><span class="dash-bd-val">${escapeHtml(formatCompact(seg.tokens))}</span><span class="dash-bd-pct">${(seg.share * 100).toFixed(0)}%</span></div>`
-        ).join('');
-        els.drawerBody.innerHTML = baseGrid
-          + (segsHtml ? `<div><div class="dash-drawer-section-title">${escapeHtml(t('dashboard.anatomy.title'))}</div>${segsHtml}</div>` : '');
-        applySwatchColors(els.drawerBody);
-      }).catch(() => {});
+    const isGroupSession = Boolean(s.sessionGroup && Array.isArray(s.groupRows) && s.groupRows.length > 0);
+    const ownershipPeriodKey = s.resumedFromPriorPeriod === true
+      ? (s.sourcePeriodKey === 'today' || s.sourcePeriodKey === 'month' ? s.sourcePeriodKey : 'month')
+      : (s.sourcePeriodKey || state.periodKey);
+    const isSyncedPeriodSession = !isGroupSession
+      && s.isNativeLocal !== true
+      && (typeof isSyncedSessionPeriodKey === 'function' ? isSyncedSessionPeriodKey(ownershipPeriodKey) : (ownershipPeriodKey === 'today' || ownershipPeriodKey === 'month'))
+      && isSyncedStatsContext(state.stats, state.settings, state.statsMode);
+    const syncedPeriodNeedsPaging = isSyncedPeriodSession
+      && (ownershipPeriodKey === 'today' || ownershipPeriodKey === 'month')
+      && state.stats?.sessionDetailsOmitted?.[ownershipPeriodKey] > 0;
+    const syncedDerivedNeedsLoad = isSyncedPeriodSession
+      && typeof isSyncedDerivedPeriod === 'function'
+      && isSyncedDerivedPeriod(ownershipPeriodKey)
+      && Boolean(typeof syncedSessionPagesKeyFor === 'function' && syncedSessionPagesKeyFor(state.stats, ownershipPeriodKey));
+    const ownershipPending = (syncedPeriodNeedsPaging || syncedDerivedNeedsLoad)
+      && !isSyncedSessionPagesLoaded(state.stats, ownershipPeriodKey);
+    const snapshotMismatch = s.snapshotId != null && state.stats?.snapshot && (
+      s.snapshotId !== state.stats.snapshot.id
+      || s.snapshotSource !== state.stats.snapshot.source
+    );
+    let effectiveSession = s;
+    if (syncedPeriodNeedsPaging && !ownershipPending) {
+      const sessionKey = s.key || `${s.client}:${s.sessionId}`;
+      const pagedSession = resolvedSyncedPageSession(state.stats, ownershipPeriodKey, sessionKey);
+      effectiveSession = reconcileSyncedSessionOwnership(s, pagedSession, { allowAdoptUnowned: true }).session;
+    } else if (isSyncedPeriodSession && !syncedPeriodNeedsPaging && !ownershipPending && (Boolean(payload.returnToGroup) || snapshotMismatch)) {
+      const sessionKey = s.key || `${s.client}:${s.sessionId}`;
+      const currentSessions = state.stats?.periods?.[ownershipPeriodKey]?.sessions;
+      const currentSession = currentSessions && Object.hasOwn(currentSessions, sessionKey)
+        ? currentSessions[sessionKey]
+        : null;
+      effectiveSession = reconcileSyncedSessionOwnership(s, currentSession, { allowAdoptUnowned: syncedDerivedNeedsLoad }).session;
+    } else if (!ownershipPending && (s.sourceDevice?.ambiguous === true || (s.sourceDevice && !s.sourceDevice.deviceId))) {
+      effectiveSession = { ...s, deviceName: '' };
+    }
+
+    const subtitleDevice = effectiveSession.sourceDevice?.ambiguous === true
+      || (effectiveSession.sourceDevice && !effectiveSession.sourceDevice.deviceId)
+      ? ''
+      : (effectiveSession.deviceName || effectiveSession.sourceDevice?.name);
+    const groupBadge = isGroupSession && typeof sessionGroupBadgeLabel === 'function'
+      ? sessionGroupBadgeLabel(effectiveSession)
+      : '';
+    els.drawerTitle.textContent = effectiveSession.title;
+    els.drawerSubtitle.textContent = [effectiveSession.clientLabel, effectiveSession.projectLabel, groupBadge, subtitleDevice].filter(Boolean).join(' · ');
+    if (els.drawerIcon && effectiveSession.iconClass) {
+      els.drawerIcon.className = `dash-drawer-icon row-icon ${effectiveSession.iconClass}`;
+    }
+    const backHtml = payload.returnToGroup
+      ? `<button type="button" class="dash-drawer-back" data-drawer-back="true">← ${escapeHtml(payload.returnToGroup.title || payload.returnToGroup.projectLabel || payload.returnToGroup.clientLabel || '')}</button>`
+      : '';
+    const baseGrid = backHtml + drawerStatGrid([
+      [t('dashboard.hero.tokens'), formatCompact(effectiveSession.totalTokens)],
+      [t('dashboard.hero.cost'), formatCost(effectiveSession.costUsd, effectiveSession.unpricedTokens)],
+      [t('dashboard.sessions.context'), effectiveSession.context ? `${effectiveSession.context.percentUsed}%` : '—'],
+      [t('dashboard.sessions.cacheWarm'), effectiveSession.promptCache ? t('session.cacheEstimate', { minutes: effectiveSession.promptCache.minutes }) : '—']
+    ]);
+
+    if (isGroupSession) {
+      state.drawer = {
+        ...payload,
+        session: effectiveSession,
+        groupMembers: effectiveSession.groupRows,
+        rawGroupSession: effectiveSession,
+        pendingOwnershipDetail: false,
+        detailRequested: false
+      };
+      els.drawerBody.innerHTML = baseGrid + renderGroupMembersSection(effectiveSession);
+      if (typeof applySwatchColors === 'function') applySwatchColors(els.drawerBody);
+      return;
+    }
+
+    els.drawerBody.innerHTML = baseGrid;
+    const baseDrawer = {
+      ...payload,
+      session: effectiveSession,
+      pendingOwnershipDetail: false,
+      detailRequested: false,
+      detailPeriodKey: ownershipPeriodKey,
+      detailSource: state.stats?.snapshot?.source ?? null,
+      detailSourceGen: statsSourceGeneration,
+      detailToken: token,
+      detailBaseGrid: baseGrid
+    };
+    state.drawer = baseDrawer;
+
+    if (!isRemoteSession(effectiveSession)) {
+      if (ownershipPending) {
+        state.drawer = {
+          ...baseDrawer,
+          pendingOwnershipDetail: true
+        };
+        ensureSyncedSessionPages(ownershipPeriodKey);
+      } else {
+        state.drawer = {
+          ...baseDrawer,
+          detailRequested: true
+        };
+        loadSessionDrawerDetail(effectiveSession, token, baseGrid);
+      }
     }
   }
 }
@@ -3014,38 +3229,556 @@ function refreshActiveHover() {
   if (!activeHover || !isOpen) return;
   if (activeHover.kind === 'heat' && activeHover.date) {
     const day = state.dayMap?.get(activeHover.date);
-    const hit = els.heatmap.querySelector(`.heat[data-d="${activeHover.date}"], .iso-col[data-d="${activeHover.date}"]`);
+    const hit = findByDataset(els.heatmap, '.heat[data-d], .iso-col[data-d]', (el) => el.getAttribute('data-d') === activeHover.date);
     if (hit) {
       hit.setAttribute('data-active', 'true');
       const anchor = hit.querySelector('.iso-face-top') || hit;
       showHeatTooltip(activeHover.date, day, anchor);
-    }
+    } else hideTooltip();
   } else if (activeHover.kind === 'ribbon' && activeHover.id) {
-    const seg = els.heroRibbon?.querySelector(`.dash-ribbon-seg[data-tip-id="${activeHover.id}"]`);
+    const seg = findByDataset(els.heroRibbon, '.dash-ribbon-seg[data-tip-id]', (el) => el.getAttribute('data-tip-id') === activeHover.id);
     if (seg) showRibbonTooltip(seg);
+    else hideTooltip();
   } else if (activeHover.kind === 'topo' && state.stageView === 'flow') {
-    const node = els.topology?.querySelector(`.topo-node[data-topo-kind="${activeHover.nodeKind}"][data-topo-id="${activeHover.nodeId}"]`);
+    const node = findByDataset(
+      els.topology,
+      '.topo-node[data-topo-kind]',
+      (el) => el.dataset.topoKind === activeHover.nodeKind && el.dataset.topoId === activeHover.nodeId
+    );
     if (node) {
       applyTopologyFocus(activeHover.nodeKind, activeHover.nodeId);
       showTopologyTooltip(activeHover.nodeKind, activeHover.nodeId, node);
+    } else {
+      clearTopologyFocus();
+      hideTooltip();
+    }
+  } else if (activeHover.kind === 'trend' && state.chartKind === activeHover.chartKind) {
+    const candles = state.chartKind === 'candle';
+    const entries = candles ? state.chartModel?.candles : state.chartModel?.bars;
+    const index = entries?.findIndex(entry => (candles ? entry.key : entry.label) === activeHover.key) ?? -1;
+    const anchor = index >= 0 ? els.chart.querySelector(`.bar-hover[data-i="${index}"]`) : null;
+    if (anchor) (candles ? showCandleTooltip : showBarTooltip)(entries[index], anchor);
+    else hideTooltip();
+  }
+}
+
+let localSessionActivity = null;
+let latestBaseStats = null;
+let latestAcceptedSnapshot = null;
+let statsPushSeq = 0;
+let statsSourceGeneration = 0;
+const syncedSessionPagesByPeriod = new Map();
+const syncedSessionPagesRequests = new Map();
+
+function applyLocalSessionActivity(stats) {
+  const incoming = localSessionActivity;
+  if (!stats || !incoming || !sessionActivityProjectionApi?.applyActivityPatch) return stats;
+  if (incoming.snapshot?.id !== stats.snapshot?.id
+    || incoming.snapshot?.source !== stats.snapshot?.source) {
+    return stats;
+  }
+  let patch = incoming.patch;
+  if (state.settings?.sessionTitlesEnabled === false && patch?.nativeSessions && sessionTitleDisplayApi?.withoutSessionTitles) {
+    const redactedNative = Object.fromEntries(
+      Object.entries(patch.nativeSessions).map(([periodName, sessions]) => [
+        periodName,
+        sessionTitleDisplayApi.withoutSessionTitles(sessions)
+      ])
+    );
+    patch = { ...patch, nativeSessions: redactedNative };
+  }
+  const patched = sessionActivityProjectionApi.applyActivityPatch(stats, patch);
+  if (state.settings?.sessionTitlesEnabled === false && sessionTitleDisplayApi?.withoutSessionTitleStats) {
+    return sessionTitleDisplayApi.withoutSessionTitleStats(patched);
+  }
+  return patched;
+}
+
+function isSyncedDerivedPeriod(periodKey) {
+  return Boolean(typeof fixedPeriodRangesApi !== 'undefined' && fixedPeriodRangesApi?.isDerived?.(periodKey));
+}
+
+function isSyncedSessionPeriodKey(periodKey) {
+  return periodKey === 'today' || periodKey === 'month' || isSyncedDerivedPeriod(periodKey);
+}
+
+function syncedPeriodCalendarKey(stats, periodKey) {
+  const devices = (stats.devices || []).map(device => [
+    String(device.deviceId || device.id || ''),
+    fixedPeriodRangesApi.deviceDayState(device)?.currentKey || device.periodWindows?.today?.key || ''
+  ]);
+  return JSON.stringify([stats.snapshot?.source, periodKey, fixedPeriodRangesApi.localDayKey(), devices.sort()]);
+}
+
+function syncedSessionPagesRevisionsKey(stats, periodKey) {
+  if (!stats?.snapshot) return '';
+  const revisions = stats.fixedRangeRevisions || {};
+  if (!Object.keys(revisions).length && !stats.localFixedRangeRevision) return '';
+  if (isSyncedDerivedPeriod(periodKey)) {
+    const dayKeys = (stats.devices || []).map((d) => {
+      const id = String(d?.deviceId || d?.id || '');
+      const hasRev = Object.hasOwn(revisions, id) && Boolean(revisions[id]);
+      return [id, hasRev ? '' : (d?.updatedAt || '')];
+    });
+    return JSON.stringify([
+      stats.snapshot.source,
+      periodKey,
+      Object.entries(revisions).sort(),
+      stats.localFixedRangeRevision || '',
+      stats.deviceHistoryRevision || '',
+      dayKeys.sort(),
+      syncedPeriodCalendarKey(stats, periodKey),
+      state.settings?.sessionTitlesEnabled !== false,
+      state.settings?.syncWeekStartsOn || ''
+    ]);
+  }
+  return JSON.stringify([
+    stats.snapshot.source,
+    periodKey,
+    Object.entries(revisions).sort(),
+    stats.localFixedRangeRevision || ''
+  ]);
+}
+
+function syncedSessionPagesKeyFor(stats, periodKey) {
+  const derived = isSyncedDerivedPeriod(periodKey);
+  if (!derived && periodKey !== 'today' && periodKey !== 'month') return '';
+  if (!stats?.snapshot) return '';
+  if (!derived && !(stats?.sessionDetailsOmitted?.[periodKey] > 0)) return '';
+  const activeMode = String(stats?.mode || state.statsMode || '').trim();
+  const hasDevices = Array.isArray(stats?.devices) && stats.devices.length > 0;
+  if (activeMode === 'local' || (!activeMode && !hasDevices && state.settings?.hubMode === 'local')) return '';
+  const revisionsKey = syncedSessionPagesRevisionsKey(stats, periodKey);
+  if (!revisionsKey) return '';
+  return derived ? revisionsKey : `${stats.snapshot.id}:${revisionsKey}`;
+}
+
+function isSyncedSessionPagesLoaded(stats = state.stats, periodKey = state.periodKey) {
+  const key = syncedSessionPagesKeyFor(stats, periodKey);
+  const entry = syncedSessionPagesByPeriod.get(periodKey);
+  return Boolean(key && entry?.key === key && (!entry.derived || entry.detailsAvailable));
+}
+
+function resolvedSyncedPageSession(stats, periodKey, sessionKey) {
+  if (!sessionKey || !isSyncedSessionPagesLoaded(stats, periodKey)) return null;
+  const entry = syncedSessionPagesByPeriod.get(periodKey);
+  if (!entry?.sessions || !Object.hasOwn(entry.sessions, sessionKey)) return null;
+  return entry.sessions[sessionKey] || null;
+}
+
+function attachSyncedSessionPages(stats) {
+  if (!stats?.snapshot || !syncedSessionPagesByPeriod.size) return stats;
+  let nextStats = stats;
+  for (const [periodKey, entry] of [...syncedSessionPagesByPeriod.entries()]) {
+    const revisionsKey = syncedSessionPagesRevisionsKey(stats, periodKey);
+    if (entry?.derived === true) {
+      // Keep the last available projection during a refresh of the same calendar range.
+      // The exact revision check still blocks transcript reads while ownership is pending.
+      if (!revisionsKey || entry.calendarKey !== syncedPeriodCalendarKey(stats, periodKey)) {
+        syncedSessionPagesByPeriod.delete(periodKey);
+        continue;
+      }
+      const rawPeriod = entry.period;
+      if (!rawPeriod || typeof rawPeriod !== 'object') continue;
+      const attachedSessions = state.settings?.sessionTitlesEnabled === false && sessionTitleDisplayApi?.withoutSessionTitles && rawPeriod.sessions
+        ? sessionTitleDisplayApi.withoutSessionTitles(rawPeriod.sessions)
+        : rawPeriod.sessions;
+      const attachedPeriod = attachedSessions === rawPeriod.sessions
+        ? rawPeriod
+        : { ...rawPeriod, sessions: attachedSessions };
+      const devPeriodsById = new Map(
+        (entry.devices || []).map((d) => [String(d?.deviceId || d?.id || '').trim(), d?.period || null])
+      );
+      const nextDevices = devPeriodsById.size > 0 && Array.isArray(nextStats.devices)
+        ? nextStats.devices.map((dev) => {
+            const devId = String(dev?.deviceId || dev?.id || '').trim();
+            const devPeriod = devPeriodsById.get(devId);
+            return devPeriod
+              ? { ...dev, periods: { ...(dev.periods || {}), [periodKey]: devPeriod } }
+              : dev;
+          })
+        : nextStats.devices;
+      nextStats = {
+        ...nextStats,
+        ...(nextDevices !== nextStats.devices ? { devices: nextDevices } : {}),
+        periods: {
+          ...(nextStats.periods || {}),
+          [periodKey]: attachedPeriod
+        },
+        syncedFixedPeriodDeviceWindows: {
+          ...(nextStats.syncedFixedPeriodDeviceWindows || {}),
+          [periodKey]: Object.fromEntries(entry.devices.filter(device => device.range)
+            .map(device => [device.deviceId, device.range]))
+        },
+        syncedFixedPeriodDetailsAvailable: {
+          ...(nextStats.syncedFixedPeriodDetailsAvailable || {}),
+          [periodKey]: entry.detailsAvailable === true
+        },
+        ...(entry.range ? {
+          nativeRangeWindows: {
+            ...(nextStats.nativeRangeWindows || {}),
+            [periodKey]: entry.range
+          }
+        } : {})
+      };
+      continue;
+    }
+    if (!(stats.sessionDetailsOmitted?.[periodKey] > 0) || !revisionsKey || entry.revisionsKey !== revisionsKey) {
+      syncedSessionPagesByPeriod.delete(periodKey);
+      continue;
+    }
+    const period = nextStats.periods?.[periodKey];
+    if (!period || typeof period !== 'object') continue;
+    const paged = state.settings?.sessionTitlesEnabled === false && sessionTitleDisplayApi?.withoutSessionTitles
+      ? sessionTitleDisplayApi.withoutSessionTitles(entry.sessions)
+      : entry.sessions;
+    if (!paged || typeof paged !== 'object') continue;
+    const inlineSessions = period.sessions || {};
+    const mergedSessions = {};
+    for (const [sessionKey, pagedSession] of Object.entries(paged)) {
+      const inlineSession = inlineSessions[sessionKey];
+      const sourceDevice = pagedSession?.sourceDevice?.ambiguous === true
+        ? pagedSession.sourceDevice
+        : (inlineSession?.sourceDevice?.ambiguous === true
+          ? inlineSession.sourceDevice
+          : (pagedSession?.sourceDevice || null));
+      mergedSessions[sessionKey] = {
+        ...(inlineSession || {}),
+        ...pagedSession,
+        sourceDevice
+      };
+    }
+    nextStats = {
+      ...nextStats,
+      periods: {
+        ...nextStats.periods,
+        [periodKey]: {
+          ...period,
+          sessions: mergedSessions
+        }
+      }
+    };
+  }
+  return nextStats;
+}
+
+function syncOpenSessionDrawer(periodKey, periodSessions, snapshot) {
+  if (state.drawer?.kind !== 'session'
+    || state.drawer.session?.sessionGroup
+    || state.drawer.session?.isNativeLocal === true
+    || !isSyncedSessionPeriodKey(periodKey)
+    || state.drawer.detailPeriodKey !== periodKey
+    || state.drawer.detailSourceGen !== statsSourceGeneration
+    || (state.drawer.detailSource != null && state.drawer.detailSource !== snapshot?.source)
+    || (typeof drawerRequestToken === 'number' && state.drawer.detailToken !== drawerRequestToken)) {
+    return;
+  }
+  const syncedContext = typeof isSyncedStatsContext === 'function'
+    ? isSyncedStatsContext(state.stats, state.settings, state.statsMode)
+    : false;
+  if (state.drawer.pendingOwnershipDetail !== true && !syncedContext) {
+    return;
+  }
+  const prevSession = state.drawer.session;
+  const sessionKey = prevSession.key || `${prevSession.client}:${prevSession.sessionId}`;
+  const rawEntry = periodSessions && Object.hasOwn(periodSessions, sessionKey)
+    ? periodSessions[sessionKey]
+    : null;
+  const wasPending = state.drawer.pendingOwnershipDetail === true;
+  const { session: resolvedSession } = reconcileSyncedSessionOwnership(prevSession, rawEntry, {
+    allowAdoptUnowned: wasPending
+  });
+  const displayDevice = resolvedSession.sourceDevice?.ambiguous === true
+    || (resolvedSession.sourceDevice && !resolvedSession.sourceDevice.deviceId)
+    ? ''
+    : (resolvedSession.deviceName || resolvedSession.sourceDevice?.name || '');
+  if (typeof els !== 'undefined' && els?.drawerSubtitle) {
+    els.drawerSubtitle.textContent = [
+      resolvedSession.clientLabel,
+      resolvedSession.projectLabel,
+      displayDevice
+    ].filter(Boolean).join(' · ');
+  }
+  const omissionsUnresolved = typeof hasUnresolvedSyncedOmissions === 'function'
+    ? hasUnresolvedSyncedOmissions(state.stats, periodKey)
+    : false;
+  const stillConfirmedLocal = typeof isRemoteSession === 'function'
+    && !isRemoteSession(resolvedSession)
+    && !omissionsUnresolved;
+  if (!stillConfirmedLocal) {
+    if (state.drawer.detailRequested === true) {
+      if (typeof drawerRequestToken === 'number') drawerRequestToken += 1;
+      if (typeof els !== 'undefined' && els?.drawerBody && typeof state.drawer.detailBaseGrid === 'string') {
+        els.drawerBody.innerHTML = state.drawer.detailBaseGrid;
+      }
+    }
+    state.drawer = {
+      ...state.drawer,
+      session: resolvedSession,
+      pendingOwnershipDetail: false,
+      detailRequested: false,
+      detailToken: typeof drawerRequestToken === 'number' ? drawerRequestToken : state.drawer.detailToken
+    };
+  } else if (wasPending && typeof loadSessionDrawerDetail === 'function') {
+    state.drawer = {
+      ...state.drawer,
+      session: resolvedSession,
+      pendingOwnershipDetail: false,
+      detailRequested: true,
+      detailToken: typeof drawerRequestToken === 'number' ? drawerRequestToken : state.drawer.detailToken
+    };
+    loadSessionDrawerDetail(resolvedSession, drawerRequestToken, state.drawer.detailBaseGrid);
+  } else {
+    state.drawer = {
+      ...state.drawer,
+      session: resolvedSession,
+      pendingOwnershipDetail: false
+    };
+  }
+}
+
+function ensureSyncedSessionPages(targetPeriodKey = state.periodKey) {
+  if (typeof window.tokenMonitor?.getSyncedFixedPeriod !== 'function') return;
+  const snapshot = state.stats?.snapshot;
+  const periodKey = targetPeriodKey;
+  const derived = isSyncedDerivedPeriod(periodKey);
+  const key = syncedSessionPagesKeyFor(state.stats, periodKey);
+  const revisionsKey = syncedSessionPagesRevisionsKey(state.stats, periodKey);
+  if (!key || !revisionsKey || !snapshot) return;
+  const existing = syncedSessionPagesByPeriod.get(periodKey);
+  if (existing?.key === key && (!derived || existing.detailsAvailable)) return;
+  const pending = syncedSessionPagesRequests.get(periodKey);
+  if (pending && (derived || pending.key === key)) return;
+  const request = { key };
+  const calendarKey = derived ? syncedPeriodCalendarKey(state.stats, periodKey) : '';
+  syncedSessionPagesRequests.set(periodKey, request);
+  void Promise.resolve()
+    .then(() => window.tokenMonitor.getSyncedFixedPeriod(snapshot.id, snapshot.source, periodKey))
+    .then((result) => {
+      if (syncedSessionPagesRequests.get(periodKey) !== request) return;
+      syncedSessionPagesRequests.delete(periodKey);
+      if (syncedSessionPagesKeyFor(state.stats, periodKey) !== key) {
+        if (state.periodKey === periodKey) ensureSyncedSessionPages();
+        return;
+      }
+      if (derived && result?.period && result.status === 'ready') {
+        // Preserve a complete projection through a temporary failure. Partial totals
+        // are still useful on a cold load, and the next refresh can retry this revision.
+        if (result.detailsAvailable !== true && existing?.detailsAvailable && existing.calendarKey === calendarKey) return;
+        syncedSessionPagesByPeriod.set(periodKey, {
+          key,
+          revisionsKey,
+          derived: true,
+          calendarKey,
+          snapshot: { id: snapshot.id, source: snapshot.source },
+          period: result.period,
+          devices: Array.isArray(result.devices) ? result.devices : [],
+          range: result.range || null,
+          detailsAvailable: result.detailsAvailable === true,
+          sessions: result.period.sessions || {}
+        });
+        const attached = attachSyncedSessionPages(allTimeSessions ? allTimeSessions.attach(state.stats) : state.stats);
+        state.stats = applyLocalSessionActivity(attached);
+        state.motion = 'update';
+        render();
+        if (result.detailsAvailable) syncOpenSessionDrawer(periodKey, result.period.sessions || null, snapshot);
+      } else if (!derived && result?.detailsAvailable && result?.period?.sessions) {
+        syncedSessionPagesByPeriod.set(periodKey, {
+          key,
+          revisionsKey,
+          snapshot: { id: snapshot.id, source: snapshot.source },
+          sessions: result.period.sessions
+        });
+        const attached = attachSyncedSessionPages(allTimeSessions ? allTimeSessions.attach(state.stats) : state.stats);
+        state.stats = applyLocalSessionActivity(attached);
+        state.motion = 'update';
+        render();
+        syncOpenSessionDrawer(periodKey, result.period.sessions, snapshot);
+      }
+    }, () => {
+      if (syncedSessionPagesRequests.get(periodKey) === request) syncedSessionPagesRequests.delete(periodKey);
+    });
+}
+
+const allTimeSessions = allTimeSessionsApi?.createAllTimeSessionsLoader
+  ? allTimeSessionsApi.createAllTimeSessionsLoader({
+      fetchSessions: (snapshotId) => window.tokenMonitor.getAllTimeSessions(snapshotId),
+      currentSnapshot: () => state.stats?.snapshot,
+      needed: () => state.periodKey === 'allTime' && typeof window.tokenMonitor?.getAllTimeSessions === 'function',
+      projectSessions: (sessions) => (
+        state.settings?.sessionTitlesEnabled === false && sessionTitleDisplayApi?.withoutSessionTitles
+          ? sessionTitleDisplayApi.withoutSessionTitles(sessions)
+          : sessions
+      ),
+      projectionKey: () => state.settings?.sessionTitlesEnabled !== false,
+      onLoaded: () => {
+        if (!state.stats) return;
+        const attached = allTimeSessions.attach(state.stats);
+        state.stats = applyLocalSessionActivity(attachSyncedSessionPages(attached));
+        state.motion = 'update';
+        render();
+      },
+      onError: (error) => console.log(`[dashboard] all-time sessions failed: ${error?.message || error}`)
+    })
+  : null;
+
+function isStaleStatsSnapshot(nextStats, expectedPushSeq = null, { fromPush = false } = {}) {
+  const prev = latestAcceptedSnapshot || state.stats?.snapshot || null;
+  const next = nextStats?.snapshot || null;
+  if (prev && next) {
+    if (typeof prev.source === 'number' && typeof next.source === 'number' && next.source < prev.source) {
+      return true;
+    }
+    if (prev.source === next.source && typeof prev.id === 'number' && typeof next.id === 'number') {
+      if (next.id < prev.id) return true;
+      if (!fromPush && expectedPushSeq != null && statsPushSeq !== expectedPushSeq && next.id === prev.id) {
+        return true;
+      }
+    }
+    return false;
+  }
+  if (!fromPush && expectedPushSeq != null && statsPushSeq !== expectedPushSeq) {
+    return true;
+  }
+  return false;
+}
+
+function shouldAcceptPulledHistory(pulledStats, statsAccepted, { pullSource = null, pullSourceGen = statsSourceGeneration } = {}) {
+  if (statsSourceGeneration !== pullSourceGen) return false;
+  const currentSource = latestAcceptedSnapshot?.source ?? state.stats?.snapshot?.source ?? null;
+  if (pulledStats?.snapshot?.source != null && currentSource != null && pulledStats.snapshot.source !== currentSource) {
+    return false;
+  }
+  if (pullSource != null && currentSource != null && currentSource !== pullSource && !statsAccepted) {
+    return false;
+  }
+  return true;
+}
+
+function applyIncomingStats(nextStats, { expectedPushSeq = null, fromPush = false, mode = '' } = {}) {
+  if (!nextStats || isStaleStatsSnapshot(nextStats, expectedPushSeq, { fromPush })) {
+    return false;
+  }
+  const prevSnap = latestAcceptedSnapshot || state.stats?.snapshot || null;
+  const nextSnap = nextStats?.snapshot || null;
+  const sourceChanged = Boolean(prevSnap && nextSnap && prevSnap.source !== nextSnap.source);
+  if (sourceChanged) {
+    statsSourceGeneration += 1;
+    state.statsMode = mode || nextStats?.mode || '';
+    state.history = null;
+    localSessionActivity = null;
+    syncedSessionPagesByPeriod.clear();
+    syncedSessionPagesRequests.clear();
+    if (state.drawer) closeDrawer();
+    deviceRateTracker?.reset?.();
+    rateHistory?.reset?.();
+    deviceRateTrackers.clear();
+    if (rateExpiryTimer) {
+      clearTimeout(rateExpiryTimer);
+      rateExpiryTimer = null;
+    }
+    if (typeof refreshQueued !== 'undefined') refreshQueued = true;
+    if (typeof dashboardReady !== 'undefined' && dashboardReady && !document.hidden
+      && (typeof refreshRunning === 'undefined' || !refreshRunning)) {
+      scheduleDashboardRefresh();
+    }
+  } else if (mode || nextStats?.mode) {
+    state.statsMode = mode || nextStats.mode;
+  }
+  if (nextSnap) {
+    latestAcceptedSnapshot = { id: nextSnap.id, source: nextSnap.source };
+  }
+  if (fromPush) {
+    statsPushSeq += 1;
+  }
+  allTimeSessions?.invalidate?.();
+  latestBaseStats = nextStats;
+  const withAllTime = allTimeSessions ? allTimeSessions.attach(nextStats) : nextStats;
+  const withPages = attachSyncedSessionPages(withAllTime);
+  state.stats = applyLocalSessionActivity(withPages);
+  observeStatsRates(state.stats);
+  allTimeSessions?.ensure?.();
+  ensureSyncedSessionPages();
+  const syncedCtx = typeof isSyncedStatsContext === 'function'
+    ? isSyncedStatsContext(state.stats, state.settings, state.statsMode)
+    : false;
+  if (state.drawer?.kind === 'session'
+    && !state.drawer.session?.sessionGroup
+    && state.drawer.session?.isNativeLocal !== true
+    && (typeof isSyncedSessionPeriodKey === 'function' ? isSyncedSessionPeriodKey(state.drawer.detailPeriodKey) : (state.drawer.detailPeriodKey === 'today' || state.drawer.detailPeriodKey === 'month'))
+    && state.drawer.detailSourceGen === statsSourceGeneration
+    && (state.drawer.detailSource == null || state.drawer.detailSource === state.stats?.snapshot?.source)
+    && (state.drawer.pendingOwnershipDetail === true || syncedCtx)) {
+    const drawerPeriodKey = state.drawer.detailPeriodKey;
+    const stillPending = typeof hasPendingSyncedOwnership === 'function'
+      ? hasPendingSyncedOwnership(state.stats, drawerPeriodKey)
+      : (state.stats?.sessionDetailsOmitted?.[drawerPeriodKey] > 0 && !isSyncedSessionPagesLoaded(state.stats, drawerPeriodKey));
+    if (stillPending) {
+      if (state.drawer.detailRequested === true) {
+        if (typeof drawerRequestToken === 'number') drawerRequestToken += 1;
+        if (typeof els !== 'undefined' && els?.drawerBody && typeof state.drawer.detailBaseGrid === 'string') {
+          els.drawerBody.innerHTML = state.drawer.detailBaseGrid;
+        }
+        state.drawer = {
+          ...state.drawer,
+          pendingOwnershipDetail: true,
+          detailRequested: false,
+          detailToken: drawerRequestToken
+        };
+      }
+      if (state.drawer.pendingOwnershipDetail === true && drawerPeriodKey !== state.periodKey) {
+        ensureSyncedSessionPages(drawerPeriodKey);
+      }
+    } else {
+      const stillOmitted = state.stats?.sessionDetailsOmitted?.[drawerPeriodKey] > 0;
+      const authoritativeSessions = stillOmitted
+        ? (syncedSessionPagesByPeriod.get(drawerPeriodKey)?.sessions || null)
+        : (state.stats?.periods?.[drawerPeriodKey]?.sessions || null);
+      syncOpenSessionDrawer(drawerPeriodKey, authoritativeSessions, state.stats?.snapshot || null);
     }
   }
+  return true;
 }
 
 function renderNow() {
   const sample = deviceRateTracker?.getSample?.() || null;
+  const deviceRateSamples = {};
+  const rateSamplesByDevice = {};
+  for (const [devId, devState] of deviceRateTrackers.entries()) {
+    const devSample = devState.tracker.getSample?.();
+    if (devSample) deviceRateSamples[devId] = devSample;
+    rateSamplesByDevice[devId] = devState.history.getSamples?.() || [];
+  }
   const overview = modelApi?.buildScopedOverview?.({
     stats: state.stats,
     history: state.history,
     periodKey: state.periodKey,
     selectedDeviceId: state.selectedDeviceId,
     settings: state.settings,
+    statsMode: state.statsMode,
     liveRatesByDevice: currentLiveRatesByDevice(),
     rateSample: sample,
+    deviceRateSamples,
     rateSamples: rateHistory?.getSamples?.() || [],
-    rateMode: state.rateMode
+    rateSamplesByDevice,
+    syncedPagesLoaded: isSyncedSessionPagesLoaded(),
+    rateMode: state.rateMode,
+    sessionLabels: {
+      subagent: t('sessions.subagent'),
+      subagentCount: (count) => t('sessions.subagentCount', { count }),
+      backgroundReviews: t('sessions.backgroundReviews'),
+      backgroundReviewCount: (count) => t('sessions.backgroundReviewCount', { count }),
+      grokBot: t('sessions.grokBot'),
+      grokBotCount: (count) => t('sessions.grokBotCount', { count })
+    }
   }) || null;
   state.overview = overview;
+  if (overview?.fleet && state.selectedDeviceId !== 'all') {
+    const hasSelected = overview.fleet.isFleetMode && Boolean(overview.activeMachine);
+    if (!hasSelected) {
+      state.selectedDeviceId = 'all';
+    }
+  }
 
   renderDeviceSelector(overview?.fleet);
 
@@ -3105,6 +3838,7 @@ function renderNow() {
   }
 
   refreshActiveHover();
+  scheduleRateExpiry?.();
   state.motion = 'none';
 }
 
@@ -3130,11 +3864,17 @@ function scheduleDashboardRefresh() {
 function handleDashboardVisibilityChange() {
   if (!dashboardRenderScheduler.visibilityChanged()) return;
   if (!document.hidden) {
+    dashboardRenderScheduler.flush();
     scheduleDashboardRefresh();
+    if (typeof scheduleRateExpiry === 'function') scheduleRateExpiry();
     return;
   }
   if (dashboardRefreshFrame) cancelAnimationFrame(dashboardRefreshFrame);
   dashboardRefreshFrame = 0;
+  if (typeof rateExpiryTimer !== 'undefined' && rateExpiryTimer) {
+    clearTimeout(rateExpiryTimer);
+    rateExpiryTimer = null;
+  }
 }
 
 document.addEventListener('visibilitychange', handleDashboardVisibilityChange);
@@ -3199,50 +3939,68 @@ function positionTooltip(evOrAnchor) {
 
 function showBarTooltip(bar, ev) {
   const formatVal = typeof state !== 'undefined' && state?.trendMetric === 'cost' ? formatCost : formatCompact;
-  const esc = (v) => String(v ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+  const esc = (v) => String(v ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
   if (bar.hasRecord === false) {
-    els.tooltip.innerHTML = `<div class="tt-head">${shortDate(bar.label)} · ${t('dashboard.noRecord')}</div>`;
+    els.tooltip.innerHTML = `<div class="tt-head">${esc(shortDate(bar.label))} · ${esc(t('dashboard.noRecord'))}</div>`;
     positionTooltip(ev);
     return;
   }
   const segs = bar.segments.slice().reverse();
   const rows = segs.map((s) =>
-    `<div class="tt-row"><span class="tt-dot" data-c="${colorFor(s.key)}"></span><span class="tt-name">${esc(s.key)}</span><span class="tt-val">${formatVal(s.value)}</span></div>`
+    `<div class="tt-row"><span class="tt-dot" data-c="${esc(colorFor(s.key))}"></span><span class="tt-name">${esc(s.key)}</span><span class="tt-val">${esc(formatVal(s.value))}</span></div>`
   ).join('');
-  els.tooltip.innerHTML = `<div class="tt-head">${shortDate(bar.label)} · ${formatVal(bar.total)}</div>${rows}`;
+  els.tooltip.innerHTML = `<div class="tt-head">${esc(shortDate(bar.label))} · ${esc(formatVal(bar.total))}</div>${rows}`;
   applySwatchColors(els.tooltip);
   positionTooltip(ev);
 }
 
 function showCandleTooltip(c, ev) {
   const formatVal = typeof state !== 'undefined' && state?.trendMetric === 'cost' ? formatCost : formatCompact;
+  const esc = (v) => String(v ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
   const head = c.endKey && c.endKey !== c.key ? `${longDate(c.key)} – ${longDate(c.endKey)}` : longDate(c.key);
   if (c.hasRecord === false) {
-    els.tooltip.innerHTML = `<div class="tt-head">${head}</div><div class="tt-row"><span class="tt-name">${t('dashboard.noRecord')}</span></div>`;
+    els.tooltip.innerHTML = `<div class="tt-head">${esc(head)}</div><div class="tt-row"><span class="tt-name">${esc(t('dashboard.noRecord'))}</span></div>`;
     positionTooltip(ev);
     return;
   }
   const ohlc = [['O', c.open], ['H', c.high], ['L', c.low], ['C', c.close]];
-  els.tooltip.innerHTML = `<div class="tt-head">${head}</div>`
-    + ohlc.map(([k, v]) => `<div class="tt-row"><span class="tt-name">${k}</span><span class="tt-val">${formatVal(v)}</span></div>`).join('');
+  els.tooltip.innerHTML = `<div class="tt-head">${esc(head)}</div>`
+    + ohlc.map(([k, v]) => `<div class="tt-row"><span class="tt-name">${esc(k)}</span><span class="tt-val">${esc(formatVal(v))}</span></div>`).join('');
   positionTooltip(ev);
 }
 
 function showHeatTooltip(date, day, evOrCell) {
-  const tokens = day ? day.tokens : 0;
-  const cost = day ? day.cost : 0;
-  const tokLabel = state.locale.startsWith('zh') ? 'Token' : 'Tokens';
-  const costLabel = state.locale.startsWith('zh') ? '花費' : 'Cost';
-  let html = `<div class="tt-head">${longDate(date)}</div>`;
-  html += `<div class="tt-row"><span class="tt-name">${tokLabel}</span><span class="tt-val">${formatCompact(tokens)}</span></div>`;
+  const make = (className, text = '') => {
+    const node = document.createElement('div');
+    node.className = className;
+    node.textContent = text;
+    return node;
+  };
+  const row = (label, value, color) => {
+    const node = make('tt-row');
+    if (color) {
+      const swatch = make('tt-dot');
+      swatch.style.backgroundColor = displayColor(color);
+      node.append(swatch);
+    }
+    node.append(make('tt-name', label), make('tt-val', value));
+    return node;
+  };
+  const tokens = day?.tokens || 0;
+  const cost = day?.cost || 0;
   const missing = Number(day?.unpricedTokens || 0);
-  if (cost > 0 || missing > 0) html += `<div class="tt-row"><span class="tt-name">${costLabel}</span><span class="tt-val">${formatCost(cost, missing)}</span></div>`;
-  if (day?.topClient?.label && typeof displayColor === 'function' && typeof escapeHtml === 'function') {
-    html += `<div class="tt-row"><span class="tt-dot" data-c="${escapeHtml(displayColor(day.topClient.color))}"></span><span class="tt-name">${escapeHtml(t('dashboard.ledger.topTool'))}</span><span class="tt-val">${escapeHtml(day.topClient.label)}</span></div>`;
+  const content = [
+    make('tt-head', longDate(date)),
+    row(t('dashboard.heatmap.tokens'), formatCompact(tokens))
+  ];
+  if (cost > 0 || missing > 0) content.push(row(t('dashboard.heatmap.cost'), formatCost(cost, missing)));
+  if (day?.topClient?.label) {
+    content.push(row(t('dashboard.ledger.topTool'), day.topClient.label, day.topClient.color));
   }
-  if (missing > 0) html += `<div class="tt-sub">${t('usage.excludedFromCost', { tokens: Math.round(missing).toLocaleString('en-US') })}</div>`;
-  els.tooltip.innerHTML = html;
-  if (day?.topClient?.label && typeof applySwatchColors === 'function') applySwatchColors(els.tooltip);
+  if (missing > 0) {
+    content.push(make('tt-sub', t('usage.excludedFromCost', { tokens: Math.round(missing).toLocaleString('en-US') })));
+  }
+  els.tooltip.replaceChildren(...content);
   positionTooltip(evOrCell);
 }
 
@@ -3307,33 +4065,127 @@ function hideHeatmapHover() {
   if (activeHover?.kind === 'heat') hideTooltip();
 }
 
+function scheduleRateExpiry() {
+  if (rateExpiryTimer) {
+    clearTimeout(rateExpiryTimer);
+    rateExpiryTimer = null;
+  }
+  if (typeof document !== 'undefined' && document.hidden) return;
+  const expiries = [];
+  const collect = (ts) => {
+    if (Number.isFinite(ts) && ts > 0) expiries.push(ts);
+  };
+  collect(deviceRateTracker?.nextExpiryAt?.());
+  collect(rateHistory?.nextExpiryAt?.());
+  for (const devState of deviceRateTrackers.values()) {
+    collect(devState.tracker?.nextExpiryAt?.());
+    collect(devState.history?.nextExpiryAt?.());
+  }
+  if (!expiries.length) return;
+  const earliest = Math.min(...expiries);
+  const delayMs = Math.max(50, earliest - Date.now() + 20);
+  rateExpiryTimer = setTimeout(() => {
+    rateExpiryTimer = null;
+    if (typeof document !== 'undefined' && document.hidden) return;
+    state.motion = 'none';
+    render();
+  }, delayMs);
+  rateExpiryTimer?.unref?.();
+}
+
 function observeStatsRates(stats) {
   if (!deviceRateTracker || !stats) return;
+  const settings = state?.settings;
+  const localId = String(stats?.localDeviceId || settings?.deviceId || '').trim();
+  const devicesList = Array.isArray(stats?.devices) ? stats.devices : [];
+  const activeMode = String(stats?.mode || state?.statsMode || '').trim();
+  const hubMode = String(settings?.hubMode || '').trim();
+  const synced = typeof isSyncedStatsContext === 'function'
+    ? isSyncedStatsContext(stats, settings, state?.statsMode)
+    : (devicesList.length > 1
+      || (devicesList.length === 1 && (() => {
+        const onlyId = String(devicesList[0]?.deviceId || devicesList[0]?.id || '').trim();
+        return Boolean(onlyId && (!localId || onlyId !== localId));
+      })())
+      || (activeMode !== 'local' && (
+        activeMode === 'sync'
+        || (hubMode !== 'local' && (Boolean(hubMode) || Boolean(String(settings?.hubUrl || '').trim())))
+      )));
   const entries = (stats.devices || []).map((device) => ({
     id: String(device?.deviceId || '').trim(),
     name: String(device?.displayName || device?.deviceId || '').trim(),
     period: device?.periods?.today || device?.today || null
   })).filter((entry) => entry.id && entry.period);
-  if (entries.length === 0 && stats.periods?.today) {
+  if (!synced && entries.length === 0 && stats.periods?.today) {
     entries.push({ id: String(stats.localDeviceId || 'local'), name: 'Local', period: stats.periods.today });
   }
-  if (entries.length > 0) {
-    const result = deviceRateTracker.observe(entries);
-    if (result?.sample) rateHistory?.observe(result.sample);
+  const activeIds = new Set(entries.map((entry) => entry.id));
+  for (const existingId of Array.from(deviceRateTrackers.keys())) {
+    if (!activeIds.has(existingId)) deviceRateTrackers.delete(existingId);
   }
+  const result = deviceRateTracker.observe(entries);
+  if (result?.sample && !result.sample.idle) {
+    rateHistory?.observe(result.sample);
+  }
+  if (entries.length > 0 && tokenRateApi?.createLiveTokenRateGroupTracker && tokenRateApi?.createLiveTokenRateHistory) {
+    for (const entry of entries) {
+      let devState = deviceRateTrackers.get(entry.id);
+      if (!devState) {
+        devState = {
+          tracker: tokenRateApi.createLiveTokenRateGroupTracker({ now: Date.now, activeMs: 12_000 }),
+          history: tokenRateApi.createLiveTokenRateHistory()
+        };
+        deviceRateTrackers.set(entry.id, devState);
+      }
+      const devRes = devState.tracker.observe([entry]);
+      if (devRes?.sample && !devRes.sample.idle) {
+        devState.history.observe(devRes.sample);
+      }
+    }
+  }
+  if (typeof scheduleRateExpiry === 'function') scheduleRateExpiry();
 }
 
 function currentLiveRatesByDevice() {
-  if (!deviceRateTracker) return {};
-  const sample = deviceRateTracker.getSample();
-  if (!sample) return {};
   const out = {};
-  for (const dev of sample.devices || []) {
-    out[dev.id] = sample.speed && sample.devices.length === 1
-      ? sample.speed
-      : Number(dev.models?.reduce((s, m) => s + Number(m.speed || 0), 0) || 0);
+  if (deviceRateTrackers.size > 0) {
+    for (const [id, devState] of deviceRateTrackers.entries()) {
+      const s = devState.tracker?.getSample?.();
+      if (s && !s.idle && Number(s.speed) > 0) {
+        out[id] = Number(s.speed);
+      }
+    }
+    return out;
   }
-  if (Object.keys(out).length === 0 && state.stats?.localDeviceId && sample.speed > 0) {
+  if (!deviceRateTracker) return out;
+  const settings = state?.settings;
+  const localId = String(state?.stats?.localDeviceId || settings?.deviceId || '').trim();
+  const devicesList = Array.isArray(state?.stats?.devices) ? state.stats.devices : [];
+  const activeMode = String(state?.stats?.mode || state?.statsMode || '').trim();
+  const hubMode = String(settings?.hubMode || '').trim();
+  const synced = typeof isSyncedStatsContext === 'function'
+    ? isSyncedStatsContext(state?.stats, settings, state?.statsMode)
+    : (devicesList.length > 1
+      || (devicesList.length === 1 && (() => {
+        const onlyId = String(devicesList[0]?.deviceId || devicesList[0]?.id || '').trim();
+        return Boolean(onlyId && (!localId || onlyId !== localId));
+      })())
+      || (activeMode !== 'local' && (
+        activeMode === 'sync'
+        || (hubMode !== 'local' && (Boolean(hubMode) || Boolean(String(settings?.hubUrl || '').trim())))
+      )));
+  const sample = deviceRateTracker.getSample();
+  if (!sample || sample.idle) return out;
+  for (const dev of sample.devices || []) {
+    if (!dev?.id) continue;
+    const devSpeed = dev?.speed != null
+      ? Number(dev.speed)
+      : (sample.speed && sample.devices.length === 1
+          ? sample.speed
+          : Number(dev.models?.reduce((s, m) => s + Number(m.speed || 0), 0) || 0));
+    if (devSpeed > 0) out[dev.id] = devSpeed;
+  }
+  if (Object.keys(out).length === 0 && !synced && state.stats?.localDeviceId && sample.speed > 0) {
     out[state.stats.localDeviceId] = sample.speed;
   }
   return out;
@@ -3384,16 +4236,32 @@ async function manualRefresh() {
   manualRefreshBusy = true;
   clearRefreshBtnFeedbackTimer();
   setRefreshBtnState('refreshing');
+  const pullPushSeq = typeof statsPushSeq === 'number' ? statsPushSeq : null;
+  const pullSource = typeof latestAcceptedSnapshot !== 'undefined' && latestAcceptedSnapshot?.source != null
+    ? latestAcceptedSnapshot.source
+    : (state.stats?.snapshot?.source ?? null);
+  const pullSourceGen = typeof statsSourceGeneration === 'number' ? statsSourceGeneration : 0;
   try {
     state.motion = state.history ? 'update' : 'entry';
     const stats = typeof window.tokenMonitor.getStats === 'function'
       ? await window.tokenMonitor.getStats({ force: true, forceHistory: true, forceSelfSync: true, feedback: true })
       : null;
     const history = await window.tokenMonitor.getDashboardHistory({ includeDevices: true });
-    state.history = history;
+    let statsAccepted = false;
     if (stats) {
-      state.stats = stats;
-      observeStatsRates(stats);
+      if (typeof applyIncomingStats === 'function') {
+        statsAccepted = applyIncomingStats(stats, { expectedPushSeq: pullPushSeq });
+      } else {
+        state.stats = stats;
+        observeStatsRates(stats);
+        statsAccepted = true;
+      }
+    }
+    const acceptHistory = typeof shouldAcceptPulledHistory === 'function'
+      ? shouldAcceptPulledHistory(stats, statsAccepted, { pullSource, pullSourceGen })
+      : true;
+    if (acceptHistory) {
+      state.history = history;
     }
     render();
     settleRefreshBtnState('refreshed');
@@ -3415,6 +4283,11 @@ async function refresh() {
     return;
   }
   refreshRunning = true;
+  const pullPushSeq = typeof statsPushSeq === 'number' ? statsPushSeq : null;
+  const pullSource = typeof latestAcceptedSnapshot !== 'undefined' && latestAcceptedSnapshot?.source != null
+    ? latestAcceptedSnapshot.source
+    : (state.stats?.snapshot?.source ?? null);
+  const pullSourceGen = typeof statsSourceGeneration === 'number' ? statsSourceGeneration : 0;
   try {
     state.motion = state.history ? 'update' : 'entry';
     const historyPromise = window.tokenMonitor.getDashboardHistory({ includeDevices: true });
@@ -3422,10 +4295,21 @@ async function refresh() {
       ? window.tokenMonitor.getStats().catch(() => null)
       : Promise.resolve(null);
     const [history, stats] = await Promise.all([historyPromise, statsPromise]);
-    state.history = history;
+    let statsAccepted = false;
     if (stats) {
-      state.stats = stats;
-      observeStatsRates(stats);
+      if (typeof applyIncomingStats === 'function') {
+        statsAccepted = applyIncomingStats(stats, { expectedPushSeq: pullPushSeq });
+      } else {
+        state.stats = stats;
+        observeStatsRates(stats);
+        statsAccepted = true;
+      }
+    }
+    const acceptHistory = typeof shouldAcceptPulledHistory === 'function'
+      ? shouldAcceptPulledHistory(stats, statsAccepted, { pullSource, pullSourceGen })
+      : true;
+    if (acceptHistory) {
+      state.history = history;
     }
     render();
   } catch (error) {
@@ -3460,6 +4344,10 @@ async function boot() {
   } catch (_) {}
   let settings = {};
   try { settings = await window.tokenMonitor.getSettings(); } catch (_) {}
+  try {
+    const streamStatus = await window.tokenMonitor.getStreamStatus?.();
+    if (streamStatus?.mode) state.statsMode = streamStatus.mode;
+  } catch (_) {}
   state.locale = i18n.resolveLocale(settings.locale || settings.language, navigator.languages);
   state.settings = settings;
   state.currency = settings.currency || 'USD';
@@ -3468,7 +4356,7 @@ async function boot() {
     window.TokenMonitorCurrency.configureRates(settings.currencyRatesEffective);
   }
   state.flat = settings.dashboardFlat === true;
-  state.heatmapMetric = settings.heatmapMetric || 'cost';
+  state.heatmapMetric = settings.dashboardHeatmapMetric || settings.heatmapMetric || 'cost';
   state.stageView = settings.dashboardStageView === '2d' || settings.dashboardStageView === '3d' || settings.dashboardStageView === 'flow'
     ? settings.dashboardStageView
     : 'flow';
@@ -3479,6 +4367,8 @@ async function boot() {
   }
   applyAppearance(settings);
   applyTranslations();
+  populateDashboardSettings();
+  syncDashboardSettings(settings);
   populatePeriodSelect();
   populateRangeSelect();
   render();
@@ -3490,7 +4380,18 @@ async function boot() {
 
 window.tokenMonitor.onSettingsPush?.((next) => {
   if (!next) return;
+  const previousSettings = state.settings;
+  const prevHubMode = previousSettings?.hubMode;
+  const prevHubUrl = previousSettings?.hubUrl;
   state.settings = { ...(state.settings || {}), ...next };
+  const destinationChanged = ('hubMode' in next && next.hubMode !== prevHubMode)
+    || ('hubUrl' in next && next.hubUrl !== prevHubUrl);
+  if (destinationChanged) {
+    statsSourceGeneration += 1;
+    syncedSessionPagesByPeriod.clear();
+    syncedSessionPagesRequests.clear();
+    if (state.drawer) closeDrawer();
+  }
   if ('dashboardFlat' in next) {
     state.flat = next.dashboardFlat === true;
     els.body.classList.toggle('flat', state.flat);
@@ -3500,15 +4401,23 @@ window.tokenMonitor.onSettingsPush?.((next) => {
   const previousReduceMotion = state.reduceMotion;
   applyAppearance(state.settings);
   let needsRender = false;
-  const nextLocale = i18n.resolveLocale(next.locale || next.language, navigator.languages);
+  const nextLocale = i18n.resolveLocale(state.settings.locale || state.settings.language, navigator.languages);
   if (state.locale !== nextLocale) {
     state.locale = nextLocale;
     applyTranslations();
-    populatePeriodSelect();
+    populateDashboardSettings();
     populateRangeSelect();
     needsRender = true;
   }
-  const nextCompactTokenUnits = compactTokenApi.normalizeCompactTokenUnits(next.compactTokenUnits);
+  if (typeof populatePeriodSelect === 'function' && populatePeriodSelect()) {
+    closeDrawer();
+    if (!destinationChanged) {
+      allTimeSessions?.ensure?.();
+      ensureSyncedSessionPages();
+    }
+    needsRender = true;
+  }
+  const nextCompactTokenUnits = compactTokenApi.normalizeCompactTokenUnits(state.settings.compactTokenUnits);
   if (state.compactTokenUnits !== nextCompactTokenUnits) {
     state.compactTokenUnits = nextCompactTokenUnits;
     needsRender = true;
@@ -3522,7 +4431,7 @@ window.tokenMonitor.onSettingsPush?.((next) => {
     needsRender = true;
   }
   if (state.reduceMotion !== previousReduceMotion) needsRender = true;
-  const nextMetric = next.heatmapMetric || 'cost';
+  const nextMetric = state.settings.dashboardHeatmapMetric || state.settings.heatmapMetric || 'cost';
   if (state.heatmapMetric !== nextMetric) {
     state.heatmapMetric = nextMetric;
     needsRender = true;
@@ -3544,12 +4453,113 @@ window.tokenMonitor.onSettingsPush?.((next) => {
       needsRender = true;
     }
   }
-  if ('showLimitUsed' in next || 'homeVendorColors' in next || 'showToolIcons' in next
-    || 'sessionContextMetric' in next || 'homeLimitAccountCount' in next
-    || 'showHomeLimitProviderNames' in next || 'limitProviders' in next || 'limitsEnabled' in next
-    || 'maskLimitAccountEmails' in next || 'showHomeLimitBars' in next) {
+  if (['syncWeekStartsOn', 'modelAliases', 'modelAliasGrouping', 'projectsEnabled'].some(key =>
+    key in next && JSON.stringify(next[key]) !== JSON.stringify(previousSettings?.[key]))) {
+    syncedSessionPagesByPeriod.clear();
+    syncedSessionPagesRequests.clear();
+    if (latestBaseStats) state.stats = applyLocalSessionActivity(allTimeSessions ? allTimeSessions.attach(latestBaseStats) : latestBaseStats);
+    if (!destinationChanged) ensureSyncedSessionPages();
     needsRender = true;
   }
+  if ('showLimitUsed' in next || 'homeVendorColors' in next || 'showToolIcons' in next
+    || 'sessionContextMetric' in next || 'homeLimitAccountCount' in next
+    || 'showHomeLimitProviderNames' in next || 'limitProviders' in next || 'limitProviderOrder' in next || 'limitsEnabled' in next
+    || 'maskLimitAccountEmails' in next || 'showHomeLimitBars' in next
+    || 'limitProviderHiddenItems' in next || 'sessionTitlesEnabled' in next) {
+    if ('sessionTitlesEnabled' in next && next.sessionTitlesEnabled !== previousSettings?.sessionTitlesEnabled) {
+      syncedSessionPagesByPeriod.clear();
+      syncedSessionPagesRequests.clear();
+      let base = latestBaseStats || state.stats;
+      if (next.sessionTitlesEnabled === false && base && sessionTitleDisplayApi?.withoutSessionTitleStats) {
+        base = sessionTitleDisplayApi.withoutSessionTitleStats(base);
+        latestBaseStats = base;
+      }
+      if (base) state.stats = applyLocalSessionActivity(allTimeSessions ? allTimeSessions.attach(base) : base);
+      if (!destinationChanged) ensureSyncedSessionPages();
+      if (state.drawer?.kind === 'session') {
+        const s = state.drawer.session;
+        const redactMember = (m) => ({
+          ...m,
+          title: m.projectLabel || m.modelLabel || m.clientLabel || m.sessionId || m.key || ''
+        });
+        const redactGroup = (grp) => (grp ? {
+          ...grp,
+          title: grp.subagentGroup
+            ? (grp.projectLabel || grp.clientLabel || grp.sessionId || grp.key || '')
+            : grp.title,
+          ...(Array.isArray(grp.groupRows) ? { groupRows: grp.groupRows.map(redactMember) } : {})
+        } : grp);
+        const updateBackButtonLabel = (grp) => {
+          if (!grp || !els.drawerBody) return;
+          const nextBackText = `← ${escapeHtml(grp.title || grp.projectLabel || grp.clientLabel || '')}`;
+          const backPattern = /(<button[^>]*class="dash-drawer-back"[^>]*>)[\s\S]*?(<\/button>)/;
+          if (typeof els.drawerBody.innerHTML === 'string' && backPattern.test(els.drawerBody.innerHTML)) {
+            els.drawerBody.innerHTML = els.drawerBody.innerHTML.replace(backPattern, (_, open, close) => `${open}${nextBackText}${close}`);
+          }
+          if (typeof state.drawer.detailBaseGrid === 'string' && backPattern.test(state.drawer.detailBaseGrid)) {
+            state.drawer.detailBaseGrid = state.drawer.detailBaseGrid.replace(backPattern, (_, open, close) => `${open}${nextBackText}${close}`);
+          }
+        };
+        if (next.sessionTitlesEnabled === false) {
+          const fallbackTitle = s.sessionGroup && !s.subagentGroup
+            ? s.title
+            : (s.projectLabel || s.clientLabel || s.sessionId || s.key || '');
+          const redactedRows = Array.isArray(s.groupRows)
+            ? s.groupRows.map(redactMember)
+            : s.groupRows;
+          const nextSession = {
+            ...s,
+            title: fallbackTitle,
+            ...(Array.isArray(redactedRows) ? { groupRows: redactedRows } : {})
+          };
+          const prevTitle = state.drawer.redactedFromTitle ?? s.title;
+          const prevRows = state.drawer.redactedFromGroupRows ?? s.groupRows;
+          const prevReturnToGroup = state.drawer.redactedFromReturnToGroup ?? state.drawer.returnToGroup;
+          const nextReturnToGroup = prevReturnToGroup ? redactGroup(prevReturnToGroup) : undefined;
+          if (s.sessionGroup && Array.isArray(redactedRows) && typeof openDrawer === 'function') {
+            openDrawer({ kind: 'session', session: nextSession });
+            state.drawer = {
+              ...state.drawer,
+              redactedFromTitle: prevTitle,
+              redactedFromGroupRows: prevRows
+            };
+          } else {
+            state.drawer = {
+              ...state.drawer,
+              session: nextSession,
+              redactedFromTitle: prevTitle,
+              ...(Array.isArray(prevRows) ? { redactedFromGroupRows: prevRows } : {}),
+              ...(nextReturnToGroup ? { returnToGroup: nextReturnToGroup, redactedFromReturnToGroup: prevReturnToGroup } : {})
+            };
+            if (els.drawerTitle) els.drawerTitle.textContent = fallbackTitle;
+            if (nextReturnToGroup) updateBackButtonLabel(nextReturnToGroup);
+          }
+        } else if (state.drawer.redactedFromTitle || state.drawer.redactedFromGroupRows || state.drawer.redactedFromReturnToGroup) {
+          const restoredReturnToGroup = state.drawer.redactedFromReturnToGroup || state.drawer.returnToGroup;
+          const restoredSession = {
+            ...s,
+            title: state.drawer.redactedFromTitle || s.title,
+            ...(Array.isArray(state.drawer.redactedFromGroupRows) ? { groupRows: state.drawer.redactedFromGroupRows } : {})
+          };
+          if (s.sessionGroup && Array.isArray(restoredSession.groupRows) && typeof openDrawer === 'function') {
+            openDrawer({ kind: 'session', session: restoredSession });
+          } else {
+            state.drawer = {
+              ...state.drawer,
+              session: restoredSession,
+              ...(restoredReturnToGroup ? { returnToGroup: restoredReturnToGroup } : {})
+            };
+            if (els.drawerTitle) els.drawerTitle.textContent = restoredSession.title;
+            if (restoredReturnToGroup) updateBackButtonLabel(restoredReturnToGroup);
+          }
+        }
+      }
+    }
+    needsRender = true;
+  }
+  if (typeof syncDashboardSettings === 'function') syncDashboardSettings(state.settings);
+  if (next.dashboardShowVelocity !== undefined && next.dashboardShowVelocity !== previousSettings?.dashboardShowVelocity
+    || next.dashboardShowQuotas !== undefined && next.dashboardShowQuotas !== previousSettings?.dashboardShowQuotas) needsRender = true;
   if (needsRender) render();
 });
 
@@ -3557,16 +4567,29 @@ window.tokenMonitor.onStatsPush?.((payload) => {
   if (!payload) return;
   if (payload.event === 'status') {
     state.streamConnected = Boolean(payload.data?.connected);
+    if (payload.data?.mode) state.statsMode = payload.data.mode;
+    return;
+  }
+  if (payload.event === 'session-activity') {
+    localSessionActivity = payload.data || null;
+    if (state.stats) {
+      const next = applyLocalSessionActivity(state.stats);
+      if (next !== state.stats) {
+        state.stats = next;
+        state.motion = 'update';
+        render();
+      }
+    }
     return;
   }
   if (payload.data?.stats) {
-    state.stats = payload.data.stats;
     if (!['local', 'presentation', 'read'].includes(payload.data?.reason)) {
       state.streamConnected = true;
     }
-    observeStatsRates(state.stats);
-    state.motion = 'update';
-    render();
+    if (applyIncomingStats(payload.data.stats, { fromPush: true, mode: payload.data?.mode || '' })) {
+      state.motion = 'update';
+      render();
+    }
   }
 });
 
@@ -3641,6 +4664,28 @@ els.trendMetricBtns.forEach((b) => b.addEventListener('click', () => {
   render();
 }));
 
+dashboardSettings.popover?.addEventListener('change', (event) => {
+  const input = event.target;
+  if (dashboardSettings.choices.contains(input)) {
+    const selected = Array.from(dashboardSettings.choices.querySelectorAll('input:checked'), item => item.value);
+    if (selected.length) void saveDashboardSettings({ dashboardVisiblePeriods: selected });
+  } else if (input === dashboardSettings.follow) {
+    void saveDashboardSettings({ dashboardFollowPeriodTabs: input.checked });
+  } else if (input === dashboardSettings.velocity) {
+    void saveDashboardSettings({ dashboardShowVelocity: input.checked });
+  } else if (input === dashboardSettings.quotas) {
+    void saveDashboardSettings({ dashboardShowQuotas: input.checked });
+  } else if (input === dashboardSettings.stage) {
+    void saveDashboardSettings({ dashboardStageView: input.value });
+  } else if (input === dashboardSettings.metric) {
+    void saveDashboardSettings({ dashboardHeatmapMetric: input.value });
+  }
+});
+document.getElementById('dashOpenAppSettings')?.addEventListener('click', () => {
+  dashboardSettings.popover.hidePopover();
+  window.tokenMonitor.dashboard.openAppSettings();
+});
+
 els.stageViewBtns.forEach((b) => b.addEventListener('click', () => {
   const nextView = b.dataset.view;
   if (!nextView || state.stageView === nextView) return;
@@ -3665,7 +4710,7 @@ els.heatmapMetricBtns.forEach((b) => b.addEventListener('click', () => {
   state.motion = 'update';
   activateSegButton(els.heatmapMetricBtns, b);
   render();
-  window.tokenMonitor.updateSettings({ heatmapMetric: state.heatmapMetric });
+  window.tokenMonitor.updateSettings({ dashboardHeatmapMetric: state.heatmapMetric });
 }));
 
 els.skylineColorBtns?.forEach((b) => b.addEventListener('click', () => {
@@ -3698,6 +4743,29 @@ els.workModeBtns.forEach((b) => b.addEventListener('click', () => {
   activateSegButton(els.workModeBtns, b);
   render();
 }));
+
+els.deviceMenu?.addEventListener('keydown', (event) => {
+  const items = Array.from(els.deviceMenu.querySelectorAll('.dash-device-menu-item'));
+  fixedPeriodRangesApi.handlePeriodMenuNavigation(event, {
+    currentIndex: items.indexOf(document.activeElement),
+    itemCount: items.length,
+    focusIndex: index => items[index].focus()
+  });
+});
+els.deviceMenu?.addEventListener('click', (ev) => {
+  const item = ev.target.closest('.dash-device-menu-item');
+  if (!item) return;
+  ev.stopPropagation();
+  setDeviceMenuOpen(false);
+  els.deviceTrigger.focus({ preventScroll: true });
+  const id = item.dataset.device;
+  if (state.selectedDeviceId === id) return;
+  hideTooltip();
+  closeDrawer();
+  state.selectedDeviceId = id;
+  state.motion = 'update';
+  render();
+});
 
 els.topology?.addEventListener('pointerover', (ev) => {
   const node = ev.target.closest('.topo-node[data-topo-kind]');
@@ -3732,7 +4800,7 @@ els.topology?.addEventListener('scroll', (ev) => {
   topologyScrollFrame = requestAnimationFrame(() => {
     topologyScrollFrame = 0;
     if (state.stageView === 'flow' && state.overview?.topology) {
-      layoutTopologyLinks(state.overview.topology, { edgeActiveSig: lastTopologyEdgeSig });
+      layoutTopologyLinks(state.overview.topology);
     }
   });
 }, { capture: true, passive: true });
@@ -3785,6 +4853,7 @@ els.topology?.addEventListener('click', (ev) => {
     else openDrawer({ kind: 'model', item: ep.raw });
   }
 });
+els.topology?.addEventListener('keydown', handleKeyboardClick);
 
 els.breakdown?.addEventListener('click', (ev) => {
   const rowEl = ev.target.closest('.dash-bd-row[data-bd-kind]');
@@ -3795,6 +4864,7 @@ els.breakdown?.addEventListener('click', (ev) => {
   const item = (list || []).find((entry) => entry.id === id);
   if (item) openDrawer({ kind, item });
 });
+els.breakdown?.addEventListener('keydown', handleKeyboardClick);
 
 els.workPanel?.addEventListener('click', (ev) => {
   if (!state.overview) return;
@@ -3825,13 +4895,62 @@ els.workPanel?.addEventListener('click', (ev) => {
     if (session) openDrawer({ kind: 'session', session });
   }
 });
+els.workPanel?.addEventListener('keydown', handleKeyboardClick);
+els.dailyLedger?.addEventListener('keydown', handleKeyboardClick);
+els.legend?.addEventListener('keydown', handleKeyboardClick);
 
 els.drawerClose?.addEventListener('click', closeDrawer);
 els.drawerScrim?.addEventListener('click', closeDrawer);
+els.drawerBody?.addEventListener?.('click', (ev) => {
+  const backBtn = ev.target?.closest?.('.dash-drawer-back');
+  if (backBtn && state.drawer?.returnToGroup) {
+    const origGroup = state.drawer.redactedFromReturnToGroup;
+    openDrawer({ kind: 'session', session: state.drawer.returnToGroup });
+    if (origGroup && state.drawer?.kind === 'session') {
+      state.drawer = {
+        ...state.drawer,
+        redactedFromTitle: origGroup.title,
+        redactedFromGroupRows: origGroup.groupRows
+      };
+    }
+    return;
+  }
+  const memberRow = ev.target?.closest?.('.dash-drawer-member-row[data-drawer-member-idx]');
+  if (memberRow) {
+    const idx = Number(memberRow.dataset.drawerMemberIdx);
+    const member = state.drawer?.groupMembers?.[idx];
+    if (member) {
+      const origRows = state.drawer.redactedFromGroupRows;
+      const origGroup = origRows
+        ? {
+            ...(state.drawer.rawGroupSession || state.drawer.session),
+            title: state.drawer.redactedFromTitle || state.drawer.session?.title,
+            groupRows: origRows
+          }
+        : null;
+      openDrawer({
+        kind: 'session',
+        session: member,
+        returnToGroup: state.drawer.rawGroupSession || state.drawer.session
+      });
+      if (origGroup && state.drawer?.kind === 'session') {
+        state.drawer = {
+          ...state.drawer,
+          redactedFromTitle: origRows[idx]?.title || member.title,
+          redactedFromReturnToGroup: origGroup
+        };
+      }
+    }
+  }
+});
+els.drawerBody?.addEventListener?.('keydown', handleKeyboardClick);
 window.addEventListener('keydown', (ev) => {
   if (ev.key === 'Escape') {
     if (state.drawer) closeDrawer();
-    if (state.deviceMenuOpen) setDeviceMenuOpen(false);
+    if (state.deviceMenuOpen) {
+      setDeviceMenuOpen(false);
+      els.deviceTrigger.focus({ preventScroll: true });
+    }
     hideTooltip();
   }
 });
@@ -3850,13 +4969,12 @@ els.chart.addEventListener('mousemove', (ev) => {
   const hit = ev.target.closest('.bar-hover');
   if (!hit || !state.chartModel) { hideTooltip(); return; }
   const i = Number(hit.getAttribute('data-i'));
-  if (state.chartKind === 'candle') {
-    const c = state.chartModel.candles[i];
-    if (c) showCandleTooltip(c, hit); else hideTooltip();
-  } else {
-    const bar = state.chartModel.bars[i];
-    if (bar) showBarTooltip(bar, hit); else hideTooltip();
-  }
+  const candles = state.chartKind === 'candle';
+  const entry = candles ? state.chartModel.candles[i] : state.chartModel.bars[i];
+  if (!entry) { hideTooltip(); return; }
+  activeHover = { kind: 'trend', chartKind: state.chartKind, key: candles ? entry.key : entry.label };
+  if (candles) showCandleTooltip(entry, hit);
+  else showBarTooltip(entry, hit);
 });
 els.chart.addEventListener('mouseleave', hideTooltip);
 
@@ -3872,12 +4990,13 @@ els.heatmap.addEventListener('pointermove', (ev) => {
     }
   }
   const hit = ev.target.closest('.heat[data-d], .iso-col[data-d]');
-  if (!hit) {
+  const rawDate = hit?.getAttribute('data-d');
+  const date = /^\d{4}-\d{2}-\d{2}$/.test(String(rawDate || '')) ? rawDate : null;
+  if (!hit || !date) {
     els.heatmap.querySelectorAll('[data-active="true"]').forEach((c) => c.removeAttribute('data-active'));
     if (activeHover?.kind === 'heat') hideTooltip();
     return;
   }
-  const date = hit.getAttribute('data-d');
   if (activeHover?.kind !== 'heat' || activeHover.date !== date) {
     els.heatmap.querySelectorAll('[data-active="true"]').forEach((c) => c.removeAttribute('data-active'));
     hit.setAttribute('data-active', 'true');
@@ -3889,8 +5008,9 @@ els.heatmap.addEventListener('pointermove', (ev) => {
 els.heatmap.addEventListener('pointerleave', hideHeatmapHover);
 els.heatmap.addEventListener('click', (ev) => {
   const hit = ev.target.closest('.heat[data-d], .iso-col[data-d]');
-  if (!hit) return;
-  const date = hit.getAttribute('data-d');
+  const rawDate = hit?.getAttribute('data-d');
+  const date = /^\d{4}-\d{2}-\d{2}$/.test(String(rawDate || '')) ? rawDate : null;
+  if (!date) return;
   const day = (state.overview?.dailyLedger || []).find((d) => d.date === date);
   if (day) openDrawer({ kind: 'day', day });
 });

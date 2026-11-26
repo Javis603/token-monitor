@@ -7371,7 +7371,7 @@ function renderViewSwitcher({ focusMenu = false, focusDisclosure = false } = {})
   const renderKey = JSON.stringify([currentId, order.map(id => [id, viewLabelById(id)]),
     pluginPageOptions().map(page => [page.id, page.icon, page.identityIcon]),
     t('views.switcher.choose'), t('views.switcher.next', { view: nextLabel }),
-    hasDashboardLauncher ? t('dashboard.title') : '']);
+    hasDashboardLauncher ? t('dashboard.menuLabel') : '']);
   // Usage pushes repaint the page without changing navigation. Keep the same
   // popover/rows so hover, focus, scroll and its entry animation survive them.
   if (renderKey === viewSwitcherRenderKey && updateViewSwitcherOpenState({ focusMenu, focusDisclosure })) return;
