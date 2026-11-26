@@ -7786,7 +7786,7 @@ async function resolveSyncedPeriodForStats(stats, source, selection) {
     return fixedRangeReads.read(key, async (abort) => {
       const signal = AbortSignal.any([abort, AbortSignal.timeout(15_000)]);
       return fetchFixedRange(
-        (url, init) => fetch(url, { ...init, signal, redirect: 'error' }),
+        (url, init) => fetchFromHub(url, { ...init, signal, redirect: 'error' }),
         config.hubUrl, deviceId, name, window, headers, revision
       );
     });
