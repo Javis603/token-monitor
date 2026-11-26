@@ -100,18 +100,17 @@
     return providerId === 'claude' ? 1 : TRAY_PROVIDER_OPTICAL_RATIO;
   }
 
-  // The provider marks the tray can draw right now. The tray, bubble and notch
-  // only pick from clients and limit providers that report data, plus providers
-  // a custom layout names, so the rest of the mark catalog never needs to be
-  // rasterized. A provider that first reports data while the window is
-  // hibernated shows the app icon until the window wakes, the same fallback a
-  // system theme change uses.
+  // The tray, bubble and notch pick from reported usage, limits, recent local
+  // activity and explicit layout choices. A provider that first reports data
+  // while the window is hibernated shows the app icon until the window wakes,
+  // the same fallback a system theme change uses.
   function trayProviderIconDemand({ stats, layouts = [] } = {}) {
     const ids = new Set();
     const add = (value) => {
       const id = String(value || '').trim().toLowerCase();
       if (id && id !== 'auto' && id !== 'app') ids.add(id);
     };
+    add(stats?.localRecentUsageActivity?.provider);
     for (const period of Object.values(stats?.periods || {})) {
       for (const id of Object.keys(period?.clients || {})) add(id);
       for (const id of Object.keys(period?.clientCosts || {})) add(id);

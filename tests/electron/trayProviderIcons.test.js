@@ -5,6 +5,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const test = require('node:test');
 const vm = require('node:vm');
+const { createTrayLayoutItem, resolveTrayLayout, VERSION } = require('../../src/shared/trayLayout');
 
 const {
   createTrayProviderIconDeliveryGuard,
@@ -182,6 +183,20 @@ test('tray icon demand covers reported usage, limit providers and layout picks',
     ]
   });
   assert.deepEqual([...demand].sort(), ['claude', 'claude-brand', 'codex', 'cursor', 'hermes', 'kimi', 'opencode']);
+});
+
+test('the recent provider icon is available before the provider reports usage or limits', () => {
+  const stats = {
+    localRecentUsageActivity: { provider: 'codex' },
+    periods: { today: { clients: { claude: 10 } } }
+  };
+  const layout = {
+    version: VERSION,
+    items: [{ ...createTrayLayoutItem('providerIcon'), autoMode: 'recent' }]
+  };
+  const availableProviderIds = [...trayProviderIconDemand({ stats, layouts: [layout] })];
+
+  assert.equal(resolveTrayLayout(layout, stats, { availableProviderIds }).items[0].provider, 'codex');
 });
 
 test('tray icon demand stays empty without data or layouts', () => {
