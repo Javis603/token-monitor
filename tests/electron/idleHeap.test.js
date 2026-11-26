@@ -65,10 +65,10 @@ test('a large committed heap is collected and raises the next threshold', async 
   assert.equal(await harness.collector.run(), true);
   assert.equal(harness.collections(), 1);
 
-  // The retained set after collection sets a 72 MiB threshold (40 + 32).
-  harness.setHeap({ heapTotal: 70 * MiB, heapUsed: 60 * MiB });
+  // The retained set after collection sets a 56 MiB threshold (40 + 16).
+  harness.setHeap({ heapTotal: 54 * MiB, heapUsed: 46 * MiB });
   assert.equal(await harness.collector.run(), false, 'a heap near the retained set is not collected again');
-  harness.setHeap({ heapTotal: 80 * MiB, heapUsed: 70 * MiB });
+  harness.setHeap({ heapTotal: 64 * MiB, heapUsed: 52 * MiB });
   assert.equal(await harness.collector.run(), true, 'growth past the retained headroom is collected');
 });
 
@@ -155,10 +155,12 @@ test('start installs the one-shot check and recurring interval, and stop clears 
   let installedInterval = null;
   let installedInitial = null;
   let clearedInterval = null;
+  let mainRuns = 0;
   let rendererRuns = 0;
   const collector = createIdleHeapCollector({
     isIdle: () => true,
-    getHeap: () => ({ heapTotal: 0, heapUsed: 0 }),
+    getHeap: () => ({ heapTotal: 120 * MiB, heapUsed: 40 * MiB }),
+    collect: async () => { mainRuns += 1; },
     collectRenderers: async () => { rendererRuns += 1; },
     setInterval: (fn, ms) => { installedInterval = { fn, ms }; return intervalTimer; },
     clearInterval: (value) => { clearedInterval = value; },
@@ -167,17 +169,26 @@ test('start installs the one-shot check and recurring interval, and stop clears 
   });
   collector.start();
   collector.start();
-  assert.equal(installedInitial.ms, 60 * 1000);
-  assert.equal(installedInterval.ms, 30 * 1000);
+  assert.equal(installedInitial.ms, 20 * 1000);
+  assert.equal(installedInterval.ms, 15 * 1000);
   assert.equal(initialTimer.unrefCalled, true);
   assert.equal(intervalTimer.unrefCalled, true);
+  installedInterval.fn();
+  await new Promise(resolve => setImmediate(resolve));
   installedInitial.fn();
   await new Promise(resolve => setImmediate(resolve));
-  assert.equal(rendererRuns, 1, 'the one-shot timer runs a check');
+  assert.equal(mainRuns, 2, 'the first recurring tick and startup check both check main');
+  assert.equal(rendererRuns, 0, 'neither early check runs renderer GC');
+  for (const expected of [1, 1, 2]) {
+    installedInterval.fn();
+    await new Promise(resolve => setImmediate(resolve));
+    assert.equal(rendererRuns, expected, 'renderers run on every second recurring tick');
+  }
+  assert.equal(mainRuns, 5);
   collector.stop();
   assert.equal(clearedInterval, intervalTimer);
   assert.equal(await collector.run(), false, 'a stopped collector does not run');
-  assert.equal(rendererRuns, 1);
+  assert.equal(rendererRuns, 2);
 
   const pendingInitial = { unref() {} };
   let clearedPendingInitial = null;
@@ -194,6 +205,34 @@ test('start installs the one-shot check and recurring interval, and stop clears 
   assert.equal(clearedPendingInitial, pendingInitial, 'stop clears a still-pending one-shot check');
 });
 
+
+test('a renderer tick waits for an in-flight main-only check', async () => {
+  let tick;
+  let startup;
+  let finishMain;
+  let mainRuns = 0;
+  let rendererRuns = 0;
+  const collector = createIdleHeapCollector({
+    getHeap: () => ({ heapTotal: MIN_HEAP_TOTAL_BYTES, heapUsed: 0 }),
+    collect: async () => {
+      mainRuns += 1;
+      if (mainRuns === 2) await new Promise(resolve => { finishMain = resolve; });
+    },
+    collectRenderers: async () => { rendererRuns += 1; },
+    setInterval: (fn) => { tick = fn; return {}; },
+    setTimeout: (fn) => { startup = fn; return {}; }
+  });
+  collector.start();
+  tick();
+  await new Promise(resolve => setImmediate(resolve));
+  startup();
+  tick();
+  assert.equal(rendererRuns, 0, 'renderer GC does not overlap main GC');
+  finishMain();
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(mainRuns, 2, 'deferred renderer GC does not repeat main GC');
+  assert.equal(rendererRuns, 1, 'the due renderer pass runs as soon as main settles');
+});
 
 test('a hung inspector collection times out', async () => {
   const session = { post: () => new Promise(() => {}) };
