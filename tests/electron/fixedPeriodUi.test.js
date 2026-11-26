@@ -472,6 +472,25 @@ test('a brief publication gap keeps usage visible without unverified titles and 
   assert.equal(context.buildFixedPeriodSnapshot().period.totalTokens, 25);
 });
 
+test('restoring the same revision cancels publication-gap expiry', async () => {
+  const { context, state, reads } = syncedRangeHarness();
+  const timers = new Set();
+  context.setTimeout = callback => { timers.add(callback); return callback; };
+  context.clearTimeout = callback => timers.delete(callback);
+  context.requestSyncedFixedPeriod();
+  reads[0].finish(rangeDetails(20));
+  await new Promise(setImmediate);
+  const revisions = state.stats.fixedRangeRevisions;
+  state.stats.fixedRangeRevisions = {};
+  assert.equal(context.buildFixedPeriodSnapshot().period.totalTokens, 20);
+  assert.equal(timers.size, 1);
+  state.stats.fixedRangeRevisions = revisions;
+  context.requestSyncedFixedPeriod();
+  assert.equal(context.buildFixedPeriodSnapshot().period.totalTokens, 20);
+  assert.equal(timers.size, 0);
+  assert.equal(reads.length, 1);
+});
+
 test('a warmup response for replaced display settings cannot populate the range cache', async () => {
   const { context, state, reads } = syncedRangeHarness();
   state.period = 'today';

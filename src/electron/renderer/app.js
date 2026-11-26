@@ -6845,6 +6845,10 @@ function buildFixedPeriodSnapshot() {
   const key = syncedFixedPeriodKey();
   const request = state.syncedFixedPeriod?.key === key ? state.syncedFixedPeriod : null;
   const cached = state.syncedFixedPeriodCache?.get(state.period);
+  if (key && cached?.publicationTimer != null) {
+    clearTimeout(cached.publicationTimer);
+    cached.publicationTimer = null;
+  }
   const usableCache = cached?.snapshot && cached.scope === syncedFixedPeriodScope();
   let synced = request?.snapshot;
   if (!synced && usableCache) {
@@ -6854,6 +6858,8 @@ function buildFixedPeriodSnapshot() {
       const period = state.period;
       cached.publicationTimer ??= setTimeout(() => {
         if (state.syncedFixedPeriodCache.get(period) !== cached) return;
+        cached.publicationTimer = null;
+        if (syncedFixedPeriodKey(period)) return;
         cached.snapshot = null;
         if (state.period === period) statsRenderScheduler.request();
       }, FIXED_PERIOD_HISTORY_RETRY_MS);
