@@ -430,11 +430,14 @@
   // Trend points filtered by launch entry, derived from the collector's
   // per-day session detail instead of the daily rows themselves: those carry
   // no session identity. A day the session detail covers splits by the
-  // sessions' own attribution; a day it does not cover counts entirely as
-  // unknown, so every entry split adds back up to the untouched total curve
-  // and a total that predates attribution never moves because of it. Session
-  // detail is wire-normalized upstream, so an entry there is a bounded value
-  // or absent, and absent is the unknown bucket.
+  // sessions' own attribution, and whatever the detail does not account for
+  // rides in the unknown bucket so each entry split still adds up to the
+  // untouched total curve (a detail whose sessions overcount the day cannot
+  // be rebalanced without inventing values, so unknown floors at zero). A day
+  // without session detail counts entirely as unknown, and a total that
+  // predates attribution never moves because of it. Session detail is
+  // wire-normalized upstream, so an entry there is a bounded value or absent,
+  // and absent is the unknown bucket.
   function entryTrendPoints(points, daySessions, entry, { labelKey = 'date', metric = 'tokens' } = {}) {
     if (!Array.isArray(points)) return [];
     const selected = typeof entry === 'string' ? entry : '';
@@ -450,10 +453,17 @@
         return value;
       }
       let sum = 0;
+      let dayTotal = 0;
       for (const session of Object.values(sessions)) {
         const attributed = typeof session?.sessionEntry === 'string' ? session.sessionEntry : '';
-        if (selected === 'unknown' ? !attributed : attributed === selected) sum += Math.max(0, n(session?.totalTokens));
+        const tokens = Math.max(0, n(session?.totalTokens));
+        dayTotal += tokens;
+        if (selected === 'unknown' ? !attributed : attributed === selected) sum += tokens;
       }
+      // The retained detail is not guaranteed to account for the whole day the
+      // history row reports, so the unknown bucket absorbs the remainder
+      // instead of letting the entry splits fall short of the total curve.
+      if (selected === 'unknown') sum += Math.max(0, n(point?.[metric]) - dayTotal);
       value[metric] = sum;
       return value;
     });

@@ -158,28 +158,66 @@ test('a verified identity conflict revokes the entry attribution', t => {
   const s = t3Store(t);
   s.thread('thread-a');
   s.thread('thread-b');
+  const conflictId = 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeee0002';
   s.provider('p1', 'thread-a', 'dup-native');
   s.provider('p2', 'thread-b', 'dup-native');
+  s.provider('p3', 'thread-a', conflictId);
+  s.provider('p4', 'thread-b', conflictId);
   const periods = { today: normalizePeriod({ sessions: {
-    a: { client: 'codex', sessionId: 'dup-native', totalTokens: 10, t3ThreadId: 'thread-a', sessionEntry: 't3' }
+    a: { client: 'codex', sessionId: 'dup-native', totalTokens: 10, t3ThreadId: 'thread-a', sessionEntry: 't3' },
+    // A record may arrive holding only the entry, with no stored link; the
+    // conflict still unattributes it.
+    b: { client: 'codex', sessionId: conflictId, totalTokens: 5, sessionEntry: 't3' }
   } }) };
   applyT3SessionParents(periods, s.home, { env: {} });
   const session = periods.today.sessions['codex:dup-native'];
   assert.equal(session.t3ThreadId, undefined);
   assert.equal(session.sessionEntry, undefined);
+  assert.equal(periods.today.sessions[`codex:${conflictId}`].sessionEntry, undefined);
 });
 
-function antigravityFixture(t) {
+function antigravityFixture(t, { corruptState = false } = {}) {
   const home = fs.mkdtempSync(path.join(os.tmpdir(), 'tm-entry-ag-dir-'));
   const t3Home = path.join(home, 'custom-t3');
   const acpRoot = path.join(t3Home, 'userdata', 'providers', 'antigravity', 'profile-a', 'antigravity-acp');
   const convDir = path.join(acpRoot, 'conversations');
   fs.mkdirSync(convDir, { recursive: true });
   fs.mkdirSync(path.join(home, '.gemini', 'antigravity'), { recursive: true });
+  // An installed T3 with an empty catalog: readable this tick, so a native
+  // store row may claim the native entry, but with no bindings in it. A
+  // corrupt store instead leaves the binding check inconclusive, and native
+  // evidence must not overcome that.
+  if (corruptState) {
+    fs.writeFileSync(path.join(t3Home, 'userdata', 'statev2.sqlite'), 'this is not a database');
+    const acpDb = new sqlite.DatabaseSync(path.join(acpRoot, 'conversation_summaries.db'));
+    const nativeDb = new sqlite.DatabaseSync(path.join(home, '.gemini', 'antigravity', 'conversation_summaries.db'));
+    t.after(() => {
+      for (const db of [acpDb, nativeDb]) { try { db.close(); } catch (_) {} }
+      fs.rmSync(home, { recursive: true, force: true });
+    });
+    for (const db of [acpDb, nativeDb]) {
+      db.exec(`CREATE TABLE conversation_summaries (
+        conversation_id TEXT PRIMARY KEY, title TEXT, preview TEXT,
+        workspace_uris TEXT, last_modified_time TEXT,
+        parent_conversation_id TEXT, agent_name TEXT
+      )`);
+    }
+    nativeDb.prepare('INSERT INTO conversation_summaries VALUES (?, ?, ?, ?, ?, ?, ?)')
+      .run('nat-conv', 'Native Task', '', '[]', '2026-11-25T08:00:00Z', '', '');
+    return { home, t3Home, env: { T3CODE_HOME: t3Home } };
+  }
+  const stateDb = new sqlite.DatabaseSync(path.join(t3Home, 'userdata', 'statev2.sqlite'));
+  stateDb.exec(`
+    CREATE TABLE orchestration_v2_projection_threads (thread_id TEXT PRIMARY KEY, deleted_at TEXT, payload_json TEXT);
+    CREATE TABLE orchestration_v2_projection_provider_threads (provider_thread_id TEXT PRIMARY KEY, thread_id TEXT, driver TEXT, payload_json TEXT);
+    CREATE TABLE orchestration_v2_projection_nodes (node_id TEXT PRIMARY KEY, thread_id TEXT, root_node_id TEXT, kind TEXT, provider_thread_id TEXT);
+    CREATE TABLE orchestration_v2_projection_run_attempts (thread_id TEXT, provider_thread_id TEXT, root_node_id TEXT, status TEXT, payload_json TEXT);
+    CREATE TABLE orchestration_v2_projection_subagents (subagent_id TEXT PRIMARY KEY, thread_id TEXT, child_thread_id TEXT, origin TEXT);
+  `);
   const acpDb = new sqlite.DatabaseSync(path.join(acpRoot, 'conversation_summaries.db'));
   const nativeDb = new sqlite.DatabaseSync(path.join(home, '.gemini', 'antigravity', 'conversation_summaries.db'));
   t.after(() => {
-    for (const db of [acpDb, nativeDb]) { try { db.close(); } catch (_) {} }
+    for (const db of [stateDb, acpDb, nativeDb]) { try { db.close(); } catch (_) {} }
     fs.rmSync(home, { recursive: true, force: true });
   });
   for (const db of [acpDb, nativeDb]) {
@@ -221,12 +259,35 @@ test('T3 ACP directory rows attribute t3 and native store rows attribute the CLI
   const sessions = periods.today.sessions;
   assert.equal(sessions['antigravity:acp-conv'].sessionEntry, 't3');
   assert.equal(sessions['antigravity:nat-conv'].sessionEntry, 'antigravity-cli');
-  // A session with no row in any store has no directory evidence; the binding
-  // read found nothing either, so the answer stays unknown.
-  assert.equal(sessions['antigravity:nowhere-conv'].sessionEntry, undefined);
+  // A session with no row in any store still reads as native once the binding
+  // check completed: the readable catalog proves it unbound (spec scenario 2).
+  assert.equal(sessions['antigravity:nowhere-conv'].sessionEntry, 'antigravity-cli');
   const wire = normalizePeriod(periods.today);
   assert.equal(wire.sessions['antigravity:acp-conv'].sessionEntry, 't3');
   assert.equal(wire.sessions['antigravity:nat-conv'].sessionEntry, 'antigravity-cli');
+});
+
+test('native directory rows stay unattributed when the binding check is inconclusive', t => {
+  // The T3 state catalog is corrupt, so this tick cannot prove the session is
+  // unbound; a validated row from the native store is not enough on its own.
+  const fixture = antigravityFixture(t, { corruptState: true });
+  const deps = {
+    sqlite,
+    env: fixture.env,
+    antigravityTitleCache: new Map(),
+    metadataCache: new Map(),
+    resolvedSessionKeys: new Set(),
+    attemptedSessionKeys: new Set(),
+    sessionMetadataResolvers: new Map([
+      ['antigravity', { resolve: antigravitySessionMetadata.resolveSessionMetadata, retryAfterTimestampFallback: true }]
+    ])
+  };
+  const periods = { today: normalizePeriod({ sessions: {
+    native: { client: 'antigravity', sessionId: 'nat-conv', totalTokens: 20 }
+  } }) };
+  sessionMetadataMap(periods, fixture.home, deps);
+  applyT3SessionParents(periods, fixture.home, deps);
+  assert.equal(periods.today.sessions['antigravity:nat-conv'].sessionEntry, undefined);
 });
 
 test('session archives round-trip the entry and leave old entries unknown', () => {
@@ -266,6 +327,15 @@ test('entry trend splits add back up to the untouched total curve', () => {
   assert.equal(cli[1].tokens, 0);
   // No filter returns the points untouched.
   assert.equal(entryTrendPoints(points, days, ''), points);
+  // Detail that does not account for the whole day rides the remainder in the
+  // unknown bucket, so the entry splits still sum to the day's trend value.
+  const partialDays = { '2026-11-25': { sessions: {
+    a: { totalTokens: 40, sessionEntry: 't3' },
+    b: { totalTokens: 30, sessionEntry: 'codex-cli' }
+  } } };
+  const partialUnknown = entryTrendPoints(points, partialDays, 'unknown');
+  assert.equal(partialUnknown[0].tokens, 100 - 70);
+  assert.equal(t3[0].tokens + 30 + partialUnknown[0].tokens, points[0].tokens);
   // Month rows carry no session detail and fall into the unknown bucket.
   const monthly = [{ month: '2026-11', tokens: 70 }];
   assert.equal(entryTrendPoints(monthly, days, 'unknown', { labelKey: 'month' })[0].tokens, 70);

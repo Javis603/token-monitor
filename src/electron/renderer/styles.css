@@ -9102,7 +9102,7 @@ html.native-liquid-glass .view-switcher-menu-item { border-radius: 9px; }
 
 .trends-panel { flex: 1; min-height: 0; display: flex; flex-direction: column; gap: 10px; padding-right: 2px; overflow: hidden; }
 .trends-cap { flex: none; display: flex; align-items: center; justify-content: space-between; font-size: 0.6875rem; letter-spacing: 0.04em; text-transform: uppercase; opacity: 0.6; }
-.trend-entry-filter { flex: none; display: flex; justify-content: center; gap: 2px; margin-block-start: -4px; }
+.trend-entry-filter { flex: none; display: flex; flex-wrap: wrap; justify-content: center; gap: 2px; margin-block-start: -4px; }
 .trend-entry-filter .session-tool-filter-button { min-width: 0; }
 .trends-open-hint { opacity: 0.75; cursor: pointer; font-size: 0.8125rem; }
 .trends-spark { flex: 1 1 auto; min-height: 0; display: flex; cursor: pointer; border-radius: 8px; padding: 6px 4px; transition: background 0.12s ease; }

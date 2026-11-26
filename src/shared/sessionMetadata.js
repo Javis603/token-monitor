@@ -444,7 +444,13 @@ function applyT3SessionParents(periods, home = os.homedir(), deps = {}, targets,
       deps.revokedT3ThreadKeys?.add(`${session.client}:${session.sessionId}`);
       continue;
     }
-    if (conflict) continue;
+    // A conflict unattributes the session even when nothing links it yet: a
+    // record that arrived holding only `sessionEntry: 't3'` loses that answer
+    // the same way it would lose a stored thread id.
+    if (conflict) {
+      delete session.sessionEntry;
+      continue;
+    }
     if (link && matches.every(fact => fact.threadId === link.threadId)) {
       const completeParentRead = parentReadIsComplete(session, link);
       if (completeParentRead) deps.completeT3ParentRows?.add(session);
@@ -457,16 +463,17 @@ function applyT3SessionParents(periods, home = os.homedir(), deps = {}, targets,
     }
     const bound = link && matches.every(fact => fact.threadId === link.threadId);
     const directoryEvidence = deps.metadataCache?.get(`${session.client}:${session.sessionId}`)?.sessionEntryEvidence;
+    // Positive directory evidence (a T3-owned store row) stands on its own.
+    // Native evidence — from the catalog or from a native store row — still
+    // needs this tick's binding check to have completed, because a native row
+    // alone cannot prove the session is not bound in a catalog that was not
+    // readable.
     applySessionEntryEvidence(session,
       bound || directoryEvidence === SESSION_ENTRY_EVIDENCE.verifiedT3
         ? SESSION_ENTRY_EVIDENCE.verifiedT3
-        // Directory evidence stands on its own: a row read from a native store
-        // does not need the T3 state catalog to be readable this tick.
-        : directoryEvidence === SESSION_ENTRY_EVIDENCE.native
-          ? SESSION_ENTRY_EVIDENCE.native
-          : (!nativeKeys.length || !ownershipIsComplete(session) || status === 'retryable'
-            ? SESSION_ENTRY_EVIDENCE.unavailable
-            : SESSION_ENTRY_EVIDENCE.native));
+        : (!nativeKeys.length || !ownershipIsComplete(session) || status === 'retryable'
+          ? SESSION_ENTRY_EVIDENCE.unavailable
+          : SESSION_ENTRY_EVIDENCE.native));
     // Native links, including Codex reviews, take precedence over app links.
     if ((!session.parentSessionId || session.t3ParentLink) && link?.parentThreadId
       && matches.every(fact => fact.parentThreadId === link.parentThreadId)) links.set(session, link);

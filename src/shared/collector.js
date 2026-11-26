@@ -1027,6 +1027,8 @@ function t3SessionLinksChanged(session, resolved) {
 
 function refreshT3SessionLinks(session, resolved, revoked = false) {
   if (!revoked && !t3SessionLinksChanged(session, resolved)) return;
+  // A revoked identity loses its launch-entry attribution with its link.
+  if (revoked) delete session.sessionEntry;
   const hadT3Parent = session.t3ParentLink;
   revokeT3SessionLinks(session);
   if (!revoked) session.t3ThreadId = resolved.t3ThreadId;
@@ -1628,6 +1630,7 @@ async function collectUsageOnce(options) {
             const retained = period.sessions?.[key];
             if (!retained?.t3ThreadId && !retained?.t3ParentLink) continue;
             revokeT3SessionLinks(retained);
+            delete retained.sessionEntry;
             localSessionMetadataDeps.revokedT3ThreadKeys.add(key);
           }
         }
@@ -1932,6 +1935,7 @@ async function collectUsageOnce(options) {
           if (!(row.t3ThreadId || row.t3ParentLink)) continue;
           if (!revokedT3ThreadKeys.has(key) && !metadataCache.get(key)?.t3ThreadRevoked) continue;
           revokeT3SessionLinks(row);
+          delete row.sessionEntry;
           revokedT3ThreadKeys.add(key);
         }
       }

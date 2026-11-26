@@ -170,7 +170,7 @@ test('both direct detail render paths hide the list filter immediately', () => {
     const hidden = new Set();
     const node = {classList:{add(name) {hidden.add(name);},remove(){}}};
     const sortClasses = new Set();
-    const els = {sessionToolFilter:node, sessionSortToggle:{classList:{add(name){sortClasses.add(name);}}},
+    const els = {sessionToolFilter:node, sessionEntryFilter:node, sessionSortToggle:{classList:{add(name){sortClasses.add(name);}}},
       breakdown:{classList:{add(){}}},sessionDetail:node,sessionDetailHead:node};
     Function('els', `${app.slice(start, end)}\n}; return ${name};`)(els)();
     assert.equal(hidden.has('hidden'), true, name);
@@ -198,8 +198,8 @@ test('hiding Sessions hides its toolbar after resolving the replacement view', (
   const render = Function('state', 'els', 'visibleStatsSurface', 'statsRenderScheduler', 'ensureBreakdownVisible',
     'loadReasonixSessionList', 'syncSessionSearchChrome',
     `${app.slice(start,end)}\n}; return renderAppContent;`)(state,
-    {sessionToolFilter:{classList:{add(name){hidden=name==='hidden';}}}},
-    ()=>'main', {request(){}}, ()=>{state.breakdown='tool';}, ()=>{reasonixView=state.breakdown;}, ()=>{});
+    {sessionToolFilter:{classList:{add(name){hidden=name==='hidden';}}}, sessionEntryFilter:{classList:{add(){}}}},
+    ()=>'main', {request(){}}, ()=>{state.breakdown='tool';}, ()=>{reasonixView=state.breakdown;}, ()=>{}}
   render();
   assert.equal(state.breakdown,'tool');
   assert.equal(reasonixView,'tool');

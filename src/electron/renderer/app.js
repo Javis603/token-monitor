@@ -3546,8 +3546,10 @@ function renderSessionEntryFilter(rows) {
     });
     host.replaceChildren(...buttons);
   }
+  // `unknown` targets the empty attribution explicitly; only no selection at
+  // all takes the All path.
   const wanted = state.sessionEntryFilter === 'unknown' ? '' : state.sessionEntryFilter;
-  return wanted ? rows.filter(row => sessionEntryValues(row).includes(wanted)) : rows;
+  return state.sessionEntryFilter ? rows.filter(row => sessionEntryValues(row).includes(wanted)) : rows;
 }
 
 function renderRows(rows, { incompleteHint = '', fromSearch = false, reuseToolFilter = false } = {}) {
@@ -6057,6 +6059,7 @@ function sessionDetailBack() {
 
 function renderSessionDetail({ detail, loading, error, preserveScroll = false } = {}) {
   els.sessionToolFilter.classList.add('hidden');
+  els.sessionEntryFilter.classList.add('hidden');
   els.sessionSearchHost?.classList.add('hidden');
   els.sessionSortToggle?.classList.add('hidden');
   els.sessionSearchToggle?.classList.add('hidden');
@@ -6313,6 +6316,7 @@ function sessionGroupRunNode(row, max, parent) {
 
 function renderSessionGroupDetail(request) {
   els.sessionToolFilter.classList.add('hidden');
+  els.sessionEntryFilter.classList.add('hidden');
   els.sessionSearchHost?.classList.add('hidden');
   els.sessionSortToggle?.classList.add('hidden');
   els.sessionSearchToggle?.classList.add('hidden');
@@ -6594,14 +6598,19 @@ function bindTrendTooltip(spark, model, points, labelKey, metric) {
 }
 
 // The launch entries the retained per-day session detail can actually split
-// the trend into. Days without session detail contribute nothing here — they
-// fall into the unknown bucket once a filter is active.
+// the trend into. A day whose sessions carry several entries contributes each
+// of them; a day with usage but no retained session detail contributes only
+// the unknown bucket, so the strip still offers it when the curve holds
+// unattributable usage.
 function trendEntryChoices(points, days, labelKey) {
   const values = new Set();
   for (const point of Array.isArray(points) ? points : []) {
     const key = String(point?.[labelKey] || '').slice(0, 10);
     const sessions = days?.[key]?.sessions;
-    if (!sessions || typeof sessions !== 'object') continue;
+    if (!sessions || typeof sessions !== 'object') {
+      if (Number(point?.tokens) > 0) values.add('unknown');
+      continue;
+    }
     for (const session of Object.values(sessions)) {
       values.add(typeof session?.sessionEntry === 'string' && session.sessionEntry ? session.sessionEntry : 'unknown');
     }
@@ -9167,7 +9176,10 @@ function renderAppContent({ fromSearch = false } = {}) {
   ensureBreakdownVisible();
   loadReasonixSessionList();
   syncSessionSearchChrome();
-  if (state.breakdown !== 'session' || state.openSession) els.sessionToolFilter.classList.add('hidden');
+  if (state.breakdown !== 'session' || state.openSession) {
+    els.sessionToolFilter.classList.add('hidden');
+    els.sessionEntryFilter.classList.add('hidden');
+  }
   const pluginPage = pluginMainPages?.render(pluginPageOptions(), state.breakdown) || false;
   els.shell.classList.toggle('plugin-page-mode', pluginPage);
   if (pluginPage) {
@@ -9214,6 +9226,7 @@ function renderAppContent({ fromSearch = false } = {}) {
   const { fixedUnavailable, detailUnavailable } = periodContentAvailability();
   if (fixedUnavailable || detailUnavailable) {
     els.sessionToolFilter.classList.add('hidden');
+    els.sessionEntryFilter.classList.add('hidden');
     els.sessionSortToggle.classList.add('hidden');
     els.sessionSearchToggle.classList.add('hidden');
     els.sessionSearchHost.classList.add('hidden');
