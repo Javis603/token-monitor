@@ -2588,7 +2588,16 @@ test('dashboard binds deferred drawer ownership to supplying period and invalida
   context.applyIncomingStats(totalStats(101));
   assert.equal(context.state.drawer.detailRequested, false, 'new stats revoke the previous transcript read');
   assert.equal(context.state.stats.periods.allTime.sessions['codex:total'].sourceDevice.deviceId, 'mac-local');
-  context.openDrawer({ kind: 'session', session: { ...local, key: 'codex:total', sourcePeriodKey: 'allTime' } });
+  context.state.periodKey = 'today';
+  const carriedTotal = dashboardModel.buildSessionList({
+    stats: context.state.stats,
+    settings: context.state.settings,
+    statsMode: 'sync',
+    periodKey: 'today'
+  }).find(row => row.key === 'codex:total');
+  assert.equal(carriedTotal.sourcePeriodKey, 'allTime');
+  assert.equal(carriedTotal.resumedFromPriorPeriod, true);
+  context.openDrawer({ kind: 'session', session: carriedTotal });
   assert.equal(detailCalls.length, callsBeforeAllTime + 1);
   await Promise.resolve();
   pendingTotals.get(101)({ 'codex:total': { ...local, sourceDevice: { ambiguous: true } } });
@@ -3662,6 +3671,21 @@ test('Dashboard applies Stats without History and fences older successful Histor
   reads[1].resolve({ revision: 'older' });
   await older;
   assert.equal(context.state.history.revision, 'manual');
+
+  let finishManualScan;
+  context.window.tokenMonitor.getStats = async (options) => options?.force
+    ? new Promise(resolve => { finishManualScan = resolve; })
+    : { snapshot: { id: ++snapshot, source: 1 } };
+  const manualFirst = context.pullDashboardData({ manual: true });
+  const backgroundWhileScanning = context.pullDashboardData();
+  await new Promise(setImmediate);
+  reads[3].resolve({ revision: 'before-scan' });
+  await backgroundWhileScanning;
+  finishManualScan({ snapshot: { id: ++snapshot, source: 1 } });
+  await new Promise(setImmediate);
+  reads[4].resolve({ revision: 'after-scan' });
+  await manualFirst;
+  assert.equal(context.state.history.revision, 'after-scan');
 });
 
 

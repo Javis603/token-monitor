@@ -1372,3 +1372,23 @@ test('synced Week History fallback uses the published Monday calendar in an en-U
   assert.equal(view.fleet.machines[0].tokens, 60);
   assert.equal(view.sessionsIncomplete, true);
 });
+
+
+test('a synced fixed period renders without totals while device History is pending or unavailable', () => {
+  const stats = {
+    mode: 'sync',
+    devices: [{ deviceId: 'mac', periods: { today: { totalTokens: 60 } } }],
+    periods: { today: { totalTokens: 60 } }
+  };
+  for (const history of [null, {
+    daily: [{ date: '2026-11-23', tokens: 60 }],
+    summary: { totalTokens: 60 },
+    deviceHistories: [{ deviceId: 'mac', historyAvailable: false }]
+  }]) {
+    const view = model.buildScopedOverview({ stats, history, periodKey: 'week', statsMode: 'sync' });
+    assert.equal(view.hero.tokens, 0);
+    assert.equal(view.fleet.machines[0].tokens, 0);
+    assert.equal(view.sessionsIncomplete, true);
+    assert.deepEqual(view.tools, []);
+  }
+});

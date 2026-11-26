@@ -3121,9 +3121,7 @@ function openDrawer(payload) {
     };
 
     const isGroupSession = Boolean(s.sessionGroup && Array.isArray(s.groupRows) && s.groupRows.length > 0);
-    const ownershipPeriodKey = s.resumedFromPriorPeriod === true
-      ? (s.sourcePeriodKey === 'today' || s.sourcePeriodKey === 'month' ? s.sourcePeriodKey : 'month')
-      : (s.sourcePeriodKey || state.periodKey);
+    const ownershipPeriodKey = s.sourcePeriodKey || (s.resumedFromPriorPeriod ? 'month' : state.periodKey);
     const isSyncedPeriodSession = !isGroupSession
       && s.isNativeLocal !== true
       && (typeof isSyncedSessionPeriodKey === 'function' ? isSyncedSessionPeriodKey(ownershipPeriodKey) : (ownershipPeriodKey === 'today' || ownershipPeriodKey === 'month'))
@@ -4245,7 +4243,6 @@ let historyRequestSeq = 0;
 let appliedHistoryRequestSeq = 0;
 
 async function pullDashboardData({ manual = false } = {}) {
-  const seq = ++historyRequestSeq;
   const pullPushSeq = typeof statsPushSeq === 'number' ? statsPushSeq : null;
   const pullSource = state.stats?.snapshot?.source ?? null;
   const pullSourceGen = typeof statsSourceGeneration === 'number' ? statsSourceGeneration : 0;
@@ -4280,8 +4277,12 @@ async function pullDashboardData({ manual = false } = {}) {
   // A manual scan updates History in main. Read it after that scan settles.
   const statsTask = readStats();
   if (manual) await statsTask;
+  let seq;
   const [historyResult] = await Promise.allSettled([
-    Promise.resolve().then(() => window.tokenMonitor.getDashboardHistory({ includeDevices: true })),
+    Promise.resolve().then(() => {
+      seq = ++historyRequestSeq;
+      return window.tokenMonitor.getDashboardHistory({ includeDevices: true });
+    }),
     statsTask
   ]);
   if (historyResult.status === 'rejected') throw historyResult.reason;

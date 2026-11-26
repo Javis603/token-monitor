@@ -2388,18 +2388,18 @@
 
     const periodData = fixedHistorySnapshot
       ? (activeMachine ? activeMachine.periodData : fixedHistorySnapshot.period)
-        || fixedPeriodRanges.derivePeriod([], { start: '', end: '' })
       : activeMachine
         ? activeMachine.periodData
         : resolvePeriodData(periodSource, scopedHistory.daily, periodKey, { locale: settings?.locale });
 
-    const anatomy = computeTokenAnatomy(periodData, scopedHistory.daily);
-    const totalTokens = periodData ? Math.max(0, n(periodData.totalTokens)) : n(scopedHistory.summary.totalTokens);
-    const totalCost = periodData ? Math.max(0, n(periodData.costUsd ?? periodData.totalCost)) : n(scopedHistory.summary.totalCost);
-    const unpricedTokens = periodData ? Math.max(0, n(periodData.unpricedTokens)) : n(scopedHistory.summary.unpricedTokens);
+    const periodFallbackHistory = fixedHistorySnapshot ? null : scopedHistory;
+    const anatomy = computeTokenAnatomy(periodData, periodFallbackHistory?.daily);
+    const totalTokens = periodData ? Math.max(0, n(periodData.totalTokens)) : n(periodFallbackHistory?.summary.totalTokens);
+    const totalCost = periodData ? Math.max(0, n(periodData.costUsd ?? periodData.totalCost)) : n(periodFallbackHistory?.summary.totalCost);
+    const unpricedTokens = periodData ? Math.max(0, n(periodData.unpricedTokens)) : n(periodFallbackHistory?.summary.unpricedTokens);
 
-    const tools = buildToolRows(periodData, scopedHistory.daily, totalTokens);
-    const models = buildModelRows(periodData, scopedHistory.daily, totalTokens);
+    const tools = buildToolRows(periodData, periodFallbackHistory?.daily || [], totalTokens);
+    const models = buildModelRows(periodData, periodFallbackHistory?.daily || [], totalTokens);
     const derivedIncomplete = Boolean(
       fixedHistorySnapshot || stats?.syncedFixedPeriodDetailsAvailable?.[periodKey] === false
     );
