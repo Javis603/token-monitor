@@ -601,6 +601,107 @@ test('T3 Antigravity ACP renews existing sessions beyond the usage window and cl
   }
 });
 
+test('T3 Antigravity ACP shows pre-token sessions locally and replaces them when usage arrives', async t => {
+  t.mock.timers.enable({ apis: ['Date'], now });
+  const f = fixture(t);
+  const { activityPatch, applyActivityPatch } = require('../../src/shared/sessionActivityProjection');
+  const { sessionActivityProvidersFor, refreshSessionActivity } = require('../../src/shared/sessionActivityRegistry');
+  f.db.exec("UPDATE orchestration_v2_projection_provider_threads SET driver = 'antigravity'");
+  const key = 'antigravity:' + nativeId;
+  const periods = ['today', 'month', 'allTime'];
+  const providers = sessionActivityProvidersFor(['antigravity']);
+  const refresh = (summary, clock, readClock = clock) => refreshSessionActivity(summary, providers, {},
+    { ...f.options, now: readClock }, { now: () => clock });
+  const baseline = Object.fromEntries(periods.map(name => [name, usage.emptyPeriod()]));
+  baseline.updatedAt = new Date(now - 60_000).toISOString();
+  const other = { client: 'reasonix', sessionId: 'reasonix-test' };
+  baseline.nativeSessions = { today: { 'reasonix:reasonix-test': other } };
+  assert.equal(await refresh(baseline, now), baseline, 'waiting is outside ACP live state support');
+
+  f.db.exec("UPDATE orchestration_v2_projection_runtime_requests SET status = 'resolved'");
+  let anchor;
+  const collected = await collectUsageOnce({
+    clients: 'antigravity', deviceId: 'pre-token-acp', agentVersion: 'test',
+    homeDir: f.home, env: {}, platform: 'darwin', allTimeSince: '2024-01-01',
+    historyEnabled: false, limitsEnabled: false, projectsEnabled: false,
+    anchorPersistenceEnabled: false, sessionMetadataDeps: { readProcessStarts: f.options.readProcessStarts },
+    runTokscale: async () => ({ entries: [] }), onAnchorComputed: value => { anchor = value; }
+  });
+  assert.equal(collected.nativeSessions?.today[key]?.liveActivity.state, 'running');
+  assert.equal(anchor.nativeSessions, undefined);
+  const active = await refresh(baseline, now);
+  assert.equal(active.updatedAt, baseline.updatedAt);
+  for (const name of periods) {
+    assert.equal(active[name], baseline[name]);
+    assert.equal(active.nativeSessions?.[name][key]?.tokenDataUnavailable, true);
+    assert.equal(anchor.windowsPeriods[name].sessions[key], undefined);
+  }
+  assert.equal(active.nativeSessions.today['reasonix:reasonix-test'], other);
+  assert.equal(Object.hasOwn(serializeSyncPayload(active).payload, 'nativeSessions'), false);
+
+  const patched = applyActivityPatch(baseline, activityPatch(baseline, active));
+  assert.equal(patched.nativeSessions.today[key].liveActivity.state, 'running');
+  assert.equal(patched.nativeSessions.today['reasonix:reasonix-test'], other);
+  const [row] = rows.sessionRowsForPeriod(patched.today, {
+    nativeSessions: { [key]: patched.nativeSessions.today[key] }, now: new Date(now)
+  });
+  assert.equal(row.activityState, 'running');
+  assert.equal(row.tokenDataUnavailable, true);
+  const recentRows = presentation.recentSessionRows({ periods: patched, nativeSessions: patched.nativeSessions });
+  assert.equal(recentRows[0].key, key);
+  const expiry = now + live.LIVE_ACTIVITY_TTL_MS;
+  assert.equal(presentation.runningSessionSummary(recentRows, expiry - 1).count, 1);
+  assert.equal(presentation.nextRunningExpiryAt(recentRows, now), expiry);
+  assert.equal(presentation.runningSessionSummary(recentRows, expiry).count, 0);
+  assert.equal(presentation.nextRunningExpiryAt(recentRows, expiry), 0);
+  const rolledBack = await refresh(active, now - 1000);
+  assert.equal(live.sessionActivityState(rolledBack.nativeSessions.today[key], now - 1000), 'running');
+  assert.equal(await refresh(active, now + 1000), active);
+  const renewed = await refresh(active, now + 10_000);
+  assert.equal(renewed.nativeSessions.today[key].liveActivity.observedAt, new Date(now + 10_000).toISOString());
+  assert.equal(renewed.nativeSessions.today[key].lastUsedAt, active.nativeSessions.today[key].lastUsedAt);
+  assert.equal(live.sessionActivityState(active.nativeSessions.today[key], now + live.LIVE_ACTIVITY_TTL_MS), 'idle');
+  const expired = await refresh(active, now + live.LIVE_ACTIVITY_TTL_MS, now);
+  assert.equal(expired.nativeSessions.today[key], undefined);
+
+  const withUsage = tokens => ({ ...active, ...Object.fromEntries(periods.map(name => [
+    name, { totalTokens: tokens, sessions: { [key]: { client: 'antigravity', sessionId: nativeId,
+      totalTokens: tokens, costUsd: 0.25, lastUsedAt: new Date(now).toISOString() } } }
+  ])) });
+  const [ordinaryZero] = presentation.recentSessionRows({ periods: withUsage(0) });
+  assert.equal(ordinaryZero.key, key);
+  assert.equal(ordinaryZero.costUsd, 0.25);
+  assert.equal(ordinaryZero.tokenDataUnavailable, false);
+  const zero = await refresh(withUsage(0), now + 1000);
+  assert.equal(zero.today.sessionActivity, undefined);
+  const [zeroRow] = presentation.recentSessionRows({ periods: zero, nativeSessions: zero.nativeSessions });
+  assert.equal(zeroRow.tokenDataUnavailable, true);
+  assert.equal(zeroRow.costUsd, 0.25);
+  t.mock.timers.setTime(now + 1000);
+  const used = await refresh(withUsage(7), now + 1000);
+  assert.equal(used.nativeSessions.today[key], undefined);
+  assert.equal(used.today.sessionActivity[key].state, 'running');
+  const visible = rows.sessionRowsForPeriod(used.today, { nativeSessions: used.nativeSessions.today, now: new Date(now) });
+  assert.deepEqual(visible.filter(row => row.client === 'antigravity').map(row => row.value), [7]);
+  const [usedRow] = presentation.recentSessionRows({ periods: used, nativeSessions: used.nativeSessions });
+  assert.equal(usedRow.totalTokens, 7);
+  const [mixedRow] = presentation.recentSessionRows({
+    periods: { today: used.today, month: zero.month }, nativeSessions: zero.nativeSessions
+  });
+  assert.equal(mixedRow.totalTokens, 7);
+  assert.equal(mixedRow.tokenDataUnavailable, false);
+
+  const doneAt = new Date(now + 2000).toISOString();
+  f.db.prepare("UPDATE orchestration_v2_projection_runs SET status = 'completed', completed_at = ?").run(doneAt);
+  const completed = await refresh(active, now + 2000);
+  assert.equal(completed.nativeSessions.today[key], undefined);
+  assert.equal(applyActivityPatch(patched, activityPatch(active, completed)).nativeSessions.today[key], undefined);
+  f.db.exec("UPDATE orchestration_v2_projection_runs SET status = 'running', completed_at = NULL");
+  fs.unlinkSync(f.runtimeFile);
+  const exited = await refresh(active, now + 3000);
+  assert.equal(exited.nativeSessions.today[key], undefined);
+});
+
 test('unchanged Codex discovery reuses locations while T3 state and process validation stay fresh', async t => {
   const f = fixture(t); f.write([started]);
   let catalogReads = 0;

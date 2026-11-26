@@ -66,7 +66,7 @@ The database and its WAL are watched, including under the environment overrides 
 
 ### Live activity in T3 Code
 
-For existing Antigravity ACP usage rows, Token Monitor matches the conversation ID to T3 Code's active run. The activity watcher follows T3's state database and validates the owning server process before renewing the running observation. This keeps a quiet run visible beyond the usage-based timeout. Completion or loss of verified live evidence returns the session to the shared idle or turn-based display rules. Desktop and standalone CLI continue to use the catalog's turn readings.
+Token Monitor matches the Antigravity ACP conversation ID to T3 Code's active run. The activity watcher follows T3's state database and validates the owning server process before renewing the running observation. This keeps a quiet run visible beyond the usage-based timeout. Before the first tokens arrive, a verified running session appears locally in Sessions, Home and Edge Dock. Its usage row takes over as soon as tokens are recorded. Completion or loss of verified live evidence removes the temporary row and returns existing usage rows to the shared idle or turn-based display rules. Desktop and standalone CLI use the catalog's turn readings.
 
 ### Boundary with quota collection
 
