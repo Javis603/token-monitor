@@ -127,8 +127,9 @@ test('createSkylineController pans on zoomed wheel, horizontal/shift wheel, and 
     const listeners = new Map();
     const classSet = new Set();
     const grad = { addColorStop() {} };
+    let transformDpr;
     const ctxStub = {
-      setTransform() {},
+      setTransform(scale) { transformDpr = scale; },
       clearRect() {},
       beginPath() {},
       moveTo() {},
@@ -234,14 +235,42 @@ test('createSkylineController pans on zoomed wheel, horizontal/shift wheel, and 
     pointerdown({ button: 1, shiftKey: false, clientX: 200, clientY: 150, pointerId: 1, preventDefault() { pointerMidPrevented = true; } });
     assert.equal(pointerMidPrevented, true);
     assert.equal(classSet.has('is-panning'), true);
-    pointermove({ clientX: 280, clientY: 180 });
+    pointerdown({ button: 0, pointerId: 2, clientX: 700, clientY: 200 });
+    pointermove({ clientX: 700, clientY: 200, pointerId: 2 });
+    pointerup({ pointerId: 2 });
+    assert.equal(classSet.has('is-panning'), true);
+    pointermove({ clientX: 280, clientY: 180, pointerId: 1 });
     pointerup({ pointerId: 1 });
     assert.equal(ctrl.getState().camera.panX, 30);
     assert.equal(ctrl.getState().camera.panY, -60);
     assert.ok(interacts > 0);
+    const keydown = listeners.get('keydown');
+    const beforeKeyOrbit = ctrl.getState().camera.yaw;
+    const key = (key, shiftKey = false) => keydown({ key, shiftKey, preventDefault() {} });
+    key('ArrowRight');
+    assert.notEqual(ctrl.getState().camera.yaw, beforeKeyOrbit);
+    key('ArrowRight', true);
+    assert.equal(ctrl.getState().camera.panX, 48);
+    const beforeZoom = ctrl.getState().camera.zoom;
+    key('+');
+    assert.ok(ctrl.getState().camera.zoom > beforeZoom);
+    const bitmapWidth = canvasStub.width;
+    const bitmapHeight = canvasStub.height;
+    hostEl.clientWidth /= 2;
+    hostEl.clientHeight /= 2;
+    hostEl.ownerDocument.defaultView.devicePixelRatio = 2;
+    ctrl.resize();
+    assert.equal(canvasStub.width, bitmapWidth);
+    assert.equal(canvasStub.height, bitmapHeight);
+    assert.equal(transformDpr, 2);
     ctrl.destroy();
   } finally {
     global.requestAnimationFrame = origRaf;
     global.cancelAnimationFrame = origCancelRaf;
   }
+});
+
+test('large finite and infinite yaw normalize without an unbounded loop', () => {
+  assert.ok(Math.abs(skyline.clampCamera({ yaw: 2 ** 60 }).yaw) <= Math.PI);
+  assert.equal(skyline.clampCamera({ yaw: Infinity }).yaw, 0);
 });

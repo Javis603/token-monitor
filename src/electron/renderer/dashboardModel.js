@@ -673,6 +673,15 @@
       }
     }
 
+    /** @type {Map<string, Map<string, number>>} */
+    const modelsByClient = new Map();
+    for (const [rawClient, models] of Object.entries(periodData?.clientModels || {})) {
+      const client = canonicalClientKey(rawClient);
+      if (!client) continue;
+      const totals = modelsByClient.get(client) || new Map();
+      for (const [model, count] of Object.entries(models || {})) totals.set(model, (totals.get(model) || 0) + Math.max(0, n(count)));
+      modelsByClient.set(client, totals);
+    }
     const rows = Object.entries(map)
       .map(([id, data]) => ({
         id,
@@ -682,7 +691,7 @@
         unpricedTokens: data.unpricedTokens,
         color: clientColor(id),
         iconClass: hasBrandMask(id) ? `row-icon-${id}` : '',
-        models: Object.entries(periodData?.clientModels?.[id] || {})
+        models: Array.from(modelsByClient.get(id) || [])
           .map(([m, t]) => ({ id: m, tokens: Math.max(0, n(t)), color: modelColor(m) }))
           .filter((m) => m.tokens > 0)
           .sort((a, b) => b.tokens - a.tokens)
@@ -864,6 +873,7 @@
         const untouched = remainingPct != null && remainingPct >= 99.5;
         return {
           ...win,
+          windowKey: limitUsageItemsApi.limitWindowKey(win),
           isCredits,
           showUsed,
           showMeter,
@@ -1954,7 +1964,7 @@
       /** @param {any} s */
       const sessionHubKey = (s) => {
         const label = String(s?.projectLabel || '').trim();
-        return label ? `ws:${label.toLowerCase()}` : 'ws:__general';
+        return label ? `ws:${label.toLowerCase()}` : 'unassigned';
       };
 
       // Rank workspace hubs across all sessions/workspaces in scope by live activity then volume.
@@ -2392,7 +2402,7 @@
         ? activeMachine.periodData
         : resolvePeriodData(periodSource, scopedHistory.daily, periodKey, { locale: settings?.locale });
 
-    const periodFallbackHistory = fixedHistorySnapshot ? null : scopedHistory;
+    const periodFallbackHistory = periodKey === 'allTime' ? scopedHistory : null;
     const anatomy = computeTokenAnatomy(periodData, periodFallbackHistory?.daily);
     const totalTokens = periodData ? Math.max(0, n(periodData.totalTokens)) : n(periodFallbackHistory?.summary.totalTokens);
     const totalCost = periodData ? Math.max(0, n(periodData.costUsd ?? periodData.totalCost)) : n(periodFallbackHistory?.summary.totalCost);

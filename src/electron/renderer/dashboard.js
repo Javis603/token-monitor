@@ -132,6 +132,7 @@ const dashboardSettings = {
   error: document.getElementById('dashSettingsError')
 };
 let dashboardSettingsSave = Promise.resolve();
+let queuedDashboardPeriods = null;
 let periodTabsSignature = '';
 const RANGES = ['7', '30', '90', '365', 'all'];
 const state = {
@@ -617,7 +618,7 @@ function dashboardPeriodTabs(settings) {
 
 function syncDashboardSettings(settings) {
   if (!dashboardSettings.popover) return;
-  const visible = dashboardPeriodChoices(settings);
+  const visible = queuedDashboardPeriods || dashboardPeriodChoices(settings);
   dashboardSettings.follow.checked = settings.dashboardFollowPeriodTabs === true;
   dashboardSettings.velocity.checked = settings.dashboardShowVelocity !== false;
   dashboardSettings.quotas.checked = settings.dashboardShowQuotas !== false;
@@ -651,6 +652,11 @@ function saveDashboardSettings(patch) {
     } catch (_) {
       dashboardSettings.error.classList.remove('hidden');
       syncDashboardSettings(state.settings);
+    } finally {
+      if (patch.dashboardVisiblePeriods && queuedDashboardPeriods === patch.dashboardVisiblePeriods) {
+        queuedDashboardPeriods = null;
+        syncDashboardSettings(state.settings);
+      }
     }
   });
 }
@@ -843,7 +849,11 @@ function renderDailyLedger(overview) {
     + `<span class="dash-ledger-num">${escapeHtml(t('dashboard.heatmap.cost'))}</span>`
     + `<span class="dash-ledger-num">${escapeHtml(t('dashboard.ledger.delta'))}</span>`
     + `</div>`;
-  const body = rows.slice(0, 60).map((row) => {
+  const scope = JSON.stringify([state.range, state.selectedDeviceId]);
+  const lastPage = Math.ceil(rows.length / 60) - 1;
+  const page = state.ledgerPage?.scope === scope ? Math.min(state.ledgerPage.index, lastPage) : 0;
+  const start = page * 60;
+  const body = rows.slice(start, start + 60).map((row) => {
     const delta = row.deltaPercent;
     const deltaCls = delta == null ? '' : delta > 0 ? ' is-up' : delta < 0 ? ' is-down' : '';
     const deltaText = delta == null ? '—' : `${delta > 0 ? '+' : ''}${Math.round(delta)}%`;
@@ -858,8 +868,21 @@ function renderDailyLedger(overview) {
       + `<span class="dash-ledger-delta${deltaCls}">${escapeHtml(deltaText)}</span>`
       + `</div>`;
   }).join('');
-  withPreservedFocus(els.dailyLedger, '.dash-ledger-row[data-day]', (r) => r.dataset.day || '', () => {
-    els.dailyLedger.innerHTML = head + body;
+  withPreservedFocus(els.dailyLedger, '[data-day], [data-ledger-page]', (node) => node.dataset.day || node.dataset.ledgerPage || '', () => {
+    const navigation = lastPage > 0
+      ? `<nav class="dash-ledger-pages" aria-label="${escapeHtml(t('dashboard.ledger.title'))}">`
+        + `<button class="seg-btn" type="button" data-ledger-page="${page - 1}"${page === 0 ? ' disabled' : ''}>${escapeHtml(t('sessions.pagePrevious'))}</button>`
+        + `<span>${escapeHtml(t('sessions.pageRange', { start: start + 1, end: Math.min(start + 60, rows.length), total: rows.length }))}</span>`
+        + `<button class="seg-btn" type="button" data-ledger-page="${page + 1}"${page === lastPage ? ' disabled' : ''}>${escapeHtml(t('sessions.pageNext'))}</button></nav>`
+      : '';
+    els.dailyLedger.innerHTML = head + body + navigation;
+    els.dailyLedger.querySelectorAll('[data-ledger-page]').forEach(button => {
+      button.addEventListener('click', () => {
+        state.ledgerPage = { scope, index: Number(button.dataset.ledgerPage) };
+        renderDailyLedger(state.overview);
+        els.dailyLedger.querySelector('[data-day]')?.focus();
+      });
+    });
     applySwatchColors(els.dailyLedger);
     els.dailyLedger.querySelectorAll('.dash-ledger-row[data-day]').forEach((row) => {
       row.addEventListener('click', () => {
@@ -1551,8 +1574,8 @@ function quotaWindowFlags(win, { vendorColors, highlightLow }) {
   return { isExhausted, isCritical, isLow, isValueLow, isUntouched };
 }
 
-function quotaMotionKey(acc, labelText) {
-  return JSON.stringify([acc?.key ?? '', acc?.name ?? '', labelText ?? '']);
+function quotaMotionKey(acc, win) {
+  return JSON.stringify([acc?.key ?? '', acc?.name ?? '', win?.windowKey || win?.label || '']);
 }
 
 function formatQuotaWindowReading(win, shownPct) {
@@ -1599,6 +1622,7 @@ function renderQuotas(overview) {
       displayColor(acc.color || charts.clientColors[acc.providerId] || '#6ab4f0'),
       Math.max(0, Number(acc.resetCount || 0)),
       (acc.windows || []).map((w) => [
+        w.windowKey,
         formatQuotaWindowLabel(w, acc.providerId, acc.windows),
         Boolean(w.pacePercent != null),
         Boolean(w.isCredits),
@@ -1617,8 +1641,7 @@ function renderQuotas(overview) {
     for (const acc of accounts) {
       const accColor = displayColor(acc.color || charts.clientColors[acc.providerId] || '#6ab4f0');
       for (const win of acc.windows || []) {
-        const labelText = formatQuotaWindowLabel(win, acc.providerId, acc.windows);
-        const motionKey = quotaMotionKey(acc, labelText);
+        const motionKey = quotaMotionKey(acc, win);
         const row = rowByKey.get(motionKey);
         if (!row) continue;
         const resetShort = formatResetShort(win.resetsAt);
@@ -1720,7 +1743,7 @@ function renderQuotas(overview) {
         flags.isExhausted ? 'is-exhausted' : '',
         flags.isUntouched ? 'is-untouched' : ''
       ].filter(Boolean).join(' ');
-      const motionKey = quotaMotionKey(acc, labelText);
+      const motionKey = quotaMotionKey(acc, win);
       const paceHtml = win.pacePercent != null
         ? `<span class="home-limit-pace" aria-hidden="true"></span>`
         : '';
@@ -3786,9 +3809,21 @@ function renderNow() {
   els.trendsPane.classList.toggle('hidden', state.tab !== 'trends');
   els.activityPane.classList.toggle('hidden', state.tab !== 'activity');
 
-  els.modeBtns.forEach((b) => b.classList.toggle('active', b.dataset.mode === state.mode));
-  els.stackBtns.forEach((b) => b.classList.toggle('active', b.dataset.stack === state.stackBy));
-  els.trendMetricBtns.forEach((b) => b.classList.toggle('active', b.dataset.tmetric === state.trendMetric));
+  els.modeBtns.forEach((b) => {
+    const active = b.dataset.mode === state.mode;
+    b.classList.toggle('active', active);
+    b.setAttribute('aria-pressed', String(active));
+  });
+  els.stackBtns.forEach((b) => {
+    const active = b.dataset.stack === state.stackBy;
+    b.classList.toggle('active', active);
+    b.setAttribute('aria-pressed', String(active));
+  });
+  els.trendMetricBtns.forEach((b) => {
+    const active = b.dataset.tmetric === state.trendMetric;
+    b.classList.toggle('active', active);
+    b.setAttribute('aria-pressed', String(active));
+  });
   els.stageViewBtns.forEach((b) => {
     const active = b.dataset.view === state.stageView;
     b.classList.toggle('active', active);
@@ -4272,19 +4307,15 @@ async function pullDashboardData({ manual = false } = {}) {
   const statsTask = readStats();
   if (manual) await statsTask;
   let seq;
-  const [historyResult] = await Promise.allSettled([
-    Promise.resolve().then(() => {
-      seq = ++historyRequestSeq;
-      return window.tokenMonitor.getDashboardHistory({ includeDevices: true });
-    }),
-    statsTask
-  ]);
-  if (historyResult.status === 'rejected') throw historyResult.reason;
+  const history = await Promise.resolve().then(() => {
+    seq = ++historyRequestSeq;
+    return window.tokenMonitor.getDashboardHistory({ includeDevices: true });
+  });
   const acceptHistory = typeof shouldAcceptPulledHistory !== 'function'
     || shouldAcceptPulledHistory(stats, statsAccepted, { pullSource, pullSourceGen });
   if (seq > appliedHistoryRequestSeq && acceptHistory) {
     appliedHistoryRequestSeq = seq;
-    state.history = historyResult.value;
+    state.history = history;
     state.motion = state.overview ? 'update' : 'entry';
     render();
   }
@@ -4677,13 +4708,14 @@ dashboardSettings.popover?.addEventListener('toggle', event => {
 dashboardSettings.choices?.addEventListener('click', event => {
   const button = event.target.closest('.period-tab-chip');
   if (!button || button.disabled) return;
-  const selected = new Set(Array.from(dashboardSettings.choices.querySelectorAll('[aria-pressed="true"]'), item => item.value));
+  const selected = new Set(queuedDashboardPeriods || dashboardPeriodChoices(state.settings));
   const wasSelected = selected.has(button.value);
   if (wasSelected && selected.size === 1) return;
-  button.setAttribute('aria-pressed', String(!wasSelected));
   if (wasSelected) selected.delete(button.value);
   else selected.add(button.value);
-  void saveDashboardSettings({ dashboardVisiblePeriods: [...selected] });
+  queuedDashboardPeriods = [...selected];
+  syncDashboardSettings(state.settings);
+  saveDashboardSettings({ dashboardVisiblePeriods: queuedDashboardPeriods });
 });
 dashboardSettings.popover?.addEventListener('change', (event) => {
   const input = event.target;

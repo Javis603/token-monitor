@@ -907,10 +907,11 @@ test('dashboard quota motion keys contain no NUL bytes and stay stable across up
   const js = read('src', 'electron', 'renderer', 'dashboard.js');
   const context = {};
   vm.runInNewContext(js.slice(js.indexOf('function quotaMotionKey'), js.indexOf('\nfunction renderQuotas')), context);
-  const key = context.quotaMotionKey({ key: 'codex:a', name: 'Personal' }, 'Session');
+  const key = context.quotaMotionKey({ key: 'codex:a', name: 'Personal' }, { label: 'Session', windowKey: 'primary' });
   assert.equal(key.includes('\0'), false);
   assert.equal(key.includes('\uFFFD'), false);
-  assert.equal(key, context.quotaMotionKey({ key: 'codex:a', name: 'Personal' }, 'Session'));
+  assert.equal(key, context.quotaMotionKey({ key: 'codex:a', name: 'Personal' }, { label: 'Session', windowKey: 'primary' }));
+  assert.notEqual(key, context.quotaMotionKey({ key: 'codex:a', name: 'Personal' }, { label: 'Session', windowKey: 'additional' }));
 });
 
 test('showHeatTooltip renders DOM-derived dates and labels as plain text', () => {
@@ -3709,4 +3710,26 @@ test('Dashboard schedules a repaint for session expiry without throughput sample
   assert.equal(timer.delay, expected - now + 20);
   timer.callback();
   assert.equal(rendered, 1);
+});
+
+
+test('Dashboard can reveal History while a silent Stats request is pending', async () => {
+  const js = read('src', 'electron', 'renderer', 'dashboard.js');
+  let finishStats;
+  const context = {
+    state: { stats: null, history: null },
+    window: { tokenMonitor: {
+      getStats: () => new Promise(resolve => { finishStats = resolve; }),
+      getDashboardHistory: async () => ({ daily: [{ tokens: 12 }] })
+    } },
+    observeStatsRates() {},
+    render() {}
+  };
+  vm.runInNewContext(js.slice(js.indexOf('let historyRequestSeq'), js.indexOf('async function manualRefresh(')), context);
+  await context.pullDashboardData();
+  assert.equal(context.state.history.daily[0].tokens, 12);
+  assert.equal(context.state.stats, null);
+  finishStats({ periods: { today: { totalTokens: 42 } } });
+  await new Promise(setImmediate);
+  assert.equal(context.state.stats.periods.today.totalTokens, 42);
 });

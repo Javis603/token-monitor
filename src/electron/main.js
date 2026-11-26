@@ -2857,16 +2857,28 @@ function rendererAllTimeSessions(stats) {
     const devices = hubSnapshot?.localDevice
       ? [...(complete.devices || []).filter(device => device.deviceId !== hubSnapshot.localDevice.deviceId), hubSnapshot.localDevice]
       : complete.devices;
-    const sourced = projectSessionDeviceSessions(sessions, devices, ['month', 'allTime']);
+    const unstamped = Object.fromEntries(Object.entries(sessions).map(([id, { sourceDevice: _owner, ...session }]) => [id, session]));
+    const sourced = projectSessionDeviceSessions(unstamped, devices, ['month', 'allTime']);
     const inline = projectModelAliasSessions(stats, settings?.sessionTitlesEnabled === false ? withoutSessionTitles(sourced) : sourced, aliases, { grouping });
-    if (!stats.sessionDetailsOmitted?.month || !Object.keys(stats.fixedRangeRevisions || {}).length) return inline;
+    if (!stats.sessionDetailsOmitted?.month) return inline;
+
+    const withoutConfirmedOwners = rows => Object.fromEntries(Object.entries(rows).map(([id, session]) => [
+      id, { ...session, sourceDevice: { ambiguous: true } }
+    ]));
+    if (!Object.keys(stats.fixedRangeRevisions || {}).length) return withoutConfirmedOwners(inline);
     return resolveSyncedPeriodForStats(stats, hubModeGeneration, 'month').then(paged => {
-      if (!paged?.period?.sessions) return inline;
+      const pagedSessions = paged?.period?.sessions || {};
       const local = hubSnapshot?.localDevice?.allTime?.sessions || {};
-      return {
-        ...inline,
-        ...Object.fromEntries(Object.entries(paged.period.sessions).filter(([id]) => !Object.hasOwn(local, id)))
-      };
+      const merged = { ...inline };
+      for (const [id, session] of Object.entries(pagedSessions)) {
+        if (!Object.hasOwn(local, id)) {
+          merged[id] = session;
+        } else if (!merged[id]?.sourceDevice || session.sourceDevice?.ambiguous
+          || session.sourceDevice?.deviceId !== hubSnapshot.localDevice.deviceId) {
+          merged[id] = { ...merged[id], sourceDevice: { ambiguous: true } };
+        }
+      }
+      return paged?.detailsAvailable === true ? merged : withoutConfirmedOwners(merged);
     });
   });
 }

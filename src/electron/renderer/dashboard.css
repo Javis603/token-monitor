@@ -2287,6 +2287,7 @@ html.native-liquid-glass .dash-skyline-reset-btn {
 }
 .dash-ledger-row:not(.is-head):hover { background: rgba(var(--overlay-rgb), 0.045); }
 .dash-ledger-tool { display: inline-flex; align-items: center; gap: 6px; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.dash-ledger-pages { display: flex; justify-content: space-between; align-items: center; padding-block: 6px; }
 .dash-ledger-num { text-align: right; }
 .dash-ledger-delta { text-align: right; font-size: 11px; color: var(--readable-muted, var(--muted)); }
 .dash-ledger-delta.is-up { color: var(--success, #34d399); }
@@ -2633,3 +2634,5 @@ body.flat .dash-drawer {
 .dash-settings .period-tab-chip[aria-pressed="false"] { color: var(--muted); background: transparent; }
 .dash-settings .period-tab-chip:disabled { cursor: default; opacity: 0.55; }
 .dash-band-single { grid-template-columns: minmax(0, 1fr); }
+
+.dash-skyline-canvas:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }

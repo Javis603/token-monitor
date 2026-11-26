@@ -26,8 +26,8 @@
   // them; stats that arrive while nothing shows the list only mark it, so a
   // hidden view costs main nothing. A list never crosses a source change: it is
   // neither attached to stats from another Hub or mode, nor kept when it lands
-  // after a switch. A failed pull waits for the next stats instead of retrying
-  // in a loop.
+  // after a switch. A failed pull can retry on a later request without
+  // retrying itself in a loop.
   function createAllTimeSessionsLoader({ fetchSessions, currentSnapshot, needed, onLoaded, onError, projectSessions = (sessions) => sessions, projectionKey = () => undefined }) {
     if (typeof fetchSessions !== 'function') throw new TypeError('fetchSessions must be a function');
     if (typeof currentSnapshot !== 'function') throw new TypeError('currentSnapshot must be a function');
@@ -68,19 +68,22 @@
       if (!snapshot) return;
       stale = false;
       pending = true;
+      let failed = false;
       Promise.resolve()
         .then(() => fetchSessions(snapshot.id))
         .then((sessions) => {
-          if (!sessions || typeof sessions !== 'object') return;
+          if (!sessions || typeof sessions !== 'object') { failed = true; return; }
           if (!sameSource(snapshot, currentSnapshot())) return;
           pulled = { snapshot, sessions };
           onLoaded();
         }, (error) => {
+          failed = true;
           if (typeof onError === 'function') onError(error);
         })
         .finally(() => {
           pending = false;
-          ensure();
+          if (failed && !stale) stale = true;
+          else ensure();
         });
     }
 

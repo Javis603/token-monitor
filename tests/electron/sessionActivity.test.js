@@ -296,3 +296,37 @@ test('a new Hub local collector batch cannot attribute the old Hub push revision
     assert.equal(result.snapshot.id, f.pushes.at(-1).data.stats.snapshot.id);
   }
 });
+
+test('All Time summaries deny local ownership on incomplete Month pages or a paged owner collision', async () => {
+  const source = fs.readFileSync(path.join(__dirname, '../../src/electron/main.js'), 'utf8');
+  const start = source.indexOf('function rendererAllTimeSessions(');
+  const end = source.indexOf('\nlet codexPresentationPendingSince', start);
+  const id = 'claude:shared';
+  const localSession = { client: 'claude', sessionId: 'shared', totalTokens: 500 };
+  const localDevice = { deviceId: 'local', allTime: { sessions: { [id]: localSession } } };
+  const owner = deviceId => ({ deviceId });
+  const context = {
+    settings: {}, hubModeGeneration: 1, snapshotLocalDevices: new WeakMap(),
+    mergedLocalAllTimeSessions, ...projection, completeLocalSyncStats: stats => stats,
+    allTimeSessionsCache: publisher.createStatsPresentationCache(),
+    projectModelAliasSessions: (_stats, sessions) => sessions,
+    ...require('../../src/electron/sessionDeviceSources')
+  };
+  vm.runInNewContext(source.slice(start, end), context);
+  for (const [detailsAvailable, pagedOwner, expectedLocal] of [
+    [false, 'local', false],
+    [true, 'remote', false],
+    [true, 'local', true]
+  ]) {
+    const stats = { periods: {}, sessionDetailsOmitted: { month: 1 }, fixedRangeRevisions: { remote: 'revision' } };
+    context.snapshotLocalDevices.set(stats, { localDevice });
+    context.resolveSyncedPeriodForStats = async () => ({
+      detailsAvailable,
+      period: { sessions: { [id]: { ...localSession, sourceDevice: owner(pagedOwner) } } }
+    });
+    const sessions = await context.rendererAllTimeSessions(stats);
+    assert.equal(sessions[id].totalTokens, 500);
+    assert.equal(sessions[id].sourceDevice.deviceId === 'local', expectedLocal);
+    assert.equal(sessions[id].sourceDevice.ambiguous === true, !expectedLocal);
+  }
+});

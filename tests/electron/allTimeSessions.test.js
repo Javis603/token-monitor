@@ -341,3 +341,25 @@ test('main answers the archived count from the local record, not a composed snap
   assert.match(fs.readFileSync(path.join(electronDir, 'renderer', 'app.js'), 'utf8'), /clearSessionUsageArchive\(\);[\s\S]{0,300}archivedSessionCountCleared\(\);\s*await refreshStats\(\);/);
   assert.match(main, /sessionUsageArchiveStore\.clear\(\);[\s\S]{0,120}localArchivedSessionCount\.archiveCleared\(\);\s*return \{ ok: true \};/);
 });
+
+test('a later explicit ensure retries a failed snapshot without an immediate loop', async () => {
+  let calls = 0;
+  const current = { id: 1, source: 1 };
+  const loader = createAllTimeSessionsLoader({
+    currentSnapshot: () => current,
+    needed: () => true,
+    onLoaded() {},
+    fetchSessions: async () => {
+      if (++calls === 1) throw new Error('temporary failure');
+      return {};
+    }
+  });
+  loader.ensure();
+  await new Promise(setImmediate);
+  assert.equal(calls, 1);
+  assert.equal(loader.current(), false);
+  loader.ensure();
+  await new Promise(setImmediate);
+  assert.equal(calls, 2);
+  assert.equal(loader.current(), true);
+});

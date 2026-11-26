@@ -1334,10 +1334,14 @@ test('buildTopologyGraph does not attribute duplicate-named Desktop workspace ed
   assert.equal(overview.topology.devToHub[0].tokens, 100);
 
   // Even when endpoints are omitted (workspace fallback path), duplicate display names must not manufacture a dev-1 edge
-  const fallbackTopo = model.buildTopologyGraph(overview, { maxEndpoints: 0 });
-  assert.equal(fallbackTopo.devToHub.length, 1);
-  assert.equal(fallbackTopo.devToHub[0].from, 'dev-2');
-  assert.equal(fallbackTopo.devToHub[0].tokens, 100);
+  const fallbackTopo = model.buildTopologyGraph({
+    ...overview,
+    sessions: [{ ...overview.sessions[0], key: 'first', projectLabel: 'Other', totalTokens: 200 }, ...overview.sessions]
+  }, { maxEndpoints: 1 });
+  assert.deepEqual(fallbackTopo.endpoints.map(endpoint => endpoint.id), ['first']);
+  const repo = fallbackTopo.hubs.find(hub => hub.name === 'Repo');
+  const repoEdges = fallbackTopo.devToHub.filter(edge => edge.to === repo.id);
+  assert.deepEqual(repoEdges.map(edge => [edge.from, edge.tokens]), [['dev-2', 100]]);
 });
 
 
@@ -1391,4 +1395,30 @@ test('a synced fixed period renders without totals while device History is pendi
     assert.equal(view.sessionsIncomplete, true);
     assert.deepEqual(view.tools, []);
   }
+});
+
+
+test('Today without Stats never substitutes unrestricted History totals', () => {
+  const daily = [{ date: '2026-11-22', tokens: 900, perClient: { codex: { tokens: 900 } } }];
+  const history = { daily, summary: { totalTokens: 900 } };
+  const today = model.buildScopedOverview({ history, periodKey: 'today' });
+  assert.equal(today.hero.tokens, 0);
+  assert.deepEqual(today.tools, []);
+  assert.equal(model.buildScopedOverview({ history, periodKey: 'allTime' }).hero.tokens, 900);
+});
+
+test('legacy and current client model attribution merge without dropping either count', () => {
+  const today = { totalTokens: 30, clients: { antigravity: 10, 'antigravity-cli': 20 },
+    clientModels: { antigravity: { gemini: 10 }, 'antigravity-cli': { gemini: 20 } } };
+  const view = model.buildScopedOverview({ stats: { periods: { today } }, periodKey: 'today' });
+  assert.deepEqual(view.tools[0].models.map(({ id, tokens }) => [id, tokens]), [['gemini', 30]]);
+});
+
+test('a workspace named __general stays separate from unassigned sessions', () => {
+  const graph = model.buildTopologyGraph({
+    hero: { tokens: 30 },
+    sessions: [{ key: 'named', projectLabel: '__general', totalTokens: 10 },
+      { key: 'unassigned', projectLabel: '', totalTokens: 20 }]
+  });
+  assert.deepEqual(graph.hubs.map(hub => [hub.id, hub.tokens]).sort(), [['unassigned', 20], ['ws:__general', 10]]);
 });

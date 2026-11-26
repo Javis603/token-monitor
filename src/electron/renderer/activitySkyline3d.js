@@ -68,9 +68,10 @@
 
   /** @param {number} yaw */
   function normalizeYaw(yaw) {
-    let y = Number(yaw) || 0;
-    while (y > Math.PI) y -= Math.PI * 2;
-    while (y < -Math.PI) y += Math.PI * 2;
+    const y = Number(yaw) % (Math.PI * 2);
+    if (!Number.isFinite(y)) return 0;
+    if (y > Math.PI) return y - Math.PI * 2;
+    if (y < -Math.PI) return y + Math.PI * 2;
     return y;
   }
 
@@ -419,7 +420,9 @@
 
     const canvas = doc.createElement('canvas');
     canvas.className = 'dash-skyline-canvas';
-    canvas.setAttribute('aria-hidden', 'false');
+    canvas.tabIndex = 0;
+    canvas.setAttribute('aria-labelledby', 'dashStageTitle');
+    canvas.setAttribute('aria-describedby', 'dashSkylineKeyboardHint');
     hostEl.replaceChildren(canvas);
 
     const rawCtx = canvas.getContext('2d');
@@ -434,6 +437,8 @@
     let velPitch = 0;
     /** @type {'orbit' | 'pan' | null} */
     let dragMode = null;
+    /** @type {number | null} */
+    let dragPointerId = null;
     let dragMoved = false;
     let downX = 0;
     let downY = 0;
@@ -508,17 +513,16 @@
       const nextW = Math.max(1, Math.round(hostEl.clientWidth || 640));
       const nextH = Math.max(1, Math.round(hostEl.clientHeight || 312));
       const nextDpr = Math.min(2.5, Math.max(1, Number(doc.defaultView?.devicePixelRatio) || 1));
-      if (canvas.width !== Math.round(nextW * nextDpr) || canvas.height !== Math.round(nextH * nextDpr)) {
-        width = nextW;
-        height = nextH;
-        dpr = nextDpr;
-        canvas.width = Math.round(width * dpr);
-        canvas.height = Math.round(height * dpr);
-        return true;
-      }
+      const changed = width !== nextW || height !== nextH || dpr !== nextDpr;
       width = nextW;
       height = nextH;
-      return false;
+      dpr = nextDpr;
+      const pixelWidth = Math.round(width * dpr);
+      const pixelHeight = Math.round(height * dpr);
+      const bitmapChanged = canvas.width !== pixelWidth || canvas.height !== pixelHeight;
+      if (canvas.width !== pixelWidth) canvas.width = pixelWidth;
+      if (canvas.height !== pixelHeight) canvas.height = pixelHeight;
+      return changed || bitmapChanged;
     }
 
     function requestFrame() {
@@ -1095,10 +1099,12 @@
 
     /** @param {PointerEvent} ev */
     function onPointerDown(ev) {
+      if (dragMode) return;
       const isPan = ev.button === 2 || ev.button === 1 || (ev.button === 0 && ev.shiftKey);
       if (!isPan && ev.button !== 0) return;
       if (isPan) ev.preventDefault();
       dragMode = isPan ? 'pan' : 'orbit';
+      dragPointerId = ev.pointerId;
       dragMoved = false;
       presetActive = false;
       velYaw = 0;
@@ -1122,6 +1128,7 @@
     /** @param {PointerEvent} ev */
     function onPointerMove(ev) {
       if (dragMode) {
+        if (ev.pointerId !== dragPointerId) return;
         const dx = ev.clientX - lastX;
         const dy = ev.clientY - lastY;
         lastX = ev.clientX;
@@ -1156,9 +1163,10 @@
 
     /** @param {PointerEvent} ev */
     function onPointerUp(ev) {
-      if (!dragMode) return;
+      if (!dragMode || ev.pointerId !== dragPointerId) return;
       const wasMode = dragMode;
       dragMode = null;
+      dragPointerId = null;
       hostEl.classList.remove('is-dragging', 'is-panning');
       try { canvas.releasePointerCapture?.(ev.pointerId); } catch (_) {}
       const releaseTs = ev.timeStamp || Date.now();
@@ -1166,7 +1174,7 @@
         velYaw = 0;
         velPitch = 0;
       }
-      if (!dragMoved && wasMode === 'orbit') {
+      if (ev.type === 'pointerup' && !dragMoved && wasMode === 'orbit') {
         const rect = canvas.getBoundingClientRect();
         const hit = hitTestPolygons(ev.clientX - rect.left, ev.clientY - rect.top, lastPaintedTargets);
         if (hit?.cell) callbacks.onSelect?.(hit.cell);
@@ -1256,6 +1264,31 @@
       requestFrame();
     }
 
+    /** @param {KeyboardEvent} ev */
+    function onKeyDown(ev) {
+      if (ev.ctrlKey || ev.metaKey || ev.altKey || dragMode) return;
+      const dx = ev.key === 'ArrowLeft' ? -18 : ev.key === 'ArrowRight' ? 18 : 0;
+      const dy = ev.key === 'ArrowUp' ? -18 : ev.key === 'ArrowDown' ? 18 : 0;
+      if (!dx && !dy && !['+', '=', '-', '0'].includes(ev.key)) return;
+      ev.preventDefault();
+      callbacks.onInteract?.();
+      if (ev.key === '0') { resetCamera(); return; }
+      if (!dx && !dy) { zoomBy(ev.key === '-' ? -0.15 : 0.15); return; }
+
+      const base = presetActive ? targetCamera : camera;
+      const { limX, limY } = panLimits(base.zoom);
+      camera = ev.shiftKey
+        ? clampCamera({ ...base, panX: clamp(base.panX + dx, -limX, limX), panY: clamp(base.panY + dy, -limY, limY) })
+        : applyOrbitDelta(base, dx, dy).camera;
+      targetCamera = { ...camera };
+      presetActive = false;
+      velYaw = 0;
+      velPitch = 0;
+      clearHover();
+      requestFrame();
+    }
+
+    canvas.addEventListener('keydown', onKeyDown);
     canvas.addEventListener('pointerdown', onPointerDown);
     canvas.addEventListener('pointermove', onPointerMove);
     canvas.addEventListener('pointerup', onPointerUp);
@@ -1271,6 +1304,7 @@
       destroyed = true;
       if (frameId) cancelAnimationFrame(frameId);
       frameId = 0;
+      canvas.removeEventListener('keydown', onKeyDown);
       canvas.removeEventListener('pointerdown', onPointerDown);
       canvas.removeEventListener('pointermove', onPointerMove);
       canvas.removeEventListener('pointerup', onPointerUp);

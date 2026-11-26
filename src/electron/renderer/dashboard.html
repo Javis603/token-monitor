@@ -134,6 +134,7 @@
                 </div>
                 <div id="dashTopology" class="dash-topo-wrap"></div>
                 <div id="dashSkylineStage" class="dash-skyline-stage hidden">
+                  <span id="dashSkylineKeyboardHint" hidden data-i18n="dashboard.skyline.keyboard">Arrow keys orbit. Shift and arrows pan. Plus and minus zoom. Zero resets the camera.</span>
                   <div id="dashSkylineCanvasHost" class="dash-skyline-canvas-host"></div>
                   <div id="dashSkylineToolLegend" class="dash-skyline-tool-legend hidden"></div>
                   <div id="dashSkylineHint" class="dash-skyline-hint" data-i18n="dashboard.skyline.hint">Drag to orbit · Scroll or right/middle-drag to pan · Double-click to reset</div>
@@ -201,16 +202,16 @@
               <div class="dash-controls">
                 <div class="dash-control-row">
                   <div class="seg" data-control="mode">
-                    <button type="button" class="seg-btn active" data-mode="bars" data-i18n="dashboard.mode.bars">Bars</button>
-                    <button type="button" class="seg-btn" data-mode="kline" data-i18n="dashboard.mode.kline">K-line</button>
+                    <button type="button" class="seg-btn active" data-mode="bars" aria-pressed="true" data-i18n="dashboard.mode.bars">Bars</button>
+                    <button type="button" class="seg-btn" data-mode="kline" aria-pressed="false" data-i18n="dashboard.mode.kline">K-line</button>
                   </div>
                   <div class="seg" data-control="trendMetric">
-                    <button type="button" class="seg-btn active" data-tmetric="tokens" data-i18n="dashboard.heatmap.tokens">Tokens</button>
-                    <button type="button" class="seg-btn" data-tmetric="cost" data-i18n="dashboard.heatmap.cost">Cost</button>
+                    <button type="button" class="seg-btn active" data-tmetric="tokens" aria-pressed="true" data-i18n="dashboard.heatmap.tokens">Tokens</button>
+                    <button type="button" class="seg-btn" data-tmetric="cost" aria-pressed="false" data-i18n="dashboard.heatmap.cost">Cost</button>
                   </div>
                   <div class="seg" data-control="stack">
-                    <button type="button" class="seg-btn active" data-stack="client" data-i18n="dashboard.stack.client">By tool</button>
-                    <button type="button" class="seg-btn" data-stack="model" data-i18n="dashboard.stack.model">By model</button>
+                    <button type="button" class="seg-btn active" data-stack="client" aria-pressed="true" data-i18n="dashboard.stack.client">By tool</button>
+                    <button type="button" class="seg-btn" data-stack="model" aria-pressed="false" data-i18n="dashboard.stack.model">By model</button>
                   </div>
                   <div id="rangeSelect" class="dash-range-group"></div>
                 </div>
