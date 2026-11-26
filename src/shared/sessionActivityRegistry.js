@@ -7,7 +7,8 @@ const { SESSION_ACTIVITY_PROVIDERS } = require('./sessionActivityProviders');
 // module. Keep file discovery and identity verification inside each adapter.
 const loaders = {
   claude: () => require('./providers/claude/sessionActivity'),
-  codex: () => require('./providers/codex/sessionActivity')
+  codex: () => require('./providers/codex/sessionActivity'),
+  antigravity: () => require('./providers/antigravity/sessionActivity')
 };
 const SESSION_ACTIVITY_REGISTRY = Object.freeze(SESSION_ACTIVITY_PROVIDERS.map((entry) => {
   const load = loaders[entry.id];

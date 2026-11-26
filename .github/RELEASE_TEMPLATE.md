@@ -4,36 +4,29 @@
 
 <!-- app-update-notes:en:start -->
 ### Added
-- **Usage range buttons.** Choose and reorder three to six ranges for direct access at the top of the widget. (#1668)
-- **Yesterday and range details.** Select Yesterday to view the previous day's usage. Yesterday, This week, Last 7 days and Last 30 days can show session and project details from scans. (#1655, #1659)
-- **Cross-device range details.** Hub and iCloud sync can show scanned totals and session and project details for those four ranges. Synced weeks begin on Monday in each device's time zone. When a matching scan is missing, History can supply totals. (#1667)
-- **Antigravity usage in T3 Code.** Automatically find and count Antigravity ACP sessions when Antigravity tracking is enabled. (#1658)
+- **Antigravity turn status.** See when a turn starts and finishes in Antigravity Desktop and CLI. In T3 Code, active Antigravity ACP sessions can stay marked as running between token updates and appear before their first tokens are recorded. (#1689, #1693, #1695)
+- **Kiro sessions in T3 Code.** Group related runs and delegated sessions under their T3 Code threads. (#1675)
 
 ### Changed
-- **Home limits layout.** The new Default layout gives each visible limit window its own row with a reading and reset countdown. Upgrading switches existing layouts to Default once. Text and Progress bars are still selectable. (#1466)
-- **Home colours.** Usage breakdowns use a neutral palette by default. Turn on Vendor colours on Home to bring back provider colours. (#1466)
-- **Home session display.** Recent sessions use one line each in Compact. Choose Detailed to see model and activity information for every session. (#1644)
+- **Local Codex Work settings.** The experimental Dots switches are now named “Collect local Codex Work usage” and “Show local Codex Work usage”. They apply to local Work tasks without a session log. (#1683)
 
 ### Improved
-- **Archived session usage.** This week, Last 7 days and Last 30 days can include previously recorded usage after a session's source files are deleted. (#1660)
-- **Usage refresh.** Full refreshes scan faster, and live Codex updates use less memory. (#1651, #1665)
-- **Live watching on Windows and Linux.** Usage updates can pick up file size changes while the file is still open. (#1444)
-- **Remote sessions.** Home, Edge Dock and Notch Panel show the device for sessions confirmed to come from another device. (#1654)
-- **Untitled sessions.** With session titles enabled, the Sessions list uses the project name for an untitled standalone session when available. (#1678)
+- **Antigravity session names and groups in T3 Code.** Show the T3 Code sidebar title when available, recover missing project names, and group related runs and delegated sessions. (#1679, #1675)
+- **Idle memory.** Token Monitor releases unused memory sooner when none of its windows is focused. (#1688)
 
 ### Fixed
-- **Dashboard backdrop on Windows.** Dashboard follows the widget's selected material. Turning off Glass Backdrop makes it transparent. (#1642)
-- **Accent Blur on Windows 10.** Remove tinted patches at the corners of the widget when Accent Blur is active. (#1669)
-- **Account reordering.** Third-party API accounts stay in the chosen order, and paused accounts keep their names after a drag. (#1645)
-- **WSL usage.** Detect running distributions and collect their usage when WSL returns its distribution list in UTF-8. (#1666)
+- **Local Codex Work usage.** Record eligible Work tasks started on the web and run on this computer when experimental local collection is enabled. (#1673)
+- **Synced date ranges.** Keep Sessions and Projects visible while data refreshes for Yesterday, This week, Last 7 days, and Last 30 days. A device with confirmed zero usage no longer hides details from other devices. (#1685)
+- **Large Hub uploads.** Preserve session details and the activity calendar for large usage histories when both the desktop app and Hub support the updated sync. (#1682)
+- **Rapid relaunch on Windows.** Reuse the existing main window when Token Monitor is launched twice in quick succession, preventing overlapping windows and flicker. (#1676)
 <!-- app-update-notes:en:end -->
 ## Download
 
-- **macOS Apple Silicon** — [Token-Monitor-0.98.0-arm64.dmg](https://github.com/Javis603/token-monitor/releases/download/v0.98.0/Token-Monitor-0.98.0-arm64.dmg)
-- **macOS Intel** — [Token-Monitor-0.98.0-x64.dmg](https://github.com/Javis603/token-monitor/releases/download/v0.98.0/Token-Monitor-0.98.0-x64.dmg)
-- **Windows Installer** — [Token-Monitor-Setup-0.98.0.exe](https://github.com/Javis603/token-monitor/releases/download/v0.98.0/Token-Monitor-Setup-0.98.0.exe) (recommended)
-- **Windows Portable** — [Token-Monitor-0.98.0.exe](https://github.com/Javis603/token-monitor/releases/download/v0.98.0/Token-Monitor-0.98.0.exe) (no install required)
-- **Linux x64** — [Token-Monitor-0.98.0.AppImage](https://github.com/Javis603/token-monitor/releases/download/v0.98.0/Token-Monitor-0.98.0.AppImage)
+- **macOS Apple Silicon** — [Token-Monitor-0.99.0-arm64.dmg](https://github.com/Javis603/token-monitor/releases/download/v0.99.0/Token-Monitor-0.99.0-arm64.dmg)
+- **macOS Intel** — [Token-Monitor-0.99.0-x64.dmg](https://github.com/Javis603/token-monitor/releases/download/v0.99.0/Token-Monitor-0.99.0-x64.dmg)
+- **Windows Installer** — [Token-Monitor-Setup-0.99.0.exe](https://github.com/Javis603/token-monitor/releases/download/v0.99.0/Token-Monitor-Setup-0.99.0.exe) (recommended)
+- **Windows Portable** — [Token-Monitor-0.99.0.exe](https://github.com/Javis603/token-monitor/releases/download/v0.99.0/Token-Monitor-0.99.0.exe) (no install required)
+- **Linux x64** — [Token-Monitor-0.99.0.AppImage](https://github.com/Javis603/token-monitor/releases/download/v0.99.0/Token-Monitor-0.99.0.AppImage)
 
 <details>
 <summary><strong>First launch and other notes</strong></summary>
@@ -69,37 +62,30 @@ Tokscale is bundled with this app and updated through Token Monitor releases. Se
 
 <!-- app-update-notes:zh:start -->
 ### 新增
-- **统计范围按钮。** 可选择 3 至 6 个范围并调整顺序，直接在小组件顶部切换。 （#1668）
-- **昨天与范围明细。** 可选择“昨天”查看前一天的用量。“昨天”、“本周”、“最近 7 天”和“最近 30 天”可显示扫描所得的会话和项目明细。 （#1655，#1659）
-- **跨设备用量明细。** 通过 Hub 或 iCloud 同步时，上述四个范围可显示扫描所得的总量、会话和项目明细。同步时按各设备的时区从周一开始计算本周。缺少对应的扫描结果时，可由历史记录提供总量。 （#1667）
-- **T3 Code 中的 Antigravity 用量。** 启用 Antigravity 跟踪后，自动发现 ACP 会话并统计用量。 （#1658）
+- **Antigravity 回合状态。** 可查看 Antigravity 桌面版和 CLI 的回合开始与结束状态。T3 Code 中的 Antigravity ACP 会话可在产生首批 Tokens 前显示，两次用量更新之间仍能显示运行状态。 （#1689，#1693，#1695）
+- **T3 Code 中的 Kiro 会话。** 同一会话的多次运行和委派会话可按 T3 Code 线程归组。 （#1675）
 
 ### 变更
-- **主页额度布局。** 新的“默认”布局逐行显示各个可见的额度周期、当前数值和重置倒计时。升级时会切换到“默认”一次，之后仍可选择“文字”或“进度条”。 （#1466）
-- **主页配色。** 用量分布默认采用中性色，可开启“主页使用厂商颜色”恢复原有的配色。 （#1466）
-- **主页会话显示。** “精简”模式下，最近会话各占一行。选择“详细”可查看每个会话的模型和活动信息。 （#1644）
+- **本机 Codex Work 设置。** 实验性 Dots 开关改名为“收集本机 Codex Work 用量”和“显示本机 Codex Work 用量”，适用于没有会话记录的本机 Work 任务。 （#1683）
 
 ### 改进
-- **归档会话用量。** 删除会话源文件后，“本周”、“最近 7 天”和“最近 30 天”仍可计入已记录的用量。 （#1660）
-- **用量刷新。** 全量刷新扫描更快，Codex 实时更新占用的内存更少。 （#1651，#1665）
-- **Windows 和 Linux 实时监测。** 文件仍处于打开状态时，也可检测其大小变化并更新用量。 （#1444）
-- **远程会话。** 对于已确认来自其他设备的会话，主界面、侧边栏和刘海面板会显示来源设备。 （#1654）
-- **无标题会话。** 开启会话标题显示后，没有标题的独立会话会在列表中显示项目名称（如有）。 （#1678）
+- **T3 Code 中的 Antigravity 会话名称与分组。** 优先显示 T3 Code 侧边栏标题，补齐缺少的项目名称，并对同一会话的多次运行和委派会话进行归组。 （#1679，#1675）
+- **空闲内存占用。** 应用窗口均未获得焦点时，更快释放闲置内存。 （#1688）
 
 ### 修复
-- **Windows 仪表盘背景。** 仪表盘跟随小组件所选的背景材质。关闭“玻璃背景”时，仪表盘背景会变为透明。 （#1642）
-- **Windows 10 模糊效果。** 修复启用 Accent Blur 时小组件四角出现色块的问题。 （#1669）
-- **账号排序。** 第三方 API 账号可正确保留拖动后的顺序，暂停的账号也会保留名称。 （#1645）
-- **WSL 用量。** WSL 以 UTF-8 返回发行版列表时，也能识别正在运行的发行版并收集用量。 （#1666）
+- **本机 Codex Work 用量。** 开启实验性本机收集后，可记录从网页发起、在本机执行且符合条件的 Work 任务。 （#1673）
+- **同步范围明细。** “昨天”、“本周”、“最近 7 天”和“最近 30 天”刷新时继续显示会话和项目。已确认没有用量的设备也不会隐藏其他设备的明细。 （#1685）
+- **大批量 Hub 上传。** 桌面应用和 Hub 均支持新版同步时，可保留大量历史用量中的会话明细和活动日历。 （#1682）
+- **Windows 连续启动。** 短时间内启动两次时复用主窗口，避免窗口重叠闪烁。 （#1676）
 <!-- app-update-notes:zh:end -->
 
 ## 下载
 
-- **macOS Apple Silicon** — [Token-Monitor-0.98.0-arm64.dmg](https://github.com/Javis603/token-monitor/releases/download/v0.98.0/Token-Monitor-0.98.0-arm64.dmg)
-- **macOS Intel** — [Token-Monitor-0.98.0-x64.dmg](https://github.com/Javis603/token-monitor/releases/download/v0.98.0/Token-Monitor-0.98.0-x64.dmg)
-- **Windows 安装版** — [Token-Monitor-Setup-0.98.0.exe](https://github.com/Javis603/token-monitor/releases/download/v0.98.0/Token-Monitor-Setup-0.98.0.exe)（推荐）
-- **Windows 便携版** — [Token-Monitor-0.98.0.exe](https://github.com/Javis603/token-monitor/releases/download/v0.98.0/Token-Monitor-0.98.0.exe)（免安装）
-- **Linux x64** — [Token-Monitor-0.98.0.AppImage](https://github.com/Javis603/token-monitor/releases/download/v0.98.0/Token-Monitor-0.98.0.AppImage)
+- **macOS Apple Silicon** — [Token-Monitor-0.99.0-arm64.dmg](https://github.com/Javis603/token-monitor/releases/download/v0.99.0/Token-Monitor-0.99.0-arm64.dmg)
+- **macOS Intel** — [Token-Monitor-0.99.0-x64.dmg](https://github.com/Javis603/token-monitor/releases/download/v0.99.0/Token-Monitor-0.99.0-x64.dmg)
+- **Windows 安装版** — [Token-Monitor-Setup-0.99.0.exe](https://github.com/Javis603/token-monitor/releases/download/v0.99.0/Token-Monitor-Setup-0.99.0.exe)（推荐）
+- **Windows 便携版** — [Token-Monitor-0.99.0.exe](https://github.com/Javis603/token-monitor/releases/download/v0.99.0/Token-Monitor-0.99.0.exe)（免安装）
+- **Linux x64** — [Token-Monitor-0.99.0.AppImage](https://github.com/Javis603/token-monitor/releases/download/v0.99.0/Token-Monitor-0.99.0.AppImage)
 
 <details>
 <summary><strong>首次启动与其他说明</strong></summary>
@@ -130,7 +116,7 @@ Tokscale 已随应用内置，并通过 Token Monitor 发布版本更新。你�
 ---
 
 <details>
-<summary><strong>Full Changelog:</strong> <a href="https://github.com/Javis603/token-monitor/compare/v0.97.0...v0.98.0">v0.97.0...v0.98.0</a></summary>
+<summary><strong>Full Changelog:</strong> <a href="https://github.com/Javis603/token-monitor/compare/v0.98.0...v0.99.0">v0.98.0...v0.99.0</a></summary>
 
 <!-- github-generated-release-notes -->
 
@@ -148,37 +134,30 @@ Tokscale 已随应用内置，并通过 Token Monitor 发布版本更新。你�
 
 <!-- app-update-notes:zh-TW:start -->
 ### 新增
-- **統計範圍按鈕。** 可選擇 3 至 6 個範圍並調整順序，直接在小工具頂端切換。 （#1668）
-- **昨日與範圍明細。** 可選擇「昨日」查看前一天的用量。「昨日」、「本星期」、「最近 7 日」及「最近 30 日」可顯示掃描取得的會話與專案明細。 （#1655、#1659）
-- **跨裝置用量明細。** 透過 Hub 或 iCloud 同步時，上述四個範圍可顯示各裝置掃描取得的總量、會話與專案明細。同步時依各裝置的時區從週一開始計算本星期。缺少相符的掃描資料時，可由歷史記錄提供總量。 （#1667）
-- **T3 Code 的 Antigravity 用量。** 啟用 Antigravity 追蹤後，會自動發現 ACP 會話並統計用量。 （#1658）
+- **Antigravity 回合狀態。** 可查看 Antigravity 桌面版及 CLI 的回合開始與結束狀態。T3 Code 的 Antigravity ACP 會話可在首批 tokens 入帳前顯示，兩次用量更新之間仍會標示執行狀態。 （#1689、#1693、#1695）
+- **T3 Code 的 Kiro 會話。** 同一會話的多次執行與委派會話可依 T3 Code 執行緒分組。 （#1675）
 
 ### 變更
-- **主頁額度版面。** 新的「預設」版面逐列顯示各個可見的額度週期、目前數值與重設倒數。升級時會切換到「預設」一次，之後仍可選擇「文字」或「進度條」。 （#1466）
-- **主頁配色。** 用量分布預設採用中性色。開啟「主頁使用廠商顏色」即可恢復原有配色。 （#1466）
-- **主頁會話顯示。** 「精簡」模式下，最近的會話各佔一行。選擇「詳細」即可查看每個會話的模型與活動資訊。 （#1644）
+- **本機 Codex Work 設定。** 實驗性的 Dots 開關改名為「收集本機 Codex Work 用量」及「顯示本機 Codex Work 用量」，適用於沒有會話記錄的本機 Work 任務。 （#1683）
 
 ### 改進
-- **已封存的會話用量。** 刪除會話來源檔案後，「本星期」、「最近 7 日」及「最近 30 日」仍可計入先前記錄的用量。 （#1660）
-- **用量更新。** 完整掃描所需時間縮短，Codex 即時更新亦減少記憶體用量。 （#1651、#1665）
-- **Windows 與 Linux 即時監測。** 檔案仍開啟時，也可偵測大小變化並更新用量。 （#1444）
-- **遠端會話。** 主畫面、側邊欄與瀏海面板會標示已確認來自其他裝置的會話來源。 （#1654）
-- **未命名會話。** 開啟會話標題顯示後，未命名的獨立會話若有專案名稱，列表會顯示該名稱。 （#1678）
+- **T3 Code 的 Antigravity 會話名稱與分組。** 優先顯示 T3 Code 側邊欄的標題，補上缺少的專案名稱，並將同一會話的多次執行與委派會話分組。 （#1679、#1675）
+- **閒置時的記憶體用量。** 應用程式的視窗皆未取得焦點時，會更快釋放閒置記憶體。 （#1688）
 
 ### 修復
-- **Windows 儀表板背景。** 儀表板會跟隨小工具所選的背景材質。關閉「玻璃背景」時，背景會切換為透明。 （#1642）
-- **Windows 10 模糊效果。** 修復開啟 Accent Blur 時小工具四角出現色塊的問題。 （#1669）
-- **帳戶排序。** 第三方 API 帳戶會正確保留拖曳後的順序，已暫停的帳戶也會保留名稱。 （#1645）
-- **WSL 用量。** WSL 以 UTF-8 傳回發行版清單時，也能辨識執行中的發行版並收集用量。 （#1666）
+- **本機 Codex Work 用量。** 開啟實驗性本機收集後，可記錄從網頁發起、由本機執行且符合條件的 Work 任務。 （#1673）
+- **同步範圍明細。** 「昨日」、「本星期」、「最近 7 日」及「最近 30 日」更新時，會話與專案明細會繼續顯示。確認沒有用量的裝置也不會隱藏其他裝置的明細。 （#1685）
+- **大量 Hub 上傳。** 桌面應用程式與 Hub 皆支援新版同步時，可保留大量歷史用量中的會話明細與活動日曆。 （#1682）
+- **Windows 連續啟動。** 短時間內啟動兩次時會沿用主視窗，避免視窗重疊閃爍。 （#1676）
 <!-- app-update-notes:zh-TW:end -->
 
 ## 下載
 
-- **macOS Apple Silicon** — [Token-Monitor-0.98.0-arm64.dmg](https://github.com/Javis603/token-monitor/releases/download/v0.98.0/Token-Monitor-0.98.0-arm64.dmg)
-- **macOS Intel** — [Token-Monitor-0.98.0-x64.dmg](https://github.com/Javis603/token-monitor/releases/download/v0.98.0/Token-Monitor-0.98.0-x64.dmg)
-- **Windows 安裝版** — [Token-Monitor-Setup-0.98.0.exe](https://github.com/Javis603/token-monitor/releases/download/v0.98.0/Token-Monitor-Setup-0.98.0.exe)（推薦）
-- **Windows 便攜版** — [Token-Monitor-0.98.0.exe](https://github.com/Javis603/token-monitor/releases/download/v0.98.0/Token-Monitor-0.98.0.exe)（免安裝）
-- **Linux x64** — [Token-Monitor-0.98.0.AppImage](https://github.com/Javis603/token-monitor/releases/download/v0.98.0/Token-Monitor-0.98.0.AppImage)
+- **macOS Apple Silicon** — [Token-Monitor-0.99.0-arm64.dmg](https://github.com/Javis603/token-monitor/releases/download/v0.99.0/Token-Monitor-0.99.0-arm64.dmg)
+- **macOS Intel** — [Token-Monitor-0.99.0-x64.dmg](https://github.com/Javis603/token-monitor/releases/download/v0.99.0/Token-Monitor-0.99.0-x64.dmg)
+- **Windows 安裝版** — [Token-Monitor-Setup-0.99.0.exe](https://github.com/Javis603/token-monitor/releases/download/v0.99.0/Token-Monitor-Setup-0.99.0.exe)（推薦）
+- **Windows 便攜版** — [Token-Monitor-0.99.0.exe](https://github.com/Javis603/token-monitor/releases/download/v0.99.0/Token-Monitor-0.99.0.exe)（免安裝）
+- **Linux x64** — [Token-Monitor-0.99.0.AppImage](https://github.com/Javis603/token-monitor/releases/download/v0.99.0/Token-Monitor-0.99.0.AppImage)
 
 </details>
 
@@ -191,37 +170,30 @@ Tokscale 已随应用内置，并通过 Token Monitor 发布版本更新。你�
 
 <!-- app-update-notes:ko:start -->
 ### 추가
-- **통계 범위 버튼.** 위젯 상단에 표시할 범위를 3~6개 선택하고 원하는 순서로 배치할 수 있습니다. (#1668)
-- **어제 사용량과 범위별 상세 내역.** ‘어제’를 선택해 전날 사용량을 볼 수 있습니다. ‘어제’, ‘이번 주’, ‘최근 7일’, ‘최근 30일’에서 수집된 세션과 프로젝트 내역을 확인할 수 있습니다. (#1655, #1659)
-- **기기 간 사용량 상세 내역.** Hub 또는 iCloud로 동기화하면 위 네 범위의 사용량 합계와 세션·프로젝트 내역을 볼 수 있습니다. 동기화 시 이번 주는 각 기기의 시간대를 기준으로 월요일부터 계산합니다. 해당 범위의 수집 데이터가 없으면 기록에서 합계를 표시할 수 있습니다. (#1667)
-- **T3 Code의 Antigravity 사용량.** Antigravity 추적을 켜면 ACP 세션을 자동으로 찾아 사용량을 집계합니다. (#1658)
+- **Antigravity 턴 상태.** Antigravity 데스크톱과 CLI에서 턴의 시작과 종료를 확인할 수 있습니다. T3 Code의 Antigravity ACP 세션은 첫 토큰이 기록되기 전부터 표시되며, 사용량 갱신 사이에도 실행 상태를 확인할 수 있습니다. (#1689, #1693, #1695)
+- **T3 Code의 Kiro 세션.** 관련 실행과 위임된 세션을 T3 Code 스레드별로 묶어 표시합니다. (#1675)
 
 ### 변경
-- **홈의 한도 레이아웃.** 새 ‘기본값’ 레이아웃은 표시 대상인 한도를 각각 한 줄에 배치하고 수치와 초기화까지 남은 시간을 보여 줍니다. 업데이트하면 한 번 ‘기본값’으로 바뀌며, 이후 ‘텍스트’나 ‘진행 막대’를 선택할 수 있습니다. (#1466)
-- **홈 색상.** 사용량 분포에는 기본적으로 중립적인 색상을 사용합니다. ‘홈에서 제공업체 색상 사용’을 켜면 기존 색상으로 돌아갑니다. (#1466)
-- **홈의 세션 표시.** ‘간결하게’에서는 최근 세션이 한 줄씩 표시됩니다. ‘자세히’를 선택하면 각 세션의 모델과 활동 정보를 볼 수 있습니다. (#1644)
+- **로컬 Codex Work 설정.** 실험 기능인 Dots 설정의 이름이 ‘로컬 Codex Work 사용량 수집’과 ‘로컬 Codex Work 사용량 표시’로 바뀌었습니다. 세션 로그가 없는 로컬 Work 작업에 적용됩니다. (#1683)
 
 ### 개선
-- **보관된 세션 사용량.** 세션의 원본 파일을 삭제한 뒤에도 ‘이번 주’, ‘최근 7일’, ‘최근 30일’에 이전에 기록한 사용량을 포함할 수 있습니다. (#1660)
-- **사용량 갱신.** 전체 스캔이 빨라졌으며 Codex 실시간 업데이트에 필요한 메모리가 줄었습니다. (#1651, #1665)
-- **Windows와 Linux의 실시간 감시.** 파일이 열린 상태에서 크기가 바뀌어도 변경을 감지해 사용량을 갱신할 수 있습니다. (#1444)
-- **원격 세션.** 홈, 가장자리 도크, 노치에서 다른 기기의 세션으로 확인된 항목에 출처 기기를 표시합니다. (#1654)
-- **제목 없는 세션.** 세션 제목 표시를 켜면 제목이 없는 단독 세션에 프로젝트 이름이 있을 때 목록에 해당 이름을 표시합니다. (#1678)
+- **T3 Code의 Antigravity 세션 제목과 그룹.** T3 Code 사이드바 제목을 우선 표시하고, 누락된 프로젝트 이름을 채우며, 관련 실행과 위임된 세션을 함께 묶습니다. (#1679, #1675)
+- **유휴 상태의 메모리 사용량.** 앱 창에 포커스가 없을 때 사용하지 않는 메모리를 더 빨리 반환합니다. (#1688)
 
 ### 수정
-- **Windows 대시보드 배경.** 위젯에서 선택한 배경 효과를 따르며, ‘글래스 배경’을 끄면 투명해집니다. (#1642)
-- **Windows 10 흐림 효과.** Accent Blur를 켰을 때 위젯 모서리에 색이 비치던 문제를 수정했습니다. (#1669)
-- **계정 순서.** 드래그해 바꾼 타사 API 계정의 순서를 저장하고, 일시 중지된 계정의 이름을 유지합니다. (#1645)
-- **WSL 사용량.** 배포판 목록이 UTF-8로 반환될 때도 실행 중인 배포판을 찾아 사용량을 수집합니다. (#1666)
+- **로컬 Codex Work 사용량.** 실험용 로컬 수집을 켜면 웹에서 시작해 이 컴퓨터에서 실행된 Work 작업 중 수집 조건을 충족하는 작업의 사용량이 기록됩니다. (#1673)
+- **동기화된 날짜 범위.** ‘어제’, ‘이번 주’, ‘최근 7일’, ‘최근 30일’을 갱신하는 동안에도 세션과 프로젝트 내역이 계속 표시됩니다. 사용량이 없는 것으로 확인된 기기 때문에 다른 기기의 내역이 사라지는 문제도 수정했습니다. (#1685)
+- **대용량 Hub 업로드.** 데스크톱 앱과 Hub가 모두 새 동기화를 지원하면 사용량 기록이 많아도 세션 내역과 활동 캘린더를 보존합니다. (#1682)
+- **Windows에서 연속 실행.** 짧은 간격으로 두 번 실행해도 기존 기본 창을 사용하므로 창이 겹치거나 깜박이지 않습니다. (#1676)
 <!-- app-update-notes:ko:end -->
 
 ## 다운로드
 
-- **macOS Apple Silicon** — [Token-Monitor-0.98.0-arm64.dmg](https://github.com/Javis603/token-monitor/releases/download/v0.98.0/Token-Monitor-0.98.0-arm64.dmg)
-- **macOS Intel** — [Token-Monitor-0.98.0-x64.dmg](https://github.com/Javis603/token-monitor/releases/download/v0.98.0/Token-Monitor-0.98.0-x64.dmg)
-- **Windows 설치 버전** — [Token-Monitor-Setup-0.98.0.exe](https://github.com/Javis603/token-monitor/releases/download/v0.98.0/Token-Monitor-Setup-0.98.0.exe) (권장)
-- **Windows 포터블 버전** — [Token-Monitor-0.98.0.exe](https://github.com/Javis603/token-monitor/releases/download/v0.98.0/Token-Monitor-0.98.0.exe) (설치 필요 없음)
-- **Linux x64** — [Token-Monitor-0.98.0.AppImage](https://github.com/Javis603/token-monitor/releases/download/v0.98.0/Token-Monitor-0.98.0.AppImage)
+- **macOS Apple Silicon** — [Token-Monitor-0.99.0-arm64.dmg](https://github.com/Javis603/token-monitor/releases/download/v0.99.0/Token-Monitor-0.99.0-arm64.dmg)
+- **macOS Intel** — [Token-Monitor-0.99.0-x64.dmg](https://github.com/Javis603/token-monitor/releases/download/v0.99.0/Token-Monitor-0.99.0-x64.dmg)
+- **Windows 설치 버전** — [Token-Monitor-Setup-0.99.0.exe](https://github.com/Javis603/token-monitor/releases/download/v0.99.0/Token-Monitor-Setup-0.99.0.exe) (권장)
+- **Windows 포터블 버전** — [Token-Monitor-0.99.0.exe](https://github.com/Javis603/token-monitor/releases/download/v0.99.0/Token-Monitor-0.99.0.exe) (설치 필요 없음)
+- **Linux x64** — [Token-Monitor-0.99.0.AppImage](https://github.com/Javis603/token-monitor/releases/download/v0.99.0/Token-Monitor-0.99.0.AppImage)
 
 </details>
 
@@ -234,37 +206,30 @@ Tokscale 已随应用内置，并通过 Token Monitor 发布版本更新。你�
 
 <!-- app-update-notes:ja:start -->
 ### 追加
-- **集計範囲ボタン。** ウィジェット上部に表示する範囲を3〜6個選び、好きな順に並べられます。 （#1668）
-- **昨日の使用量と範囲別の内訳。** 「昨日」を選んで前日の使用量を確認できます。「昨日」「今週」「過去7日間」「過去30日間」では、スキャンで取得したセッションとプロジェクトの内訳を表示できます。 （#1655、#1659）
-- **端末間の使用量の内訳。** Hub または iCloud で同期すると、上記4つの範囲でスキャン済みの合計とセッション・プロジェクトの内訳を確認できます。同期時の「今週」は各端末のタイムゾーンで月曜始まりです。該当範囲のスキャン結果がない場合は、履歴から合計を表示できます。 （#1667）
-- **T3 Code の Antigravity 使用量。** Antigravity の追跡を有効にすると、ACP セッションを自動で見つけて使用量を集計します。 （#1658）
+- **Antigravity のターン状態。** デスクトップ版と CLI でターンの開始と終了を確認できます。T3 Code の Antigravity ACP セッションは最初のトークンが記録される前から表示され、使用量の更新を待たずに実行状態を確認できます。 （#1689、#1693、#1695）
+- **T3 Code の Kiro セッション。** 関連する実行や委任先のセッションを T3 Code のスレッドごとにまとめて表示します。 （#1675）
 
 ### 変更
-- **ホームの上限表示。** 新しい「デフォルト」では、表示対象の上限ごとに数値とリセットまでの時間を1行にまとめます。更新時に一度だけ「デフォルト」に切り替わり、その後は「テキスト」や「プログレスバー」も選べます。 （#1466）
-- **ホームの配色。** 使用量の内訳は標準で落ち着いた配色になります。「ホームでプロバイダーの色を使う」をオンにすると従来の配色に戻せます。 （#1466）
-- **ホームのセッション表示。** 「コンパクト」では最近のセッションを1行ずつ表示します。「詳細」を選ぶと、各セッションのモデルやアクティビティを確認できます。 （#1644）
+- **ローカルの Codex Work 設定。** 実験機能の Dots 設定を「ローカルの Codex Work 使用量を収集」「ローカルの Codex Work 使用量を表示」に変更しました。セッションログのないローカル Work タスクが対象です。 （#1683）
 
 ### 改善
-- **アーカイブ済みセッションの使用量。** 元のファイルを削除した後も、「今週」「過去7日間」「過去30日間」に記録済みの使用量を含められます。 （#1660）
-- **使用量の更新。** 全体のスキャンが速くなり、Codex のリアルタイム更新に必要なメモリが減りました。 （#1651、#1665）
-- **Windows と Linux のリアルタイム監視。** ファイルを開いたままサイズが変わった場合も、変更を検出して使用量を更新できます。 （#1444）
-- **リモートセッション。** ホーム、エッジドック、ノッチで、別の端末のセッションと確認できた項目に端末を表示します。 （#1654）
-- **タイトルのないセッション。** セッションタイトルの表示がオンの場合、タイトルのない単独セッションには、プロジェクト名があれば一覧に表示します。 （#1678）
+- **T3 Code の Antigravity セッション名とグループ。** サイドバーのタイトルを優先して表示し、不足しているプロジェクト名を補います。関連する実行と委任先のセッションもまとめて表示します。 （#1679、#1675）
+- **待機時のメモリ使用量。** アプリのウィンドウにフォーカスがないとき、未使用のメモリをより早く解放します。 （#1688）
 
 ### 修正
-- **Windows のダッシュボード背景。** ウィジェットで選択した背景効果に連動し、「ガラス背景」をオフにすると透明になります。 （#1642）
-- **Windows 10 のぼかし効果。** Accent Blur をオンにした際、ウィジェットの四隅に色がはみ出す問題を修正しました。 （#1669）
-- **アカウントの並べ替え。** ドラッグで変更したサードパーティ API アカウントの順序が保存され、一時停止中のアカウント名も保持されます。 （#1645）
-- **WSL の使用量。** ディストリビューションの一覧が UTF-8 で返る場合も、実行中のディストリビューションを検出して使用量を収集します。 （#1666）
+- **ローカルの Codex Work 使用量。** 実験的なローカル収集をオンにすると、ウェブから開始してこの端末で実行した対象の Work タスクも記録されます。 （#1673）
+- **同期した日付範囲。** 「昨日」「今週」「過去7日間」「過去30日間」の更新中も、セッションとプロジェクトの内訳が表示され続けます。使用量がゼロと確認された端末のために、ほかの端末の内訳が表示されなくなる問題も修正しました。 （#1685）
+- **Hub への大容量アップロード。** デスクトップアプリと Hub が両方とも新しい同期方式に対応していれば、使用履歴が多い場合もセッションの内訳とアクティビティカレンダーを保持します。 （#1682）
+- **Windows での連続起動。** 短い間隔で2回起動しても既存のメインウィンドウが開き、ウィンドウの重なりやちらつきを防ぎます。 （#1676）
 <!-- app-update-notes:ja:end -->
 
 ## ダウンロード
 
-- **macOS Apple Silicon** — [Token-Monitor-0.98.0-arm64.dmg](https://github.com/Javis603/token-monitor/releases/download/v0.98.0/Token-Monitor-0.98.0-arm64.dmg)
-- **macOS Intel** — [Token-Monitor-0.98.0-x64.dmg](https://github.com/Javis603/token-monitor/releases/download/v0.98.0/Token-Monitor-0.98.0-x64.dmg)
-- **Windows インストーラー** — [Token-Monitor-Setup-0.98.0.exe](https://github.com/Javis603/token-monitor/releases/download/v0.98.0/Token-Monitor-Setup-0.98.0.exe)（推奨）
-- **Windows ポータブル版** — [Token-Monitor-0.98.0.exe](https://github.com/Javis603/token-monitor/releases/download/v0.98.0/Token-Monitor-0.98.0.exe)（インストール不要）
-- **Linux x64** — [Token-Monitor-0.98.0.AppImage](https://github.com/Javis603/token-monitor/releases/download/v0.98.0/Token-Monitor-0.98.0.AppImage)
+- **macOS Apple Silicon** — [Token-Monitor-0.99.0-arm64.dmg](https://github.com/Javis603/token-monitor/releases/download/v0.99.0/Token-Monitor-0.99.0-arm64.dmg)
+- **macOS Intel** — [Token-Monitor-0.99.0-x64.dmg](https://github.com/Javis603/token-monitor/releases/download/v0.99.0/Token-Monitor-0.99.0-x64.dmg)
+- **Windows インストーラー** — [Token-Monitor-Setup-0.99.0.exe](https://github.com/Javis603/token-monitor/releases/download/v0.99.0/Token-Monitor-Setup-0.99.0.exe)（推奨）
+- **Windows ポータブル版** — [Token-Monitor-0.99.0.exe](https://github.com/Javis603/token-monitor/releases/download/v0.99.0/Token-Monitor-0.99.0.exe)（インストール不要）
+- **Linux x64** — [Token-Monitor-0.99.0.AppImage](https://github.com/Javis603/token-monitor/releases/download/v0.99.0/Token-Monitor-0.99.0.AppImage)
 
 </details>
 

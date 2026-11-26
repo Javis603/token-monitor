@@ -9,6 +9,36 @@ const { nativeAccountingId, readT3IdentityBindings, t3AccountingClient } = requi
 const QUERY_CHUNK_SIZE = 400;
 const T3_DEFAULT_TITLES = new Set(['new thread', 'start a new conversation']);
 
+function antigravityContextColumns(json) {
+  const token = (field) => `json_extract(${json}, '$.contextUsage.${field}')`;
+  const safe = field => `CASE WHEN json_type(${json}, '$.contextUsage.${field}') = 'integer'
+    AND ${token(field)} BETWEEN 1 AND ${Number.MAX_SAFE_INTEGER} THEN ${token(field)} END`;
+  return `${safe('usedTokens')} AS contextTokens, ${safe('maxTokens')} AS contextWindow`;
+}
+
+function readT3AntigravityContextStamp(file, deps = {}) {
+  const sqlite = resolveSqlite(deps);
+  if (!sqlite) return undefined;
+  let db;
+  try {
+    if (!fs.existsSync(file)) return '[]';
+    db = new sqlite.DatabaseSync(file, { readOnly: true });
+    const payload = "CASE WHEN json_valid(p.payload_json) THEN p.payload_json ELSE '{}' END";
+    const rows = db.prepare(`SELECT p.provider_thread_id, p.thread_id, t.deleted_at,
+      json_extract(${payload}, '$.nativeThreadRef.nativeId') AS nativeId,
+      ${antigravityContextColumns(payload)}
+      FROM orchestration_v2_projection_provider_threads p
+      JOIN orchestration_v2_projection_threads t ON t.thread_id = p.thread_id
+      WHERE p.driver = 'antigravity'
+        AND json_type(${payload}, '$.nativeThreadRef.nativeId') = 'text'
+        AND json_extract(${payload}, '$.nativeThreadRef.driver') = p.driver
+        AND json_extract(${payload}, '$.nativeThreadRef.strength') = 'strong'
+      ORDER BY p.provider_thread_id`).all();
+    return JSON.stringify(rows);
+  } catch (_) { return undefined; }
+  finally { db?.close(); }
+}
+
 function cleanText(value) {
   return String(value || '').replace(/\s+/g, ' ').trim();
 }
@@ -275,6 +305,7 @@ function readT3SessionRelationResult(nativeIds, deps = {}) {
       };
       readTitle = deps.includeAntigravityTitles && has('t', ['title']);
       const titleColumn = readTitle ? ', t.title AS title' : '';
+      const contextColumn = deps.includeAntigravityContext ? `, ${antigravityContextColumns(json('p'))}` : '';
       const strong = `${native('p', 'driver')} = p.driver AND ${native('p', 'strength')} = 'strong'`;
       const add = row => {
         if (bindingsUnavailable && row.driver === 'acpRegistry') {
@@ -296,7 +327,9 @@ function readT3SessionRelationResult(nativeIds, deps = {}) {
         } else if (!facts.has(key)) {
           const title = client === 'antigravity' && readTitle ? cleanT3Title(row.title) : '';
           facts.set(key, { threadId, ...(client === 'antigravity' && deps.includeAntigravityTitles
-            ? { title: title && !T3_DEFAULT_TITLES.has(title.toLowerCase()) ? title : null, titleStore: file } : {}) });
+            ? { title: title && !T3_DEFAULT_TITLES.has(title.toLowerCase()) ? title : null, titleStore: file } : {}),
+          ...(row.driver === 'antigravity' && !row.historical && deps.includeAntigravityContext
+            ? { contextUsage: { contextTokens: row.contextTokens, contextWindow: row.contextWindow } } : {}) });
         }
       };
       // IDs live in unindexed JSON in current T3 schemas. One candidate pass
@@ -304,7 +337,7 @@ function readT3SessionRelationResult(nativeIds, deps = {}) {
       // target filters precede the indexed ownership joins.
       const idJson = JSON.stringify(ids);
       const uuidJson = JSON.stringify(uuidIds);
-      const sql = `SELECT p.driver, ${instance('p')} AS instanceId, ${native('p', 'nativeId')} AS nativeId, p.thread_id AS threadId${titleColumn}
+      const sql = `SELECT p.driver, ${instance('p')} AS instanceId, ${native('p', 'nativeId')} AS nativeId, p.thread_id AS threadId${titleColumn}${contextColumn}
         FROM ${names.p} p CROSS JOIN ${names.t} t ON t.thread_id = p.thread_id
         WHERE (${native('p', 'nativeId')} IN (SELECT value FROM json_each(?))
           OR lower(${native('p', 'nativeId')}) IN (SELECT value FROM json_each(?)))
@@ -425,6 +458,7 @@ function readT3SessionRelationResult(nativeIds, deps = {}) {
             merged.title = previous.title;
             merged.titleStore = previous.titleStore;
           }
+          if (previous && Object.hasOwn(previous, 'contextUsage')) merged.contextUsage = previous.contextUsage;
           if (ambiguousParents.has(key)) for (const field of ['parentThreadId', 'parentClient', 'parentNativeId']) delete merged[field];
           out.set(key, merged);
         }
@@ -447,4 +481,4 @@ function readT3SessionParents(nativeIds, deps = {}) {
     .map(([key, fact]) => [key, { parentClient: fact.parentClient, parentNativeId: fact.parentNativeId }]));
 }
 
-module.exports = { expandHomePath, t3HomeDir, discoverT3DbPaths, readT3SessionMeta, readT3SessionParents, readT3SessionRelations, readT3SessionRelationResult };
+module.exports = { expandHomePath, t3HomeDir, discoverT3DbPaths, readT3SessionMeta, readT3SessionParents, readT3SessionRelations, readT3SessionRelationResult, readT3AntigravityContextStamp };
