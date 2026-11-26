@@ -7902,7 +7902,9 @@ html.native-material-opaque .content-blur-surface { --popup-surface-alpha: 1; }
   inset: auto;
   left: anchor(left);
   bottom: calc(anchor(top) + 6px);
-  width: anchor-size(width);
+  min-width: anchor-size(width);
+  width: max-content;
+  max-width: calc(100vw - 24px);
   margin: 0;
   color: var(--text);
   /* Keep content filtering out of the backdrop surface. The menu fades and
@@ -7965,6 +7967,28 @@ html.native-material-opaque .content-blur-surface { --popup-surface-alpha: 1; }
   line-height: 14px;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+.view-switcher-menu-separator {
+  height: 1px;
+  margin: 4px 6px;
+  background: linear-gradient(
+    to right,
+    rgba(var(--line-rgb), 0) 0,
+    rgba(var(--line-rgb), 0.12) 20%,
+    rgba(var(--line-rgb), 0.12) 80%,
+    rgba(var(--line-rgb), 0) 100%
+  );
+}
+.view-switcher-menu-action {
+  color: var(--muted);
+}
+.view-switcher-menu-ext {
+  width: 13px;
+  height: 13px;
+  justify-self: center;
+  opacity: 0.78;
+  -webkit-mask-image: url("icons/actions/external-link.svg");
+  mask-image: url("icons/actions/external-link.svg");
 }
 /* On Liquid Glass the controls sit straight on the AppKit surface, so they read
    as lensed edges of that one sheet rather than slabs stacked on it: capsule

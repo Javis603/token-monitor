@@ -291,15 +291,96 @@ test('dashboard.css declares chart classes and a flat theme override', () => {
 });
 
 test('dashboard.js fetches history over IPC and renders both tabs', () => {
+  const html = read('src', 'electron', 'renderer', 'dashboard.html');
+  const css = read('src', 'electron', 'renderer', 'dashboard.css');
   const js = read('src', 'electron', 'renderer', 'dashboard.js');
-  assert.match(js, /window\.tokenMonitor\.getDashboardHistory\(\)/);
+  const modelJs = read('src', 'electron', 'renderer', 'dashboardModel.js');
+  const contentBlurJs = read('src', 'electron', 'renderer', 'contentBlur.js');
+  assert.match(js, /window\.tokenMonitor\.getDashboardHistory\(\{\s*includeDevices:\s*true\s*\}\)/);
   assert.match(js, /charts\.barsChartSvg/);
   assert.match(js, /charts\.candleChartSvg/);
   assert.match(js, /charts\.heatmapSvg/);
+  assert.match(js, /modelApi\.isometricHeatmapSvg/);
   assert.match(js, /updateSettings\(\{ dashboardFlat: state\.flat \}\)/);
   assert.match(js, /dashboard\.minimize\(\)/);
   assert.match(js, /dashboard\.ready\(\)/);
   assert.match(js, /onDashboardHistoryChanged\?\.\(handleDashboardHistoryChanged\)/);
+  assert.match(js, /onStatsPush\?\.\(/);
+  assert.match(html, /<script src="rowIconMasks\.js"><\/script>/);
+  assert.match(html, /<script src="limits\/homeMotion\.js"><\/script>/);
+  assert.match(html, /<script src="\.\.\/tokenNumberAnimation\.js"><\/script>/);
+  assert.match(html, /<script src="contentBlur\.js"><\/script>/);
+  assert.match(html, /<script src="accountIdentity\.js"><\/script>/);
+  assert.match(html, /<script src="dashboardModel\.js"><\/script>/);
+  assert.match(js, /TokenMonitorContentBlur/);
+  assert.match(html, /id="dashDeviceMenu"[^>]*popover="manual"/);
+  assert.match(html, /id="dashDrawer"[^>]*popover="manual"/);
+  assert.match(html, /id="dashTooltip"[^>]*popover="manual"/);
+  assert.match(html, /id="dashTopology"/);
+  assert.match(html, /data-control="stageView"/);
+  assert.match(html, /dash-glass-card/);
+  assert.match(html, /id="dashQuotasCard"[^>]*home-module-limits/);
+  assert.match(html, /id="dashQuotas"[^>]*home-module-body/);
+  assert.doesNotMatch(html, /class="dash-title"/);
+  assert.match(html, /class="dash-quotas-viewport"/);
+  assert.match(html, /id="dashHeatLegend"/);
+  assert.match(css, /--dash-card-shadow:\s*none/);
+  assert.match(css, /\.dash-topo-wrap\s*\{[^}]*border:\s*none/);
+  assert.doesNotMatch(css, /\.topo-port\s*\{[^}]*background:\s*rgb\(var\(--glass-rgb\)\)/);
+  assert.match(css, /\.dash-quotas-viewport\s*\{/);
+  assert.doesNotMatch(css, /\.dash-quotas-col\s+\.home-limit-window/);
+  assert.match(css, /\.dash-heat-legend\s*\{/);
+  assert.doesNotMatch(css, /\.dash-activity-col\s*\{[^}]*justify-content:\s*space-between/);
+  assert.doesNotMatch(css, /\.dash-quotas-list\s*\{[^}]*max-height:\s*248px/);
+  assert.match(js, /home-limit-account-head/);
+  assert.match(js, /home-limit-windows/);
+  assert.match(js, /home-limit-resets/);
+  assert.match(js, /const vendorColors = true/);
+  assert.match(js, /const highlightLow = true/);
+  assert.match(js, /data-c="\$\{accColor\}"/);
+  assert.match(js, /data-limit-color="\$\{accColor\}"/);
+  assert.match(js, /maskLimitAccountEmails/);
+  assert.match(js, /function animateMetricText/);
+  assert.match(js, /lastTopologyStructureSig/);
+  assert.match(js, /function syncTopologyScrollFades/);
+  assert.match(js, /dash-topo-col-scroll/);
+  assert.match(js, /--edge-vis/);
+  assert.match(js, /is-offscreen/);
+  assert.doesNotMatch(js, /topologyExpanded|topo-more-btn|topo-collapse-btn/);
+  assert.match(js, /topo-beam-tail/);
+  assert.match(js, /topo-beam-body/);
+  assert.match(js, /topo-beam-head/);
+  assert.match(js, /topo-edge--hop/);
+  assert.match(js, /topo-node--device/);
+  assert.match(js, /topo-node--hub/);
+  assert.match(js, /topo-node--endpoint/);
+  assert.match(js, /pathLength="100"/);
+  assert.doesNotMatch(js, /topo-packet-core/);
+  assert.doesNotMatch(js, /<animateMotion/);
+  assert.match(css, /\.dash-topo-col-scroll\b/);
+  assert.match(css, /\.has-bottom-fade/);
+  assert.match(css, /\.topo-edge\.is-offscreen/);
+  assert.match(css, /\.topo-beam-head/);
+  assert.match(css, /mask-composite:\s*exclude/);
+  assert.match(css, /topoBorderPass/);
+  assert.match(css, /topoSheenPass/);
+  assert.match(css, /topoPortEmit/);
+  assert.match(css, /topoPortHubIn/);
+  assert.match(css, /topoPortHubOut/);
+  assert.match(css, /topoPortArrive/);
+  assert.doesNotMatch(css, /topo-more-btn|topo-collapse-btn|dash-topo-wrap\.is-expanded/);
+  assert.match(js, /pendingVisualBandFromHeight/);
+  assert.match(js, /function renderHeatLegend/);
+  assert.match(js, /function updateHeroTokens[\s\S]*?!document\.hidden/);
+  assert.match(js, /function renderTopology/);
+  assert.match(js, /function layoutTopologyLinks/);
+  assert.match(js, /createLiveTokenRateGroupTracker\(\{\s*now:\s*Date\.now/);
+  assert.match(contentBlurJs, /\.dash-tooltip/);
+  assert.match(contentBlurJs, /\.dash-device-menu/);
+  assert.match(contentBlurJs, /\.dash-drawer/);
+  assert.doesNotMatch(html, /\sstyle\s*=/i, 'CSP forbids inline style attributes in dashboard.html');
+  assert.doesNotMatch(js, /<[a-z][^>]*\sstyle\s*=/i, 'CSP forbids inline style attributes in dashboard.js');
+  assert.doesNotMatch(modelJs, /<[a-z][^>]*\sstyle\s*=/i, 'CSP forbids inline style attributes in dashboardModel.js');
 });
 
 test('Dashboard Trends renders the selected calendar range and labels unrecorded days', () => {
@@ -584,4 +665,103 @@ test('renderer removes Trends from available views when history is disabled', ()
   const app = read('src', 'electron', 'renderer', 'app.js');
   assert.match(app, /state\.settings\?\.historyEnabled === false/);
   assert.match(app, /order\.filter\(\(id\) => id !== 'trends'\)/);
+});
+
+test('main forwards live stats:push snapshots to a ready visible dashboard window', () => {
+  const main = read('src', 'electron', 'main.js');
+  const sentDashboard = [];
+  const sentMain = [];
+  const context = {
+    latestStats: null,
+    latestStatsSource: null,
+    hubModeGeneration: 1,
+    statsPushRevision: 0,
+    statsPushSource: null,
+    mode: 'local',
+    settings: {},
+    edgeDockManualStats: null,
+    lastRendererStatsFingerprint: null,
+    mainWindowStatsPushWanted: () => true,
+    mainWindow: {
+      isDestroyed: () => false,
+      webContents: { send: (ch, payload) => sentMain.push([ch, payload]) }
+    },
+    dashboardWindowReady: true,
+    dashboardWindow: {
+      isDestroyed: () => false,
+      isVisible: () => true,
+      webContents: { send: (ch, payload) => sentDashboard.push([ch, payload]) }
+    },
+    statsHistoryRevision: () => 'rev-1',
+    injectLocalDeviceStatus: (s) => s,
+    currentHubStatsIdentity: () => 'local',
+    getSyncContentRuntime: () => ({ notifyStats() {} }),
+    getAccountPresentationSync: () => ({ notifyStats() {} }),
+    electronPresentationStats: (s) => s,
+    getLimitsHistoryStore: () => ({ record() {} }),
+    limitsHistoryController: null,
+    migrateCodexAdditionalLimits() {},
+    rendererSnapshots: { stamp: (_orig, copy) => ({ ...copy, snapshot: { id: 1, source: 1 } }) },
+    rendererStats: (s) => s,
+    buildStatsDelta: () => ({ delta: { patched: true }, fingerprint: 'fp-1' }),
+    fingerprintStats: () => 'fp-1',
+    scheduleMacWidgetSnapshot() {},
+    pluginRuntime: null,
+    updateEdgeDockCells() {},
+    syncCodexPresentationActiveAccount() {},
+    updateTrayDisplay() {},
+    maybeAdoptSharedSubscriptionRevision() {},
+    sendMainWindowEvent() {}
+  };
+  vm.runInNewContext(main.slice(main.indexOf('function sendPush('), main.indexOf('function statsHistoryRevision(')), context);
+  context.sendPush({ event: 'stats', data: { stats: { periods: { today: { totalTokens: 42 } }, historyRevision: 'rev-1' } } });
+
+  assert.equal(sentMain.length, 1);
+  assert.ok(sentMain[0][1].data.statsDelta, 'main window receives statsDelta');
+  assert.equal(sentDashboard.length, 1);
+  assert.equal(sentDashboard[0][0], 'stats:push');
+  assert.equal(sentDashboard[0][1].data.stats.periods.today.totalTokens, 42, 'dashboard receives full stats payload, never main-relative statsDelta');
+
+  context.dashboardWindow.isVisible = () => false;
+  context.sendPush({ event: 'stats', data: { stats: { periods: { today: { totalTokens: 99 } }, historyRevision: 'rev-1' } } });
+  assert.equal(sentDashboard.length, 1, 'hidden dashboard window does not receive stats pushes');
+});
+
+test('dashboard tooltips stay anchored above pointer and survive live renderNow refreshes', () => {
+  const js = read('src', 'electron', 'renderer', 'dashboard.js');
+  const css = read('src', 'electron', 'renderer', 'dashboard.css');
+  const renderNowBody = /function renderNow\(\)\s*\{([\s\S]*?)\n\}\n\nconst dashboardRenderScheduler/.exec(js);
+  assert.ok(renderNowBody, 'renderNow exists');
+  assert.doesNotMatch(renderNowBody[1], /\bhideTooltip\(\)/, 'live refreshes must not unconditionally dismiss active hover tooltips');
+  assert.match(css, /\.dash-tooltip\s*\{[^}]*backdrop-filter:\s*blur\(28px\)/);
+  assert.match(css, /\.seg-indicator\s*\{/);
+  assert.match(js, /function syncSegIndicator/);
+
+  const style = { transform: '' };
+  const dataset = {};
+  const tooltip = {
+    style,
+    dataset,
+    classList: { remove() {}, add() {}, contains: () => false },
+    setAttribute() {},
+    getBoundingClientRect: () => ({ width: 120, height: 50 })
+  };
+  const context = {
+    els: { tooltip },
+    window: { innerWidth: 1000, innerHeight: 700 }
+  };
+  const positionTooltip = dashboardFunction('positionTooltip', '\nfunction showBarTooltip', context);
+  positionTooltip({ left: 300, top: 200, bottom: 212, width: 12, height: 12 });
+  // Above anchor: top (200) - gap (11) - tip height (50) = 139px; horizontal center: 306 - 60 = 246px.
+  assert.equal(style.transform, 'translate3d(246px, 139px, 0)');
+  assert.equal(dataset.visible, 'true');
+});
+
+test('widget bottom-left viewSwitcherMenu offers Usage Dashboard launcher', () => {
+  const app = read('src', 'electron', 'renderer', 'app.js');
+  const css = read('src', 'electron', 'renderer', 'styles.css');
+  assert.match(app, /dataset\.action\s*=\s*'open-dashboard'/);
+  assert.match(app, /window\.tokenMonitor\.openDashboard\(\)/);
+  assert.match(css, /\.view-switcher-menu-separator/);
+  assert.match(css, /\.view-switcher-menu-action/);
 });

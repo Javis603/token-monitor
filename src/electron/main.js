@@ -4731,7 +4731,15 @@ function mainWindowStatsPushWanted() {
 function sendPush(payload, options = {}) {
   const previousHistoryRevision = statsHistoryRevision(latestStats);
   const wantsRenderer = options.deferToRenderer === true || mainWindowStatsPushWanted();
+  const wantsDashboard = typeof dashboardWindow !== 'undefined' && Boolean(
+    dashboardWindow
+    && !dashboardWindow.isDestroyed()
+    && (typeof dashboardWindowReady === 'undefined' || dashboardWindowReady)
+    && typeof dashboardWindow.isVisible === 'function'
+    && dashboardWindow.isVisible()
+  );
   let rendererPayload = payload;
+  let dashboardPayload = payload;
   let rendererFingerprint = null;
   if (payload?.data?.stats) {
     payload.data.stats = injectLocalDeviceStatus(payload.data.stats);
@@ -4750,21 +4758,26 @@ function sendPush(payload, options = {}) {
     getLimitsHistoryStore().record(currentHubStatsIdentity(), visibleStats.limits);
     limitsHistoryController?.refresh();
     migrateCodexAdditionalLimits(visibleStats);
-    if (wantsRenderer) {
+    if (wantsRenderer || wantsDashboard) {
       const copy = rendererSnapshots.stamp(latestStats, rendererStats(visibleStats), visibleStats);
-      const allowDelta = options.deferToRenderer !== true
-        && payload.data.reason !== 'read'
-        && payload.data.reason !== 'presentation';
-      const built = allowDelta
-        ? buildStatsDelta(lastRendererStatsFingerprint, copy)
-        : { delta: null, fingerprint: fingerprintStats(copy) };
-      rendererFingerprint = built.fingerprint;
-      if (built.delta) {
-        const data = { ...payload.data };
-        delete data.stats;
-        rendererPayload = { ...payload, data: { ...data, statsDelta: built.delta } };
-      } else {
-        rendererPayload = { ...payload, data: { ...payload.data, stats: copy } };
+      if (wantsDashboard) {
+        dashboardPayload = { ...payload, data: { ...payload.data, stats: copy } };
+      }
+      if (wantsRenderer) {
+        const allowDelta = options.deferToRenderer !== true
+          && payload.data.reason !== 'read'
+          && payload.data.reason !== 'presentation';
+        const built = allowDelta
+          ? buildStatsDelta(lastRendererStatsFingerprint, copy)
+          : { delta: null, fingerprint: fingerprintStats(copy) };
+        rendererFingerprint = built.fingerprint;
+        if (built.delta) {
+          const data = { ...payload.data };
+          delete data.stats;
+          rendererPayload = { ...payload, data: { ...data, statsDelta: built.delta } };
+        } else {
+          rendererPayload = { ...payload, data: { ...payload.data, stats: copy } };
+        }
       }
     }
     scheduleMacWidgetSnapshot(visibleStats, options.widgetProducerOwner);
@@ -4796,6 +4809,9 @@ function sendPush(payload, options = {}) {
         lastRendererStatsFingerprint = null;
       }
     }
+  }
+  if (wantsDashboard && !options.deferToRenderer && dashboardWindow && !dashboardWindow.isDestroyed()) {
+    try { dashboardWindow.webContents.send('stats:push', dashboardPayload); } catch (_) {}
   }
   if (payload?.data?.stats) {
     const nextHistoryRevision = statsHistoryRevision(payload.data.stats);
@@ -6097,22 +6113,40 @@ function syncDockSurfaces(rendererSettings) {
 }
 
 function sendStatsPresentationToRenderer(options = {}) {
-  if (!latestStats || !mainWindow || mainWindow.isDestroyed()) return false;
-  if (options.force !== true && !mainWindowStatsPushWanted()) return false;
+  if (!latestStats) return false;
+  const wantsMain = Boolean(mainWindow && !mainWindow.isDestroyed() && (options.force === true || mainWindowStatsPushWanted()));
+  const wantsDashboard = typeof dashboardWindow !== 'undefined' && Boolean(
+    dashboardWindow
+    && !dashboardWindow.isDestroyed()
+    && (typeof dashboardWindowReady === 'undefined' || dashboardWindowReady)
+    && typeof dashboardWindow.isVisible === 'function'
+    && dashboardWindow.isVisible()
+  );
+  if (!wantsMain && !wantsDashboard) return false;
   const visibleStats = electronPresentationStats(latestStats);
   const copy = rendererSnapshots.stamp(latestStats, rendererStats(visibleStats), visibleStats);
-  try {
-    mainWindow.webContents.send('stats:push', {
-      event: 'stats',
-      data: { type: 'stats', reason: 'presentation', mode, stats: copy }
-    });
-    const fingerprint = fingerprintStats(copy);
-    if (fingerprint) lastRendererStatsFingerprint = fingerprint;
-    return true;
-  } catch (_) {
-    lastRendererStatsFingerprint = null;
-    return false;
+  const message = {
+    event: 'stats',
+    data: { type: 'stats', reason: 'presentation', mode, stats: copy }
+  };
+  let delivered = false;
+  if (wantsMain) {
+    try {
+      mainWindow.webContents.send('stats:push', message);
+      const fingerprint = fingerprintStats(copy);
+      if (fingerprint) lastRendererStatsFingerprint = fingerprint;
+      delivered = true;
+    } catch (_) {
+      lastRendererStatsFingerprint = null;
+    }
   }
+  if (wantsDashboard) {
+    try {
+      dashboardWindow.webContents.send('stats:push', message);
+      delivered = true;
+    } catch (_) {}
+  }
+  return delivered;
 }
 
 function refreshLimitStatsPresentation() {
@@ -7710,10 +7744,10 @@ function createDashboardWindow() {
     return dashboardWindow;
   }
   const windowOptions = {
-    width: 920,
-    height: 620,
-    minWidth: 560,
-    minHeight: 420,
+    width: 1180,
+    height: 760,
+    minWidth: 720,
+    minHeight: 520,
     frame: false,
     transparent: true,
     show: false,

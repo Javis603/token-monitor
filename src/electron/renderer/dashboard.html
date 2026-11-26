@@ -8,69 +8,240 @@
     <link rel="stylesheet" href="dashboard.css" />
   </head>
   <body>
-    <header class="dash-header">
-      <div class="dash-title" data-i18n="dashboard.title">Usage Dashboard</div>
-      <div class="dash-header-actions">
-        <button id="themeToggle" class="icon-button" aria-label="Theme">◐</button>
-        <button id="refreshBtn" class="icon-button" aria-label="Refresh">↻</button>
-        <button id="minBtn" class="icon-button" aria-label="Minimize">−</button>
-        <button id="closeBtn" class="icon-button" aria-label="Close">×</button>
-      </div>
-    </header>
-
-    <nav class="dash-tabs">
-      <button id="activityTab" class="dash-tab active" data-tab="activity" data-i18n="dashboard.tab.activity">Overview</button>
-      <button id="trendsTab" class="dash-tab" data-tab="trends" data-i18n="dashboard.tab.trends">Trends</button>
-    </nav>
-
-    <section id="trendsPane" class="dash-pane hidden">
-      <div class="dash-controls">
-        <div class="dash-control-row">
-          <div class="seg" data-control="stack">
-            <button class="seg-btn active" data-stack="client" data-i18n="dashboard.stack.client">By tool</button>
-            <button class="seg-btn" data-stack="model" data-i18n="dashboard.stack.model">By model</button>
-          </div>
-          <div class="seg" data-control="mode">
-            <button class="seg-btn active" data-mode="bars" data-i18n="dashboard.mode.bars">Bars</button>
-            <button class="seg-btn" data-mode="kline" data-i18n="dashboard.mode.kline">K-line</button>
-          </div>
-          <div id="rangeSelect" class="dash-range-group"></div>
-        </div>
-      </div>
-      <div id="dashChart" class="dash-chart-wrap"></div>
-      <div id="dashLegend" class="dash-legend"></div>
-    </section>
-
-    <section id="activityPane" class="dash-pane">
-      <div id="dashCards" class="dash-cards"></div>
-      <div class="dash-heatmap-block">
-        <div class="dash-heatmap-title-row">
-          <div class="dash-heatmap-title" data-i18n="dashboard.heatmap.title">Token Activity</div>
-          <div class="seg seg--sm" data-control="heatmapMetric">
-            <button class="seg-btn" data-val="tokens" aria-pressed="false" data-i18n="dashboard.heatmap.tokens">Tokens</button>
-            <button class="seg-btn active" data-val="cost" aria-pressed="true" data-i18n="dashboard.heatmap.cost">Cost</button>
+    <div id="dashShell" class="dash-shell">
+      <header class="dash-header">
+        <div class="dash-header-brand">
+          <span class="dash-brand-mark row-icon row-icon-token-monitor" role="img" aria-label="Usage Dashboard"></span>
+          <div id="dashDeviceScope" class="dash-device-scope hidden">
+            <button id="dashDeviceTrigger" type="button" class="dash-device-trigger" aria-haspopup="menu" aria-expanded="false"></button>
           </div>
         </div>
-        <div id="dashHeatmap" class="dash-heatmap-wrap"></div>
-      </div>
-      <div id="dashBreakdown" class="dash-breakdown"></div>
-    </section>
 
-    <div id="dashEmpty" class="dash-empty hidden" data-i18n="dashboard.empty">No usage history yet</div>
-    <div id="dashTooltip" class="dash-tooltip hidden"></div>
+        <div class="dash-header-center">
+          <div id="periodSelect" class="seg dash-period-seg" role="tablist" aria-label="Period"></div>
+          <nav class="dash-tabs" aria-label="Dashboard views">
+            <button id="activityTab" type="button" class="dash-tab active" data-tab="activity" data-i18n="dashboard.tab.activity">Overview</button>
+            <button id="trendsTab" type="button" class="dash-tab" data-tab="trends" data-i18n="dashboard.tab.trends">Trends</button>
+          </nav>
+        </div>
+
+        <div class="dash-header-actions">
+          <button id="themeToggle" type="button" class="icon-button" aria-label="Theme">◐</button>
+          <button id="refreshBtn" type="button" class="icon-button" aria-label="Refresh">↻</button>
+          <button id="minBtn" type="button" class="icon-button" aria-label="Minimize">−</button>
+          <button id="closeBtn" type="button" class="icon-button" aria-label="Close">×</button>
+        </div>
+      </header>
+
+      <div id="dashWorkspace" class="dash-workspace" data-fleet="single">
+        <main class="dash-stage">
+          <section id="activityPane" class="dash-pane">
+            <section id="dashHero" class="dash-hero-band">
+              <div class="dash-glass-card dash-hero-main">
+                <div class="dash-hero-eyebrow">
+                  <span id="dashHeroScope" class="dash-hero-scope"></span>
+                  <span id="dashHeroActive" class="dash-hero-active hidden"></span>
+                </div>
+                <div class="dash-hero-figure-row">
+                  <span id="dashHeroTokens" class="dash-hero-tokens">0</span>
+                  <span id="dashHeroApprox" class="dash-hero-approx hidden"></span>
+                </div>
+                <div class="dash-hero-sub-row">
+                  <span id="dashHeroCost" class="dash-hero-cost">—</span>
+                  <span class="dash-hero-meta-sep" aria-hidden="true">·</span>
+                  <span class="dash-hero-meta-item">
+                    <span class="dash-hero-meta-k" data-i18n="dashboard.hero.cacheHit">Cache hit</span>
+                    <strong id="dashHeroCache" class="dash-hero-meta-v">—</strong>
+                  </span>
+                  <span class="dash-hero-meta-sep" aria-hidden="true">·</span>
+                  <span class="dash-hero-meta-item">
+                    <span class="dash-hero-meta-k" data-i18n="dashboard.hero.streak">Streak</span>
+                    <strong id="dashHeroStreak" class="dash-hero-meta-v">—</strong>
+                  </span>
+                </div>
+                <div class="dash-hero-tracks">
+                  <div id="dashHeroRibbon" class="dash-ribbon" aria-hidden="true"></div>
+                  <div id="dashHeroAnatomy" class="dash-anatomy"></div>
+                </div>
+              </div>
+
+              <div id="dashVelocity" class="dash-glass-card dash-velocity">
+                <div class="dash-velocity-head">
+                  <span class="dash-section-label" data-i18n="dashboard.velocity.title">Live Velocity</span>
+                  <span id="dashVelocityStatus" class="dash-velocity-status is-idle">
+                    <span class="dash-velocity-dot" aria-hidden="true"></span>
+                    <span id="dashVelocityStatusText"></span>
+                  </span>
+                </div>
+                <div class="dash-velocity-overview">
+                  <div class="dash-velocity-metrics">
+                    <button id="dashVelocityFigure" type="button" class="dash-velocity-figure">
+                      <strong id="dashVelocityValue">—</strong>
+                      <span id="dashVelocityUnit" class="dash-velocity-unit">tok/s</span>
+                      <span class="dash-velocity-swap" aria-hidden="true">⇄</span>
+                    </button>
+                    <div id="dashVelocitySecondary" class="dash-velocity-secondary"></div>
+                  </div>
+                  <div id="dashVelocitySpark" class="dash-velocity-spark"></div>
+                </div>
+                <div id="dashVelocityModels" class="dash-velocity-models"></div>
+              </div>
+            </section>
+
+            <div class="dash-visual-band">
+              <section class="dash-glass-card dash-activity-col">
+                <div class="dash-section-head">
+                  <div class="dash-heatmap-title-group">
+                    <h2 id="dashStageTitle" class="dash-section-title" data-i18n="dashboard.topology.title">Live Neural Flow</h2>
+                    <span id="dashHeatmapMeta" class="dash-surface-sub"></span>
+                  </div>
+                  <div class="dash-activity-controls">
+                    <div class="seg seg--sm" data-control="stageView">
+                      <button type="button" class="seg-btn active" data-view="flow" aria-pressed="true" data-i18n="dashboard.stage.flow">Live Flow</button>
+                      <button type="button" class="seg-btn" data-view="3d" aria-pressed="false" data-i18n="dashboard.stage.activity3d">3D</button>
+                      <button type="button" class="seg-btn" data-view="2d" aria-pressed="false" data-i18n="dashboard.stage.activity2d">2D</button>
+                    </div>
+                    <div id="dashHeatmapMetricControl" class="seg seg--sm hidden" data-control="heatmapMetric">
+                      <button type="button" class="seg-btn" data-val="tokens" aria-pressed="false" data-i18n="dashboard.heatmap.tokens">Tokens</button>
+                      <button type="button" class="seg-btn active" data-val="cost" aria-pressed="true" data-i18n="dashboard.heatmap.cost">Cost</button>
+                    </div>
+                  </div>
+                </div>
+                <div id="dashTopology" class="dash-topo-wrap"></div>
+                <div id="dashHeatmap" class="dash-heatmap-wrap hidden"></div>
+                <div id="dashHeatLegend" class="dash-heat-legend hidden" aria-hidden="true"></div>
+              </section>
+
+              <section id="dashQuotasCard" class="dash-glass-card dash-quotas-col home-module-limits">
+                <div class="dash-section-head">
+                  <h2 class="dash-section-title" data-i18n="home.limits">Limits</h2>
+                  <span id="dashQuotasCount" class="dash-surface-sub"></span>
+                </div>
+                <div class="dash-quotas-viewport">
+                  <div id="dashQuotas" class="home-module-body dash-quotas-list"></div>
+                </div>
+              </section>
+            </div>
+
+            <div id="dashCards" class="dash-cards"></div>
+
+            <div class="dash-lower-band">
+              <section class="dash-glass-card dash-work-col">
+                <div class="dash-section-head">
+                  <div class="dash-work-heading">
+                    <h2 id="dashWorkTitle" class="dash-section-title" data-i18n="dashboard.work.sessions">Sessions</h2>
+                    <span id="dashWorkSummary" class="dash-surface-sub"></span>
+                  </div>
+                  <div class="seg seg--sm" data-control="workMode">
+                    <button type="button" class="seg-btn active" data-work="sessions" aria-pressed="true" data-i18n="dashboard.work.all">All</button>
+                    <button type="button" class="seg-btn" data-work="running" aria-pressed="false" data-i18n="dashboard.work.running">Running</button>
+                    <button type="button" class="seg-btn" data-work="workspaces" aria-pressed="false" data-i18n="dashboard.work.workspaces">Workspaces</button>
+                    <button type="button" class="seg-btn" data-work="devices" aria-pressed="false" data-i18n="dashboard.work.devices">Devices</button>
+                  </div>
+                </div>
+                <div id="dashWorkPanel" class="dash-work-list"></div>
+              </section>
+
+              <section class="dash-glass-card dash-attribution-col">
+                <div class="dash-section-head">
+                  <h2 class="dash-section-title" data-i18n="dashboard.breakdown.title">Attribution</h2>
+                  <div class="seg seg--sm" data-control="breakdownMode">
+                    <button type="button" class="seg-btn active" data-bd="both" aria-pressed="true" data-i18n="dashboard.breakdown.all">All</button>
+                    <button type="button" class="seg-btn" data-bd="client" aria-pressed="false" data-i18n="dashboard.breakdown.tools">Tools</button>
+                    <button type="button" class="seg-btn" data-bd="model" aria-pressed="false" data-i18n="dashboard.breakdown.models">Models</button>
+                  </div>
+                </div>
+                <div id="dashBreakdown" class="dash-breakdown"></div>
+              </section>
+            </div>
+          </section>
+
+          <section id="trendsPane" class="dash-pane hidden">
+            <div class="dash-glass-card dash-trends-open">
+              <div class="dash-controls">
+                <div class="dash-control-row">
+                  <div class="seg" data-control="stack">
+                    <button type="button" class="seg-btn active" data-stack="client" data-i18n="dashboard.stack.client">By tool</button>
+                    <button type="button" class="seg-btn" data-stack="model" data-i18n="dashboard.stack.model">By model</button>
+                  </div>
+                  <div class="seg" data-control="mode">
+                    <button type="button" class="seg-btn active" data-mode="bars" data-i18n="dashboard.mode.bars">Bars</button>
+                    <button type="button" class="seg-btn" data-mode="kline" data-i18n="dashboard.mode.kline">K-line</button>
+                  </div>
+                  <div class="seg" data-control="trendMetric">
+                    <button type="button" class="seg-btn active" data-tmetric="tokens" data-i18n="dashboard.heatmap.tokens">Tokens</button>
+                    <button type="button" class="seg-btn" data-tmetric="cost" data-i18n="dashboard.heatmap.cost">Cost</button>
+                  </div>
+                  <div id="rangeSelect" class="dash-range-group"></div>
+                </div>
+              </div>
+              <div id="dashChart" class="dash-chart-wrap"></div>
+              <div id="dashLegend" class="dash-legend"></div>
+            </div>
+
+            <section class="dash-glass-card dash-ledger-open">
+              <div class="dash-section-head">
+                <h2 class="dash-section-title" data-i18n="dashboard.ledger.title">Daily Breakdown</h2>
+                <span id="dashLedgerMeta" class="dash-surface-sub"></span>
+              </div>
+              <div id="dashDailyLedger" class="dash-ledger"></div>
+            </section>
+          </section>
+        </main>
+      </div>
+
+      <div id="dashEmpty" class="dash-empty hidden" data-i18n="dashboard.empty">No usage history yet</div>
+    </div>
+
+    <div id="dashDeviceMenu" class="dash-device-menu" popover="manual" role="menu" aria-hidden="true"></div>
+    <div id="dashDrawerScrim" class="dash-drawer-scrim hidden" aria-hidden="true"></div>
+    <aside id="dashDrawer" class="dash-drawer" popover="manual" role="dialog" aria-modal="false" aria-labelledby="dashDrawerTitle">
+      <div class="dash-drawer-head">
+        <div class="dash-drawer-identity">
+          <span id="dashDrawerIcon" class="dash-drawer-icon hidden" aria-hidden="true"></span>
+          <div class="dash-drawer-titles">
+            <h3 id="dashDrawerTitle" class="dash-drawer-title"></h3>
+            <div id="dashDrawerSubtitle" class="dash-drawer-subtitle"></div>
+          </div>
+        </div>
+        <button id="dashDrawerClose" type="button" class="icon-button" aria-label="Close">×</button>
+      </div>
+      <div id="dashDrawerBody" class="dash-drawer-body"></div>
+    </aside>
+    <div id="dashTooltip" class="dash-tooltip" popover="manual" role="tooltip" aria-hidden="true"></div>
 
     <script src="../../shared/clientCatalog.js"></script>
     <script src="../../shared/vendorPresentation.js"></script>
+    <script src="rowIconMasks.js"></script>
+    <script src="../../shared/limits/providers.js"></script>
+    <script src="../../shared/compactTokens.js"></script>
+    <script src="../../shared/limits/balanceDisplay.js"></script>
+    <script src="homeOverview.js"></script>
+    <script src="limits/resetMotion.js"></script>
+    <script src="limits/resetAnimator.js"></script>
+    <script src="limits/homeMotion.js"></script>
+    <script src="../../shared/deviceKind.js"></script>
+    <script src="deviceIcons.js"></script>
+    <script src="deviceBreakdown.js"></script>
+    <script src="../../shared/projectKey.js"></script>
+    <script src="projectRows.js"></script>
+    <script src="../../shared/sessionActivityProviders.js"></script>
+    <script src="../../shared/sessionLive.js"></script>
+    <script src="fixedPeriodRanges.js"></script>
+    <script src="tokenRatePresentation.js"></script>
+    <script src="../tokenNumberAnimation.js"></script>
     <script src="usageCharts.js"></script>
     <script src="themePresets.js"></script>
     <script src="i18n.js"></script>
-    <script src="../../shared/compactTokens.js"></script>
     <script src="../../shared/currency.js"></script>
     <script src="../../shared/compactMoney.js"></script>
     <script src="../../shared/fontSettings.js"></script>
     <script src="../motionPreference.js"></script>
     <script src="statsRenderScheduler.js"></script>
     <script src="glassRendering.js"></script>
+    <script src="contentBlur.js"></script>
+    <script src="accountIdentity.js"></script>
+    <script src="dashboardModel.js"></script>
     <script src="dashboard.js"></script>
   </body>
 </html>
