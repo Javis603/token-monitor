@@ -74,6 +74,73 @@
   }
 
   /**
+   * Collects deduplicated session entries for `periodKey` with `sessionWithActivity` applied,
+   * plus still-active (`running` / `waiting`) cross-day sessions from `month` / `allTime`
+   * when viewing `today` (with today accounting zeroed out).
+   *
+   * @param {any} stats
+   * @param {string} periodKey
+   * @param {any} aggregatePeriod
+   * @param {number} nowMs
+   * @param {{ includeNative?: boolean }} [options]
+   * @returns {Array<[string, any]>}
+   */
+  function collectPeriodSessionEntries(stats, periodKey, aggregatePeriod, nowMs, options = {}) {
+    const includeNative = options.includeNative !== false;
+    /** @type {Array<[string, any]>} */
+    const collected = [];
+    const seen = new Set();
+
+    /** @param {string} key @param {any} rawSession @param {any} periodObj */
+    const resolveSession = (key, rawSession, periodObj) => (
+      sessionLive?.sessionWithActivity
+        ? sessionLive.sessionWithActivity(periodObj, key, rawSession, nowMs)
+        : rawSession
+    );
+
+    for (const [key, rawSession] of Object.entries(aggregatePeriod?.sessions || {})) {
+      if (!rawSession || typeof rawSession !== 'object' || seen.has(key)) continue;
+      seen.add(key);
+      collected.push([key, resolveSession(key, rawSession, aggregatePeriod)]);
+    }
+
+    if (includeNative) {
+      for (const [key, rawSession] of Object.entries(stats?.nativeSessions?.[periodKey] || {})) {
+        if (!rawSession || typeof rawSession !== 'object' || seen.has(key)) continue;
+        seen.add(key);
+        collected.push([key, resolveSession(key, rawSession, aggregatePeriod)]);
+      }
+    }
+
+    if (periodKey === 'today') {
+      for (const fallbackKey of ['month', 'allTime']) {
+        const retainedPeriod = stats?.periods?.[fallbackKey];
+        if (!retainedPeriod || typeof retainedPeriod !== 'object') continue;
+        for (const [key, rawSession] of Object.entries(retainedPeriod.sessions || {})) {
+          if (!rawSession || typeof rawSession !== 'object' || seen.has(key)) continue;
+          if (rawSession.sessionKind === 'background-review') continue;
+          const resolved = resolveSession(key, rawSession, retainedPeriod);
+          const activityState = sessionLive?.sessionActivityState?.(resolved, nowMs) || 'idle';
+          if (activityState !== 'running' && activityState !== 'waiting') continue;
+          seen.add(key);
+          collected.push([
+            key,
+            {
+              ...resolved,
+              totalTokens: 0,
+              costUsd: 0,
+              unpricedTokens: 0,
+              resumedFromPriorPeriod: true
+            }
+          ]);
+        }
+      }
+    }
+
+    return collected;
+  }
+
+  /**
    * Resolves a period object (`today`, `yesterday`, `week`, `last7`, `last30`, `month`, `allTime`)
    * from native `source.periods[periodKey]` when available, or derives fixed ranges via
    * `fixedPeriodRanges.fixedPeriodSnapshot` from `historyDaily`.
@@ -265,8 +332,8 @@
     const livePeriod = stats?.periods?.[periodKey] || stats?.periods?.today || stats?.periods?.month || null;
     /** @type {Map<string, any[]>} */
     const sessionsByDevice = new Map();
-    for (const session of Object.values(livePeriod?.sessions || {})) {
-      const devId = String(session?.sourceDevice?.deviceId || '').trim();
+    for (const [, session] of collectPeriodSessionEntries(stats, periodKey, livePeriod, nowMs, { includeNative: true })) {
+      const devId = String(session?.sourceDevice?.deviceId || (!session?.sourceDevice && localId ? localId : '')).trim();
       if (!devId) continue;
       const list = sessionsByDevice.get(devId) || [];
       list.push(session);
@@ -715,10 +782,9 @@
       || stats?.periods?.today
       || stats?.periods?.month
       || null;
-    const rawMap = aggregatePeriod?.sessions || {};
-    const nativeMap = selectedDeviceId === 'all' || selectedDeviceId === stats?.localDeviceId
-      ? (stats?.nativeSessions?.[periodKey] || {})
-      : {};
+    const localId = String(stats?.localDeviceId || '').trim();
+    const includeNative = selectedDeviceId === 'all' || (Boolean(localId) && selectedDeviceId === localId);
+    const collectedSessions = collectPeriodSessionEntries(stats, periodKey, aggregatePeriod, nowMs, { includeNative });
 
     /** @type {Map<string, { name: string, deviceKind: string, isLocal: boolean }>} */
     const deviceLookup = new Map();
@@ -738,11 +804,8 @@
 
     /** @type {any[]} */
     const entries = [];
-    const seen = new Set();
-    for (const [key, session] of [...Object.entries(rawMap), ...Object.entries(nativeMap)]) {
-      if (!session || typeof session !== 'object' || seen.has(key)) continue;
-      seen.add(key);
-      const devId = String(session?.sourceDevice?.deviceId || '').trim();
+    for (const [key, session] of collectedSessions) {
+      const devId = String(session?.sourceDevice?.deviceId || (!session?.sourceDevice && localId ? localId : '')).trim();
       if (selectedDeviceId !== 'all' && devId !== selectedDeviceId) continue;
 
       const client = canonicalClientKey(session.client || key.split(':')[0] || '');
@@ -777,6 +840,7 @@
         activityState,
         isActive,
         archived: sessionLive?.isArchivedSession?.(session) === true,
+        resumedFromPriorPeriod: session.resumedFromPriorPeriod === true,
         context: context ? {
           ...context,
           displayPercent: showContextUsed ? context.percentUsed : context.percentLeft
@@ -1157,6 +1221,130 @@
       + `<g class="iso-towers-layer">${columnsSvg}</g>`
       + `<g class="iso-months-layer">${monthsSvg}</g>`
       + `</svg>`;
+  }
+
+  /**
+   * Computes 2D/3D activity insights over a daily series:
+   * per-weekday rhythm (`dayOfWeek: 0..6`), busiest weekday, top peak days with
+   * top tool attribution, and rolling active-day averages.
+   *
+   * @param {any[]} daily
+   * @param {{ metric?: 'tokens' | 'cost' | string, startDate?: string, endDate?: string, topLimit?: number }} [options]
+   */
+  function buildActivityInsights(daily, options = {}) {
+    const metric = options.metric === 'cost' ? 'cost' : 'tokens';
+    const startDate = options.startDate ? String(options.startDate).slice(0, 10) : '';
+    const endDate = options.endDate ? String(options.endDate).slice(0, 10) : '';
+    const topLimit = Math.max(1, Number(options.topLimit) || 3);
+
+    /** @type {Array<{ dayOfWeek: number, total: number, count: number, avg: number, totalTokens: number, totalCost: number, share: number }>} */
+    const weekdays = Array.from({ length: 7 }, (_, dayOfWeek) => ({
+      dayOfWeek,
+      total: 0,
+      count: 0,
+      avg: 0,
+      totalTokens: 0,
+      totalCost: 0,
+      share: 0
+    }));
+
+    /** @type {any[]} */
+    const activeEntries = [];
+    let totalTokens = 0;
+    let totalCost = 0;
+
+    for (const row of Array.isArray(daily) ? daily : []) {
+      const date = String(row?.date || '').slice(0, 10);
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) continue;
+      if (startDate && date < startDate) continue;
+      if (endDate && date > endDate) continue;
+
+      const tokens = Math.max(0, n(row?.tokens));
+      const cost = Math.max(0, n(row?.cost));
+      const unpricedTokens = Math.max(0, n(row?.unpricedTokens));
+      const value = metric === 'cost' ? cost : tokens;
+      if (tokens <= 0 && cost <= 0) continue;
+
+      totalTokens += tokens;
+      totalCost += cost;
+
+      const parsedDate = new Date(`${date}T00:00:00Z`);
+      const dayOfWeek = Number.isNaN(parsedDate.getTime()) ? -1 : parsedDate.getUTCDay();
+      if (dayOfWeek >= 0 && dayOfWeek <= 6) {
+        const bucket = weekdays[dayOfWeek];
+        bucket.total += value;
+        bucket.totalTokens += tokens;
+        bucket.totalCost += cost;
+        bucket.count += 1;
+      }
+
+      let topClient = row?.topClient || null;
+      if (!topClient && row?.perClient && typeof row.perClient === 'object') {
+        const rawMetricMap = Object.fromEntries(
+          Object.entries(row.perClient).map(([k, v]) => {
+            const entry = /** @type {any} */ (v);
+            const metricVal = metric === 'cost' && n(entry?.cost) > 0 ? n(entry.cost) : n(entry?.tokens);
+            return [k, metricVal];
+          })
+        );
+        const topEntry = Object.entries(foldClientNumbers(rawMetricMap))
+          .filter(([, val]) => val > 0)
+          .sort((a, b) => b[1] - a[1])[0];
+        if (topEntry) {
+          topClient = {
+            id: topEntry[0],
+            label: clientDisplayLabel(topEntry[0]),
+            color: clientColor(topEntry[0])
+          };
+        }
+      }
+
+      activeEntries.push({
+        date,
+        tokens,
+        cost,
+        unpricedTokens,
+        value,
+        topClient
+      });
+    }
+
+    let maxWeekdayAvg = 0;
+    for (const bucket of weekdays) {
+      bucket.avg = bucket.count > 0 ? bucket.total / bucket.count : 0;
+      if (bucket.avg > maxWeekdayAvg) maxWeekdayAvg = bucket.avg;
+    }
+    /** @type {typeof weekdays[0] | null} */
+    let busiestWeekday = null;
+    for (const bucket of weekdays) {
+      bucket.share = maxWeekdayAvg > 0 ? bucket.avg / maxWeekdayAvg : 0;
+      if (bucket.avg > 0 && (!busiestWeekday || bucket.avg > busiestWeekday.avg)) {
+        busiestWeekday = bucket;
+      }
+    }
+
+    const sortedPeaks = activeEntries
+      .slice()
+      .sort((a, b) => b.value - a.value || b.tokens - a.tokens || b.date.localeCompare(a.date))
+      .slice(0, topLimit);
+    const maxPeakVal = sortedPeaks[0]?.value || 0;
+    const peakDays = sortedPeaks.map((entry) => ({
+      ...entry,
+      share: maxPeakVal > 0 ? entry.value / maxPeakVal : 0
+    }));
+
+    const activeDays = activeEntries.length;
+    return {
+      metric,
+      weekdays,
+      busiestWeekday,
+      peakDays,
+      activeDays,
+      totalTokens,
+      totalCost,
+      dailyAvgTokens: activeDays > 0 ? totalTokens / activeDays : 0,
+      dailyAvgCost: activeDays > 0 ? totalCost / activeDays : 0
+    };
   }
 
   /**
@@ -1769,6 +1957,7 @@
     buildLiveVelocityModel,
     buildTopologyGraph,
     isometricHeatmapSvg,
+    buildActivityInsights,
     buildScopedOverview
   };
 });

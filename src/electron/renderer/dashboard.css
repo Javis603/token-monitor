@@ -345,6 +345,11 @@ html.native-high-contrast .dash-drawer {
   padding: 3px 8px;
 }
 
+.seg--xs .seg-btn {
+  font-size: 9.5px;
+  padding: 2px 7px;
+}
+
 .dash-tab {
   padding: 4.5px 12px;
 }
@@ -898,6 +903,10 @@ html.native-liquid-glass .seg-indicator {
   display: flex;
   flex-direction: column;
   min-height: 368px;
+}
+
+.dash-activity-col[data-stage="2d"] {
+  min-height: 0;
 }
 
 /* Optical Flow Topology Canvas */
@@ -1496,12 +1505,145 @@ html.native-liquid-glass .seg-indicator {
 .dash-heat-legend {
   display: flex;
   align-items: center;
-  justify-content: center;
+  justify-content: flex-end;
   gap: 5px;
-  margin-top: 8px;
+  margin-top: 0;
   font-size: 10px;
   color: var(--readable-muted, var(--muted));
   opacity: 0.78;
+}
+
+.dash-activity-col[data-stage="2d"] .dash-heatmap-wrap {
+  flex: 1 1 auto;
+  min-height: 0;
+  justify-content: center;
+  align-items: center;
+  padding: 6px 0 2px;
+}
+
+.dash-heat-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-top: 8px;
+}
+
+.dash-heat-summary {
+  font-size: 10.5px;
+  color: var(--readable-muted, var(--muted));
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* Interactive Orbital 3D Glass Skyline Stage */
+.dash-skyline-stage {
+  position: relative;
+  flex: 1 1 auto;
+  min-height: 312px;
+  width: 100%;
+  overflow: hidden;
+  user-select: none;
+}
+
+.dash-skyline-canvas-host {
+  position: absolute;
+  inset: 0;
+  cursor: grab;
+}
+
+.dash-skyline-canvas-host.is-dragging {
+  cursor: grabbing;
+}
+
+.dash-skyline-canvas-host.is-panning {
+  cursor: move;
+}
+
+.dash-skyline-canvas {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
+.dash-skyline-tool-legend {
+  position: absolute;
+  top: 6px;
+  left: 4px;
+  z-index: 2;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  pointer-events: none;
+}
+
+.dash-skyline-tool-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 9.5px;
+  color: var(--readable-muted, var(--muted));
+}
+
+.dash-skyline-hint {
+  position: absolute;
+  left: 2px;
+  bottom: 5px;
+  z-index: 2;
+  font-size: 9.5px;
+  color: var(--readable-muted, var(--muted));
+  opacity: 0.4;
+  pointer-events: none;
+  transition: opacity 260ms ease;
+}
+
+.dash-skyline-hint.is-dismissed {
+  opacity: 0;
+}
+
+.dash-skyline-hud {
+  position: absolute;
+  right: 2px;
+  bottom: 2px;
+  z-index: 3;
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  opacity: 0.78;
+  transition: opacity 160ms ease;
+}
+
+.dash-skyline-hud:hover {
+  opacity: 1;
+}
+
+.dash-skyline-reset-btn {
+  width: 22px;
+  height: 22px;
+  border-radius: 7px;
+  border: 1px solid rgba(var(--line-rgb), 0.085);
+  background: rgba(var(--overlay-rgb), 0.045);
+  color: var(--readable-muted, var(--muted));
+  font-size: 11px;
+  line-height: 1;
+  font-family: inherit;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  transition: color 140ms ease, background-color 140ms ease;
+}
+
+.dash-skyline-reset-btn:hover {
+  color: var(--text);
+  background: rgba(var(--overlay-rgb), 0.1);
+}
+
+html.native-liquid-glass .dash-skyline-reset-btn {
+  border-radius: 999px;
 }
 .dash-heat-legend-label {
   padding-inline: 2px;
@@ -1625,7 +1767,7 @@ html.native-liquid-glass .seg-indicator {
 .dash-quotas-viewport {
   position: relative;
   flex: 1 1 auto;
-  min-height: 172px;
+  min-height: 152px;
 }
 
 .dash-quotas-list {

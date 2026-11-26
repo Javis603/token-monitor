@@ -312,7 +312,9 @@ test('dashboard.js fetches history over IPC and renders both tabs', () => {
   assert.match(html, /<script src="contentBlur\.js"><\/script>/);
   assert.match(html, /<script src="accountIdentity\.js"><\/script>/);
   assert.match(html, /<script src="dashboardModel\.js"><\/script>/);
+  assert.match(html, /<script src="activitySkyline3d\.js"><\/script>/);
   assert.match(js, /TokenMonitorContentBlur/);
+  const skylineJs = read('src', 'electron', 'renderer', 'activitySkyline3d.js');
   assert.match(html, /id="dashDeviceMenu"[^>]*popover="manual"/);
   assert.match(html, /id="dashDrawer"[^>]*popover="manual"/);
   assert.match(html, /id="dashTooltip"[^>]*popover="manual"/);
@@ -382,6 +384,7 @@ test('dashboard.js fetches history over IPC and renders both tabs', () => {
   assert.doesNotMatch(html, /\sstyle\s*=/i, 'CSP forbids inline style attributes in dashboard.html');
   assert.doesNotMatch(js, /<[a-z][^>]*\sstyle\s*=/i, 'CSP forbids inline style attributes in dashboard.js');
   assert.doesNotMatch(modelJs, /<[a-z][^>]*\sstyle\s*=/i, 'CSP forbids inline style attributes in dashboardModel.js');
+  assert.doesNotMatch(skylineJs, /<[a-z][^>]*\sstyle\s*=/i, 'CSP forbids inline style attributes in activitySkyline3d.js');
 });
 
 test('Dashboard Trends renders the selected calendar range and labels unrecorded days', () => {
@@ -876,4 +879,17 @@ test('dashboard hero removes redundant streak, aligns borderless active status, 
   assert.doesNotMatch(js, /class="[^"]*\brow-icon\b[^"]*"\s+data-c="/);
   assert.doesNotMatch(js, /class="\$\{escapeHtml\(acc\.iconClass\)\}"\s+data-c="/);
   assert.doesNotMatch(js, /els\.drawerIcon\.style\.color\s*=\s*displayColor/);
+
+  // Minimalist 2D compact heatmap + Orbital 3D skyline wiring stay intact with zero native tooltips.
+  assert.match(html, /id="dashHeatFooter"/);
+  assert.doesNotMatch(html, /id="dashHeat2dInsights"/);
+  assert.match(html, /id="dashSkylineStage"/);
+  assert.match(html, /data-control="skylineColor"/);
+  assert.match(html, /id="skylineReset"/);
+  assert.match(css, /\.dash-activity-col\[data-stage="2d"\]\s*\{[^}]*min-height:\s*0/);
+  assert.match(css, /\.dash-activity-col\[data-stage="2d"\] \.dash-heatmap-wrap/);
+  assert.doesNotMatch(css, /\.dash-heat2d-frame|\.dash-rhythm-track/);
+  assert.match(css, /\.dash-skyline-stage/);
+  assert.match(css, /\.dash-skyline-canvas-host\.is-panning/);
+  assert.doesNotMatch(html, /\stitle=/i);
 });

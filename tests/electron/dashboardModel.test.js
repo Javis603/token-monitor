@@ -241,6 +241,34 @@ test('isometricHeatmapSvg renders a CSP-safe 3D skyline sorted back-to-front wit
   assert.doesNotMatch(svg, /\sstyle\s*=/i, '3D heatmap SVG must stay free of inline style attributes for CSP');
 });
 
+test('buildActivityInsights computes weekday rhythm, busiest day, and peak days with tool attribution', () => {
+  const sampleDaily = [
+    // 2026-11-23 is Monday, 2026-11-24 is Tuesday, 2026-11-25 is Wednesday
+    { date: '2026-11-16', tokens: 1000, cost: 1.0, perClient: { codex: { tokens: 1000, cost: 1.0 } } },
+    { date: '2026-11-23', tokens: 3000, cost: 3.0, perClient: { claude: { tokens: 3000, cost: 3.0 } } },
+    { date: '2026-11-24', tokens: 5000, cost: 2.0, perClient: { antigravity: { tokens: 5000, cost: 2.0 } } },
+    { date: '2026-11-25', tokens: 0, cost: 0 }
+  ];
+
+  const costInsights = model.buildActivityInsights(sampleDaily, { metric: 'cost', topLimit: 2 });
+  assert.equal(costInsights.activeDays, 3);
+  assert.equal(costInsights.busiestWeekday.dayOfWeek, 1); // Monday avg cost (1+3)/2 = 2.0 === Tuesday 2.0 (first max wins)
+  assert.equal(costInsights.weekdays[1].avg, 2.0);
+  assert.equal(costInsights.weekdays[2].avg, 2.0);
+  assert.deepEqual(costInsights.peakDays.map((d) => d.date), ['2026-11-23', '2026-11-24']);
+  assert.equal(costInsights.peakDays[0].topClient.id, 'claude');
+
+  const tokenInsights = model.buildActivityInsights(sampleDaily, { metric: 'tokens', topLimit: 2 });
+  assert.equal(tokenInsights.busiestWeekday.dayOfWeek, 2); // Tuesday avg tokens 5000 > Monday avg 2000
+  assert.deepEqual(tokenInsights.peakDays.map((d) => d.date), ['2026-11-24', '2026-11-23']);
+  assert.equal(tokenInsights.peakDays[0].topClient.id, 'antigravity');
+
+  const emptyInsights = model.buildActivityInsights([], { metric: 'cost' });
+  assert.equal(emptyInsights.activeDays, 0);
+  assert.equal(emptyInsights.busiestWeekday, null);
+  assert.deepEqual(emptyInsights.peakDays, []);
+});
+
 test('buildTopologyGraph links devices, workspaces, and sessions cleanly and falls back to tools -> models', () => {
   const nowIso = new Date().toISOString();
   const sessionOverview = model.buildScopedOverview({
@@ -358,4 +386,166 @@ test('buildTopologyGraph includes all 6+ devices and 9 sessions by default, and 
     false,
     'sessions from a hidden device must not misattribute onto devices[0]'
   );
+});
+
+test('dashboard session resolution honors sessionWithActivity overlays and projects resumed active sessions into today with zero accounting', () => {
+  const now = Date.now();
+  const nowIso = new Date(now).toISOString();
+
+  // 1. Live activity overlay overrides raw transcript recency
+  const overlayOverview = model.buildScopedOverview({
+    stats: {
+      localDeviceId: 'mac-1',
+      devices: [
+        { deviceId: 'mac-1', displayName: 'Mac', periods: { today: { totalTokens: 2000, costUsd: 1.0, clients: { codex: 2000 } } } }
+      ],
+      periods: {
+        today: {
+          totalTokens: 2000,
+          costUsd: 1.0,
+          sessions: {
+            'codex:overridden-idle': {
+              client: 'codex',
+              projectLabel: 'proj-idle',
+              totalTokens: 1200,
+              lastUsedAt: nowIso,
+              sourceDevice: { deviceId: 'mac-1' }
+            },
+            'codex:overridden-waiting': {
+              client: 'codex',
+              projectLabel: 'proj-wait',
+              totalTokens: 800,
+              lastUsedAt: new Date(now - 60 * 60 * 1000).toISOString(),
+              sourceDevice: { deviceId: 'mac-1' }
+            }
+          },
+          sessionActivity: {
+            'codex:overridden-idle': { state: 'idle', observedAt: nowIso },
+            'codex:overridden-waiting': { state: 'waiting', observedAt: nowIso }
+          }
+        }
+      }
+    },
+    periodKey: 'today',
+    nowMs: now
+  });
+
+  const idleSession = overlayOverview.sessions.find((s) => s.key === 'codex:overridden-idle');
+  const waitSession = overlayOverview.sessions.find((s) => s.key === 'codex:overridden-waiting');
+  assert.equal(idleSession.activityState, 'idle');
+  assert.equal(idleSession.isActive, false);
+  assert.equal(waitSession.activityState, 'waiting');
+  assert.equal(waitSession.isActive, true);
+  assert.equal(overlayOverview.fleet.fleetTotals.activeSessions, 1);
+
+  // 2. Cross-day resumed Antigravity turn appears as active with zero tokens in today only
+  const baseStats = {
+    localDeviceId: 'mac-1',
+    devices: [
+      {
+        deviceId: 'mac-1',
+        displayName: 'Mac',
+        periods: {
+          today: { totalTokens: 1000, costUsd: 0.4, clients: { codex: 1000 } },
+          yesterday: { totalTokens: 2000, costUsd: 0.8, clients: { antigravity: 2000 } }
+        }
+      }
+    ],
+    periods: {
+      today: {
+        totalTokens: 1000,
+        costUsd: 0.4,
+        sessions: {
+          'codex:today-1': {
+            client: 'codex',
+            projectLabel: 'today-repo',
+            totalTokens: 1000,
+            costUsd: 0.4,
+            lastUsedAt: nowIso,
+            turnEnded: true,
+            sourceDevice: { deviceId: 'mac-1' }
+          }
+        }
+      },
+      yesterday: {
+        totalTokens: 2000,
+        costUsd: 0.8,
+        sessions: {}
+      },
+      month: {
+        totalTokens: 60000,
+        costUsd: 15,
+        sessions: {
+          'antigravity:resumed-running': {
+            client: 'antigravity',
+            title: 'Resumed AG Task',
+            projectLabel: 'Token Monitor',
+            latestModel: 'gemini-3-pro',
+            totalTokens: 50000,
+            costUsd: 12.5,
+            unpricedTokens: 4000,
+            lastUsedAt: nowIso,
+            turnEnded: false,
+            sourceDevice: { deviceId: 'mac-1' }
+          },
+          'antigravity:resumed-finished': {
+            client: 'antigravity',
+            title: 'Finished AG Task',
+            totalTokens: 9000,
+            costUsd: 2.1,
+            lastUsedAt: nowIso,
+            turnEnded: true,
+            sourceDevice: { deviceId: 'mac-1' }
+          }
+        }
+      }
+    }
+  };
+
+  const todayOverview = model.buildScopedOverview({ stats: baseStats, periodKey: 'today', nowMs: now });
+  const resumedRow = todayOverview.sessions.find((s) => s.key === 'antigravity:resumed-running');
+  assert.ok(resumedRow, 'resumed running Antigravity session projects into today');
+  assert.equal(resumedRow.activityState, 'running');
+  assert.equal(resumedRow.totalTokens, 0);
+  assert.equal(resumedRow.costUsd, 0);
+  assert.equal(resumedRow.unpricedTokens, 0);
+  assert.equal(resumedRow.resumedFromPriorPeriod, true);
+  assert.equal(todayOverview.hero.tokens, 1000, 'prior-day tokens do not leak into today hero');
+  assert.equal(todayOverview.sessions.some((s) => s.key === 'antigravity:resumed-finished'), false);
+  assert.equal(todayOverview.fleet.fleetTotals.activeSessions, 1);
+  assert.equal(todayOverview.topology.hubToEnd.find((e) => e.to === 'antigravity:resumed-running')?.active, true);
+
+  // Yesterday must not inherit today/resumed live projections
+  const yesterdayOverview = model.buildScopedOverview({ stats: baseStats, periodKey: 'yesterday', nowMs: now });
+  assert.equal(yesterdayOverview.sessions.some((s) => s.key === 'antigravity:resumed-running'), false);
+
+  // Once today records new usage for the same key, today wins without duplication
+  const statsWithTodayUsage = {
+    ...baseStats,
+    periods: {
+      ...baseStats.periods,
+      today: {
+        ...baseStats.periods.today,
+        totalTokens: 1300,
+        sessions: {
+          ...baseStats.periods.today.sessions,
+          'antigravity:resumed-running': {
+            client: 'antigravity',
+            title: 'Resumed AG Task',
+            projectLabel: 'Token Monitor',
+            totalTokens: 300,
+            costUsd: 0.12,
+            lastUsedAt: nowIso,
+            turnEnded: false,
+            sourceDevice: { deviceId: 'mac-1' }
+          }
+        }
+      }
+    }
+  };
+  const settledOverview = model.buildScopedOverview({ stats: statsWithTodayUsage, periodKey: 'today', nowMs: now });
+  const matches = settledOverview.sessions.filter((s) => s.key === 'antigravity:resumed-running');
+  assert.equal(matches.length, 1);
+  assert.equal(matches[0].totalTokens, 300);
+  assert.equal(matches[0].resumedFromPriorPeriod, false);
 });

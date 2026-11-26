@@ -84,7 +84,7 @@
             </section>
 
             <div class="dash-visual-band">
-              <section class="dash-glass-card dash-activity-col">
+              <section id="dashActivityCol" class="dash-glass-card dash-activity-col">
                 <div class="dash-section-head">
                   <div class="dash-heatmap-title-group">
                     <h2 id="dashStageTitle" class="dash-section-title" data-i18n="dashboard.topology.title">Live Neural Flow</h2>
@@ -103,8 +103,23 @@
                   </div>
                 </div>
                 <div id="dashTopology" class="dash-topo-wrap"></div>
+                <div id="dashSkylineStage" class="dash-skyline-stage hidden">
+                  <div id="dashSkylineCanvasHost" class="dash-skyline-canvas-host"></div>
+                  <div id="dashSkylineToolLegend" class="dash-skyline-tool-legend hidden"></div>
+                  <div id="dashSkylineHint" class="dash-skyline-hint" data-i18n="dashboard.skyline.hint">Drag to orbit · Right-drag to pan · Double-click to reset</div>
+                  <div id="dashSkylineHud" class="dash-skyline-hud">
+                    <div class="seg seg--sm seg--xs" data-control="skylineColor">
+                      <button type="button" class="seg-btn active" data-color="heat" aria-pressed="true" data-i18n="dashboard.skyline.colorHeat">Heat</button>
+                      <button type="button" class="seg-btn" data-color="tool" aria-pressed="false" data-i18n="dashboard.skyline.colorTool">Top tool</button>
+                    </div>
+                    <button id="skylineReset" type="button" class="dash-skyline-reset-btn" aria-label="Reset view">↺</button>
+                  </div>
+                </div>
                 <div id="dashHeatmap" class="dash-heatmap-wrap hidden"></div>
-                <div id="dashHeatLegend" class="dash-heat-legend hidden" aria-hidden="true"></div>
+                <div id="dashHeatFooter" class="dash-heat-footer hidden">
+                  <span id="dashHeatSummary" class="dash-heat-summary"></span>
+                  <div id="dashHeatLegend" class="dash-heat-legend hidden" aria-hidden="true"></div>
+                </div>
               </section>
 
               <section id="dashQuotasCard" class="dash-glass-card dash-quotas-col home-module-limits">
@@ -237,6 +252,7 @@
     <script src="contentBlur.js"></script>
     <script src="accountIdentity.js"></script>
     <script src="dashboardModel.js"></script>
+    <script src="activitySkyline3d.js"></script>
     <script src="dashboard.js"></script>
   </body>
 </html>

@@ -19,6 +19,7 @@ const homeLimitMotionApi = window.TokenMonitorHomeLimitMotion;
 const limitResetMotionApi = window.TokenMonitorLimitResetMotion;
 const limitResetAnimatorApi = window.TokenMonitorLimitResetAnimator;
 const sessionLiveApi = window.TokenMonitorSessionLive;
+const skylineApi = window.TokenMonitorActivitySkyline3D;
 
 // Canonical brand colours captured before overrides (clientColors is shared by reference).
 const BRAND_VENDOR_COLORS = { ...charts.modelColors };
@@ -61,10 +62,16 @@ const els = {
   velocitySpark: document.getElementById('dashVelocitySpark'),
   velocityModels: document.getElementById('dashVelocityModels'),
   stageTitle: document.getElementById('dashStageTitle'),
+  activityCol: document.getElementById('dashActivityCol'),
   heatmapMeta: document.getElementById('dashHeatmapMeta'),
   heatmapMetricControl: document.getElementById('dashHeatmapMetricControl'),
   visualBand: document.querySelector('.dash-visual-band'),
   topology: document.getElementById('dashTopology'),
+  skylineStage: document.getElementById('dashSkylineStage'),
+  skylineCanvasHost: document.getElementById('dashSkylineCanvasHost'),
+  skylineToolLegend: document.getElementById('dashSkylineToolLegend'),
+  skylineHint: document.getElementById('dashSkylineHint'),
+  skylineReset: document.getElementById('skylineReset'),
   quotasCard: document.getElementById('dashQuotasCard'),
   quotasCount: document.getElementById('dashQuotasCount'),
   quotas: document.getElementById('dashQuotas'),
@@ -78,6 +85,8 @@ const els = {
   chart: document.getElementById('dashChart'),
   legend: document.getElementById('dashLegend'),
   heatmap: document.getElementById('dashHeatmap'),
+  heatFooter: document.getElementById('dashHeatFooter'),
+  heatSummary: document.getElementById('dashHeatSummary'),
   heatLegend: document.getElementById('dashHeatLegend'),
   cards: document.getElementById('dashCards'),
   empty: document.getElementById('dashEmpty'),
@@ -94,6 +103,7 @@ const els = {
   trendMetricBtns: Array.from(document.querySelectorAll('[data-control="trendMetric"] .seg-btn')),
   stageViewBtns: Array.from(document.querySelectorAll('[data-control="stageView"] .seg-btn')),
   heatmapMetricBtns: Array.from(document.querySelectorAll('[data-control="heatmapMetric"] .seg-btn')),
+  skylineColorBtns: Array.from(document.querySelectorAll('[data-control="skylineColor"] .seg-btn')),
   breakdownModeBtns: Array.from(document.querySelectorAll('[data-control="breakdownMode"] .seg-btn')),
   workModeBtns: Array.from(document.querySelectorAll('[data-control="workMode"] .seg-btn'))
 };
@@ -118,6 +128,7 @@ const state = {
   stageView: 'flow',
   heatmapView: '3d',
   heatmapMetric: 'cost',
+  skylineColorMode: 'heat',
   rateMode: 'speed',
   breakdownMode: 'both',
   workMode: 'sessions',
@@ -164,6 +175,9 @@ const metricTextAnimations = new WeakMap();
 let topologyLayoutFrame = 0;
 let topologyScrollFrame = 0;
 let topologyResizeObserver = null;
+let skylineController = null;
+let skylineResizeObserver = null;
+let skylineHintDismissed = false;
 let lastRenderedTab = state.tab;
 let activeHover = null;
 let spotlightFrame = 0;
@@ -441,6 +455,7 @@ function applyTranslations() {
   if (els.refreshBtn && !manualRefreshBusy && !refreshFeedbackTimer) {
     els.refreshBtn.setAttribute('aria-label', t('refreshButton.label'));
   }
+  if (els.skylineReset) els.skylineReset.setAttribute('aria-label', t('dashboard.skyline.reset'));
   document.documentElement.lang = state.locale;
 }
 
@@ -456,6 +471,7 @@ function applyAppearance(settings) {
   applyThemeColors(settings?.themeColors);
   applyVendorColorOverrides(settings?.vendorColors);
   els.body.classList.toggle('flat', state.flat);
+  skylineController?.refreshTheme?.();
 }
 
 function applyFontSettings(settings) {
@@ -635,6 +651,7 @@ function applySwatchColors(root) {
     }
   });
   root.querySelectorAll('[data-w]').forEach((el) => { el.style.setProperty('--bar-scale', el.getAttribute('data-w')); });
+  root.querySelectorAll('[data-h]').forEach((el) => { el.style.setProperty('--bar-h', el.getAttribute('data-h')); });
   root.querySelectorAll('[data-weight]').forEach((el) => { el.style.setProperty('--seg-weight', el.getAttribute('data-weight')); });
   root.querySelectorAll('[data-bg]').forEach((el) => { el.style.background = el.getAttribute('data-bg'); });
   root.querySelectorAll('[data-node-accent]').forEach((el) => { el.style.setProperty('--node-accent', el.getAttribute('data-node-accent')); });
@@ -2477,6 +2494,75 @@ function renderTopology(overview) {
   });
 }
 
+function dismissSkylineHint() {
+  if (skylineHintDismissed) return;
+  skylineHintDismissed = true;
+  els.skylineHint?.classList.add('is-dismissed');
+}
+
+function ensureSkylineController() {
+  if (skylineController || !els.skylineCanvasHost || typeof skylineApi?.createSkylineController !== 'function') {
+    return skylineController;
+  }
+  skylineController = skylineApi.createSkylineController(els.skylineCanvasHost, {
+    onHover(hit) {
+      if (!hit || state.stageView !== '3d' || state.tab !== 'activity') {
+        if (activeHover?.kind === 'skyline') hideTooltip();
+        return;
+      }
+      const date = hit.cell?.date;
+      if (!date) return;
+      activeHover = { kind: 'skyline', date };
+      showHeatTooltip(date, state.dayMap?.get(date) || hit.cell, hit.anchorRect);
+    },
+    onSelect(cell) {
+      if (!cell?.date) return;
+      const day = (state.overview?.dailyLedger || []).find((d) => d.date === cell.date);
+      if (day) openDrawer({ kind: 'day', day });
+    },
+    onInteract() {
+      dismissSkylineHint();
+    }
+  });
+  if (skylineController && typeof ResizeObserver === 'function' && !skylineResizeObserver) {
+    skylineResizeObserver = new ResizeObserver(() => {
+      if (state.stageView === '3d' && state.tab === 'activity') skylineController?.resize?.();
+    });
+    skylineResizeObserver.observe(els.skylineCanvasHost);
+  }
+  return skylineController;
+}
+
+function renderSkylineToolLegend(cells) {
+  if (!els.skylineToolLegend) return;
+  const visible = state.skylineColorMode === 'tool' && Array.isArray(cells) && cells.length > 0;
+  if (!visible) {
+    els.skylineToolLegend.classList.add('hidden');
+    els.skylineToolLegend.innerHTML = '';
+    return;
+  }
+  const counts = new Map();
+  for (const c of cells) {
+    if (!c?.topClient?.id || !(c.tokens > 0 || c.cost > 0)) continue;
+    const prev = counts.get(c.topClient.id);
+    if (prev) prev.count += 1;
+    else counts.set(c.topClient.id, { ...c.topClient, count: 1 });
+  }
+  const topTools = Array.from(counts.values())
+    .sort((a, b) => b.count - a.count || a.label.localeCompare(b.label))
+    .slice(0, 5);
+  if (!topTools.length) {
+    els.skylineToolLegend.classList.add('hidden');
+    els.skylineToolLegend.innerHTML = '';
+    return;
+  }
+  els.skylineToolLegend.classList.remove('hidden');
+  els.skylineToolLegend.innerHTML = topTools.map((tool) =>
+    `<span class="dash-skyline-tool-item"><span class="dash-bd-swatch" data-c="${escapeHtml(displayColor(tool.color))}"></span><span>${escapeHtml(tool.label)}</span></span>`
+  ).join('');
+  applySwatchColors(els.skylineToolLegend);
+}
+
 function renderHeatLegend(visible) {
   if (!els.heatLegend) return;
   els.heatLegend.classList.toggle('hidden', !visible);
@@ -2496,8 +2582,8 @@ function renderHeatLegend(visible) {
 
 function renderActivity(overview) {
   const isFlow = state.stageView === 'flow';
+  els.activityCol?.setAttribute('data-stage', state.stageView);
   els.topology?.classList.toggle('hidden', !isFlow);
-  els.heatmap?.classList.toggle('hidden', isFlow);
   els.heatmapMetricControl?.classList.toggle('hidden', isFlow);
 
   if (els.stageTitle) {
@@ -2515,6 +2601,9 @@ function renderActivity(overview) {
     }
     heatmapMotionGeneration += 1;
     els.heatmap?.classList.remove('is-motion-pending');
+    els.heatmap?.classList.add('hidden');
+    els.skylineStage?.classList.add('hidden');
+    els.heatFooter?.classList.add('hidden');
     renderHeatLegend(false);
     renderTopology(overview);
   } else {
@@ -2532,86 +2621,143 @@ function renderActivity(overview) {
     const intensityKey = state.heatmapMetric === 'cost' ? 'costIntensity' : 'tokenIntensity';
     const gap = 3;
     let heat = charts.contribHeatmap(daily, { cell: 12, gap, startDate: start, endDate: end, intensityKey });
-    const avail = els.heatmap.clientWidth || 0;
-    if (state.heatmapView === '2d' && heat.weeks > 0 && avail > 0) {
-      const cell = Math.max(8, Math.min(20, (avail - heat.weeks * gap) / heat.weeks));
-      heat = charts.contribHeatmap(daily, { cell, gap, startDate: start, endDate: end, intensityKey });
-    }
 
     if (els.heatmapMeta) {
       const peak = overview?.scopedHistory?.summary?.peakDayTokens || 0;
       els.heatmapMeta.textContent = peak > 0 ? `${t('trends.peakDay')}: ${formatCompact(peak)}` : '';
     }
 
-    state.dayMap = new Map(scopedDailySource.map((d) => [String(d.date).slice(0, 10), {
-      tokens: Number(d.tokens || 0),
-      cost: Number(d.cost || 0),
-      unpricedTokens: Number(d.unpricedTokens || 0)
-    }]));
-
-    const hideHeatmapForEntry = !prefersReducedMotion()
-      && (state.motion === 'entry' || els.heatmap.classList.contains('is-motion-pending'));
-
-    const heatGridSig = JSON.stringify([
-      state.selectedDeviceId,
-      state.heatmapView,
-      state.locale,
-      state.heatmapView === '2d' ? Math.round(avail) : 0,
-      start,
-      end
-    ]);
-    const heatValuesSig = JSON.stringify([
-      state.heatmapMetric,
-      daily.map((d) => [d.date, d.tokens, d.cost])
-    ]);
-
-    if (!heat.cells.length) {
-      lastHeatmapGridSig = '';
-      lastHeatmapValuesSig = '';
-      els.heatmap.innerHTML = '';
-    } else if (
-      state.heatmapView === '2d'
-      && heatGridSig === lastHeatmapGridSig
-      && !hideHeatmapForEntry
-      && els.heatmap.querySelector('svg.dash-heatmap:not(.dash-heatmap--iso)')
-    ) {
-      if (heatValuesSig !== lastHeatmapValuesSig) {
-        lastHeatmapValuesSig = heatValuesSig;
-        const baseCells = els.heatmap.querySelectorAll('.heat-base-layer .heat[data-d]');
-        const brightCells = els.heatmap.querySelectorAll('.heat-bright-layer .heat-bright');
-        const setLevel = (el, lvl) => {
-          for (let i = 0; i <= 4; i++) el.classList.remove(`lvl-${i}`);
-          el.classList.add(`lvl-${lvl}`);
-        };
-        heat.cells.forEach((c, idx) => {
-          const baseEl = baseCells[idx];
-          if (baseEl && baseEl.getAttribute('data-d') === c.date) {
-            setLevel(baseEl, c.intensity);
-            baseEl.setAttribute('data-t', String(Math.round((c.tokens || 0) * 100) / 100));
-            baseEl.setAttribute('data-cost', String(Math.round((c.cost || 0) * 100) / 100));
-          }
-          const brightEl = brightCells[idx];
-          if (brightEl) setLevel(brightEl, c.intensity);
-        });
-      }
-    } else if (heatGridSig !== lastHeatmapGridSig || heatValuesSig !== lastHeatmapValuesSig || hideHeatmapForEntry) {
-      lastHeatmapGridSig = heatGridSig;
-      lastHeatmapValuesSig = heatValuesSig;
-      if (state.heatmapView === '3d' && modelApi?.isometricHeatmapSvg) {
-        els.heatmap.innerHTML = modelApi.isometricHeatmapSvg(heat, {
-          monthLabel: (m) => monthLabel(m.label),
-          dayMap: state.dayMap,
+    const insights = modelApi?.buildActivityInsights
+      ? modelApi.buildActivityInsights(scopedDailySource, {
           metric: state.heatmapMetric,
-          uid: 'dashIso',
-          initialHidden: hideHeatmapForEntry
+          startDate: start,
+          endDate: end,
+          topLimit: 3
+        })
+      : null;
+
+    const ledgerByDate = new Map();
+    for (const row of overview?.dailyLedger || []) {
+      if (row?.date) ledgerByDate.set(row.date, row);
+    }
+
+    state.dayMap = new Map(scopedDailySource.map((d) => {
+      const date = String(d.date).slice(0, 10);
+      const ledgerRow = ledgerByDate.get(date);
+      return [date, {
+        tokens: Number(d.tokens || 0),
+        cost: Number(d.cost || 0),
+        unpricedTokens: Number(d.unpricedTokens || 0),
+        topClient: ledgerRow?.topClient || null
+      }];
+    }));
+
+    if (state.heatmapView === '3d') {
+      const controller = ensureSkylineController();
+      if (controller) {
+        heatmapMotionGeneration += 1;
+        els.heatmap?.classList.remove('is-motion-pending');
+        els.heatmap?.classList.add('hidden');
+        els.heatFooter?.classList.add('hidden');
+        renderHeatLegend(false);
+        els.skylineStage?.classList.remove('hidden');
+
+        const enrichedCells = heat.cells.map((c) => {
+          const dayRec = state.dayMap.get(c.date);
+          return {
+            ...c,
+            tokens: dayRec ? dayRec.tokens : c.tokens,
+            cost: dayRec ? dayRec.cost : c.cost,
+            unpricedTokens: dayRec ? dayRec.unpricedTokens : 0,
+            topClient: dayRec?.topClient || null
+          };
         });
-        if (!hideHeatmapForEntry && state.motion === 'update' && !prefersReducedMotion() && !document.hidden) {
-          els.heatmap.querySelector('.iso-towers-layer')?.animate?.(
-            [{ opacity: 0.58 }, { opacity: 1 }],
-            { duration: 180, easing: 'cubic-bezier(0.22, 1, 0.36, 1)' }
-          );
-        }
+        renderSkylineToolLegend(enrichedCells);
+        controller.setData({
+          cells: enrichedCells,
+          monthLabels: heat.monthLabels,
+          weeks: heat.weeks,
+          metric: state.heatmapMetric,
+          colorMode: state.skylineColorMode,
+          reducedMotion: prefersReducedMotion(),
+          animateEntry: state.motion === 'entry',
+          monthLabel: (m) => monthLabel(m.label)
+        });
       } else {
+        // Fallback when Canvas 2D is unavailable
+        els.skylineStage?.classList.add('hidden');
+        els.heatFooter?.classList.add('hidden');
+        renderHeatLegend(false);
+        els.heatmap?.classList.remove('hidden');
+        if (heat.cells.length && modelApi?.isometricHeatmapSvg) {
+          els.heatmap.innerHTML = modelApi.isometricHeatmapSvg(heat, {
+            monthLabel: (m) => monthLabel(m.label),
+            dayMap: state.dayMap,
+            metric: state.heatmapMetric,
+            uid: 'dashIso',
+            initialHidden: false
+          });
+        } else {
+          els.heatmap.innerHTML = '';
+        }
+      }
+    } else {
+      els.skylineStage?.classList.add('hidden');
+      els.heatmap?.classList.remove('hidden');
+
+      const avail = Math.max(0, (els.heatmap.clientWidth || 0) - 4);
+      if (heat.weeks > 0 && avail > 0) {
+        const cell = Math.max(8, Math.min(20, (avail - heat.weeks * gap) / heat.weeks));
+        heat = charts.contribHeatmap(daily, { cell, gap, startDate: start, endDate: end, intensityKey });
+      }
+
+      const hideHeatmapForEntry = !prefersReducedMotion()
+        && (state.motion === 'entry' || els.heatmap.classList.contains('is-motion-pending'));
+
+      const heatGridSig = JSON.stringify([
+        state.selectedDeviceId,
+        state.heatmapView,
+        state.locale,
+        Math.round(avail),
+        start,
+        end
+      ]);
+      const heatValuesSig = JSON.stringify([
+        state.heatmapMetric,
+        daily.map((d) => [d.date, d.tokens, d.cost])
+      ]);
+
+      if (!heat.cells.length) {
+        lastHeatmapGridSig = '';
+        lastHeatmapValuesSig = '';
+        els.heatmap.innerHTML = '';
+      } else if (
+        heatGridSig === lastHeatmapGridSig
+        && !hideHeatmapForEntry
+        && els.heatmap.querySelector('svg.dash-heatmap:not(.dash-heatmap--iso)')
+      ) {
+        if (heatValuesSig !== lastHeatmapValuesSig) {
+          lastHeatmapValuesSig = heatValuesSig;
+          const baseCells = els.heatmap.querySelectorAll('.heat-base-layer .heat[data-d]');
+          const brightCells = els.heatmap.querySelectorAll('.heat-bright-layer .heat-bright');
+          const setLevel = (el, lvl) => {
+            for (let i = 0; i <= 4; i++) el.classList.remove(`lvl-${i}`);
+            el.classList.add(`lvl-${lvl}`);
+          };
+          heat.cells.forEach((c, idx) => {
+            const baseEl = baseCells[idx];
+            if (baseEl && baseEl.getAttribute('data-d') === c.date) {
+              setLevel(baseEl, c.intensity);
+              baseEl.setAttribute('data-t', String(Math.round((c.tokens || 0) * 100) / 100));
+              baseEl.setAttribute('data-cost', String(Math.round((c.cost || 0) * 100) / 100));
+            }
+            const brightEl = brightCells[idx];
+            if (brightEl) setLevel(brightEl, c.intensity);
+          });
+        }
+      } else if (heatGridSig !== lastHeatmapGridSig || heatValuesSig !== lastHeatmapValuesSig || hideHeatmapForEntry) {
+        lastHeatmapGridSig = heatGridSig;
+        lastHeatmapValuesSig = heatValuesSig;
         els.heatmap.innerHTML = charts.heatmapSvg(heat, {
           monthLabel: (m) => monthLabel(m.label),
           radius: 2.5,
@@ -2621,9 +2767,22 @@ function renderActivity(overview) {
           initialHidden: hideHeatmapForEntry
         });
       }
+
+      const show2dExtras = heat.cells.length > 0;
+      if (els.heatSummary) {
+        if (show2dExtras && insights && insights.activeDays > 0) {
+          const avgVal = state.heatmapMetric === 'cost'
+            ? formatCostCompact(insights.dailyAvgCost)
+            : formatCompact(insights.dailyAvgTokens);
+          els.heatSummary.textContent = `${t('dashboard.heatmap.activeSummary', { days: insights.activeDays })} · ${t('dashboard.heatmap.dailyAvg', { value: avgVal })}`;
+        } else {
+          els.heatSummary.textContent = '';
+        }
+      }
+      els.heatFooter?.classList.toggle('hidden', !show2dExtras);
+      renderHeatLegend(show2dExtras);
+      animateHeatmapEntry();
     }
-    renderHeatLegend(state.stageView === '2d' && heat.cells.length > 0);
-    animateHeatmapEntry();
   }
 
   const summary = overview?.scopedHistory?.summary || {};
@@ -2909,6 +3068,11 @@ function renderNow() {
     b.classList.toggle('active', active);
     b.setAttribute('aria-pressed', String(active));
   });
+  els.skylineColorBtns?.forEach((b) => {
+    const active = b.dataset.color === state.skylineColorMode;
+    b.classList.toggle('active', active);
+    b.setAttribute('aria-pressed', String(active));
+  });
   els.breakdownModeBtns.forEach((b) => {
     const active = b.dataset.bd === state.breakdownMode;
     b.classList.toggle('active', active);
@@ -3073,8 +3237,12 @@ function showHeatTooltip(date, day, evOrCell) {
   html += `<div class="tt-row"><span class="tt-name">${tokLabel}</span><span class="tt-val">${formatCompact(tokens)}</span></div>`;
   const missing = Number(day?.unpricedTokens || 0);
   if (cost > 0 || missing > 0) html += `<div class="tt-row"><span class="tt-name">${costLabel}</span><span class="tt-val">${formatCost(cost, missing)}</span></div>`;
+  if (day?.topClient?.label && typeof displayColor === 'function' && typeof escapeHtml === 'function') {
+    html += `<div class="tt-row"><span class="tt-dot" data-c="${escapeHtml(displayColor(day.topClient.color))}"></span><span class="tt-name">${escapeHtml(t('dashboard.ledger.topTool'))}</span><span class="tt-val">${escapeHtml(day.topClient.label)}</span></div>`;
+  }
   if (missing > 0) html += `<div class="tt-sub">${t('usage.excludedFromCost', { tokens: Math.round(missing).toLocaleString('en-US') })}</div>`;
   els.tooltip.innerHTML = html;
+  if (day?.topClient?.label && typeof applySwatchColors === 'function') applySwatchColors(els.tooltip);
   positionTooltip(evOrCell);
 }
 
@@ -3500,6 +3668,21 @@ els.heatmapMetricBtns.forEach((b) => b.addEventListener('click', () => {
   window.tokenMonitor.updateSettings({ heatmapMetric: state.heatmapMetric });
 }));
 
+els.skylineColorBtns?.forEach((b) => b.addEventListener('click', () => {
+  const nextColor = b.dataset.color === 'tool' ? 'tool' : 'heat';
+  if (state.skylineColorMode === nextColor) return;
+  hideTooltip();
+  state.skylineColorMode = nextColor;
+  state.motion = 'update';
+  activateSegButton(els.skylineColorBtns, b);
+  render();
+}));
+
+els.skylineReset?.addEventListener('click', () => {
+  dismissSkylineHint();
+  skylineController?.resetCamera?.();
+});
+
 els.breakdownModeBtns.forEach((b) => b.addEventListener('click', () => {
   if (state.breakdownMode === b.dataset.bd) return;
   state.breakdownMode = b.dataset.bd;
@@ -3656,6 +3839,7 @@ window.addEventListener('keydown', (ev) => {
 els.themeToggle.addEventListener('click', () => {
   state.flat = !state.flat;
   els.body.classList.toggle('flat', state.flat);
+  skylineController?.refreshTheme?.();
   window.tokenMonitor.updateSettings({ dashboardFlat: state.flat });
 });
 els.refreshBtn.addEventListener('click', () => { void manualRefresh(); });
@@ -3728,6 +3912,7 @@ window.addEventListener('resize', () => {
   hideTooltip();
   setDeviceMenuOpen(false);
   syncAllSegIndicators({ animate: false });
+  skylineController?.resize?.();
   clearTimeout(resizeTimer);
   resizeTimer = setTimeout(() => { state.motion = 'none'; render(); }, 120);
 });
