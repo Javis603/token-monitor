@@ -8226,6 +8226,10 @@ function setupHomeActivityScroller(scroller, onReady = null) {
   };
   scroller.addEventListener('scroll', () => {
     scroller.classList.toggle('is-scrolled', scroller.scrollLeft > 2);
+    // Our own restore dispatches its scroll event a frame later. While the window is
+    // being resized the width has changed again by then, so recording that event would
+    // turn the right-edge snap into a user scroll back. The hover listener consumes it.
+    if (homeActivityProgrammaticScrollers.has(scroller)) return;
     const record = homeOverviewApi.homeActivityScrollRecord({
       scrollLeft: scroller.scrollLeft,
       scrollWidth: scroller.scrollWidth,
