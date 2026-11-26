@@ -3087,7 +3087,14 @@ function startCollector(options) {
           for (const period of Object.values(anchor.dailySessionPastDays || {})) {
             for (const key of revokedLinks) {
               const row = period?.sessions?.[key];
-              if (row) revokeT3SessionLinks(row);
+              // Past-day rows normally carry no launch-entry attribution, but
+              // a revoked key must not leave one behind if a row ever holds
+              // it: the revocation invalidates the identity the entry came
+              // from, exactly as it invalidates the link.
+              if (row) {
+                revokeT3SessionLinks(row);
+                delete row.sessionEntry;
+              }
             }
           }
           for (const period of ['today', 'month', 'allTime']) {
