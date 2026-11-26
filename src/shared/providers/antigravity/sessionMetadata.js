@@ -270,16 +270,23 @@ function resolveSessionMetadata(sessionIds, context = {}) {
   const entryEvidenceFor = (sessionId, source) => {
     if (source && typeof source === 'object') return source.t3 ? 'verified-t3' : '';
     if (typeof source === 'string' && source) {
-      if (acpSummaryDbs.has(source)) return 'verified-t3';
+      // The persisted source is only evidence while this pass still sees the
+      // store and a validated row for the session: a confirmed miss or an
+      // unreadable store claims nothing, so an attribution already held can
+      // survive as unavailable instead of being re-proven by stale rows.
       const selected = cache.get(source);
-      return selected?.stamp && selected.validatedIds.has(sessionId) ? 'native' : '';
+      const validated = selected && currentStamps.get(source) && selected.validatedIds.has(sessionId);
+      if (!validated) return '';
+      return acpSummaryDbs.has(source) ? 'verified-t3' : 'native';
     }
     return '';
   };
 
+  const currentStamps = new Map();
   for (const dbPath of candidates) {
     const canReadTurn = canReadTurns(dbPath);
     const stamp = databaseStamp(dbPath);
+    currentStamps.set(dbPath, stamp);
     let cached = cache.get(dbPath);
     if (!stamp) {
       for (const id of sessionIds) {
