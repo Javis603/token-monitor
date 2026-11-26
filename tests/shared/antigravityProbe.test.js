@@ -1292,3 +1292,99 @@ test('probe keeps the full discovery budget when there is no explicit hub port',
   assert.equal(discoveryResolved, true, 'discovery must be allowed to finish after half the deadline');
   assert.equal(result.accountEmail, 'nohub@example.com');
 });
+
+test('listeningPorts (win32) uses windowsTcpTable without spawning PowerShell', async () => {
+  const ports = await probe.listeningPorts(64252, {
+    platform: 'win32',
+    ipv4LoopbackOnly: true,
+    windowsTcpTable: {
+      readWindowsListeningPorts(pid, options) {
+        assert.equal(pid, 64252);
+        assert.equal(options.ipv4LoopbackOnly, true);
+        return [49931];
+      }
+    }
+  });
+  assert.deepEqual(ports, [49931]);
+
+  const emptyErr = await probe.listeningPorts(64252, {
+    platform: 'win32',
+    windowsTcpTable: { readWindowsListeningPorts: () => [] }
+  }).catch((error) => error);
+  assert.equal(emptyErr.status, 'unavailable');
+
+  // When native binding is unavailable (returns null), falls back to PowerShell.
+  const fallbackErr = await probe.listeningPorts(64252, {
+    platform: 'win32',
+    timeoutMs: 50,
+    windowsTcpTable: { readWindowsListeningPorts: () => null }
+  }).catch((error) => error);
+  assert.ok(fallbackErr === null || fallbackErr instanceof Error);
+});
+
+test('desktop RPC uses windowsTcpTable on win32 without spawning PowerShell', async (t) => {
+  const { port, close } = await startStubHttpServer((req, res) => {
+    assert.equal(req.headers['x-codeium-csrf-token'], 'native-token');
+    req.resume();
+    res.writeHead(200, { 'content-type': 'application/json' });
+    res.end('{"native":true}');
+  });
+  t.after(close);
+
+  let ownershipChecks = 0;
+  const result = await probe.callLs({
+    scheme: 'http',
+    port,
+    desktopPid: process.pid,
+    csrfToken: 'native-token',
+    method: 'Heartbeat',
+    timeoutMs: 2000
+  }, {
+    platform: 'win32',
+    windowsTcpTable: {
+      isWindowsLoopbackTcpSocketOwned({ localPort, remotePort, owningPid }) {
+        ownershipChecks += 1;
+        assert.equal(localPort, port);
+        assert.ok(Number.isInteger(remotePort) && remotePort > 0);
+        assert.equal(owningPid, process.pid);
+        return ownershipChecks >= 2;
+      }
+    }
+  });
+
+  assert.deepEqual(result, { native: true });
+  assert.equal(ownershipChecks, 2);
+});
+
+// When a source has no explicit hub-port fallback stage, groupedQuotaFromCandidates
+// must keep the full remaining probe deadline instead of halving it into an
+// artificial timeout before the first RPC settles.
+test('probe keeps the full remaining quota budget when there is no fallback stage', async () => {
+  const probeTimeoutMs = 900;
+  const result = await probe.probe({
+    probeTimeoutMs,
+    detectProcessInfos: async () => {
+      await new Promise((resolve) => setTimeout(resolve, 450));
+      return [{ pid: 1, kind: 'app', csrfToken: 'csrf', desktopRpcPort: 54733 }];
+    },
+    listeningPorts: async () => [54733],
+    callLs: async ({ method, timeoutMs }) => {
+      if (method === 'GetUnleashData') return {};
+      if (method === 'RetrieveUserQuotaSummary') {
+        assert.ok(timeoutMs > 300, `expected full remaining quota budget (>300ms), got ${timeoutMs}ms`);
+        await new Promise((resolve) => setTimeout(resolve, 260));
+        return {
+          groups: [{
+            displayName: 'Gemini Models',
+            buckets: [{ bucketId: 'gemini-5h', remainingFraction: 0.5 }]
+          }]
+        };
+      }
+      if (method === 'GetUserStatus') return { userStatus: { email: 'full-budget@example.com' } };
+      throw probe._errorWithStatus('unavailable', 'unexpected method');
+    }
+  });
+
+  assert.equal(result.accountEmail, 'full-budget@example.com');
+  assert.equal(result.windows[0].remainingFraction, 0.5);
+});
