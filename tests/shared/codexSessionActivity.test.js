@@ -531,10 +531,19 @@ test('T3 Antigravity ACP renews existing sessions beyond the usage window and cl
     UPDATE orchestration_v2_projection_provider_threads SET driver = 'antigravity';
     UPDATE orchestration_v2_projection_runtime_requests SET status = 'resolved';
   `);
+  const secondId = '22222222-2222-4222-8222-222222222222';
+  f.db.prepare(`INSERT INTO orchestration_v2_projection_provider_threads
+    SELECT 'zero-provider', thread_id, driver, provider, status, last_run_ordinal, updated_at, ?
+    FROM orchestration_v2_projection_provider_threads WHERE provider_thread_id = 'provider'`)
+    .run(JSON.stringify({ nativeThreadRef: { nativeId: secondId } }));
+  f.db.exec(`INSERT INTO orchestration_v2_projection_runs
+    SELECT 'zero-run', 'zero-provider', ordinal, status, requested_at, completed_at
+    FROM orchestration_v2_projection_runs WHERE run_id = 'run'`);
   const providers = sessionActivityProvidersFor(['antigravity']);
   const key = 'antigravity:' + nativeId;
   const sessions = {
     [key]: { client: 'antigravity', sessionId: nativeId, totalTokens: 7, lastUsedAt: new Date(now - 3_600_000).toISOString() },
+    ['antigravity:' + secondId]: { client: 'antigravity', sessionId: secondId, totalTokens: 0 },
     'antigravity:desktop': { client: 'antigravity', sessionId: 'desktop', totalTokens: 3 }
   };
   const updatedAt = new Date(now - 60_000).toISOString();
@@ -556,10 +565,22 @@ test('T3 Antigravity ACP renews existing sessions beyond the usage window and cl
     .run(new Date(later + 1000).toISOString());
   const finished = await refresh(renewed, later + 1000);
   assert.equal(live.sessionActivityState(live.sessionWithActivity(finished.today, key), later + 1000), 'idle');
+  const runtime = fs.readFileSync(f.runtimeFile);
   fs.unlinkSync(f.runtimeFile);
   const exited = await refresh(renewed, later + 2000);
   assert.equal(live.sessionActivityState(live.sessionWithActivity(exited.today, key), later + 2000), 'idle');
   assert.deepEqual(activityPatch(renewed, exited).observations.map(row => row.liveActivity.state), ['unknown']);
+
+  fs.writeFileSync(f.runtimeFile, runtime);
+  const recent = { ...exited, today: { ...exited.today, sessions: {
+    ...sessions, [key]: { ...sessions[key], lastUsedAt: new Date(later).toISOString(), turnEnded: false }
+  } } };
+  const recoveredAt = later + 3000;
+  assert.equal(live.sessionActivityState(live.sessionWithActivity(recent.today, key), recoveredAt), 'running');
+  const recovered = await refresh(recent, recoveredAt);
+  assert.equal(live.sessionActivityState(live.sessionWithActivity(recovered.today, key), recoveredAt), 'idle');
+  assert.equal(recovered.today.sessionActivity[key].observedAt, exited.today.sessionActivity[key].observedAt);
+  assert.equal(await refresh(recovered, recoveredAt + 10_000), recovered);
 });
 
 test('unchanged Codex discovery reuses locations while T3 state and process validation stay fresh', async t => {

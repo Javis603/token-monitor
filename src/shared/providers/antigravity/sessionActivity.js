@@ -28,9 +28,15 @@ function projectActivity(summary, { readings }, now = Date.now()) {
     const reading = readings.get(sessionId);
     // Keep permission and input prompts outside this adapter's running/idle
     // scope. In the absence of live evidence, restore the ordinary turn state.
-    const liveActivity = reading?.state === 'running' || reading?.state === 'idle'
+    let liveActivity = reading?.state === 'running' || reading?.state === 'idle'
       ? reading
       : { state: 'unknown', observedAt: new Date(now).toISOString() };
+    // T3 only returns recent completions. A recovered completion can replace
+    // the clearance once without advancing its clock on subsequent reads.
+    if (liveActivity.state === 'idle' && previous?.state === 'unknown'
+      && Date.parse(liveActivity.observedAt) < Date.parse(previous.observedAt)) {
+      liveActivity = { ...liveActivity, observedAt: previous.observedAt };
+    }
     if (!previous && liveActivity.state === 'unknown') continue;
     if (previous?.state === liveActivity.state && (liveActivity.state === 'unknown'
       || Date.parse(liveActivity.observedAt) - Date.parse(previous.observedAt) < RENEW_INTERVAL_MS)) continue;

@@ -133,7 +133,9 @@
     const result = [];
     for (const id of selected) for (const location of locationsFor(summary, client, id)) {
       const session = live.sessionWithActivity(periodNamed(summary, location.name), location.key);
-      if (session && !live.isArchivedSession(session)) result.push({ ...location, session });
+      // Antigravity only projects activity onto periods with recorded usage.
+      if (session && !live.isArchivedSession(session)
+        && (client !== 'antigravity' || session.totalTokens > 0)) result.push({ ...location, session });
     }
     return result;
   }

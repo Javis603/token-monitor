@@ -318,7 +318,7 @@ Token Monitor 对 Token 用量、账户额度和 session 明细分别支持：
 | 会话模型与推理强度 | Claude Code, Codex | 仅显示会话中明确记录的模型与推理强度。 |
 | 推理 Token 数 | Codex, OpenCode, Pi, Oh My Pi, OmO Native, CodeBuddy, WorkBuddy, Reasonix, DeepSeek Harness | — |
 | 回合开始／完成识别 | Claude Code, Codex, OpenCode, Cursor, Antigravity, CodeBuddy, WorkBuddy, DeepSeek Harness | 依据工具记录的回合信号。其他工具或缺少有效信号时，最后活动后约 10 分钟内估算为运行中。 |
-| 原生运行中／等待输入状态 | Claude Code, Codex, Antigravity | T3 Code 内的 Antigravity 支持实时运行中状态。 |
+| 原生运行中／等待输入状态 | Claude Code, Codex, Antigravity | T3 Code 内的 Antigravity ACP 仅报告运行中和空闲状态。 |
 | 父会话／子代理分组 | Codex, Antigravity, Oh My Pi, ZCode；具有可验证父会话链接的 T3 Code 会话 | Claude Code 的分组通过 T3 Code 提供。 |
 | 同一对话的续接记录分组 | Codex；具有已验证线程链接的 T3 Code 会话 | — |
 | 切换本地账号 | Codex | 可切换至已添加到 Token Monitor 的账号。 |
