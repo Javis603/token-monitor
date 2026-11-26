@@ -42,7 +42,7 @@ const {
   watchIgnoreMatcher,
   clientWatchCandidates,
   selfSyncSourceRootsForClients,
-  antigravitySummaryWatchSources,
+  antigravityMetadataWatchSources,
   watchClientRootsForClients,
   watchPathsForClients,
   watchAttributionRootsForClients,
@@ -59,7 +59,8 @@ const {
   WATCH_REFUSAL_CODES
 } = require('./watchPolicy');
 const { createSessionActivityScheduler } = require('./sessionActivityScheduler');
-const { activityWatchSources, activityClientsForPath } = require('./sessionActivityWatch');
+const { activityWatchSources, activityClientsForPath, comparablePath } = require('./sessionActivityWatch');
+const { readT3AntigravityContextStamp } = require('./t3/sessionMetadata');
 const { localDayKey, parseGraphResult, normalizeHistory, mergeHistories, mergeDailyMaps } = require('./history');
 const {
   graphFromDailyHistoryArchive, readDailyHistoryArchive, retainDailyHistory, retainLiveDailyHistory
@@ -3520,7 +3521,7 @@ function startCollector(options) {
       Object.entries(selfSyncSourceRootsForClients(clients, sourceOptions))
         .map(([client, dirs]) => [client, dirs.map(canonicalWatchPath)])
     );
-    const summaryFiles = new Set(antigravitySummaryWatchSources(sourceOptions)
+    const antigravityMetadataFiles = new Set(antigravityMetadataWatchSources(sourceOptions)
       .flatMap(({ file }) => [file, `${file}-wal`]));
     const usageDirs = [...new Set(Object.values(rootsByClient).flat())];
     const activitySources = options.sessionActivityPolling === false ? [] : activityWatchSources(trackedClients, {
@@ -3532,6 +3533,14 @@ function startCollector(options) {
     watchedCodexHomes = JSON.stringify(watchOptions.codexHomes);
     const directoryKey = JSON.stringify([dirs, activitySources, watchOptions.senpiSources, watchedCodexHomes]);
     if (directoryKey === watchedDirectoryKey) return;
+    const t3ContextFiles = new Map();
+    const t3ContextStamps = new Map();
+    for (const source of activitySources) {
+      if (path.basename(source.target) !== 'statev2.sqlite' || !source.clients.includes('antigravity')) continue;
+      t3ContextFiles.set(comparablePath(source.target), source.target);
+      t3ContextFiles.set(comparablePath(`${source.target}-wal`), source.target);
+      t3ContextStamps.set(source.target, readT3AntigravityContextStamp(source.target, options.sessionMetadataDeps));
+    }
     // Initial adds are suppressed, so remember an existing exporter name
     // before the first event arrives. It may be an unlink.
     copilotExporter?.rememberExistingAlias();
@@ -3555,6 +3564,16 @@ function startCollector(options) {
       const activityClients = activityClientsForPath(filePath, activitySources);
       if (activityClients.length || eventClients.some(isSessionActivityClient)) {
         activityScheduler?.request();
+      }
+      // T3 also writes activity and other providers to this database. Refresh
+      // Antigravity usage metadata only when its context projection changes.
+      const contextFile = t3ContextFiles.get(comparablePath(path.resolve(filePath || '.')));
+      if (contextFile) {
+        const stamp = readT3AntigravityContextStamp(contextFile, options.sessionMetadataDeps);
+        if (stamp !== undefined && stamp !== t3ContextStamps.get(contextFile)) {
+          t3ContextStamps.set(contextFile, stamp);
+          if (!eventClients.includes('antigravity')) eventClients.push('antigravity');
+        }
       }
       // The read-only T3 reader can recreate -shm itself. Neither it nor other
       // activity-only writes are token usage, so they cannot request a scan.
@@ -3581,8 +3600,8 @@ function startCollector(options) {
         reasonixNativeSessionCache.invalidate(filePath);
       }
       for (const client of clientsForWatchPath(filePath, sourceSyncRootsByClient, attributionIgnores)) {
-        // Catalog changes refresh labels and turn state, not the RPC usage cache.
-        if (client === 'antigravity' && summaryFiles.has(path.resolve(filePath))) continue;
+        // Catalog and context changes only refresh session metadata.
+        if (client === 'antigravity' && antigravityMetadataFiles.has(path.resolve(filePath))) continue;
         // Another client's scan root may overlap the desktop store. Its unrelated
         // files can request a local scan, but only database/WAL writes earn a
         // Cursor cloud sync.

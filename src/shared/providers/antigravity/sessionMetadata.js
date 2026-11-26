@@ -9,6 +9,8 @@ const { discoverAntigravityAcpPaths } = require('./acpPaths');
 const { antigravityCliDataDir } = require('../../clientSources');
 const { readT3SessionRelationResult } = require('../../t3/sessionMetadata');
 const { RUNNING_WINDOW_MS } = require('../../sessionLive');
+const { normalizeSessionContext } = require('../../sessionContext');
+const { cliContextPath, readCliContext } = require('./cliContext');
 
 // Deferred like cursor: importing this resolver must not emit Node's
 // experimental node:sqlite warning for collectors that never see an Antigravity row.
@@ -331,10 +333,12 @@ function resolveSessionMetadata(sessionIds, context = {}) {
   const { facts: t3Relations, status: t3Status, completedStores, ambiguous, ownershipComplete } = readT3SessionRelationResult(sessionIds, {
     ...context.deps,
     includeAntigravityTitles: true,
+    includeAntigravityContext: !context.deps?.scopedHome,
     includeOwnershipStatus: true,
     homeDir: home,
     useEnvRoot: !context.deps?.scopedHome
   });
+  const cliReadings = readCliContext(sqlite, cliContextPath({ homeDir: home, env }), sessionIds, context.now ?? Date.now());
   for (const sessionId of sessionIds) {
     const key = `antigravity:${sessionId}`;
     const previous = context.metadata?.get(key);
@@ -394,6 +398,18 @@ function resolveSessionMetadata(sessionIds, context = {}) {
     }
     if (ambiguous?.has(key) || (ownershipComplete && !match && (!previousT3Store || completedStores?.has(previousT3Store)))) {
       result.set(sessionId, { catalogOnly: true, ...result.get(sessionId), t3ThreadRevoked: true });
+    }
+    let contextReading = !match && !ambiguous?.has(key) ? cliReadings.get(sessionId) : undefined;
+    if (match && Object.hasOwn(match, 'contextUsage')) {
+      const { contextTokens, contextWindow } = match.contextUsage;
+      contextReading = Number.isSafeInteger(contextTokens) && Number.isSafeInteger(contextWindow)
+        ? normalizeSessionContext(match.contextUsage) : null;
+    }
+    if (contextReading !== undefined || Object.hasOwn(previous || {}, 'contextWindow')) {
+      result.set(sessionId, {
+        catalogOnly: true, ...result.get(sessionId),
+        ...(contextReading || { contextTokens: 0, contextWindow: 0 })
+      });
     }
     const meta = result.get(sessionId);
     const turn = turns.get(sessionId);
