@@ -5,7 +5,6 @@ const test = require('node:test');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
-const net = require('node:net');
 const http = require('node:http');
 const { spawn, spawnSync } = require('node:child_process');
 const { once } = require('node:events');
@@ -321,17 +320,12 @@ for (const consumeRequest of [false, true]) {
   });
 }
 
-test('standalone SIGTERM saves an accepted upload before exiting', { skip: process.platform === 'win32' }, async (t) => {
+test('standalone SIGTERM saves an accepted upload before exiting', { skip: process.platform === 'win32', timeout: 15000 }, async (t) => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'tm-signal-'));
   const dataFile = path.join(dir, 'devices.json');
-  const listener = net.createServer();
-  listener.listen(0, '127.0.0.1');
-  await once(listener, 'listening');
-  const port = listener.address().port;
-  await new Promise((resolve) => listener.close(resolve));
   const child = spawn(process.execPath, [
     path.resolve(__dirname, '../../src/hub/server.js'),
-    `--port=${port}`, '--host=127.0.0.1', `--dataFile=${dataFile}`,
+    '--port=0', '--host=127.0.0.1', `--dataFile=${dataFile}`,
     '--persistIntervalMs=300000'
   ], { env: { ...process.env, TOKEN_MONITOR_SECRET: 'test-secret' } });
   t.after(() => {
@@ -339,13 +333,18 @@ test('standalone SIGTERM saves an accepted upload before exiting', { skip: proce
     fs.rmSync(dir, { recursive: true });
   });
   const exited = once(child, 'exit');
-  await new Promise((resolve, reject) => {
+  let output = '', stderr = '';
+  child.stderr.on('data', (chunk) => { stderr += chunk; });
+  const port = await new Promise((resolve, reject) => {
     child.stdout.on('data', (chunk) => {
-      if (String(chunk).includes('hub listening')) resolve();
+      output += chunk;
+      const match = output.match(/hub listening on http:\/\/127\.0\.0\.1:(\d+)\r?\n/);
+      if (match) resolve(Number(match[1]));
     });
     child.once('error', reject);
-    child.once('exit', (code) => reject(new Error(`Hub exited before listening: ${code}`)));
+    child.once('exit', (code) => reject(new Error(`Hub exited before listening: ${code}: ${stderr}`)));
   });
+  assert.ok(port > 0, 'Hub must report the assigned ephemeral port');
   const response = await fetch(`http://127.0.0.1:${port}/api/ingest`, {
     method: 'POST',
     headers: { 'content-type': 'application/json', authorization: 'Bearer test-secret' },

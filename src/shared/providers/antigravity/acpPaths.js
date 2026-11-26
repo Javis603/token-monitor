@@ -3,7 +3,7 @@
 
 const fs = require('node:fs');
 const path = require('node:path');
-const { t3HomeDir } = require('../../t3SessionMetadata');
+const { t3HomeDir } = require('../../t3/sessionMetadata');
 
 const ANTIGRAVITY_ACP_SOURCE_ID = 't3-antigravity-acp';
 

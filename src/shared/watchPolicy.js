@@ -23,6 +23,7 @@ const { ANTIGRAVITY_ACP_SOURCE_ID, discoverAntigravityAcpPaths } = require('./pr
 const { activityWatchIgnored } = require('./sessionActivityWatch');
 const { antigravityDataRoots } = require('./providers/antigravity/selfSync');
 const { antigravityConversationSummaryCandidates } = require('./providers/antigravity/sessionMetadata');
+const { cliContextPath } = require('./providers/antigravity/cliContext');
 const { cursorDesktopWatchRoots, isCursorDesktopStateWrite } = require('./providers/cursor/desktopState');
 const { catpawDatabaseName } = require('./providers/catpaw/paths');
 const { isDshSessionLogName } = require('./providers/dsh/sessionFiles');
@@ -92,11 +93,14 @@ function selfSyncSourceRootsForClients(clientsCsv, options = {}) {
   return rootsByClient;
 }
 
-function antigravitySummaryWatchSources(options = {}) {
-  return antigravityConversationSummaryCandidates({
+function antigravityMetadataWatchSources(options = {}) {
+  const catalogs = antigravityConversationSummaryCandidates({
     home: options.homeDir || os.homedir(),
-    env: options.env || process.env
-  }).map((candidate) => {
+    env: options.env || process.env,
+    useEnvRoot: options.useEnvRoot !== false,
+    antigravityAcpPaths: options.antigravityAcpPaths
+  });
+  return [...catalogs, cliContextPath(options)].map((candidate) => {
     const file = canonicalWatchFilePath(candidate);
     return { file, dir: path.dirname(file) };
   });
@@ -134,7 +138,7 @@ function watchClientRootsForClients(clientsCsv, options = {}) {
   if (enabled.has('antigravity')) {
     // Watch the parent so a summary DB or WAL created after startup is seen.
     // Its policy below admits only those exact files, never the surrounding tree.
-    const summaryDirs = antigravitySummaryWatchSources(options).map(({ dir }) => dir).filter(dirExists);
+    const summaryDirs = antigravityMetadataWatchSources(options).map(({ dir }) => dir).filter(dirExists);
     if (acpDirs.length > 0 || summaryDirs.length > 0) {
       rootsByClient.antigravity = [...new Set([...(rootsByClient.antigravity || []), ...acpDirs, ...summaryDirs])];
     }
@@ -192,7 +196,7 @@ function watchAttributionRootsForClients(clientsCsv, watchRoots = null, options 
       ...(options.antigravityAcpPaths ?? discoverAntigravityAcpPaths(options)),
       ...(normalizeCustomScanPaths(options.customScanPaths, options).antigravity || [])
     ].map(canonicalRoot));
-    const summaries = antigravitySummaryWatchSources(options);
+    const summaries = antigravityMetadataWatchSources(options);
     const summaryDirs = new Set(summaries.map(({ dir }) => dir));
     const watched = new Set(rootsByClient.antigravity.map(canonicalRoot));
     const antigravity = rootsByClient.antigravity.filter((dir) => !summaryDirs.has(canonicalRoot(dir)) || usageRoots.has(canonicalRoot(dir)));
@@ -606,7 +610,7 @@ function watchPolicyEntries(clientsCsv, options = {}) {
     return false;
   });
   if (antigravityEnabled) {
-    for (const { file, dir } of antigravitySummaryWatchSources(options)) {
+    for (const { file, dir } of antigravityMetadataWatchSources(options)) {
       const name = path.basename(file);
       bound('antigravity', [dir], directChildOnly((child) => child === name || child === `${name}-wal`));
     }
@@ -1041,7 +1045,7 @@ function isSelfWatchSqliteSidecarEvent(filePath, rootsByClient = {}) {
 module.exports = {
   clientWatchCandidates,
   selfSyncSourceRootsForClients,
-  antigravitySummaryWatchSources,
+  antigravityMetadataWatchSources,
   watchClientRootsForClients,
   watchPathsForClients,
   watchAttributionRootsForClients,

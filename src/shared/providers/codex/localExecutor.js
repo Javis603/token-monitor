@@ -65,8 +65,15 @@ function localExecutorIds(options = {}) {
   });
 }
 
+const DOTS_THREAD_SOURCES = new Map([
+  ['codex_work_cca', 'aeon_child'],
+  ['codex_work_web', 'user']
+]);
+const DOTS_ORIGINATORS = Object.freeze([...DOTS_THREAD_SOURCES.keys()]);
+
 function localThreadEnvironment(thread, executorIds) {
-  if (thread?.originator !== 'codex_work_cca' || thread.threadSource !== 'aeon_child'
+  const threadSource = DOTS_THREAD_SOURCES.get(thread?.originator);
+  if (!threadSource || thread.threadSource !== threadSource
     || thread.path || thread.ephemeral || typeof thread.id !== 'string' || !thread.id
     || typeof thread.model !== 'string' || !thread.model) return null;
   const environments = thread.environments;
@@ -77,4 +84,4 @@ function localThreadEnvironment(thread, executorIds) {
   return { environmentId: environment.environmentId, cwd: environment.cwd };
 }
 
-module.exports = { executorIdsFromProcesses, localExecutorIds, localThreadEnvironment };
+module.exports = { DOTS_ORIGINATORS, executorIdsFromProcesses, localExecutorIds, localThreadEnvironment };

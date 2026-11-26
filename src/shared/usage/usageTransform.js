@@ -8,7 +8,7 @@ const {
   sessionUsageArchiveDate
 } = require('./sessionUsageArchive');
 const { readSessionUsageArchiveSnapshot } = require('./sessionUsageArchiveStore');
-const { applyProjectRollups } = require('../usage');
+const { applyProjectRollups, projectRollupFromSessions } = require('../usage');
 
 // Every setting project() and transform() read. A transform running on another
 // thread is handed exactly these (see usageTransformSettings).
@@ -25,6 +25,45 @@ function usageTransformSettings(settings = {}) {
     if (settings?.[key] !== undefined) picked[key] = settings[key];
   }
   return picked;
+}
+
+// Retained legacy data can contain a Month total without exact daily slices.
+// Keep publishing the ordinary record if day rows cannot reconstruct its usage.
+function dailySessionsCoverSummary(days, summary) {
+  const today = summary.periodWindows?.today?.key;
+  const windows = {
+    ...summary.nativeRangeWindows,
+    today: { start: today, end: today },
+    month: { start: today?.slice(0, 7) + '-01', end: today }
+  };
+  // Hub aggregates expose USD to six decimal places. Allow sub-resolution
+  // noise from summing the same observations in different orders.
+  const costsMatch = (left, right) => Math.abs((left || 0) - (right || 0)) <= 0.0000005;
+  for (const [name, window] of Object.entries(windows)) {
+    const expected = name === 'today' || name === 'month' ? summary[name] : summary.nativeRanges?.[name];
+    if (!expected || !window.end) return false;
+    const totals = new Map();
+    let tokens = 0;
+    let cost = 0;
+    for (const [day, period] of Object.entries(days)) {
+      if (day < window.start || day > window.end) continue;
+      tokens += period.totalTokens;
+      cost += period.costUsd || 0;
+      for (const [key, row] of Object.entries(period.sessions || {})) {
+        const total = totals.get(key) || { tokens: 0, cost: 0 };
+        total.tokens += row.totalTokens;
+        total.cost += row.costUsd || 0;
+        totals.set(key, total);
+      }
+    }
+    const sessions = Object.entries(expected.sessions || {});
+    if (tokens !== expected.totalTokens || !costsMatch(cost, expected.costUsd) || totals.size !== sessions.length
+      || sessions.some(([key, row]) => {
+        const total = totals.get(key);
+        return !total || total.tokens !== row.totalTokens || !costsMatch(total.cost, row.costUsd);
+      })) return false;
+  }
+  return true;
 }
 
 // The widget's usage transform: every collected summary passes through here on
@@ -107,6 +146,22 @@ function createUsageTransform(options = {}) {
           mutate: true
         }), archive, { now, canonical: true, activeClients: settings.clients });
     delete visibleSummary.sessionUsageArchiveFullScan;
+    const days = summary.dailySessionPeriods;
+    if (days) {
+      const windows = Object.fromEntries(Object.keys(days).map(day => [day, { start: day, end: day }]));
+      const restored = settings.sessionUsageArchiveEnabled === false ? days
+        : applySessionDayArchive({ nativeRanges: days, nativeRangeWindows: windows }, archive, {
+          now, canonical: true, activeClients: settings.clients
+        }).nativeRanges;
+      if (dailySessionsCoverSummary(restored, visibleSummary)) {
+        visibleSummary.dailySessionPeriods = Object.fromEntries(Object.entries(restored).map(([day, period]) => [day, {
+          ...period,
+          projects: settings.projectsEnabled === false ? {} : projectRollupFromSessions(period.sessions)
+        }]));
+      } else {
+        delete visibleSummary.dailySessionPeriods;
+      }
+    }
     return settings.projectsEnabled === false ? visibleSummary : applyProjectRollups(visibleSummary);
   }
 
