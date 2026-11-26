@@ -585,6 +585,20 @@ test('T3 Antigravity ACP renews existing sessions beyond the usage window and cl
   const crossingExpiry = await refreshSessionActivity(recent, providers, {},
     { ...f.options, now: expiry - 1 }, { now: () => expiry });
   assert.equal(crossingExpiry, recent);
+
+  const rolledBackAt = later + 1500;
+  const materialized = { ...recent, today: { ...recent.today, sessionActivity: undefined, sessions: {
+    ...recent.today.sessions, [key]: { ...recent.today.sessions[key], liveActivity: exited.today.sessionActivity[key] }
+  } } };
+  const clock = t.mock.method(Date, 'now', () => rolledBackAt);
+  try {
+    const recoveredAfterRollback = await refresh(materialized, rolledBackAt);
+    const row = live.sessionWithActivity(recoveredAfterRollback.today, key);
+    assert.equal(row.liveActivity.state, 'idle');
+    assert.equal(row.liveActivity.observedAt, new Date(later + 1000).toISOString());
+  } finally {
+    clock.mock.restore();
+  }
 });
 
 test('unchanged Codex discovery reuses locations while T3 state and process validation stay fresh', async t => {

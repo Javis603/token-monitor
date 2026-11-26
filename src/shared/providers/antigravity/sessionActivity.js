@@ -36,9 +36,11 @@ function projectActivity(summary, { readings }, now = Date.now()) {
       : { state: 'unknown', observedAt: new Date(now).toISOString() };
     // T3 only returns recent completions. A recovered completion can replace
     // the clearance once without advancing its clock on subsequent reads.
-    if (liveActivity.state === 'idle' && previous?.state === 'unknown'
-      && Date.parse(liveActivity.observedAt) < Date.parse(previous.observedAt)) {
-      liveActivity = { ...liveActivity, observedAt: previous.observedAt };
+    if (liveActivity.state === 'idle' && previous?.state === 'unknown') {
+      const clearedAt = Date.parse(previous.observedAt);
+      if (clearedAt <= now && Date.parse(liveActivity.observedAt) < clearedAt) {
+        liveActivity = { ...liveActivity, observedAt: previous.observedAt };
+      }
     }
     if (!previous && liveActivity.state === 'unknown') continue;
     if (previous?.state === liveActivity.state && (liveActivity.state === 'unknown'
