@@ -110,7 +110,7 @@ async function resolveSyncedFixedPeriod(selection, devices, revisions, options) 
   }), null);
   return {
     status: 'ready', selection, range, devices: rows,
-    detailsAvailable: !fallback?.length,
+    detailsAvailable: fallback.every(({ period }) => period.totalTokens === 0 && period.costUsd === 0),
     period: { ...period, sessions }
   };
 }

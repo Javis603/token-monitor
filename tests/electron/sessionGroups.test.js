@@ -255,14 +255,14 @@ test('an unrelated range revision cannot keep a Today group open in Month', () =
       ]
     }
   };
-  const extract = name => source.match(new RegExp(`function ${name}\\(\\) \\{[\\s\\S]*?\\n\\}`))[0];
+  const extract = name => source.match(new RegExp(`function ${name}\\([^)]*\\) \\{[\\s\\S]*?\\n\\}`))[0];
   const context = {
     state, currentNativeRangeSnapshot: () => null, sessionRowsForPeriod: () => [],
     currentCalendarLocale: () => 'en-GB', fixedPeriodTodayKey: () => '2026-11-25',
     fixedPeriodRangesApi: { isDerived: () => false, supportsBreakdown: () => true, deviceDayState: () => null },
     window: { tokenMonitor: { getSyncedFixedPeriod() {} } }
   };
-  vm.runInNewContext(['syncedFixedPeriodKey', 'needsPagedSessions', 'pagedSessionsPending', 'followOpenSessionToPeriod']
+  vm.runInNewContext(['syncedFixedPeriodKey', 'syncedFixedPeriodScope', 'needsPagedSessions', 'pagedSessionsPending', 'followOpenSessionToPeriod']
     .map(extract).join('\n'), context);
   const todayGroup = { kind: 'session-group', period: 'today', summary: { key: 'session-group:example' } };
   state.openSession = todayGroup;
