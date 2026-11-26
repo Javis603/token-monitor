@@ -3265,23 +3265,41 @@ test('Alibaba CLI readings keep saved Cookie setup reachable while web readings 
 });
 
 
-test('QwenWork fallback accounts can start and cancel a stored browser sign-in', () => {
-  const source = functionBody(readRendererFile('app.js'), 'renderQwenworkStatus', 'renderOpenCodeProfiles');
-  for (const sourceId of ['environment', 'magpie', 'settings']) {
-    const hidden = new Map();
-    const state = { qwenworkSignInBusy: false, qwenworkSignInCancelable: false, settings: { qwenworkSessionConfigured: true, qwenworkSessionSource: sourceId } };
-    const render = vm.runInNewContext(`${source}\nrenderQwenworkStatus`, {
-      document: { getElementById: id => ({ classList: { toggle: (name, value) => hidden.set(id, value) } }) },
-      state, limitProviderEnabled: () => true, qwenworkAccountLinked: () => true,
-      qwenworkProviderStatus: () => ({ status: 'ok' }), qwenworkAccountStatusText: () => '',
-      accountShellApi: { render() {} }, renderSettingsSummaries() {}
-    });
-    render();
-    assert.equal(hidden.get('qwenworkSignInButton'), sourceId === 'settings');
-    state.qwenworkSignInBusy = true;
-    state.qwenworkSignInCancelable = true;
-    render();
+function qwenworkAccountOwner({ source = 'settings', readStatus = 'linked', cancelSignIn = async () => {} } = {}) {
+  const { create } = require('../../src/electron/renderer/limits/providerOwners/qwenwork');
+  const hidden = new Map();
+  const handlers = new Map();
+  const output = {};
+  let finishSignIn;
+  const owner = create({
+    document: { getElementById: id => ({
+      classList: { toggle: (_name, value) => hidden.set(id, value) },
+      addEventListener: (_name, fn) => handlers.set(id, fn)
+    }) },
+    getSettings: () => ({ qwenworkSessionConfigured: true, qwenworkSessionSource: source }),
+    getReading: () => ({ status: 'ok' }),
+    isEnabled: () => true,
+    accountShellApi: { render: value => Object.assign(output, value) },
+    limitProviderPresentationApi: { apiKeyAccountStatus: () => readStatus },
+    bridge: { signIn: () => new Promise(resolve => { finishSignIn = resolve; }), cancelSignIn, onLoginStatus() {} },
+    t: key => key,
+    refreshQuota() {}
+  });
+  owner.setup();
+  return { hidden, handlers, output, finish: () => finishSignIn({ ok: false }) };
+}
+
+test('QwenWork fallback accounts can start and cancel a stored browser sign-in', async () => {
+  for (const source of ['environment', 'magpie', 'settings']) {
+    const { hidden, handlers, finish } = qwenworkAccountOwner({ source });
+    assert.equal(hidden.get('qwenworkSignInButton'), source === 'settings');
+    if (source === 'settings') continue;
+    const signIn = handlers.get('qwenworkSignInButton')();
     assert.equal(hidden.get('qwenworkCancelSignInButton'), false);
+    await handlers.get('qwenworkCancelSignInButton')();
+    assert.equal(hidden.get('qwenworkCancelSignInButton'), true);
+    finish();
+    await signIn;
   }
 });
 
@@ -3294,7 +3312,7 @@ test('QwenWork login reconfigures the newly enabled provider before invalidation
   let handler;
   vm.runInNewContext(main.slice(start, end), {
     ipcMain: { handle: (_name, fn) => { handler = fn; } },
-    qwenworkLoginController: null, qwenworkLoginFlowId: '', AbortController,
+    initialLimitProvidersPending: true, qwenworkLoginController: null, qwenworkLoginFlowId: '', AbortController,
     runQwenworkDeviceFlowLogin: async () => ({ session: { access: 'fixture' } }),
     qwenworkAuthBaseUrl: () => '', qwenworkBaseUrl: () => '', process: { env: {} },
     shell: { openExternal() {} }, electronLimitsFetch() {}, settings,
@@ -3336,56 +3354,34 @@ test('QwenWork sign-in consumes the pending first-run provider seed only after t
 });
 
 test('QwenWork account status reports disabled, unchecked and failed states distinctly', () => {
-  const body = functionBody(readRendererFile('app.js'), 'qwenworkAccountStatusText', 'setCopilotManualExpanded');
-  for (const [status, expected] of [
+  for (const [readStatus, expected] of [
     ['disabled', 'settings.limits.status.disabled'],
     ['notChecked', 'settings.common.notChecked'],
     ['error', 'settings.common.error'],
     ['unavailable', 'settings.qwenwork.statusUnavailable']
   ]) {
-    const text = vm.runInNewContext(`${body}\nqwenworkAccountStatusText(null, true, 'settings', true)`, {
-      t: key => key,
-      limitProviderPresentationApi: { apiKeyAccountStatus: () => status }
-    });
-    assert.equal(text, expected, status);
+    const { output } = qwenworkAccountOwner({ readStatus });
+    assert.equal(output.statusText, expected, readStatus);
   }
 });
 
 test('QwenWork cancel keeps the flow cancelable when the cancel request fails', async () => {
-  const source = readRendererFile('app.js');
-  const marker = "document.getElementById('qwenworkCancelSignInButton').addEventListener('click', async () => {";
-  const start = source.indexOf(marker);
-  assert.notEqual(start, -1, 'QwenWork cancel handler should exist');
-  const end = source.indexOf('\n    });', start);
-  const block = source.slice(start + marker.length, end);
-  for (const fails of [false, true]) {
-    const state = { qwenworkSignInFlowId: 'flow-1', qwenworkSignInBusy: true, qwenworkSignInCancelable: true,
-      qwenworkLoginStatus: 'waiting', qwenworkErrorMessage: '' };
-    const handler = vm.runInNewContext(`(async () => {${block}})()`, {
-      state,
-      t: key => key,
-      window: { tokenMonitor: { qwenwork: { cancelSignIn: async () => {
-        if (fails) throw new Error('cancel IPC failed');
-      } } } },
-      isCurrentQwenworkSignInFlow: flowId => Boolean(state.qwenworkSignInFlowId) && flowId === state.qwenworkSignInFlowId,
-      setQwenworkError: message => { state.qwenworkErrorMessage = message || ''; },
-      renderQwenworkStatus() {}
-    });
-    await handler;
-    if (fails) {
-      assert.equal(state.qwenworkSignInFlowId, 'flow-1');
-      assert.equal(state.qwenworkSignInCancelable, true);
-      assert.equal(state.qwenworkSignInBusy, true);
-      assert.match(state.qwenworkErrorMessage, /cancel IPC failed/);
-    } else {
-      assert.equal(state.qwenworkSignInFlowId, '');
-      assert.equal(state.qwenworkSignInCancelable, false);
-      assert.equal(state.qwenworkSignInBusy, false);
+  let attempts = 0;
+  const { hidden, handlers, output, finish } = qwenworkAccountOwner({
+    source: 'magpie',
+    cancelSignIn: async () => {
+      if (++attempts === 1) throw new Error('cancel IPC failed');
     }
-  }
+  });
+  const signIn = handlers.get('qwenworkSignInButton')();
+  await handlers.get('qwenworkCancelSignInButton')();
+  assert.equal(hidden.get('qwenworkCancelSignInButton'), false);
+  assert.match(output.errorText, /cancel IPC failed/);
+  await handlers.get('qwenworkCancelSignInButton')();
+  assert.equal(hidden.get('qwenworkCancelSignInButton'), true);
+  finish();
+  await signIn;
 });
-
-
 
 test('QwenWork upgrade leaves saved selections and custom orders alone', () => {
   const main = fs.readFileSync(path.join(rendererDir, '..', 'main.js'), 'utf8');

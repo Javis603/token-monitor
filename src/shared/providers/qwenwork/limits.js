@@ -129,7 +129,7 @@ function creditAllowance(raw, name) {
   let usedPercent = explicitPercent === null ? (used / total) * 100 : explicitPercent;
   // The gateway reports 0.9893 for 98.93%. Multiply only when the value
   // matches the raw fraction; a genuine sub-1% percentage stays as reported.
-  if (usedPercent >= 0 && usedPercent <= 1 && Math.abs(usedPercent - (used / total)) < 0.001) {
+  if (explicitPercent !== null && usedPercent >= 0 && usedPercent <= 1 && Math.abs(usedPercent - (used / total)) < 0.001) {
     usedPercent *= 100;
   }
   return {
@@ -224,11 +224,32 @@ async function requestJson(fetchImpl, url, token, signal) {
   return response.json();
 }
 
+function inferredBillingWindowMinutes(resetsAtIso) {
+  const resetMs = Date.parse(resetsAtIso);
+  if (!Number.isFinite(resetMs)) return null;
+  const end = new Date(resetMs);
+  let year = end.getUTCFullYear();
+  let month = end.getUTCMonth() - 1;
+  if (month < 0) { month = 11; year -= 1; }
+  const lastDay = new Date(Date.UTC(year, month + 1, 0)).getUTCDate();
+  const startMs = Date.UTC(
+    year,
+    month,
+    Math.min(end.getUTCDate(), lastDay),
+    end.getUTCHours(),
+    end.getUTCMinutes(),
+    end.getUTCSeconds(),
+    end.getUTCMilliseconds()
+  );
+  const minutes = Math.round((resetMs - startMs) / 60_000);
+  return minutes > 0 ? minutes : null;
+}
+
 async function fetchQwenworkLimits(options = {}, deps = {}) {
   const env = deps.env || process.env;
   const now = (deps.now || Date.now)();
   const updatedAt = new Date(now).toISOString();
-  const base = { provider: 'qwenwork', source: 'web', updatedAt };
+  const base = { provider: 'qwenwork', source: '', updatedAt };
   let baseUrl;
   try {
     baseUrl = qwenworkBaseUrl(env);
@@ -238,7 +259,9 @@ async function fetchQwenworkLimits(options = {}, deps = {}) {
 
   let token = cleanSecret(options.qwenworkToken);
   let session = normalizeQwenworkSession(options.qwenworkSession);
+  if (token) base.source = 'api';
   if (!token && session) {
+    base.source = 'oauth';
     if (session.expiresAt > now + MAGPIE_TOKEN_SKEW_MS) {
       token = session.access;
     } else if (session.refresh) {
@@ -275,6 +298,7 @@ async function fetchQwenworkLimits(options = {}, deps = {}) {
   if (!token) {
     const resolved = qwenworkTokenWithSource(env);
     token = resolved.token;
+    if (token) base.source = resolved.source === 'magpie' ? 'local' : 'api';
   }
   if (!token) return normalizeLimitProvider({ ...base, status: 'notConfigured', windows: [] });
 
@@ -304,26 +328,6 @@ async function fetchQwenworkLimits(options = {}, deps = {}) {
       return { parsed, account };
     }, { signal: deps.signal, deadlineMs: deps.qwenworkFetchTimeoutMs || QWENWORK_FETCH_TIMEOUT_MS });
 
-function inferredBillingWindowMinutes(resetsAtIso) {
-  const resetMs = Date.parse(resetsAtIso);
-  if (!Number.isFinite(resetMs)) return null;
-  const end = new Date(resetMs);
-  let year = end.getUTCFullYear();
-  let month = end.getUTCMonth() - 1;
-  if (month < 0) { month = 11; year -= 1; }
-  const lastDay = new Date(Date.UTC(year, month + 1, 0)).getUTCDate();
-  const startMs = Date.UTC(
-    year,
-    month,
-    Math.min(end.getUTCDate(), lastDay),
-    end.getUTCHours(),
-    end.getUTCMinutes(),
-    end.getUTCSeconds(),
-    end.getUTCMilliseconds()
-  );
-  const minutes = Math.round((resetMs - startMs) / 60_000);
-  return minutes > 0 ? minutes : null;
-}
 
     const user = result.account?.user || null;
     const plan = result.account?.plan || null;

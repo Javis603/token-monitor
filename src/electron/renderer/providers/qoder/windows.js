@@ -9,7 +9,7 @@
   const { windowsForKind, limitWindowNode, providerWindowText } = deps;
 
   /** @param {any} provider @param {any} color @param {any} windows @returns {any} */ function renderWindows(provider, color, windows) {
-    windows.classList.add('limit-windows-qoder');
+    windows.classList.add(`limit-windows-${provider.provider}`);
     for (const credits of windowsForKind(provider, 'billing')) {
       const node = limitWindowNode(
         credits?.label || 'Credits',

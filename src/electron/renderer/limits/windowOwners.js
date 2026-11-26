@@ -62,6 +62,7 @@
     owners.factory = factories.factory(capabilities);
     owners.kiro = factories.kiro(capabilities);
     owners.qoder = factories.qoder(capabilities);
+    owners.qwenwork = owners.qoder;
     owners.workbuddy = factories.workbuddy(capabilities);
     owners.commandcode = factories.commandcode(capabilities);
     owners.kimi = factories.kimi(capabilities);

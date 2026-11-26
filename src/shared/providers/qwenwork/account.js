@@ -1,3 +1,4 @@
+// @ts-check
 'use strict';
 
 // QwenWork limits account wiring. Leaf module: no requires.
@@ -7,8 +8,13 @@
 // stored under the provider's credential path. A QwenWork sign-in that magpie
 // already keeps fresh, or an explicit environment token, remains a fallback so
 // an existing install keeps working without signing in again.
-module.exports = {
+module.exports = /** @satisfies {import('../../limits/accounts').AccountDeclaration} */ ({
   id: 'qwenwork',
+  sources: [
+    { id: 'oauth', kind: 'oauth', relation: 'alternative', products: ['qwenwork'], labelKey: 'settings.limits.sources.oauth', descriptionKey: 'settings.limits.sources.oauthDescription' },
+    { id: 'api', kind: 'env', relation: 'alternative', products: ['qwenwork'], labelKey: 'settings.limits.sources.env', descriptionKey: 'settings.limits.sources.envDescription' },
+    { id: 'local', kind: 'file', relation: 'alternative', products: ['qwenwork'], labelKey: 'settings.limits.sources.file', descriptionKey: 'settings.limits.sources.fileDescription' }
+  ],
   fetch: 'fetchQwenworkLimits',
   fields: [
     {
@@ -24,4 +30,4 @@ module.exports = {
     qwenworkSessionConfigured: Boolean(settings?.qwenworkSession || discovered?.source),
     qwenworkSessionSource: settings?.qwenworkSession ? 'settings' : (discovered?.source || '')
   })
-};
+});
