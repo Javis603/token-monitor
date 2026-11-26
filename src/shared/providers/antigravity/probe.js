@@ -373,7 +373,7 @@ async function listeningPortsPosix(pid, deps = {}) {
 }
 
 async function listeningPortsWin32(pid, deps = {}) {
-  if (!deps.spawn) {
+  if (deps.windowsTcpTable || !deps.spawn) {
     const tcpTable = deps.windowsTcpTable || defaultWindowsTcpTable;
     const nativePorts = tcpTable?.readWindowsListeningPorts?.(pid, {
       ipv4LoopbackOnly: Boolean(deps.ipv4LoopbackOnly)
@@ -416,7 +416,7 @@ function statusFromHttpCode(code) {
 
 async function desktopSocketOwned(port, pid, localPort, timeoutMs, deps) {
   if ((deps.platform || process.platform) === 'win32') {
-    if (!deps.spawn) {
+    if (deps.windowsTcpTable || !deps.spawn) {
       const tcpTable = deps.windowsTcpTable || defaultWindowsTcpTable;
       const nativeOwned = tcpTable?.isWindowsLoopbackTcpSocketOwned?.({
         localPort: port,
@@ -885,6 +885,8 @@ async function probe(deps = {}) {
     // - discovery keeps the full provider deadline when no explicit hub competes.
     for (const kind of PROCESS_KIND_ORDER) {
       const sourceInfos = infos.filter((info) => info.kind === kind);
+      // Process infos are sorted by priority. Leave quota time for any later detected kind.
+      const hasLaterSource = kind !== infos.at(-1)?.kind;
       const sourceKeys = sourceInfos.map(({ pid, csrfToken }) => hashKey('antigravity-rpc', kind, pid, csrfToken));
       const halfDeadlineMs = () => (
         Date.now() + Math.max(1, Math.floor(remainingMs(probeDeadlineMs) / 2))
@@ -987,7 +989,7 @@ async function probe(deps = {}) {
         };
         const grouped = await groupedQuotaFromCandidates(entry.candidates, call, {
           ...groupOptions,
-          summaryDeadlineMs: entry.fallbackCandidates ? halfDeadlineMs() : probeDeadlineMs,
+          summaryDeadlineMs: entry.fallbackCandidates || hasLaterSource ? halfDeadlineMs() : probeDeadlineMs,
           previousError: entry.error
         });
         if (grouped.snapshot || signal.aborted || !entry.fallbackCandidates) return grouped;
@@ -999,7 +1001,7 @@ async function probe(deps = {}) {
         }
         return groupedQuotaFromCandidates(fallback.candidates, call, {
           ...groupOptions,
-          summaryDeadlineMs: probeDeadlineMs,
+          summaryDeadlineMs: hasLaterSource ? halfDeadlineMs() : probeDeadlineMs,
           previousError
         });
       });

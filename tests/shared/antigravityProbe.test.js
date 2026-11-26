@@ -1092,14 +1092,15 @@ test('probe falls back to discovered ports when the explicit hub port is unreach
 // reachability success, deliberately, because the lightweight RPC may simply be
 // unsupported. That is not proof the quota RPCs work, so a hub port that answers
 // the preflight must not remove the discovered candidates from the quota stage.
-test('probe still tries discovered ports when the hub port answers the preflight but cannot serve quota', async () => {
+test('probe still tries discovered ports when the hub port answers the preflight but cannot serve quota', async (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout', 'Date'] });
   const calledPorts = [];
   const result = await probe.probe({
     detectProcessInfos: async () => [
       { pid: 9001, kind: 'cli', csrfToken: 'abc', hubPort: 55555, extensionPort: null }
     ],
     listeningPorts: async () => [60000],
-    callLs: async ({ port, method }) => {
+    callLs: async ({ port, method, timeoutMs }) => {
       calledPorts.push(port);
       if (port === 55555) {
         // Reachable, but the lightweight RPC is unsupported.
@@ -1112,6 +1113,7 @@ test('probe still tries discovered ports when the hub port answers the preflight
       }
       if (port === 60000 && method === 'GetUnleashData') return {};
       if (port === 60000 && method === 'RetrieveUserQuotaSummary') {
+        assert.equal(timeoutMs, 2000, 'the final source can spend the full remaining budget');
         return {
           groups: [{
             displayName: 'Gemini Models',
@@ -1294,9 +1296,11 @@ test('probe keeps the full discovery budget when there is no explicit hub port',
 });
 
 test('listeningPorts (win32) uses windowsTcpTable without spawning PowerShell', async () => {
+  const spawn = () => assert.fail('unexpected PowerShell lookup');
   const ports = await probe.listeningPorts(64252, {
     platform: 'win32',
     ipv4LoopbackOnly: true,
+    spawn,
     windowsTcpTable: {
       readWindowsListeningPorts(pid, options) {
         assert.equal(pid, 64252);
@@ -1309,17 +1313,28 @@ test('listeningPorts (win32) uses windowsTcpTable without spawning PowerShell', 
 
   const emptyErr = await probe.listeningPorts(64252, {
     platform: 'win32',
+    spawn,
     windowsTcpTable: { readWindowsListeningPorts: () => [] }
   }).catch((error) => error);
   assert.equal(emptyErr.status, 'unavailable');
+});
 
-  // When native binding is unavailable (returns null), falls back to PowerShell.
-  const fallbackErr = await probe.listeningPorts(64252, {
+test('listeningPorts (win32) falls back to PowerShell when the native table is unavailable', async (t) => {
+  const readWindowsListeningPorts = t.mock.fn(() => null);
+  const spawn = t.mock.fn(fakeSpawn('51153\r\n49931\r\n51153\r\n'));
+  const ports = await probe.listeningPorts(64252, {
     platform: 'win32',
-    timeoutMs: 50,
-    windowsTcpTable: { readWindowsListeningPorts: () => null }
-  }).catch((error) => error);
-  assert.ok(fallbackErr === null || fallbackErr instanceof Error);
+    ipv4LoopbackOnly: true,
+    windowsTcpTable: { readWindowsListeningPorts },
+    spawn
+  });
+  assert.equal(readWindowsListeningPorts.mock.callCount(), 1);
+  assert.equal(spawn.mock.callCount(), 1);
+  const [command, args] = spawn.mock.calls[0].arguments;
+  assert.equal(command, 'powershell');
+  assert.match(args.at(-1), /Get-NetTCPConnection -OwningProcess 64252 -State Listen\b/);
+  assert.match(args.at(-1), /Where-Object LocalAddress -eq '127\.0\.0\.1'/);
+  assert.deepEqual(ports, [49931, 51153]);
 });
 
 test('desktop RPC uses windowsTcpTable on win32 without spawning PowerShell', async (t) => {
@@ -1341,6 +1356,7 @@ test('desktop RPC uses windowsTcpTable on win32 without spawning PowerShell', as
     timeoutMs: 2000
   }, {
     platform: 'win32',
+    spawn: () => assert.fail('unexpected PowerShell lookup'),
     windowsTcpTable: {
       isWindowsLoopbackTcpSocketOwned({ localPort, remotePort, owningPid }) {
         ownershipChecks += 1;
@@ -1356,23 +1372,20 @@ test('desktop RPC uses windowsTcpTable on win32 without spawning PowerShell', as
   assert.equal(ownershipChecks, 2);
 });
 
-// When a source has no explicit hub-port fallback stage, groupedQuotaFromCandidates
-// must keep the full remaining probe deadline instead of halving it into an
-// artificial timeout before the first RPC settles.
-test('probe keeps the full remaining quota budget when there is no fallback stage', async () => {
-  const probeTimeoutMs = 900;
+test('probe keeps the full remaining quota budget when there is no fallback stage', async (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout', 'Date'] });
   const result = await probe.probe({
-    probeTimeoutMs,
+    probeTimeoutMs: 900,
     detectProcessInfos: async () => {
-      await new Promise((resolve) => setTimeout(resolve, 450));
+      t.mock.timers.tick(450);
       return [{ pid: 1, kind: 'app', csrfToken: 'csrf', desktopRpcPort: 54733 }];
     },
     listeningPorts: async () => [54733],
     callLs: async ({ method, timeoutMs }) => {
       if (method === 'GetUnleashData') return {};
       if (method === 'RetrieveUserQuotaSummary') {
-        assert.ok(timeoutMs > 300, `expected full remaining quota budget (>300ms), got ${timeoutMs}ms`);
-        await new Promise((resolve) => setTimeout(resolve, 260));
+        assert.equal(timeoutMs, 450);
+        t.mock.timers.tick(260);
         return {
           groups: [{
             displayName: 'Gemini Models',
@@ -1388,3 +1401,39 @@ test('probe keeps the full remaining quota budget when there is no fallback stag
   assert.equal(result.accountEmail, 'full-budget@example.com');
   assert.equal(result.windows[0].remainingFraction, 0.5);
 });
+
+for (const [slowSource, laterKind] of [
+  [{ kind: 'app', desktopRpcPort: 52001 }, 'cli'],
+  [{ kind: 'cli', hubPort: 51000 }, 'ide']
+]) {
+  test(`probe reaches a healthy ${laterKind} after ${slowSource.kind} quota stalls`, async (t) => {
+    t.mock.timers.enable({ apis: ['setTimeout', 'Date'] });
+    const quotaPorts = [];
+    const result = await probe.probe({
+      probeTimeoutMs: 8000,
+      detectProcessInfos: async () => [
+        { pid: 2, kind: laterKind, csrfToken: 'healthy' },
+        { pid: 1, ...slowSource, csrfToken: 'slow' }
+      ],
+      listeningPorts: async (pid) => [pid === 1 ? 52001 : 52002],
+      callLs: async ({ port, method, timeoutMs }) => {
+        if (method === 'GetUnleashData') return {};
+        if (method === 'GetUserStatus') return { userStatus: { email: 'healthy@example.com' } };
+        assert.equal(method, 'RetrieveUserQuotaSummary');
+        quotaPorts.push(port);
+        if (port === slowSource.hubPort) return { groups: [] };
+        if (port === 52001) {
+          t.mock.timers.tick(timeoutMs);
+          return new Promise(() => {});
+        }
+        return { groups: [{ buckets: [{ window: 'weekly', remainingFraction: 0.7 }] }] };
+      }
+    });
+    if (slowSource.hubPort) assert.equal(quotaPorts[0], slowSource.hubPort);
+    assert.ok(quotaPorts.includes(52001));
+    assert.equal(quotaPorts.at(-1), 52002);
+    assert.equal(result.sourceDetail, laterKind);
+    assert.equal(result.accountEmail, 'healthy@example.com');
+    assert.equal(result.windows[0].remainingFraction, 0.7);
+  });
+}

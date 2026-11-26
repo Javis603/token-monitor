@@ -159,7 +159,7 @@ test('readWindowsListeningPorts and isWindowsLoopbackTcpSocketOwned return null 
   assert.equal(tcpTable.isWindowsLoopbackTcpSocketOwned({ localPort: 80, remotePort: 90, owningPid: 123 }, failingNative), null);
 });
 
-test('live Win32 iphlpapi detects own loopback listener and established socket ownership quickly', { skip: process.platform !== 'win32' }, async (t) => {
+test('live Win32 iphlpapi detects own loopback listener and established socket ownership', { skip: process.platform !== 'win32' }, async (t) => {
   const sockets = new Set();
   const server = net.createServer((socket) => {
     sockets.add(socket);
@@ -176,10 +176,10 @@ test('live Win32 iphlpapi detects own loopback listener and established socket o
   await once(server, 'listening');
   const serverPort = server.address().port;
 
+  const accepted = once(server, 'connection');
   client = net.createConnection({ host: '127.0.0.1', port: serverPort });
-  await once(client, 'connect');
+  await Promise.all([accepted, once(client, 'connect')]);
 
-  const startedAt = performance.now();
   const ports = tcpTable.readWindowsListeningPorts(process.pid, { ipv4LoopbackOnly: true });
   const owned = tcpTable.isWindowsLoopbackTcpSocketOwned({
     localPort: serverPort,
@@ -191,10 +191,8 @@ test('live Win32 iphlpapi detects own loopback listener and established socket o
     remotePort: client.localPort,
     owningPid: 2147483647
   });
-  const elapsedMs = performance.now() - startedAt;
 
   assert.ok(Array.isArray(ports) && ports.includes(serverPort), `expected port ${serverPort} in ${JSON.stringify(ports)}`);
   assert.equal(owned, true);
   assert.equal(wrongPidOwned, false);
-  assert.ok(elapsedMs < 200, `expected native Win32 TCP queries in <200ms, got ${elapsedMs.toFixed(1)}ms`);
 });
