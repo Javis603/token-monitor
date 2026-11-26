@@ -2017,6 +2017,10 @@ function renderWorkPanel(overview) {
           const w = ws.relWidth.toFixed(4);
           fillEl.setAttribute('data-w', w);
           fillEl.style.setProperty('--bar-scale', w);
+          if (fillEl.getAttribute('data-bg') !== ws.barBackground) {
+            fillEl.setAttribute('data-bg', ws.barBackground);
+            fillEl.style.background = ws.barBackground;
+          }
         }
         if (tokEl) tokEl.textContent = formatCompact(ws.tokens);
         if (costEl) costEl.textContent = formatCost(ws.cost, ws.unpricedTokens);

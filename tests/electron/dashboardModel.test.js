@@ -118,7 +118,7 @@ test('computeTokenAnatomy fails closed on unclassifiedTokens and computes cacheH
   assert.equal(exact.cacheRead, 600);
   assert.equal(exact.cacheMiss, 200);
   assert.equal(exact.unclassified, 0);
-  assert.equal(Math.round(exact.cacheHitRate * 100), 75);
+  assert.equal(Math.round(exact.cacheHitRate * 100), 67);
   assert.deepEqual(exact.segments.map((s) => s.labelKey), [
     'dashboard.tooltip.inputCacheHit',
     'dashboard.anatomy.cacheWrite',
@@ -680,7 +680,7 @@ test('computeSessionDetailAnatomy aggregates exchanges[].tokens from session:get
   assert.equal(anatomy.cacheMiss, 150);
   assert.equal(anatomy.output, 200);
   assert.equal(anatomy.unclassified, 0);
-  assert.equal(anatomy.cacheHitRate, 600 / 750);
+  assert.equal(anatomy.cacheHitRate, 600 / 800);
 
   const fallback = model.computeSessionDetailAnatomy({
     found: true,
@@ -1022,9 +1022,13 @@ test('fleet and topology agree on shared running sessions, remote-only local bad
   );
 
   // 3. Switched to Local Only while retaining saved hubUrl still attributes local last7 session cleanly
+  const { rangeForSelection } = require('../../src/electron/renderer/fixedPeriodRanges');
+  const now = Date.parse(nowIso);
+  const localLast7Window = rangeForSelection('last7', { now });
   const localWithSavedUrl = model.buildScopedOverview({
     stats: {
       localDeviceId: 'mac-local',
+      nativeRangeWindows: { last7: localLast7Window },
       devices: [
         { deviceId: 'mac-local', displayName: 'MacBook', platform: 'darwin', periods: { last7: { totalTokens: 500, clients: { codex: 500 } } } }
       ],
@@ -1039,6 +1043,7 @@ test('fleet and topology agree on shared running sessions, remote-only local bad
       }
     },
     periodKey: 'last7',
+    nowMs: now,
     settings: { hubMode: 'local', hubUrl: 'https://hub.example', deviceId: 'mac-local' },
     statsMode: 'local'
   });
@@ -1421,4 +1426,42 @@ test('a workspace named __general stays separate from unassigned sessions', () =
       { key: 'unassigned', projectLabel: '', totalTokens: 20 }]
   });
   assert.deepEqual(graph.hubs.map(hub => [hub.id, hub.tokens]).sort(), [['unassigned', 20], ['ws:__general', 10]]);
+});
+
+
+test('local fixed ranges reject carried periods after rollover and use the current calendar history', () => {
+  const nowMs = new Date(2026, 10, 23, 12).getTime(); // Monday
+  const stale = {
+    totalTokens: 900, clients: { codex: 900 },
+    sessions: { 'codex:stale': {
+      client: 'codex', sessionId: 'stale', projectLabel: 'Stale workspace',
+      lastUsedAt: new Date(nowMs).toISOString(), totalTokens: 900
+    } }
+  };
+  const stats = {
+    mode: 'local', localDeviceId: 'local',
+    nativeRangeWindows: { week: { start: '2026-11-16', end: '2026-11-22' } },
+    devices: [{ deviceId: 'local', periods: { week: stale } }],
+    periods: { week: stale }
+  };
+  const daily = [{ date: '2026-11-22', tokens: 100 }, { date: '2026-11-23', tokens: 40 }];
+  const view = model.buildScopedOverview({
+    stats, periodKey: 'week', nowMs, settings: { locale: 'en-US', calendarLocale: 'en-GB' },
+    history: { daily, deviceHistories: [{ deviceId: 'local', history: { daily } }] }
+  });
+  assert.equal(view.hero.tokens, 40);
+  assert.equal(view.fleet.machines[0].tokens, 40);
+  assert.equal(view.fleet.machines[0].sessionCount, 0);
+  assert.deepEqual(view.sessions, []);
+  assert.deepEqual(view.workspaces, []);
+  assert.equal(view.sessionsIncomplete, true);
+
+  stats.nativeRangeWindows.week = { start: '2026-11-23', end: '2026-11-23' };
+  const fresh = model.buildScopedOverview({
+    stats, periodKey: 'week', nowMs, settings: { locale: 'en-US', calendarLocale: 'en-GB' }
+  });
+  assert.equal(fresh.hero.tokens, 900);
+  assert.equal(fresh.fleet.machines[0].tokens, 900);
+  assert.equal(fresh.sessions[0].sessionId, 'stale');
+  assert.equal(fresh.sessionsIncomplete, false);
 });

@@ -3882,3 +3882,31 @@ test('Work Panel refreshes renamed device labels and preserves its row for metri
   assert.match(panel.innerHTML, /dashboard.devices.you/);
   assert.equal(rebuilds, 2);
 });
+
+
+test('Work Panel updates workspace tool attribution without replacing a retained row', () => {
+  const attributes = new Map([['data-bg', 'red']]);
+  const fill = {
+    getAttribute: key => attributes.get(key), setAttribute: (key, value) => attributes.set(key, value),
+    style: { background: 'red', setProperty() {} }
+  };
+  const row = {
+    dataset: { wsKey: 'repo' },
+    querySelector: selector => selector === '.dash-project-bar-fill' ? fill : null
+  };
+  const panel = { innerHTML: '', querySelectorAll: () => [row] };
+  let rebuilds = 0;
+  const render = dashboardFunction('renderWorkPanel', '\nfunction topologyLineage(', {
+    els: { workPanel: panel }, state: { workMode: 'workspaces', locale: 'en' },
+    lastWorkStructureSig: '', t: String, escapeHtml: String, formatCompact: String, formatCost: String,
+    captureListSnapshot() {}, animateListSnapshot() {}, applySwatchColors() {},
+    withPreservedFocus(_root, _selector, _key, update) { rebuilds++; update(); }
+  });
+  const workspace = { key: 'repo', name: 'Repo', relWidth: 1, barBackground: 'red' };
+  render({ workspaces: [workspace] });
+  workspace.barBackground = 'linear-gradient(90deg, red 40%, blue 40%)';
+  render({ workspaces: [workspace] });
+  assert.equal(rebuilds, 1);
+  assert.equal(attributes.get('data-bg'), workspace.barBackground);
+  assert.equal(fill.style.background, workspace.barBackground);
+});

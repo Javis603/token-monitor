@@ -202,13 +202,15 @@
    * @param {any} source
    * @param {any[]} historyDaily
    * @param {string} periodKey
-   * @param {{ locale?: string, todayKey?: string }} [options]
+   * @param {{ locale?: string, todayKey?: string, synced?: boolean }} [options]
    */
   function resolvePeriodData(source, historyDaily, periodKey, options = {}) {
-    const direct = source?.periods?.[periodKey] || source?.[periodKey];
+    const todayKey = options.todayKey || fixedPeriodRanges?.localDayKey?.() || '';
+    const direct = fixedPeriodRanges?.isDerived(periodKey) && !options.synced
+      ? fixedPeriodRanges.nativeRangeSnapshot(periodKey, source, { todayKey, locale: options.locale })?.period
+      : source?.periods?.[periodKey] || source?.[periodKey];
     if (direct && typeof direct === 'object') return direct;
 
-    const todayKey = options.todayKey || usageCharts?.localDayKey?.() || fixedPeriodRanges?.localDayKey?.() || '';
     const daily = Array.isArray(historyDaily) ? historyDaily : [];
 
     if (fixedPeriodRanges?.isDerived?.(periodKey) && (daily.length > 0 || source?.periods?.today || source?.today)) {
@@ -386,10 +388,19 @@
     const ids = new Set([...deviceMap.keys(), ...historyMap.keys()]);
     const localId = String(stats?.localDeviceId || settings?.deviceId || '').trim();
 
-    const livePeriod = stats?.periods?.[periodKey] || null;
+    const rangeOptions = {
+      locale: synced ? settings.locale : settings.calendarLocale || settings.locale,
+      todayKey: fixedPeriodRanges?.localDayKey(nowMs),
+      synced
+    };
+    const localFixed = !synced && fixedPeriodRanges?.isDerived(periodKey);
+    const livePeriod = localFixed
+      ? fixedPeriodRanges.nativeRangeSnapshot(periodKey, stats, rangeOptions)?.period
+      : stats?.periods?.[periodKey];
+    const sessionDeviceIds = localFixed && !livePeriod ? [] : ids;
     /** @type {Map<string, any[]>} */
     const sessionsByDevice = new Map();
-    for (const deviceId of ids) {
+    for (const deviceId of sessionDeviceIds) {
       const scoped = buildSessionList({
         stats,
         periodData: livePeriod,
@@ -410,8 +421,9 @@
       const devDaily = devHistory?.history?.daily || [];
       const resolvedPeriod = options.fixedHistorySnapshot
         ? mergedDevice.periods?.[periodKey] || fixedHistoryById.get(deviceId) || null
-        : resolvePeriodData(mergedDevice, devDaily, periodKey, { locale: settings?.locale });
-      const todayPeriod = resolvePeriodData(mergedDevice, devDaily, 'today', { locale: settings?.locale });
+        : (localFixed && (deviceId === localId || ids.size === 1) ? livePeriod : null)
+          || resolvePeriodData(mergedDevice, devDaily, periodKey, rangeOptions);
+      const todayPeriod = resolvePeriodData(mergedDevice, devDaily, 'today', rangeOptions);
       const tokens = Math.max(0, n(resolvedPeriod?.totalTokens));
       const cost = Math.max(0, n(resolvedPeriod?.costUsd ?? resolvedPeriod?.totalCost));
       const unpricedTokens = Math.max(0, n(resolvedPeriod?.unpricedTokens));
@@ -570,7 +582,7 @@
       : Math.max(0, totalTokens - accounted);
 
     const denominator = totalTokens > 0 ? totalTokens : Math.max(1, cacheRead + cacheWrite + cacheMiss + output + unclassified);
-    const cachePromptDenominator = cacheRead + cacheMiss;
+    const cachePromptDenominator = cacheRead + cacheWrite + cacheMiss;
     const cacheHitRate = cachePromptDenominator > 0 ? Math.max(0, Math.min(1, cacheRead / cachePromptDenominator)) : null;
 
     const rawSegments = [
@@ -2364,8 +2376,9 @@
     const statsMode = String(options.statsMode || '');
     const nowMs = Number.isFinite(Number(options.nowMs)) ? Number(options.nowMs) : Date.now();
 
-    const syncedDerived = fixedPeriodRanges?.isDerived(periodKey) && isSyncedStatsContext(stats, settings, statsMode);
-    const fixedHistorySnapshot = syncedDerived && !stats?.periods?.[periodKey]
+    const synced = isSyncedStatsContext(stats, settings, statsMode);
+    const fixed = fixedPeriodRanges?.isDerived(periodKey);
+    const fixedHistorySnapshot = fixed && synced && !stats?.periods?.[periodKey]
       ? fixedPeriodRanges.fixedPeriodSnapshotFromDevices(periodKey, fixedPeriodRanges.joinDeviceHistorySources(
         history?.deviceHistories || [], stats?.devices || []
       ), {
@@ -2392,15 +2405,15 @@
       : null;
 
     const scopedHistory = selectScopedHistory(history, activeMachine ? activeMachine.deviceId : 'all');
-    const periodSource = activeMachine
-      ? { periods: { [periodKey]: activeMachine.periodData } }
-      : stats;
-
     const periodData = fixedHistorySnapshot
       ? (activeMachine ? activeMachine.periodData : fixedHistorySnapshot.period)
       : activeMachine
         ? activeMachine.periodData
-        : resolvePeriodData(periodSource, scopedHistory.daily, periodKey, { locale: settings?.locale });
+        : resolvePeriodData(stats, scopedHistory.daily, periodKey, {
+          locale: synced ? settings.locale : settings.calendarLocale || settings.locale,
+          todayKey: fixedPeriodRanges?.localDayKey(nowMs),
+          synced
+        });
 
     const periodFallbackHistory = periodKey === 'allTime' ? scopedHistory : null;
     const anatomy = computeTokenAnatomy(periodData, periodFallbackHistory?.daily);
@@ -2412,6 +2425,7 @@
     const models = buildModelRows(periodData, periodFallbackHistory?.daily || [], totalTokens);
     const derivedIncomplete = Boolean(
       fixedHistorySnapshot || stats?.syncedFixedPeriodDetailsAvailable?.[periodKey] === false
+      || (fixed && !synced && (!periodData || periodData.derivedFromHistory))
     );
     const sessions = derivedIncomplete ? [] : buildSessionList({
       stats,
@@ -2484,7 +2498,7 @@
       scopedHistory,
       periodData,
       periodKey,
-      isSynced: isSyncedStatsContext(stats, settings, statsMode),
+      isSynced: synced,
       omittedSessionCount,
       sessionsIncomplete,
       hero: {
