@@ -4716,7 +4716,7 @@ function publishLocalSessionActivity(patch) {
   const previousDevice = lastCollectedDevice;
   lastCollectedDevice = projectLocalActivity(lastCollectedDevice, patch);
   if (localDevice) localDevice = localDevice === previousDevice ? lastCollectedDevice : applyActivityPatch(localDevice, patch);
-  if (!latestStats) return;
+  if (!latestStatsMatchCurrentSource()) return;
   const previous = latestStats;
   latestStats = projectLocalActivity(previous, patch);
   const localSnapshot = snapshotLocalDevices.get(previous);
@@ -4738,6 +4738,11 @@ function publishLocalSessionActivity(patch) {
   pluginRuntime?.publishStats(activityStats, latestStats);
   updateEdgeDockCells(activityStats);
   sendPush({ event: 'session-activity', data: { patch: visiblePatch, snapshot } });
+}
+
+function latestStatsMatchCurrentSource() {
+  return latestStats && latestStatsSource?.generation === hubModeGeneration
+    && latestStatsSource.identity === currentHubStatsIdentity();
 }
 
 // Two options, both for the cold-start seed and neither for live stats.
@@ -4765,14 +4770,7 @@ function mainWindowStatsPushWanted() {
 function sendPush(payload, options = {}) {
   const previousHistoryRevision = statsHistoryRevision(latestStats);
   const wantsRenderer = options.deferToRenderer === true || mainWindowStatsPushWanted();
-  const wantsDashboard = typeof dashboardWindow !== 'undefined' && Boolean(
-    dashboardWindow
-    && !dashboardWindow.isDestroyed()
-    && (typeof dashboardWindowReady === 'undefined' || dashboardWindowReady)
-    && typeof dashboardWindow.isVisible === 'function'
-    && dashboardWindow.isVisible()
-    && !dashboardWindow.isMinimized()
-  );
+  const wantsDashboard = dashboardStatsPushWanted();
   let rendererPayload = payload;
   let dashboardPayload = payload;
   let rendererFingerprint = null;
@@ -4855,6 +4853,14 @@ function sendPush(payload, options = {}) {
     }
     maybeAdoptSharedSubscriptionRevision(payload.data.stats);
   }
+}
+
+function dashboardStatsPushWanted() {
+  return Boolean(dashboardWindow
+    && dashboardWindowReady
+    && !dashboardWindow.isDestroyed()
+    && dashboardWindow.isVisible()
+    && !dashboardWindow.isMinimized());
 }
 
 function statsHistoryRevision(stats) {
@@ -6148,16 +6154,9 @@ function syncDockSurfaces(rendererSettings) {
 }
 
 function sendStatsPresentationToRenderer(options = {}) {
-  if (!latestStats) return false;
+  if (!latestStatsMatchCurrentSource()) return false;
   const wantsMain = Boolean(mainWindow && !mainWindow.isDestroyed() && (options.force === true || mainWindowStatsPushWanted()));
-  const wantsDashboard = typeof dashboardWindow !== 'undefined' && Boolean(
-    dashboardWindow
-    && !dashboardWindow.isDestroyed()
-    && (typeof dashboardWindowReady === 'undefined' || dashboardWindowReady)
-    && typeof dashboardWindow.isVisible === 'function'
-    && dashboardWindow.isVisible()
-    && !dashboardWindow.isMinimized()
-  );
+  const wantsDashboard = dashboardStatsPushWanted();
   if (!wantsMain && !wantsDashboard) return false;
   const visibleStats = electronPresentationStats(latestStats);
   const copy = rendererSnapshots.stamp(latestStats, rendererStats(visibleStats), visibleStats);
@@ -6946,7 +6945,10 @@ async function fetchStats(options = {}) {
     }
   }
   const url = `${hubUrl.replace(/\/$/, '')}/api/stats`;
-  const response = await fetchFromHub(url, { headers: secret ? { authorization: `Bearer ${secret}` } : {} });
+  const response = await fetchFromHub(url, {
+    headers: secret ? { authorization: `Bearer ${secret}` } : {},
+    signal: AbortSignal.timeout(15_000)
+  });
   if (!response.ok) throw new Error(`Hub ${response.status}: ${(await response.text()).slice(0, 200)}`);
   const stats = await response.json();
   if (!hubModeRequestIsCurrent(requestGeneration, 'client', requestHubIdentity)) {
@@ -8842,8 +8844,6 @@ app.whenReady().then(() => {
   ipcMain.handle('stats:get', async (event, options) => {
     if (options?.deltaResync === true) {
       if (!mainWindow || mainWindow.isDestroyed() || event.sender !== mainWindow.webContents) return null;
-      if (latestStatsSource?.generation !== hubModeGeneration
-        || latestStatsSource.identity !== currentHubStatsIdentity()) return null;
       // Send the full snapshot on the same channel as subsequent deltas.
       // An invoke reply can arrive after a newer push and roll the view back.
       sendStatsPresentationToRenderer({ force: true });
@@ -8880,7 +8880,11 @@ app.whenReady().then(() => {
       throw new Error(error.code || error.message, { cause: error });
     }
   });
-  ipcMain.handle('stats:allTimeSessions', (_event, snapshotId) => rendererAllTimeSessions(rendererSnapshots.get(snapshotId)));
+  ipcMain.handle('stats:allTimeSessions', async (_event, snapshotId) => {
+    const source = hubModeGeneration;
+    const sessions = await rendererAllTimeSessions(rendererSnapshots.get(snapshotId, source));
+    return source === hubModeGeneration ? sessions : null;
+  });
   // While a headless agent owns host or sync collection, this app's record stops
   // updating and the agent applies its own archive, so there is no count to show.
   ipcMain.handle('stats:archivedSessionCount', () => (

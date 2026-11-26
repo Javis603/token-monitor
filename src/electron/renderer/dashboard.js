@@ -129,7 +129,8 @@ const dashboardSettings = {
   quotas: document.getElementById('dashShowQuotas'),
   stage: document.getElementById('dashDefaultStage'),
   metric: document.getElementById('dashDefaultMetric'),
-  error: document.getElementById('dashSettingsError')
+  error: document.getElementById('dashSettingsError'),
+  shortcutError: document.getElementById('dashShortcutSaveError')
 };
 let dashboardSettingsSave = Promise.resolve();
 let queuedDashboardPeriods = null;
@@ -200,6 +201,7 @@ let lastRenderedTab = state.tab;
 let activeHover = null;
 let spotlightFrame = 0;
 let spotlightVisible = false;
+let spotlightGradient = null;
 const spotlightCurrent = { x: -200, y: -200 };
 const spotlightTarget = { x: -200, y: -200 };
 
@@ -644,13 +646,18 @@ function populateDashboardSettings() {
   ).join('');
 }
 
-function saveDashboardSettings(patch) {
+function saveDashboardSettings(patchOrRead, { shortcut = false } = {}) {
+  dashboardSettings.error.classList.add('hidden');
+  dashboardSettings.shortcutError.classList.add('hidden');
   dashboardSettingsSave = dashboardSettingsSave.then(async () => {
-    dashboardSettings.error.classList.add('hidden');
+    const patch = typeof patchOrRead === 'function' ? patchOrRead() : patchOrRead;
+    if (!patch) return;
     try {
       await window.tokenMonitor.updateSettings(patch);
     } catch (_) {
-      dashboardSettings.error.classList.remove('hidden');
+      const error = shortcut && !dashboardSettings.popover.matches(':popover-open')
+        ? dashboardSettings.shortcutError : dashboardSettings.error;
+      error.classList.remove('hidden');
       syncDashboardSettings(state.settings);
     } finally {
       if (patch.dashboardVisiblePeriods && queuedDashboardPeriods === patch.dashboardVisiblePeriods) {
@@ -659,6 +666,7 @@ function saveDashboardSettings(patch) {
       }
     }
   });
+  return dashboardSettingsSave;
 }
 
 function populatePeriodSelect() {
@@ -1910,7 +1918,7 @@ function renderWorkPanel(overview) {
       els.workPanel.innerHTML = `<div class="dash-quotas-empty">${escapeHtml(t('dashboard.empty'))}</div>`;
       return;
     }
-    const nextSig = JSON.stringify(['devices', state.locale, state.selectedDeviceId, machines.map((m) => m.deviceId)]);
+    const nextSig = JSON.stringify(['devices', state.locale, state.selectedDeviceId, machines.map((m) => [m.deviceId, m.name, m.isLocal, m.deviceKind])]);
     if (nextSig === lastWorkStructureSig) {
       machines.forEach((m) => {
         const row = findByDataset(els.workPanel, '.dash-device-row[data-device-id]', (r) => r.dataset.deviceId === m.deviceId);
@@ -2587,6 +2595,12 @@ function renderHeatLegend(visible) {
     + `<span class="dash-heat-legend-label">${escapeHtml(moreLabel)}</span>`;
 }
 
+function setHeatmapMarkup(markup) {
+  if (spotlightGradient) hideHeatmapHover();
+  els.heatmap.innerHTML = markup;
+  spotlightGradient = els.heatmap.querySelector('#dashActivitySpotlightGradient');
+}
+
 function renderActivity(overview) {
   const isFlow = state.stageView === 'flow';
   els.activityCol?.setAttribute('data-stage', state.stageView);
@@ -2690,15 +2704,15 @@ function renderActivity(overview) {
         renderHeatLegend(false);
         els.heatmap?.classList.remove('hidden');
         if (heat.cells.length && modelApi?.isometricHeatmapSvg) {
-          els.heatmap.innerHTML = modelApi.isometricHeatmapSvg(heat, {
+          setHeatmapMarkup(modelApi.isometricHeatmapSvg(heat, {
             monthLabel: (m) => monthLabel(m.label),
             dayMap: state.dayMap,
             metric: state.heatmapMetric,
             uid: 'dashIso',
             initialHidden: false
-          });
+          }));
         } else {
-          els.heatmap.innerHTML = '';
+          setHeatmapMarkup('');
         }
       }
     } else {
@@ -2730,7 +2744,7 @@ function renderActivity(overview) {
       if (!heat.cells.length) {
         lastHeatmapGridSig = '';
         lastHeatmapValuesSig = '';
-        els.heatmap.innerHTML = '';
+        setHeatmapMarkup('');
       } else if (
         heatGridSig === lastHeatmapGridSig
         && !hideHeatmapForEntry
@@ -2758,14 +2772,14 @@ function renderActivity(overview) {
       } else if (heatGridSig !== lastHeatmapGridSig || heatValuesSig !== lastHeatmapValuesSig || hideHeatmapForEntry) {
         lastHeatmapGridSig = heatGridSig;
         lastHeatmapValuesSig = heatValuesSig;
-        els.heatmap.innerHTML = charts.heatmapSvg(heat, {
+        setHeatmapMarkup(charts.heatmapSvg(heat, {
           monthLabel: (m) => monthLabel(m.label),
           radius: 2.5,
           glowFilterId: 'dashActivityHeatGlow',
           spotlightId: 'dashActivitySpotlight',
           spotlightRadius: 82,
           initialHidden: hideHeatmapForEntry
-        });
+        }));
       }
 
       const show2dExtras = heat.cells.length > 0;
@@ -4050,7 +4064,7 @@ function showRibbonTooltip(seg) {
 function moveHeatmapSpotlight(x, y) {
   spotlightTarget.x = x;
   spotlightTarget.y = y;
-  const gradient = els.heatmap.querySelector('#dashActivitySpotlightGradient');
+  const gradient = spotlightGradient;
   if (!gradient) return;
   if (!spotlightVisible) {
     spotlightVisible = true;
@@ -4063,7 +4077,7 @@ function moveHeatmapSpotlight(x, y) {
   if (spotlightFrame) return;
   const step = () => {
     spotlightFrame = 0;
-    const g = els.heatmap.querySelector('#dashActivitySpotlightGradient');
+    const g = spotlightGradient;
     if (!g) return;
     const dx = spotlightTarget.x - spotlightCurrent.x;
     const dy = spotlightTarget.y - spotlightCurrent.y;
@@ -4089,7 +4103,7 @@ function hideHeatmapHover() {
   spotlightTarget.y = -200;
   spotlightCurrent.x = -200;
   spotlightCurrent.y = -200;
-  const g = els.heatmap.querySelector('#dashActivitySpotlightGradient');
+  const g = spotlightGradient;
   if (g) {
     g.setAttribute('cx', '-200');
     g.setAttribute('cy', '-200');
@@ -4270,6 +4284,7 @@ function settleRefreshBtnState(status) {
 
 let historyRequestSeq = 0;
 let appliedHistoryRequestSeq = 0;
+let silentStatsRequest = null;
 
 async function pullDashboardData({ manual = false } = {}) {
   const pullPushSeq = typeof statsPushSeq === 'number' ? statsPushSeq : null;
@@ -4304,8 +4319,15 @@ async function pullDashboardData({ manual = false } = {}) {
   };
 
   // A manual scan updates History in main. Read it after that scan settles.
-  const statsTask = readStats();
-  if (manual) await statsTask;
+  if (manual) {
+    await readStats();
+  } else if (silentStatsRequest?.sourceGen !== pullSourceGen) {
+    const request = { sourceGen: pullSourceGen };
+    silentStatsRequest = request;
+    void readStats().finally(() => {
+      if (silentStatsRequest === request) silentStatsRequest = null;
+    });
+  }
   let seq;
   const history = await Promise.resolve().then(() => {
     seq = ++historyRequestSeq;
@@ -4320,6 +4342,7 @@ async function pullDashboardData({ manual = false } = {}) {
     render();
   }
   if (manual && statsError) throw statsError;
+  return acceptHistory;
 }
 
 async function manualRefresh() {
@@ -4328,8 +4351,8 @@ async function manualRefresh() {
   clearRefreshBtnFeedbackTimer();
   setRefreshBtnState('refreshing');
   try {
-    await pullDashboardData({ manual: true });
-    settleRefreshBtnState('refreshed');
+    const historyCurrent = await pullDashboardData({ manual: true });
+    settleRefreshBtnState(historyCurrent ? 'refreshed' : 'error');
   } catch (error) {
     console.log(`[dashboard] manual refresh failed: ${error.message}`);
     settleRefreshBtnState('error');
@@ -4470,6 +4493,7 @@ window.tokenMonitor.onSettingsPush?.((next) => {
   const nextMetric = state.settings.dashboardHeatmapMetric || state.settings.heatmapMetric || 'cost';
   if (state.heatmapMetric !== nextMetric) {
     state.heatmapMetric = nextMetric;
+    state.motion = 'update';
     needsRender = true;
   }
   if ('dashboardStageView' in next) {
@@ -4478,7 +4502,12 @@ window.tokenMonitor.onSettingsPush?.((next) => {
       : 'flow';
     if (state.stageView !== nextStage) {
       state.stageView = nextStage;
-      if (nextStage === '2d' || nextStage === '3d') state.heatmapView = nextStage;
+      if (nextStage === '2d' || nextStage === '3d') {
+        state.heatmapView = nextStage;
+        state.motion = 'entry';
+      } else {
+        state.motion = 'update';
+      }
       needsRender = true;
     }
   }
@@ -4486,6 +4515,7 @@ window.tokenMonitor.onSettingsPush?.((next) => {
     const nextRateMode = next.tokenRateMode === 'burn' ? 'burn' : 'speed';
     if (state.rateMode !== nextRateMode) {
       state.rateMode = nextRateMode;
+      state.motion = 'update';
       needsRender = true;
     }
   }
@@ -4646,10 +4676,9 @@ function handleDashboardHistoryChanged() {
 window.tokenMonitor.onDashboardHistoryChanged?.(handleDashboardHistoryChanged);
 
 els.velocityFigure?.addEventListener('click', () => {
-  state.rateMode = state.rateMode === 'burn' ? 'speed' : 'burn';
-  state.motion = 'update';
-  render();
-  window.tokenMonitor.updateSettings?.({ tokenRateMode: state.rateMode });
+  void saveDashboardSettings(() => ({
+    tokenRateMode: state.rateMode === 'burn' ? 'speed' : 'burn'
+  }), { shortcut: true });
 });
 
 document.addEventListener('pointerdown', (ev) => {
@@ -4738,29 +4767,21 @@ document.getElementById('dashOpenAppSettings')?.addEventListener('click', () => 
 
 els.stageViewBtns.forEach((b) => b.addEventListener('click', () => {
   const nextView = b.dataset.view;
-  if (!nextView || state.stageView === nextView) return;
-  hideTooltip();
-  clearTopologyFocus();
-  state.stageView = nextView;
-  if (nextView === '2d' || nextView === '3d') {
-    state.heatmapView = nextView;
-    state.motion = 'entry';
-  } else {
-    state.motion = 'update';
-  }
-  activateSegButton(els.stageViewBtns, b);
-  render();
-  window.tokenMonitor.updateSettings?.({ dashboardStageView: state.stageView });
+  if (!nextView) return;
+  void saveDashboardSettings(() => {
+    if (state.stageView === nextView) return null;
+    hideTooltip();
+    clearTopologyFocus();
+    return { dashboardStageView: nextView };
+  }, { shortcut: true });
 }));
 
 els.heatmapMetricBtns.forEach((b) => b.addEventListener('click', () => {
-  if (state.heatmapMetric === b.dataset.val) return;
-  hideTooltip();
-  state.heatmapMetric = b.dataset.val;
-  state.motion = 'update';
-  activateSegButton(els.heatmapMetricBtns, b);
-  render();
-  window.tokenMonitor.updateSettings({ dashboardHeatmapMetric: state.heatmapMetric });
+  void saveDashboardSettings(() => {
+    if (state.heatmapMetric === b.dataset.val) return null;
+    hideTooltip();
+    return { dashboardHeatmapMetric: b.dataset.val };
+  }, { shortcut: true });
 }));
 
 els.skylineColorBtns?.forEach((b) => b.addEventListener('click', () => {
@@ -5006,10 +5027,7 @@ window.addEventListener('keydown', (ev) => {
 });
 
 els.themeToggle.addEventListener('click', () => {
-  state.flat = !state.flat;
-  els.body.classList.toggle('flat', state.flat);
-  skylineController?.refreshTheme?.();
-  window.tokenMonitor.updateSettings({ dashboardFlat: state.flat });
+  void saveDashboardSettings(() => ({ dashboardFlat: !state.flat }), { shortcut: true });
 });
 els.refreshBtn.addEventListener('click', () => { void manualRefresh(); });
 els.minBtn.addEventListener('click', () => window.tokenMonitor.dashboard.minimize());

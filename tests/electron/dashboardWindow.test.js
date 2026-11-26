@@ -301,7 +301,7 @@ test('dashboard.js fetches history over IPC and renders both tabs', () => {
   assert.match(js, /charts\.candleChartSvg/);
   assert.match(js, /charts\.heatmapSvg/);
   assert.match(js, /modelApi\.isometricHeatmapSvg/);
-  assert.match(js, /updateSettings\(\{ dashboardFlat: state\.flat \}\)/);
+  assert.match(js, /saveDashboardSettings\(\(\) => \(\{ dashboardFlat: !state\.flat \}\), \{ shortcut: true \}\)/);
   assert.match(js, /dashboard\.minimize\(\)/);
   assert.match(js, /dashboard\.ready\(\)/);
   assert.match(js, /onDashboardHistoryChanged\?\.\(handleDashboardHistoryChanged\)/);
@@ -3329,7 +3329,7 @@ test('dashboard resolves synced fixed periods (yesterday, week, last7, last30) w
   const dashboardModel = require('../../src/electron/renderer/dashboardModel');
   const { resolveSyncedFixedPeriod } = require('../../src/electron/syncedFixedPeriod');
   const { normalizePeriod } = require('../../src/shared/usage');
-  const now = new Date();
+  const now = new Date(2026, 10, 25, 12);
   const nowIso = now.toISOString();
   const todayKey = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
   const yestDate = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 1);
@@ -3362,6 +3362,23 @@ test('dashboard resolves synced fixed periods (yesterday, week, last7, last30) w
       }
     })
   };
+
+  const expectedRanges = {
+    week: { start: '2026-11-23', end: todayKey },
+    last7: { start: '2026-11-19', end: todayKey },
+    last30: { start: '2026-10-27', end: todayKey }
+  };
+  for (const [index, name] of Object.keys(expectedRanges).entries()) {
+    for (const [deviceId, client] of [['mac-1', 'codex'], ['linux-2', 'claude']]) {
+      const totalTokens = 100 * (index + 1);
+      remotePeriods[`${deviceId}:${name}`] = normalizePeriod({
+        totalTokens, clients: { [client]: totalTokens },
+        sessions: {
+          [`${client}:${name}`]: { client, sessionId: name, totalTokens, lastUsedAt: nowIso }
+        }
+      });
+    }
+  }
 
   const endsAtIso = new Date(now.getTime() + 3_600_000).toISOString();
   const baseStats = {
@@ -3445,7 +3462,8 @@ test('dashboard resolves synced fixed periods (yesterday, week, last7, last30) w
           if (delayedRead) await delayedRead;
           return resolveSyncedFixedPeriod(selection, baseStats.devices, baseStats.fixedRangeRevisions, {
             now: now.getTime(),
-            read: devId => devId === missingDevice ? null : remotePeriods[`${devId}:yesterday`],
+            weekStartsOn: 1,
+            read: (devId, name) => devId === missingDevice ? null : remotePeriods[`${devId}:${name}`],
             history: async devices => devices.map(device => ({
               deviceId: device.deviceId,
               range: { start: yestKey, end: yestKey },
@@ -3540,6 +3558,17 @@ test('dashboard resolves synced fixed periods (yesterday, week, last7, last30) w
     await new Promise((r) => setTimeout(r, 0));
     assert.equal(requestedSelection, periodName);
     assert.equal(context.isSyncedSessionPagesLoaded(context.state.stats, periodName), true);
+    for (const selectedDeviceId of ['all', 'mac-1']) {
+      const overview = dashboardModel.buildScopedOverview({
+        stats: context.state.stats, periodKey: periodName, statsMode: 'sync', selectedDeviceId, nowMs: now.getTime()
+      });
+      assert.deepEqual(selectedDeviceId === 'all'
+        ? context.state.stats.nativeRangeWindows[periodName]
+        : context.state.stats.syncedFixedPeriodDeviceWindows[periodName][selectedDeviceId], expectedRanges[periodName]);
+      assert.equal(overview.sessions.length, selectedDeviceId === 'all' ? 2 : 1);
+      assert.ok(overview.sessions.every(session => session.sessionId === periodName));
+      assert.equal(overview.hero.tokens, remotePeriods[`mac-1:${periodName}`].totalTokens * overview.sessions.length);
+    }
   }
 });
 
@@ -3715,11 +3744,12 @@ test('Dashboard schedules a repaint for session expiry without throughput sample
 
 test('Dashboard can reveal History while a silent Stats request is pending', async () => {
   const js = read('src', 'electron', 'renderer', 'dashboard.js');
-  let finishStats;
+  const pendingStats = [];
   const context = {
+    statsSourceGeneration: 1,
     state: { stats: null, history: null },
     window: { tokenMonitor: {
-      getStats: () => new Promise(resolve => { finishStats = resolve; }),
+      getStats: () => new Promise(resolve => pendingStats.push(resolve)),
       getDashboardHistory: async () => ({ daily: [{ tokens: 12 }] })
     } },
     observeStatsRates() {},
@@ -3729,7 +3759,126 @@ test('Dashboard can reveal History while a silent Stats request is pending', asy
   await context.pullDashboardData();
   assert.equal(context.state.history.daily[0].tokens, 12);
   assert.equal(context.state.stats, null);
-  finishStats({ periods: { today: { totalTokens: 42 } } });
+  await context.pullDashboardData();
+  assert.equal(pendingStats.length, 1, 'History invalidation shares the pending Stats read');
+  context.statsSourceGeneration++;
+  await context.pullDashboardData();
+  assert.equal(pendingStats.length, 2, 'a new source has its own Stats read');
+  pendingStats[0](null);
+  await new Promise(setImmediate);
+  await context.pullDashboardData();
+  assert.equal(pendingStats.length, 2, 'finishing the old request keeps the new one in flight');
+  pendingStats[1]({ periods: { today: { totalTokens: 42 } } });
   await new Promise(setImmediate);
   assert.equal(context.state.stats.periods.today.totalTokens, 42);
+  await context.pullDashboardData();
+  assert.equal(pendingStats.length, 3, 'a finished read allows the next refresh');
+  pendingStats[2](null);
+});
+
+
+test('Dashboard manual refresh never reports success for History discarded during a source change', async () => {
+  const js = read('src', 'electron', 'renderer', 'dashboard.js');
+  for (const stage of ['Stats', 'History']) {
+    let finish;
+    const held = new Promise(resolve => { finish = resolve; });
+    const feedback = [];
+    const stats = { snapshot: { id: 1, source: 1 } };
+    const context = {
+      statsSourceGeneration: 1, latestAcceptedSnapshot: stats.snapshot,
+      state: { stats, history: null },
+      window: { tokenMonitor: {
+        getStats: () => stage === 'Stats' ? held.then(() => stats) : Promise.resolve(stats),
+        getDashboardHistory: () => stage === 'History' ? held.then(() => ({})) : Promise.resolve({})
+      } },
+      applyIncomingStats: () => true,
+      render() {}, console: { log() {} },
+      setRefreshBtnState: status => feedback.push(status),
+      settleRefreshBtnState: status => feedback.push(status),
+      clearRefreshBtnFeedbackTimer() {}, manualRefreshBusy: false
+    };
+    vm.runInNewContext(js.slice(js.indexOf('function shouldAcceptPulledHistory('), js.indexOf('function applyIncomingStats('))
+      + js.slice(js.indexOf('let historyRequestSeq'), js.indexOf('let refreshRunning = false;')), context);
+    const refreshing = context.manualRefresh();
+    await new Promise(setImmediate);
+    context.statsSourceGeneration++;
+    finish();
+    await refreshing;
+    assert.equal(context.state.history, null, stage);
+    assert.deepEqual(feedback, ['refreshing', 'error'], stage);
+  }
+});
+
+test('Dashboard shortcuts share the settings queue and report a rejected write outside the popover', async () => {
+  const js = read('src', 'electron', 'renderer', 'dashboard.js');
+  const alert = () => {
+    const element = { hidden: true };
+    element.classList = { add() { element.hidden = true; }, remove() { element.hidden = false; } };
+    return element;
+  };
+  const error = alert();
+  const shortcutError = alert();
+  const pending = [];
+  const state = { settings: { dashboardStageView: 'flow' }, stageView: 'flow' };
+  const context = {
+    state, dashboardSettingsSave: Promise.resolve(),
+    dashboardSettings: { error, shortcutError, popover: { matches: () => false } },
+    window: { tokenMonitor: { updateSettings: patch => new Promise((resolve, reject) => pending.push({ patch, resolve, reject })) } },
+    syncDashboardSettings() {
+      assert.equal(state.stageView, 'flow');
+      assert.equal(shortcutError.hidden, false);
+      assert.equal(error.hidden, true);
+    }
+  };
+  vm.runInNewContext(js.slice(js.indexOf('function saveDashboardSettings('), js.indexOf('function populatePeriodSelect(')), context);
+  const first = context.saveDashboardSettings({ dashboardStageView: '3d' }, { shortcut: true });
+  const second = context.saveDashboardSettings({ dashboardShowVelocity: false });
+  await Promise.resolve();
+  assert.equal(pending.length, 1);
+  assert.equal(state.stageView, 'flow');
+  pending[0].reject(new Error('disk unavailable'));
+  await first;
+  await Promise.resolve();
+  assert.equal(pending.length, 2);
+  pending[1].resolve();
+  await second;
+  assert.equal(shortcutError.hidden, false, 'another queued write cannot hide this failure');
+  const retry = context.saveDashboardSettings({ dashboardStageView: '3d' }, { shortcut: true });
+  await Promise.resolve();
+  assert.equal(shortcutError.hidden, true);
+  pending[2].resolve();
+  await retry;
+});
+
+
+test('Work Panel refreshes renamed device labels and preserves its row for metrics-only pushes', () => {
+  const tokens = { textContent: '' };
+  const row = {
+    dataset: { deviceId: 'mac-1' }, classList: { toggle() {} },
+    querySelector: selector => selector === '.dash-row-tokens' ? tokens : null
+  };
+  const panel = { innerHTML: '' };
+  let rebuilds = 0;
+  const render = dashboardFunction('renderWorkPanel', '\nfunction topologyLineage(', {
+    els: { workPanel: panel }, state: { workMode: 'devices', locale: 'en', selectedDeviceId: 'all' },
+    lastWorkStructureSig: '', t: String, escapeHtml: String, formatCompact: String,
+    captureListSnapshot() {}, animateListSnapshot() {}, applySwatchColors() {},
+    withPreservedFocus(_root, _selector, _key, update) { rebuilds++; update(); },
+    findByDataset: (_root, _selector, match) => match(row) ? row : null
+  });
+  const device = { deviceId: 'mac-1', name: 'Old name', deviceKind: 'desktop', isLocal: false, tokens: 10, share: 1 };
+  const update = () => render({ fleet: { machines: [device], fleetTotals: { tokens: device.tokens } } });
+  update();
+  assert.match(panel.innerHTML, /Old name/);
+  assert.doesNotMatch(panel.innerHTML, /dashboard.devices.you/);
+  device.tokens = 20;
+  update();
+  assert.equal(tokens.textContent, '20');
+  assert.equal(rebuilds, 1);
+  device.name = 'New name';
+  device.isLocal = true;
+  update();
+  assert.match(panel.innerHTML, /New name/);
+  assert.match(panel.innerHTML, /dashboard.devices.you/);
+  assert.equal(rebuilds, 2);
 });

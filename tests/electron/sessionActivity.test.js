@@ -25,7 +25,8 @@ test('host and iCloud activity snapshots retain the captured local history for T
       liveActivity: { state: 'waiting', observedAt: new Date().toISOString() } }],
       nativeSessions: { today: {}, month: {}, allTime: {} } };
     const context = {
-      settings: {}, latestStats: previous, localStats: previous, lastCollectedDevice: local, localDevice: local,
+      settings: {}, latestStats: previous, latestStatsSource: { generation: 1, identity: mode },
+      hubModeGeneration: 1, currentHubStatsIdentity: () => mode, localStats: previous, lastCollectedDevice: local, localDevice: local,
       ownsUsageRuntime: () => true, ...syncDisplay, ...projection, ...require('../../src/electron/sessionDeviceSources'),
       snapshotLocalDevices: snapshots, rendererSnapshots: publisher.createRendererSnapshots({ source: () => mode }),
       presentationCache: publisher.createStatsPresentationCache(), allTimeSessionsCache: publisher.createStatsPresentationCache(),
@@ -113,7 +114,7 @@ function mainActivityHarness(hubMode, externalAgent = false) {
   const pushes = [];
   let get;
   const context = {
-    console, Date, settings: { hubMode }, mode: 'sync', hubModeGeneration: 1,
+    console, Date, AbortSignal, settings: { hubMode }, mode: 'sync', hubModeGeneration: 1,
     lastCollectedDevice: local, localDevice: null, localStats: null, latestStats: null, statsPushSource: null,
     statsPushRevision: 0, lastExportAt: 0, edgeDockManualStats: null, deviceRuntimeHandle: {},
     ...projection, ...syncDisplay, rendererStats: publisher.rendererStats,
@@ -329,4 +330,17 @@ test('All Time summaries deny local ownership on incomplete Month pages or a pag
     assert.equal(sessions[id].sourceDevice.deviceId === 'local', expectedLocal);
     assert.equal(sessions[id].sourceDevice.ambiguous === true, !expectedLocal);
   }
+});
+
+
+test('local activity is kept for collection without re-stamping stats from a previous Hub', () => {
+  const f = mainActivityHarness('client');
+  f.context.sendPush({ event: 'stats', data: { stats: f.aggregate() } });
+  const previous = f.context.latestStats;
+  f.context.hubModeGeneration++;
+  f.context.publishLocalSessionActivity(f.patch('waiting'));
+  assert.equal(f.context.latestStats, previous);
+  assert.equal(f.pushes.length, 1);
+  const { sessionWithActivity } = require('../../src/shared/sessionLive');
+  assert.equal(sessionWithActivity(f.context.lastCollectedDevice.month, 'claude:live').liveActivity.state, 'waiting');
 });

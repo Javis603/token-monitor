@@ -4,6 +4,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
 const test = require('node:test');
+const vm = require('node:vm');
 
 const {
   createRendererSnapshots,
@@ -195,7 +196,7 @@ test('every stats payload sent to the renderer goes through rendererStats and na
   assert.doesNotMatch(main, /stats: visibleStats\b/);
   assert.match(
     main,
-    /ipcMain\.handle\('stats:allTimeSessions', \(_event, snapshotId\) => rendererAllTimeSessions\(rendererSnapshots\.get\(snapshotId\)\)\)/
+    /ipcMain\.handle\('stats:allTimeSessions',[\s\S]*?const source = hubModeGeneration;[\s\S]*?rendererAllTimeSessions\(rendererSnapshots\.get\(snapshotId, source\)\)[\s\S]*?return source === hubModeGeneration \? sessions : null;/
   );
   assert.match(main, /createRendererSnapshots\(\{ source: \(\) => hubModeGeneration \}\)/);
 });
@@ -242,4 +243,41 @@ test('a snapshot stays addressable after newer ones are published', () => {
   assert.deepEqual(snapshots.stamp(first, {}).snapshot, { id: 1, source: 3 });
   assert.equal(snapshots.get(1), first);
   assert.equal(snapshots.get(2), null, 'the re-stamped snapshot counts as recent');
+});
+
+
+test('All Time IPC keeps same-source predecessors and fences a Hub switch before or during the read', async () => {
+  const main = fs.readFileSync(path.join(__dirname, '../../src/electron/main.js'), 'utf8');
+  const start = main.indexOf("ipcMain.handle('stats:allTimeSessions'");
+  const end = main.indexOf('\n  // While a headless agent', start);
+  let handler;
+  let reads = 0;
+  let release;
+  const context = {
+    hubModeGeneration: 1,
+    ipcMain: { handle: (_channel, callback) => { handler = callback; } },
+    rendererSnapshots: createRendererSnapshots({ source: () => context.hubModeGeneration }),
+    rendererAllTimeSessions(stats) {
+      if (!stats) return null;
+      reads++;
+      return new Promise(resolve => { release = () => resolve(stats.sessions); });
+    }
+  };
+  vm.runInNewContext(main.slice(start, end), context);
+  const publish = name => {
+    const stats = { sessions: { [name]: {} } };
+    return context.rendererSnapshots.stamp(stats, stats).snapshot.id;
+  };
+  const previous = publish('a');
+  publish('b');
+  const sameSource = handler(null, previous);
+  release();
+  assert.deepEqual(await sameSource, { a: {} });
+
+  const pending = handler(null, previous);
+  context.hubModeGeneration = 2;
+  release();
+  assert.equal(await pending, null);
+  assert.equal(await handler(null, previous), null);
+  assert.equal(reads, 2, 'a previous-source ID never loads session rows');
 });

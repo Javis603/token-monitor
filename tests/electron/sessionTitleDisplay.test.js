@@ -82,7 +82,9 @@ test('saving the title preference immediately republishes Today and Home data fr
   const original = { periods: { today: { sessions: { 'codex:s': session() } }, month: { sessions: {} } } };
   const context = {
     settings: { sessionTitlesEnabled: false }, previousSettingsState: { sessionTitlesEnabled: true },
-    latestStats: original, mode: 'local', ...modelAliases, ...deviceSources, withoutSessionTitleStats,
+    latestStats: original, latestStatsSource: { generation: 1, identity: 'local' },
+    hubModeGeneration: 1, currentHubStatsIdentity: () => 'local',
+    dashboardStatsPushWanted: () => false, mode: 'local', ...modelAliases, ...deviceSources, withoutSessionTitleStats,
     presentationCache: createStatsPresentationCache(), syncProvenanceActive: () => false,
     projectLimitStatsForDisplay: value => value,
     migrateCodexAdditionalLimits: noop, scheduleMacWidgetSnapshot: noop, captureMacWidgetProducerOwner: noop, pluginRuntime: null,
@@ -96,7 +98,8 @@ test('saving the title preference immediately republishes Today and Home data fr
       events.push('stats'); adopted = payload.data.stats;
     } } }
   };
-  vm.runInNewContext(`${source.slice(projectionStart, projectionEnd)}\n${source.slice(presentationPushStart, presentationPushEnd)}\n${source.slice(refreshStart, refreshEnd)}\nfunction saveDisplayPreference() {${source.slice(updateStart, updateEnd)}}`, context);
+  const sourceGuard = source.slice(source.indexOf('function latestStatsMatchCurrentSource('), source.indexOf('// Two options'));
+  vm.runInNewContext(`${sourceGuard}\n${source.slice(projectionStart, projectionEnd)}\n${source.slice(presentationPushStart, presentationPushEnd)}\n${source.slice(refreshStart, refreshEnd)}\nfunction saveDisplayPreference() {${source.slice(updateStart, updateEnd)}}`, context);
   for (const enabled of [false, true]) {
     context.previousSettingsState = { sessionTitlesEnabled: !enabled };
     context.settings = { sessionTitlesEnabled: enabled };
