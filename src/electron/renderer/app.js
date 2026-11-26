@@ -3409,13 +3409,19 @@ function renderRows(rows, { incompleteHint = '', fromSearch = false, reuseToolFi
     rows = sessionRowsApi.filterSessionRows(rows, searchQuery);
   }
   const searchEmpty = Boolean(searchQuery && rows.length === 0);
-  if (rows.length === 0 && (!incompleteHint || searchEmpty)) {
+  const reasonixReadFailed = state.breakdown === 'session' && reasonixSessionList?.failed
+    && !fixedPeriodRangesApi.isDerived(state.period);
+  const hintText = [
+    incompleteHint ? t(incompleteHint) : '',
+    reasonixReadFailed ? t('sessions.reasonixReadFailed') : ''
+  ].filter(Boolean).join(' ');
+  if (rows.length === 0 && (!hintText || searchEmpty)) {
     els.breakdown.replaceChildren();
-    if (incompleteHint) {
+    if (hintText) {
       const hint = document.createElement('p');
       hint.className = 'breakdown-incomplete-hint';
       hint.setAttribute('role', 'status');
-      hint.textContent = t(incompleteHint);
+      hint.textContent = hintText;
       els.breakdown.append(hint);
     }
     if (searchEmpty) els.breakdown.append(sessionSearchEmptyNode(searchQuery));
@@ -3431,7 +3437,6 @@ function renderRows(rows, { incompleteHint = '', fromSearch = false, reuseToolFi
   setSessionSearchStatus(searchQuery, page.total);
   const visibleRows = page.rows;
   const max = barScaleMax(rows);
-  const hintText = incompleteHint ? t(incompleteHint) : '';
   const signature = JSON.stringify([
     state.breakdown,
     hintText,
@@ -3474,7 +3479,7 @@ function renderRows(rows, { incompleteHint = '', fromSearch = false, reuseToolFi
       if (!retainedKeys.has(key)) cancelRowNumberAnimation(row.querySelector('.row-value'));
     }
     const nodes = visibleRows.map((row) => existing.get(row.key) || rowTemplate(row));
-    if (incompleteHint) {
+    if (hintText) {
       const hint = existingHint || document.createElement('p');
       hint.className = 'breakdown-incomplete-hint';
       hint.setAttribute('role', 'status');
@@ -3720,23 +3725,29 @@ function loadReasonixSessionList() {
     reasonixSessionList = null;
     return;
   }
-  // The list belongs to this visit. Stats pushes only repaint it.
+  // Reuse the list for this visit and local day across ordinary stats repaints.
   if (state.period && fixedPeriodRangesApi.isDerived(state.period)) return;
   const key = JSON.stringify([
     state.settings?.sessionTitlesEnabled !== false,
     state.settings?.modelAliases,
     state.settings?.modelAliasGrouping,
-    state.settings?.allTimeSince
+    state.settings?.allTimeSince,
+    fixedPeriodTodayKey()
   ]);
   if (state.openSession || reasonixSessionList?.key === key
     || !window.tokenMonitor.listReasonixSessions) return;
-  const request = { key, titlesEnabled: state.settings?.sessionTitlesEnabled !== false, periods: {} };
+  const request = { key, titlesEnabled: state.settings?.sessionTitlesEnabled !== false, periods: {}, failed: false };
   reasonixSessionList = request;
   window.tokenMonitor.listReasonixSessions().then((periods) => {
     if (reasonixSessionList !== request) return;
     request.periods = periods;
     statsRenderScheduler.request();
-  }).catch((error) => console.log(`[reasonix-sessions] ${error.message}`));
+  }, (error) => {
+    if (reasonixSessionList !== request) return;
+    console.log(`[reasonix-sessions] ${error?.message || error}`);
+    request.failed = true;
+    statsRenderScheduler.request();
+  });
 }
 
 function sessionRowsForPeriod(period) {

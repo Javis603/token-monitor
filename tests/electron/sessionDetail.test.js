@@ -654,34 +654,122 @@ test('a confirmed remote session never opens a local transcript with the same ID
   assert.equal(renders[0].detail.found, false);
 });
 
-test('Reasonix loads on a Sessions visit and ignores ordinary stats repaints', async () => {
+function reasonixSessionListHarness(listReasonixSessions) {
   const source = rendererSource.slice(rendererSource.indexOf('let reasonixSessionList = null;'),
     rendererSource.indexOf('function sessionRowsForPeriod('));
-  const state = { breakdown: 'home', settings: { sessionTitlesEnabled: true, allTimeSince: '2024-01-01' } };
-  let calls = 0;
+  const refreshHandler = rendererSource.slice(rendererSource.indexOf("els.refreshButton.addEventListener('click',"),
+    rendererSource.indexOf("els.minButton.addEventListener('click',"));
+  const state = { breakdown: 'home', period: 'today', settings: { sessionTitlesEnabled: true, allTimeSince: '2024-01-01' } };
+  const calendar = { today: '2026-11-30' };
   let renders = 0;
+  let refresh;
   const context = {
     state, clientRowTracked: () => true,
+    fixedPeriodTodayKey: () => calendar.today,
+    fixedPeriodRangesApi: { isDerived: period => period === 'last7days' },
+    console: { log() {} },
+    els: { refreshButton: { addEventListener: (_type, handler) => { refresh = handler; } } },
+    refreshStats() {},
     statsRenderScheduler: { request: () => { renders += 1; } },
-    window: { tokenMonitor: { listReasonixSessions: async () => { calls += 1; return {}; } } }
+    window: { tokenMonitor: { listReasonixSessions } }
   };
-  vm.runInNewContext(source, context);
-  context.loadReasonixSessionList();
+  const request = vm.runInNewContext(`${source}\n${refreshHandler}\n() => reasonixSessionList`, context);
+  return { state, calendar, load: context.loadReasonixSessionList, refresh, request, renders: () => renders };
+}
+
+test('Reasonix loads on a Sessions visit and reloads once when the local day changes', async () => {
+  let calls = 0;
+  const { state, calendar, load, renders } = reasonixSessionListHarness(async () => {
+    calls += 1;
+    return {};
+  });
+  load();
   assert.equal(calls, 0);
   state.breakdown = 'session';
-  context.loadReasonixSessionList();
-  context.loadReasonixSessionList();
+  load();
+  load();
   await Promise.resolve();
   assert.equal(calls, 1);
-  assert.equal(renders, 1);
+  assert.equal(renders(), 1);
+  calendar.today = '2026-12-01';
+  state.openSession = {};
+  load();
+  assert.equal(calls, 1, 'an open detail does not trigger a list read');
+  state.openSession = null;
+  load();
+  load();
+  assert.equal(calls, 2, 'the first list render on the new day reloads once');
   state.settings.allTimeSince = '2025-01-01';
-  context.loadReasonixSessionList();
-  assert.equal(calls, 2);
-  state.breakdown = 'home';
-  context.loadReasonixSessionList();
-  state.breakdown = 'session';
-  context.loadReasonixSessionList();
+  load();
   assert.equal(calls, 3);
+  state.breakdown = 'home';
+  load();
+  state.breakdown = 'session';
+  load();
+  assert.equal(calls, 4);
+});
+
+test('Reasonix marks a failed list read and retries on Refresh', async () => {
+  let calls = 0;
+  const emptyPeriods = { today: {}, month: {}, allTime: {} };
+  const { state, load, refresh, request, renders } = reasonixSessionListHarness(async () => {
+    calls += 1;
+    if (calls === 1) throw new Error('worker timed out');
+    return emptyPeriods;
+  });
+  state.breakdown = 'session';
+  load();
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(request().failed, true);
+  assert.equal(renders(), 1, 'the failure prompts a repaint');
+  load();
+  load();
+  assert.equal(calls, 1, 'ordinary repaints do not retry a failed read');
+
+  refresh();
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(calls, 2);
+  assert.notEqual(request().failed, true);
+  assert.equal(request().periods, emptyPeriods);
+  assert.equal(renders(), 2);
+});
+
+test('Reasonix list IPC does not reuse a worker read started before midnight', async () => {
+  const main = fs.readFileSync(path.join(__dirname, '../../src/electron/main.js'), 'utf8');
+  const source = main.slice(main.indexOf('  let reasonixSessionRead;'),
+    main.indexOf("  ipcMain.handle('session:getDetail'"));
+  const reads = [];
+  let today = '2026-11-30';
+  let list;
+  const sender = {};
+  vm.runInNewContext(source, {
+    ipcMain: { handle: (_name, handler) => { list = handler; } },
+    mainWindow: { webContents: sender },
+    settings: { clients: ['reasonix'] },
+    clientsCsvForSetting: clients => clients,
+    trackedClientSet: clients => new Set(clients),
+    fixedPeriodRangesApi: { localDayKey: () => today },
+    latestStats: null,
+    projectModelAliasSessions: (_stats, rows) => rows,
+    runSessionDetailWorker() {
+      const read = deferred();
+      reads.push(read);
+      return read.promise;
+    }
+  });
+
+  const previous = list({ sender });
+  today = '2026-12-01';
+  const current = list({ sender });
+  assert.equal(reads.length, 2);
+  reads[0].resolve({ today: { previous: {} } });
+  assert.deepEqual(Object.keys((await previous).today), ['previous']);
+
+  const concurrent = list({ sender });
+  assert.equal(reads.length, 2, 'only reads on the same local day are shared');
+  reads[1].resolve({ today: { current: {} } });
+  assert.deepEqual(Object.keys((await current).today), ['current']);
+  assert.deepEqual(Object.keys((await concurrent).today), ['current']);
 });
 
 test('Reasonix detail stays on demand even if ordinary stats contain a matching row', async () => {

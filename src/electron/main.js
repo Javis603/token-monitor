@@ -8830,8 +8830,9 @@ app.whenReady().then(() => {
   ipcMain.handle('session:listReasonix', async (event) => {
     if (event.sender !== mainWindow?.webContents || !trackedClientSet(clientsCsvForSetting(settings?.clients)).has('reasonix')) return {};
     const allTimeSince = settings.allTimeSince;
-    if (!reasonixSessionRead || reasonixSessionRead.allTimeSince !== allTimeSince) {
-      const request = { allTimeSince, promise: null };
+    const todayKey = fixedPeriodRangesApi.localDayKey();
+    if (!reasonixSessionRead || reasonixSessionRead.allTimeSince !== allTimeSince || reasonixSessionRead.todayKey !== todayKey) {
+      const request = { allTimeSince, todayKey, promise: null };
       request.promise = runSessionDetailWorker({ action: 'listReasonixSessions', allTimeSince }).finally(() => {
         if (reasonixSessionRead === request) reasonixSessionRead = null;
       });
