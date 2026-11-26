@@ -1363,6 +1363,7 @@ async function collectUsageOnce(options) {
     ...(options.sessionMetadataDeps || {}),
     env: options.env || options.sessionMetadataDeps?.env,
     customScanPaths: options.customScanPaths,
+    antigravityAcpPaths,
     metadataCache: new Map(),
     resolvedSessionKeys: new Set(),
     attemptedSessionKeys: new Set(),

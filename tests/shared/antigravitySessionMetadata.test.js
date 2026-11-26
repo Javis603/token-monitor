@@ -440,7 +440,8 @@ test('Antigravity catalog renames preserve transcript activity, turn state and p
 for (const [source, dir] of [
   ['Desktop', '.gemini/antigravity'],
   ['CLI', '.gemini/antigravity-cli'],
-  ['ACP', '.t3/userdata/providers/antigravity/profile-a/antigravity-acp']
+  ['ACP', '.t3/userdata/providers/antigravity/profile-a/antigravity-acp'],
+  ['ACP with selected path', 'custom-acp']
 ]) {
   test(`Antigravity ${source} turn changes reach anchored periods before new usage arrives`, { skip: !sqlite }, async (t) => {
     const store = summaryStore(t, dir);
@@ -467,6 +468,7 @@ for (const [source, dir] of [
       runTokscale: async () => ({ entries: [{ client: 'antigravity', sessionId: 'turn', input: 10, output: 2, cost: 0.5, lastUsedAt: prior }] }),
       onAnchorComputed: (value) => { captured = value; }
     };
+    if (dir === 'custom-acp') options.antigravityAcpPaths = [path.join(store.dir, 'conversations')];
     write.run('CASCADE_RUN_STATUS_IDLE', 0, prior, prior);
     const initial = await collectUsageOnce(options);
     const anchor = {
@@ -516,6 +518,30 @@ for (const [source, dir] of [
         assert.equal(resumed[period].totalTokens, 12, period);
         assert.equal(retainedAnchor[period].sessions[key].lastUsedAt, yesterday, 'keep the accounting anchor unchanged');
       }
+    }
+
+    // A turn spans midnight. Its last usage is recent but its prompt is not,
+    // and it completes before the scanner reports any usage for the new day.
+    const afterMidnight = new Date();
+    afterMidnight.setHours(0, 1, 0, 0);
+    const clock = afterMidnight.getTime();
+    const beforeMidnight = new Date(clock - 120_000).toISOString();
+    const oldPrompt = new Date(clock - 30 * 60_000).toISOString();
+    options.now = afterMidnight;
+    options.runTokscale = async ({ flags }) => ({ entries: flags.includes('--today') ? [] : [
+      { client: 'antigravity', sessionId: 'turn', input: 10, output: 2, cost: 0.5, lastUsedAt: beforeMidnight }
+    ] });
+    write.run('CASCADE_RUN_STATUS_RUNNING', 1, oldPrompt, beforeMidnight);
+    const overnight = await collectUsageOnce(options);
+    assert.equal(sessionActivityState(overnight.month.sessions[key], clock), 'running');
+    const overnightAnchor = { dateKey: localTodayKey(afterMidnight), today: overnight.today, month: overnight.month,
+      allTime: overnight.allTime, todayPartitions: captured.todayPartitions };
+    write.run('CASCADE_RUN_STATUS_IDLE', 0, oldPrompt, afterMidnight.toISOString());
+    const finished = await collectUsageOnce({ ...options, todayOnlyAnchor: overnightAnchor, targetClients: ['antigravity'] });
+    assert.equal(finished.today.sessions[key], undefined);
+    for (const period of ['month', 'allTime']) {
+      assert.equal(sessionActivityState(finished[period].sessions[key], clock), 'ended', period);
+      assert.equal(finished[period].sessions[key].lastUsedAt, beforeMidnight, 'the catalog modification time is not activity');
     }
   });
 }

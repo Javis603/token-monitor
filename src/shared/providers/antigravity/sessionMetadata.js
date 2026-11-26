@@ -96,11 +96,14 @@ function projectFromWorkspaceUris(workspaceUris, context) {
   return null;
 }
 
-function readTurn(row) {
-  const rawInputAt = row.last_user_input_time;
+function catalogTime(value) {
   // Use ISO parsing for SQLite's space-separated timestamps. V8 otherwise
   // interprets the year-0001 sentinel as 2001.
-  const inputAt = typeof rawInputAt === 'string' ? Date.parse(rawInputAt.replace(' ', 'T')) : NaN;
+  return typeof value === 'string' ? Date.parse(value.replace(' ', 'T')) : NaN;
+}
+
+function readTurn(row) {
+  const inputAt = catalogTime(row.last_user_input_time);
   if (row.status === 'CASCADE_RUN_STATUS_RUNNING') {
     return { turnEnded: false, inputAt: inputAt > 0 ? inputAt : 0 };
   }
@@ -121,7 +124,7 @@ function canReadTurns(dbPath) {
 }
 
 // Anchored scans only reload today's usage. A resumed conversation can still
-// have all its tokens in earlier days, so query recent prompts directly
+// have all its tokens in earlier days, so query recent prompts and idle updates
 // instead of looking up every historical session on each watch tick.
 function readRecentTurns(home, deps, now) {
   const turns = new Map();
@@ -138,10 +141,12 @@ function readRecentTurns(home, deps, now) {
       try {
         db = new sqlite.DatabaseSync(dbPath, { readOnly: true });
         const rows = db.prepare(`
-          SELECT conversation_id, status, not_fully_idle, last_user_input_time
+          SELECT conversation_id, status, not_fully_idle, last_user_input_time, last_modified_time
           FROM conversation_summaries
-          WHERE julianday(last_user_input_time) >= julianday(?)
-        `).all(new Date(since).toISOString());
+          WHERE julianday(last_user_input_time) >= julianday(?1)
+            OR (status = 'CASCADE_RUN_STATUS_IDLE' AND not_fully_idle = 0
+              AND julianday(last_modified_time) >= julianday(?1))
+        `).all({ '?1': new Date(since).toISOString() });
         cached = { stamp, since, rows };
         recentTurnCache.set(dbPath, cached);
       } catch (_) {
@@ -153,7 +158,11 @@ function readRecentTurns(home, deps, now) {
     }
     for (const row of cached.rows) {
       const turn = readTurn(row);
-      if (turn?.inputAt >= since) rememberTurn(turns, row.conversation_id, turn);
+      // A recent catalog update makes an idle row worth checking even when its
+      // prompt is old. Only the prompt can advance a session's activity time.
+      if (turn && (turn.inputAt >= since || (turn.turnEnded && catalogTime(row.last_modified_time) >= since))) {
+        rememberTurn(turns, row.conversation_id, turn);
+      }
     }
   }
   return turns;
