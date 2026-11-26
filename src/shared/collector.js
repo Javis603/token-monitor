@@ -1031,7 +1031,14 @@ function refreshT3SessionLinks(session, resolved, revoked = false) {
   if (revoked) delete session.sessionEntry;
   const hadT3Parent = session.t3ParentLink;
   revokeT3SessionLinks(session);
-  if (!revoked) session.t3ThreadId = resolved.t3ThreadId;
+  if (!revoked) {
+    session.t3ThreadId = resolved.t3ThreadId;
+    // The confirmed binding is entry evidence too: a session the anchor still
+    // labels as native CLI moves to T3 with its link. Copy only a confirmed
+    // value — an absent one is not evidence of removal, mirroring how the
+    // fill-only anchor copy above treats an unavailable read.
+    if (resolved.sessionEntry) session.sessionEntry = resolved.sessionEntry;
+  }
   if (session.parentSessionId || !resolved?.parentSessionId || (revoked && (!hadT3Parent || resolved.t3ParentLink))) return;
   session.parentSessionId = resolved.parentSessionId;
   if (resolved.parentClient) session.parentClient = resolved.parentClient;

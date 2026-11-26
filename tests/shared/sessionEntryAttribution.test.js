@@ -416,3 +416,29 @@ test('entry trend choices expose the entries the detail attributes and the unkno
     ['t3']
   );
 });
+
+test('a link refresh moves the anchor row to the confirmed entry', t => {
+  const s = t3Store(t);
+  s.thread('app-thread');
+  s.provider('p1', 'app-thread', 'bound-native');
+  // The anchor row still carries the native CLI label from an earlier tick
+  // without the binding; this tick's pass confirmed T3. The anchored update
+  // copies the confirmed entry with its link, so a later unavailable read
+  // cannot resurrect the stale native label.
+  const periods = { today: normalizePeriod({ sessions: {
+    a: { client: 'codex', sessionId: 'bound-native', totalTokens: 10, sessionEntry: 'codex-cli' }
+  } }) };
+  applyT3SessionParents(periods, s.home, { env: {} });
+  const session = periods.today.sessions['codex:bound-native'];
+  assert.equal(session.t3ThreadId, 'app-thread');
+  assert.equal(session.sessionEntry, 't3');
+  // Revocation still clears the entry with the link.
+  s.db.prepare("DELETE FROM orchestration_v2_projection_provider_threads WHERE provider_thread_id = 'p1'").run();
+  const revokePeriods = { today: normalizePeriod({ sessions: {
+    a: { client: 'codex', sessionId: 'bound-native', totalTokens: 10, t3ThreadId: 'app-thread', sessionEntry: 't3' }
+  } }) };
+  applyT3SessionParents(revokePeriods, s.home, { env: {} });
+  const revoked = revokePeriods.today.sessions['codex:bound-native'];
+  assert.equal(revoked.t3ThreadId, undefined);
+  assert.equal(revoked.sessionEntry, undefined);
+});
