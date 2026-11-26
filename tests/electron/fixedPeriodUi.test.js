@@ -452,6 +452,40 @@ test('an unsuccessful warmup retries once when a new revision arrives', async ()
   assert.equal(reads.length, 2);
 });
 
+test('a brief publication gap keeps usage visible without unverified titles and expires', async () => {
+  const { context, state, reads } = syncedRangeHarness();
+  let expire;
+  context.setTimeout = callback => { expire = callback; return 1; };
+  context.requestSyncedFixedPeriod();
+  reads[0].finish(rangeDetails(20));
+  await new Promise(setImmediate);
+  state.stats.fixedRangeRevisions = {};
+  context.requestSyncedFixedPeriod();
+  assert.equal(context.buildFixedPeriodSnapshot().period.totalTokens, 20);
+  assert.equal(context.buildFixedPeriodSnapshot().period.sessions.example.title, undefined);
+  expire();
+  assert.equal(context.buildFixedPeriodSnapshot().status, 'loading');
+  state.stats.fixedRangeRevisions = { remote: 'revision-2' };
+  context.requestSyncedFixedPeriod();
+  reads[1].finish(rangeDetails(25));
+  await new Promise(setImmediate);
+  assert.equal(context.buildFixedPeriodSnapshot().period.totalTokens, 25);
+});
+
+test('a warmup response for replaced display settings cannot populate the range cache', async () => {
+  const { context, state, reads } = syncedRangeHarness();
+  state.period = 'today';
+  context.warmSyncedFixedPeriod();
+  state.settings.modelAliases = { old: 'new' };
+  reads[0].finish(rangeDetails(20));
+  await new Promise(setImmediate);
+  assert.equal(state.syncedFixedPeriodCache.get('week').snapshot, null);
+  assert.equal(reads.length, 2);
+  reads[1].finish(rangeDetails(25));
+  await new Promise(setImmediate);
+  assert.equal(state.syncedFixedPeriodCache.get('week').snapshot.period.totalTokens, 25);
+});
+
 function rangeDetails(totalTokens) {
   return { status: 'ready', detailsAvailable: true, period: {
     totalTokens, sessions: { example: { title: 'Synced title' } }, projects: { example: { totalTokens } }

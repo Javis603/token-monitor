@@ -7773,6 +7773,7 @@ async function resolveSyncedPeriodForStats(stats, source, selection) {
   const config = historyResolverOptions();
   const localDevice = stats.localFixedRangeRevision ? snapshotLocalDevices.get(stats)?.localDevice : null;
   const options = { weekStartsOn: SYNC_WEEK_STARTS_ON, now: Date.now() };
+  const { sessionTitlesEnabled, modelAliases, modelAliasGrouping } = settings || {};
   const headers = config.secret ? { authorization: `Bearer ${config.secret}` } : {};
   const read = (deviceId, name, window, revision) => {
     if (config.hubMode === 'icloud') return config.icloudSync?.readFixedRange(deviceId, name, window, revision);
@@ -7807,8 +7808,9 @@ async function resolveSyncedPeriodForStats(stats, source, selection) {
     periods: { [selection]: fixed.period },
     devices: fixed.devices.map(({ period, ...device }) => ({ ...device, periods: { [selection]: period } }))
   };
-  const visible = settings?.sessionTitlesEnabled === false ? withoutSessionTitleStats(input) : input;
-  const projected = projectModelAliasStats(visible, settings?.modelAliases, { grouping: settings?.modelAliasGrouping });
+  const visible = sessionTitlesEnabled === false || settings?.sessionTitlesEnabled === false
+    ? withoutSessionTitleStats(input) : input;
+  const projected = projectModelAliasStats(visible, modelAliases, { grouping: modelAliasGrouping });
   return {
     ...fixed,
     period: projected.periods[selection],

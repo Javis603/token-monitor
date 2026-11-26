@@ -6726,6 +6726,7 @@ function readSyncedFixedPeriod(period, key) {
   const entry = { scope, key, revisions, snapshot, promise: null };
   cache.set(period, entry);
   entry.promise = window.tokenMonitor.getSyncedFixedPeriod(id, source, period).then(result => {
+    if (cache.get(period) !== entry || syncedFixedPeriodKey(period) !== key) return null;
     if (result?.detailsAvailable) {
       entry.snapshot = result;
       entry.snapshotKey = key;
@@ -6844,9 +6845,23 @@ function buildFixedPeriodSnapshot() {
   const key = syncedFixedPeriodKey();
   const request = state.syncedFixedPeriod?.key === key ? state.syncedFixedPeriod : null;
   const cached = state.syncedFixedPeriodCache?.get(state.period);
-  const usableCache = key && cached && cached.scope === syncedFixedPeriodScope();
-  const mayUseCached = usableCache && (cached.snapshotKey === key || request?.pending || Number.isFinite(request?.retryAt));
-  const synced = request?.snapshot || (mayUseCached && cached.snapshot);
+  const usableCache = cached?.snapshot && cached.scope === syncedFixedPeriodScope();
+  let synced = request?.snapshot;
+  if (!synced && usableCache) {
+    if (!key) {
+      // Usage can arrive before its detail pages. Give publication one retry
+      // interval while retaining the same range and checking title consent.
+      const period = state.period;
+      cached.publicationTimer ??= setTimeout(() => {
+        if (state.syncedFixedPeriodCache.get(period) !== cached) return;
+        cached.snapshot = null;
+        if (state.period === period) statsRenderScheduler.request();
+      }, FIXED_PERIOD_HISTORY_RETRY_MS);
+      synced = retainVerifiedFixedRangeTitles(cached.snapshot, cached.revisions, {});
+    } else if (cached.snapshotKey === key || request?.pending || Number.isFinite(request?.retryAt)) {
+      synced = cached.snapshot;
+    }
+  }
   if (synced) {
     const history = state.settings?.historyEnabled !== false && !state.fixedPeriodHistoryFailed
       ? buildFixedPeriodSourcesSnapshot() : null;
