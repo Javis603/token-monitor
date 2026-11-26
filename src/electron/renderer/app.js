@@ -18876,11 +18876,11 @@ function trayProviderIconDemand() {
 }
 
 // A provider that starts reporting usage after startup needs its mark delivered
-// before the tray can pick it. An id counts as requested once a current
-// delivery has sent its mark to main or failed to load it, so a failed mark
-// cannot turn every stats push into another delivery, while one dropped by a
-// superseded delivery is asked for again. Ids the current delivery is still
-// loading are left to it.
+// before the tray can pick it. An id counts as requested while the latest
+// finished delivery sent its mark to main or failed to load it, so a failed
+// mark cannot turn every stats push into another delivery, while one dropped
+// by a superseded delivery, or left out of a later one, is asked for again.
+// Ids the current delivery is still loading are left to it.
 function syncTrayProviderIconDemand() {
   if (!state.settings || !window.tokenMonitor.setTrayIcons) return;
   if (trayProviderIconDemand().some((id) => !trayProviderIconsRequested.has(id) && !trayProviderIconsLoading.has(id))) {
@@ -18931,8 +18931,12 @@ async function deliverTrayProviderIcons(showBadge = state.settings?.showTrayProv
   }
   if (!trayProviderIconDeliveryGuard.isCurrent(deliveryId)) return;
   if (Object.keys(icons).length) await window.tokenMonitor.setTrayIcons(icons);
-  for (const id of [...Object.keys(icons), ...failed]) trayProviderIconsRequested.add(id);
   if (!trayProviderIconDeliveryGuard.isCurrent(deliveryId)) return;
+  // Main keeps every bitmap it was sent, including ones drawn for an earlier
+  // theme or badge setting. Only the marks this delivery covered are current,
+  // so a provider that left demand is delivered again when it returns.
+  trayProviderIconsRequested.clear();
+  for (const id of [...Object.keys(icons), ...failed]) trayProviderIconsRequested.add(id);
   trayProviderIconsLoading = new Set();
   // Provider images may unlock a richer bars icon now that they're cached.
   maybeUpdateBarsIcon();

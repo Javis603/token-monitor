@@ -265,6 +265,27 @@ test('a mark loaded by a superseded delivery is sent once it returns to demand',
   assert.equal(sent.includes('claude-brand'), true);
 });
 
+test('a mark left out of a theme redelivery is drawn for the new theme when it returns', async () => {
+  const { context, pick } = trayMarkDeliveryFixture(() => Promise.resolve({}));
+  let theme = 'dark';
+  const held = {};
+  context.providerImageToPngDataUrl = () => `bitmap-${theme}`;
+  context.window.tokenMonitor.setTrayIcons = async (icons) => { Object.assign(held, icons); };
+  pick('claude-brand');
+  await context.deliverTrayProviderIcons();
+  assert.equal(held['claude-brand'], 'bitmap-dark');
+
+  pick('chatgpt');
+  theme = 'light';
+  await context.deliverTrayProviderIcons();
+  assert.equal(held['claude-brand'], 'bitmap-dark', 'main still holds the old-theme bitmap');
+
+  pick('claude-brand');
+  context.syncTrayProviderIconDemand();
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(held['claude-brand'], 'bitmap-light');
+});
+
 test('a mark that failed to load is not retried on every stats push', async () => {
   let loads = 0;
   const { context, pick } = trayMarkDeliveryFixture((source) => {
