@@ -6610,8 +6610,10 @@ function renderTrends() {
   const { points, metric, labelKey } = selected;
   const patchedPoints = state.period === 'today' ? charts.patchTodayBar(points, todayTotal) : points;
   // An entry filter re-derives the curve from the retained session detail;
-  // days it does not cover land entirely in the unknown bucket, so the split
-  // always adds back up to the untouched total curve.
+  // uncovered days and undercounts land in the unknown bucket, so the split
+  // adds back up to the untouched total curve unless the detail overcounts a
+  // point — that case cannot be rebalanced without inventing values and
+  // floors unknown at zero instead.
   const entryDays = state.stats?.dailySessionPeriods;
   const entryChoices = charts.entryTrendChoices(patchedPoints, entryDays, { labelKey, metric });
   if (state.trendEntryFilter && !entryChoices.includes(state.trendEntryFilter)) state.trendEntryFilter = '';
