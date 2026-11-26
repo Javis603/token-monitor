@@ -70,6 +70,7 @@ const {
 } = require('./subprocessTermination');
 const { lowerSubprocessPriority } = require('./subprocessPriority');
 const { createAntigravitySelfSync } = require('./providers/antigravity/selfSync');
+const { readRecentTurns: readRecentAntigravityTurns } = require('./providers/antigravity/sessionMetadata');
 const { ANTIGRAVITY_ACP_SOURCE_ID, discoverAntigravityAcpPaths } = require('./providers/antigravity/acpPaths');
 const { withCursorLifecycle } = require('./providers/cursor/lifecycle');
 const { createCursorSelfSync } = require('./providers/cursor/selfSync');
@@ -956,6 +957,20 @@ function propagateTodayProjects(today, periods, titleMetadata = {}) {
   }
 }
 
+function projectRetainedAntigravityTurns(today, periods, turns) {
+  for (const [sessionId, turn] of turns) {
+    const key = `antigravity:${sessionId}`;
+    if (today.sessions?.[key]) continue;
+    for (const period of periods) {
+      const row = period?.sessions?.[key];
+      if (!row) continue;
+      const lastUsedAt = turn.inputAt > (Date.parse(row.lastUsedAt) || 0)
+        ? new Date(turn.inputAt).toISOString() : row.lastUsedAt;
+      period.sessions[key] = { ...row, lastUsedAt, turnEnded: turn.turnEnded };
+    }
+  }
+}
+
 // Yesterday is a closed day: it takes a session's current title, project and
 // links, but its times, context and turn state stay those of that day.
 const PAST_DAY_IDENTITY_FIELDS = Object.freeze([
@@ -1385,6 +1400,7 @@ async function collectUsageOnce(options) {
   // each range. Watch ticks reuse the anchor's past part: those days are over.
   let nativeDays = null;
   let nativePastRanges = null;
+  let retainedAntigravityTurns;
   let dailyHistoryLiveDays = options.dailyHistoryLiveDays;
   let todayPartitions = null;
   const anchor = options.todayOnlyAnchor;
@@ -1562,6 +1578,10 @@ async function collectUsageOnce(options) {
         applySessionIdentities({ month, allTime }, options.homeDir || os.homedir(), { ...localSessionMetadataDeps, deferT3SessionParents: true });
       }
       propagateTodayProjects(today, { month, allTime }, { ...localSessionMetadataDeps, t3Titles: anchor.t3Titles, scanTitleClears });
+      if (trackedClientSet.has('antigravity')) {
+        retainedAntigravityTurns = readRecentAntigravityTurns(options.homeDir || os.homedir(), localSessionMetadataDeps, collectedAt.getTime());
+        projectRetainedAntigravityTurns(today, [month, allTime], retainedAntigravityTurns);
+      }
       // A delegated child may be new today while its idle parent exists only in
       // the broader anchor. Resolve app links without re-reading transcripts.
       const targets = upgradeIdentities
@@ -1822,6 +1842,10 @@ async function collectUsageOnce(options) {
       codexDotsUsage,
       titleMetadata: { ...localSessionMetadataDeps, t3Titles: anchor?.t3Titles, scanTitleClears }
     }) : null;
+  if (nativeRangeSnapshot && retainedAntigravityTurns) {
+    const { yesterday, ...current } = nativeRangeSnapshot.nativeRanges;
+    projectRetainedAntigravityTurns(today, Object.values(current), retainedAntigravityTurns);
+  }
 
   // One filesystem probe per tick, shared by the legacy status and the health
   // record below. Probing twice cost a second pass over every client's roots —
@@ -3556,7 +3580,7 @@ function startCollector(options) {
         reasonixNativeSessionCache.invalidate(filePath);
       }
       for (const client of clientsForWatchPath(filePath, sourceSyncRootsByClient, attributionIgnores)) {
-        // Catalog changes refresh labels, not the RPC usage cache.
+        // Catalog changes refresh labels and turn state, not the RPC usage cache.
         if (client === 'antigravity' && summaryFiles.has(path.resolve(filePath))) continue;
         // Another client's scan root may overlap the desktop store. Its unrelated
         // files can request a local scan, but only database/WAL writes earn a

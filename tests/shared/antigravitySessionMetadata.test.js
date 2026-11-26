@@ -22,10 +22,10 @@ try { sqlite = require('node:sqlite'); } catch (_) { sqlite = null; }
 
 installSourceEnvGuard(test);
 
-function summaryStore(t) {
+function summaryStore(t, source = '.gemini/antigravity') {
   const temp = fs.realpathSync.native(os.tmpdir());
   const home = fs.mkdtempSync(path.join(temp, 'antigravity-metadata-'));
-  const dir = path.join(home, '.gemini', 'antigravity');
+  const dir = path.join(home, source);
   fs.mkdirSync(dir, { recursive: true });
   const dbPath = path.join(dir, 'conversation_summaries.db');
   const db = new sqlite.DatabaseSync(dbPath);
@@ -436,6 +436,89 @@ test('Antigravity catalog renames preserve transcript activity, turn state and p
     assert.equal(sessionActivityState(session, now), id);
   }
 });
+
+for (const [source, dir] of [
+  ['Desktop', '.gemini/antigravity'],
+  ['CLI', '.gemini/antigravity-cli'],
+  ['ACP', '.t3/userdata/providers/antigravity/profile-a/antigravity-acp']
+]) {
+  test(`Antigravity ${source} turn changes reach anchored periods before new usage arrives`, { skip: !sqlite }, async (t) => {
+    const store = summaryStore(t, dir);
+    fs.mkdirSync(path.join(store.dir, 'conversations'));
+    store.put.run('turn', 'Title', '', null, null);
+    store.db.exec(`
+      ALTER TABLE conversation_summaries ADD COLUMN status TEXT;
+      ALTER TABLE conversation_summaries ADD COLUMN not_fully_idle INTEGER;
+      ALTER TABLE conversation_summaries ADD COLUMN last_user_input_time TEXT;
+    `);
+    const write = store.db.prepare('UPDATE conversation_summaries SET status = ?, not_fully_idle = ?, last_user_input_time = ?, last_modified_time = ?');
+    const now = Date.now();
+    const prior = new Date(now - 60_000).toISOString();
+    const input = new Date(now - 30_000).toISOString();
+    const modified = new Date(now - 10_000).toISOString();
+    const key = 'antigravity:turn';
+    let captured;
+    const options = {
+      clients: 'antigravity', homeDir: store.home, projectsEnabled: false,
+      historyEnabled: false, dailyHistoryArchiveEnabled: false, codexLocalUsageEnabled: false,
+      wslScanEnabled: false, osInfo: {}, allTimeSince: '2024-01-01',
+      deviceId: 'fixture-device', agentVersion: 'fixture', commandTimeoutMs: 1000,
+      sessionMetadataDeps: store.deps, runAntigravitySync: async () => {},
+      runTokscale: async () => ({ entries: [{ client: 'antigravity', sessionId: 'turn', input: 10, output: 2, cost: 0.5, lastUsedAt: prior }] }),
+      onAnchorComputed: (value) => { captured = value; }
+    };
+    write.run('CASCADE_RUN_STATUS_IDLE', 0, prior, prior);
+    const initial = await collectUsageOnce(options);
+    const anchor = {
+      dateKey: localTodayKey(), today: initial.today, month: initial.month, allTime: initial.allTime,
+      todayPartitions: captured.todayPartitions
+    };
+    const watch = () => collectUsageOnce({ ...options, todayOnlyAnchor: anchor, targetClients: ['antigravity'] });
+    const expectState = (summary, state, turnEnded, lastUsedAt) => {
+      for (const period of ['today', 'month', 'allTime']) {
+        const session = summary[period].sessions[key];
+        assert.equal(sessionActivityState(session, now), state, period);
+        assert.equal(session.turnEnded, turnEnded, period);
+        assert.equal(session.lastUsedAt, lastUsedAt, period);
+        assert.equal(summary[period].totalTokens, 12, period);
+      }
+    };
+    expectState(initial, 'ended', true, prior);
+    // Desktop and ACP can write RUNNING before the next input timestamp.
+    write.run('CASCADE_RUN_STATUS_RUNNING', 1, prior, prior);
+    expectState(await watch(), 'running', false, prior);
+    write.run('CASCADE_RUN_STATUS_RUNNING', 1, input, input);
+    expectState(await watch(), 'running', false, input);
+    write.run('CASCADE_RUN_STATUS_IDLE', 0, input, modified);
+    expectState(await watch(), 'ended', true, input);
+    write.run('CASCADE_RUN_STATUS_IDLE', 1, input, modified);
+    expectState(await watch(), 'running', undefined, prior);
+    write.run('CASCADE_RUN_STATUS_IDLE', 0, '0001-01-01 00:00:00+00:00', modified);
+    expectState(await watch(), 'running', undefined, prior);
+
+    const yesterday = new Date(now - 86_400_000).toISOString();
+    options.runTokscale = async ({ flags }) => ({ entries: flags.includes('--today') ? [] : [
+      { client: 'antigravity', sessionId: 'turn', input: 10, output: 2, cost: 0.5, lastUsedAt: yesterday }
+    ] });
+    write.run('CASCADE_RUN_STATUS_IDLE', 0, yesterday, yesterday);
+    const retained = await collectUsageOnce(options);
+    const retainedAnchor = { dateKey: localTodayKey(), today: retained.today, month: retained.month,
+      allTime: retained.allTime, todayPartitions: captured.todayPartitions };
+    for (const [status, pending, expected] of [
+      ['CASCADE_RUN_STATUS_RUNNING', 1, 'running'], ['CASCADE_RUN_STATUS_IDLE', 0, 'ended']
+    ]) {
+      write.run(status, pending, input, modified);
+      const resumed = await collectUsageOnce({ ...options, todayOnlyAnchor: retainedAnchor, targetClients: ['antigravity'] });
+      assert.equal(resumed.today.sessions[key], undefined);
+      for (const period of ['month', 'allTime']) {
+        assert.equal(sessionActivityState(resumed[period].sessions[key], now), expected, period);
+        assert.equal(resumed[period].sessions[key].lastUsedAt, input, period);
+        assert.equal(resumed[period].totalTokens, 12, period);
+        assert.equal(retainedAnchor[period].sessions[key].lastUsedAt, yesterday, 'keep the accounting anchor unchanged');
+      }
+    }
+  });
+}
 
 test('Antigravity retries failed rows without losing successful cached titles', (t) => {
   const temp = fs.realpathSync.native(os.tmpdir());
