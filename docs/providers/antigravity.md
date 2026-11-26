@@ -37,6 +37,8 @@ The normalized client id is `antigravity`. The tokscale aliases `antigravity-cli
 
 The parse-local CLI source lives under `${GEMINI_CLI_HOME || ~/.gemini}/antigravity-cli/conversations`. The IDE extension's generation databases are read directly from `~/.gemini/antigravity/conversations/*.db`; this source follows the home directory and not `GEMINI_CLI_HOME`. Neither source depends on a successful `antigravity sync`. The extension directory is already inside a watched native root, while the CLI directory is watched separately.
 
+Token Monitor also discovers T3 Code Antigravity ACP conversation directories under `~/.t3/userdata/providers/antigravity/<profile-id>/antigravity-acp/conversations` (or under the configured `T3CODE_HOME`). With Antigravity tracking enabled, these directories are read by the CLI scanner and watched for updates. Overlaps with manual Antigravity scan paths are read only once by the CLI scanner. Settings → Tools → Antigravity shows the directories in an expandable Auto-discovered row when any are present. The Source counter excludes them.
+
 Normal scans include both database identities. A custom Antigravity root is passed only to `antigravity` and `antigravity-cli`: the CLI and extension use the same `*.db` parser, so passing one custom directory to both would count rows without response IDs twice. When a persisted custom root is inside the built-in extension directory — the pre-upgrade workaround for reading it — the `antigravity-cli` leg is dropped for that root so its files are not parsed a second time. A custom root that contains the extension directory keeps the leg because it may hold databases outside it; the shared subtree can still count rows without response IDs twice until Tokscale dedupes on canonical file paths.
 
 ### Watch behavior
@@ -45,20 +47,44 @@ The native roots are watched so that a change there triggers an Antigravity-targ
 
 The generated `antigravity-cache` directory is deliberately not watched. Token Monitor's own sync writes it, so watching it would create a refresh loop.
 
-### Session titles and project resolution
+### Session titles, projects and turn state
 
-Antigravity session entries are joined against the local `conversation_summaries.db` SQLite database located under the Antigravity configuration roots (`~/.gemini/antigravity`, or paths specified via `ANTIGRAVITY_HOME`/`ANTIGRAVITY_DATA_DIR`) and the CLI root beside its `conversations` directory. The CLI root follows the collector's existing `GEMINI_CLI_HOME` path policy; IDE roots remain under the configured home's `.gemini` directory.
+Antigravity session entries are joined against the local `conversation_summaries.db` SQLite database located under the Antigravity configuration roots (`~/.gemini/antigravity`, or paths specified via `ANTIGRAVITY_HOME`/`ANTIGRAVITY_DATA_DIR`), the CLI root beside its `conversations` directory, and each discovered T3 Code `antigravity-acp` profile root beside its `conversations` directory. The CLI root follows the collector's existing `GEMINI_CLI_HOME` path policy, T3 ACP roots follow `T3CODE_HOME` (ignored for WSL lookups), and IDE roots remain under the configured home's `.gemini` directory.
 
 For each conversation ID:
 
 - The title is resolved from the `title` column (falling back to `preview` when the title is empty, and falling back to `agent_name` when both are empty). Titles are trimmed and limited to 96 code points.
 - Subagent relationships are resolved from `parent_conversation_id` when present, populating `parentSessionId` on the session row. This enables grouping of child subagent conversations under their parent in the Sessions and Edge Dock views.
 - A missing project association is resolved from `workspace_uris` (file URLs); later summary changes refresh or clear that association across today/month/all-time and the persisted anchor. Provenance is per period: a native historical project remains authoritative even when Today receives the same project ID from the summary. WSL workspace URLs are decoded as POSIX paths even though the reader runs on Windows.
-- Summary updates preserve transcript activity timestamps, turn state, context and cache observations. `last_modified_time` is not a generation timestamp: renaming a conversation must not make it appear running.
+- Desktop, CLI and discovered ACP stores can report the current turn through their conversation status. A running turn reopens an existing usage row, and a fully idle conversation with a recorded user prompt marks the turn as ended. The prompt timestamp can advance activity before the next token update. A rename can change `last_modified_time`, so that field never advances activity. Older schemas, backup stores and unavailable statuses have no turn reading and use the existing activity estimate.
 
 The reader opens the database read-only, queries only requested session IDs, and caches source rows and misses per database/WAL fingerprint. A changed fingerprint revalidates each requested row while preserving its last successful value on transient failures, including a temporarily missing or unstatable database; failed rows remain eligible for retry. Successfully clearing both title and preview, or confirming that a row is missing, removes only that catalog override, including on the first lookup after restart. Check all candidate stores before treating a missing row as deletion; an unreadable candidate is not proof of absence. Prefer usable titles over empty rows and fresh reads over stale rows. When only stale rows remain, retain the last selected source until an earlier candidate can be successfully revalidated. Each store's confirmed misses discard its old rows, even when the file becomes unavailable, without shadowing another store. The existing anchor also records the summary title source, so its temporary disappearance after restart cannot be mistaken for deletion in an unrelated store. Catalog title provenance uses the existing local metadata and anchor ledger, so watch renames and removals survive later read misses and restarts without changing usage baselines. Project identities are derived on each lookup so changing the Projects setting does not require a database write. WSL lookups ignore all host environment overrides, including `GEMINI_CLI_HOME`.
 
+For T3 Code Antigravity ACP, a strong native conversation reference in T3's V2 database lets the T3 thread title take precedence. The native catalog supplies the title when T3 has no usable title. Verified T3 thread IDs group runs of the same conversation, and verified T3 delegation links group subagents under their parent. Native parent links take precedence and each Antigravity conversation keeps its own accounting identity. T3 metadata is refreshed during usage collection. A confirmed ownership conflict revokes the T3 thread and delegation links while retaining any native parent link.
+
 The database and its WAL are watched, including under the environment overrides and the resolved CLI root. Metadata reads, discovery and watch policies share the collector's environment and configured home; the top-level environment takes precedence over an environment injected through metadata dependencies. Summary-only directories admit those exact files and attribute events to them rather than to the whole parent; unrelated runtime files and the reader's SHM writes do not trigger collection. Summary changes refresh labels without admitting an accelerated Antigravity RPC self-sync; conversation usage writes retain their source-sync behavior. Watch ticks refresh sessions present in today; month/all-time-only titles refresh on the next full scan.
+
+### Live activity in T3 Code
+
+Token Monitor matches the Antigravity ACP conversation ID to T3 Code's active run. The activity watcher follows T3's state database and validates the owning server process before renewing the running observation. This keeps a quiet run visible beyond the usage-based timeout. Before the first tokens arrive, a verified running session appears locally in Sessions, Home and Edge Dock. Its usage row takes over as soon as tokens are recorded. Completion or loss of verified live evidence removes the temporary row and returns existing usage rows to the shared idle or turn-based display rules. Desktop and standalone CLI use the catalog's turn readings.
+
+For a recent ACP usage row, Context Window uses the occupied tokens and model capacity reported by ACP and saved by T3 Code for that native conversation. Resumed or historical runs with a different native ID do not inherit the current conversation's reading. The automatic compaction threshold in Antigravity's own database is separate from the model capacity.
+
+### Context Window in standalone CLI
+
+The interactive CLI can share its Context Window through its [status-line command](https://antigravity.google/docs/cli/statusline/). Set the following in Antigravity CLI settings, using the absolute path to the script in a Token Monitor checkout and a Node.js 22.22+ executable available to the CLI. `stack_with_default` preserves the built-in status line.
+
+```json
+{
+  "statusLine": {
+    "type": "command",
+    "command": "node --disable-warning=ExperimentalWarning \"/absolute/path/to/Token Monitor/src/shared/providers/antigravity/cliContext.js\"",
+    "stack_with_default": true
+  }
+}
+```
+
+If you use a custom status line, have that script pass the same stdin JSON to `cliContext.js` while continuing to render its usual output. The hook stores only the conversation ID, the window capacity, occupancy derived from the CLI's reported percentage, and the observation time. The token count can differ by rounding. Context appears on recent usage rows and follows their existing visibility rules.
 
 ### Boundary with quota collection
 
@@ -73,19 +99,21 @@ Antigravity quota collection starts in `fetchAntigravityLimits()` in `src/shared
 
 ### Source order
 
-Local RPC probes prefer process kinds in this order:
+Local RPC probes try the running sources in this order. A desktop installation can supply quota on its own.
 
 1. app
 2. CLI
 3. IDE
 
-When managed OAuth accounts exist, Token Monitor fetches enabled OAuth accounts and the local RPC snapshot concurrently. If local RPC returns a trusted email matching an OAuth account, the live local result replaces the remote result for that account, unless the local snapshot is empty or unavailable (`status !== 'ok'`), or a legacy 3-pool RPC fallback (`windowMinutes: null`) would overwrite richer grouped OAuth quota (`windowMinutes: 300` or `10080`). When both sources return grouped windows for the same account, any grouped model family present only in OAuth (such as `Gemini 4 Argon` when the local language server predates Hub 2.16.0) is retained alongside the live local groups.
+When managed OAuth accounts exist, Token Monitor fetches enabled OAuth accounts and the local RPC snapshot concurrently. A successful local snapshot with a trusted email replaces the remote result for the matching account. When both sources return grouped windows for that account, groups present only in OAuth (such as `Gemini 4 Argon` when the local language server predates Hub 2.16.0) are retained alongside the live local groups.
 
-An account-scoped manual refresh fetches only the requested OAuth account. With no managed accounts, normal collection remains local-RPC-only.
+An account-scoped manual refresh fetches only the requested OAuth account. With no managed accounts, normal collection uses local RPC when enabled. Under **Settings → AI Tool Limits → Antigravity**, **Automatically detect local Antigravity accounts** is on by default. Turning it off stops local RPC quota collection on this device and removes its cached RPC quota rows. Saved OAuth accounts continue to refresh according to their enabled state.
 
 ### Local RPC
 
-The probe discovers the running process and connects to its loopback RPC service. For Antigravity desktop builds that advertise a host bridge token on stdin, it reads the RPC port and credential from the matching PID’s `~/.gemini/antigravity/daemon/hub_*.json` descriptor and verifies that the process owns the listener and the connected socket before sending the credential. Older builds provide the RPC credential on the process command line. It tries the grouped quota summary path first and uses user status to obtain identity when available. Older model-config RPC methods remain fallbacks for Antigravity builds without the grouped quota response.
+The probe discovers the running process and connects to its loopback RPC service. For Antigravity desktop builds that advertise a host bridge token on stdin, it reads the RPC port and credential from the matching PID’s `~/.gemini/antigravity/daemon/hub_*.json` descriptor and verifies that the process owns the listener and the connected socket before sending the credential. Older builds provide the RPC credential on the process command line.
+
+Local quota comes from the grouped quota summary. If a source cannot provide a usable summary, the probe tries the next local source until its deadline. When all sources fail, the limits runtime applies its last-good policy. An authentication rejection can clear a cached reading if the current runtime has already associated that process and credential with the reading. Ambiguous failures keep the previous reading. User status supplies account identity and plan information after a successful quota lookup.
 
 Identity lookup may fail while quota lookup succeeds. Such a row is valid but anonymous; it must remain device-scoped during hub aggregation. Do not give anonymous RPC rows a cross-device-stable fallback key, because two unrelated Google accounts could otherwise collapse into one row. An anonymous local row also cannot be safely matched to a managed OAuth account, so both rows may be visible until local identity becomes available.
 
@@ -118,9 +146,9 @@ Grouped quota responses map into the normalized limits windows used by every pro
 - five-hour windows;
 - weekly windows.
 
-Older model-config responses are pooled into compatible fallback windows (`Gemini Pro`, `Gemini Flash`, `Claude`, and `Gemini 4 Argon`). UI labels and grouping should describe the upstream pool rather than inventing per-model precision the response does not contain. A pool without a finite remaining fraction stays in the normalized record with its reset information and meter disabled, but the renderer hides its entire row, including the name and reset. Apply the same visibility rule to the Limits page, Edge Dock, Home compact windows, and usage checklist. A real zero remains a visible, metered, exhausted allowance in both remaining and used display modes. This rule does not hide unknown or disabled buckets in the normal grouped-quota layout.
+Standalone OAuth can still produce legacy model pools when grouped quota is unavailable. These rows and rows synced from older devices keep the fallback layout. A legacy pool without a finite remaining fraction keeps its reset information in the normalized record, and the renderer hides the row across the Limits page, Edge Dock, Home, Notch compact windows, and usage checklist. A real zero stays visible as exhausted. In the grouped layout, disabled buckets remain visible without a meter.
 
-The Limits page and Edge Dock preserve the existing Gemini and Claude/GPT quota pairs, then append the separate Gemini 4 Argon group. A weekly-only Argon allowance spans the full row. Apply this ordering in the shared renderer rather than changing normalized window order; an unavailable bucket must not gain an invented percentage or meter.
+The Limits page and Edge Dock show Gemini, Claude/GPT, and Gemini 4 Argon in their existing order, followed by new groups in service order. New groups use the service's display name and show whichever five-hour or weekly buckets the summary supplies. Names that need shortening or sanitization use a stable suffix so RPC and OAuth agree on the group within the Hub label limit. Other periods are skipped. A weekly-only Argon allowance spans the full row.
 
 ### Identity and aggregation
 

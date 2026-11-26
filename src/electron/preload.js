@@ -47,6 +47,7 @@ contextBridge.exposeInMainWorld('tokenMonitor', {
   getCodexResetForecast: (options) => ipcRenderer.invoke('codexResetForecast:get', options),
   openDashboard: () => ipcRenderer.invoke('dashboard:open'),
   getDashboardHistory: (options) => ipcRenderer.invoke('dashboard:getHistory', options),
+  getSyncedFixedPeriod: (...args) => ipcRenderer.invoke('stats:fixedPeriod', ...args),
   onDashboardHistoryChanged: (callback) => {
     const listener = () => { try { callback(); } catch (_) {} };
     ipcRenderer.on('dashboard:historyChanged', listener);

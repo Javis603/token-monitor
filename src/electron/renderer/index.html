@@ -18,7 +18,7 @@
         </div>
         <div class="title-controls">
           <div id="pluginPageActions" class="plugin-page-actions hidden"></div>
-          <nav class="tabs" aria-label="Period tabs">
+          <nav id="periodTabs" class="tabs" aria-label="Period tabs" data-i18n-aria-label="periodRange.tabsTitle">
             <span class="tab-indicator" aria-hidden="true"></span>
             <button class="tab active" data-period="today" data-period-slot="today">DAY</button>
             <button id="monthPeriodTab" class="tab" data-period="month" data-period-slot="month" aria-haspopup="menu" aria-expanded="false">MONTH</button>
@@ -26,6 +26,7 @@
           </nav>
           <div id="monthPeriodMenu" class="view-switcher-menu period-menu hidden" popover="manual" role="menu" aria-labelledby="monthPeriodTab">
             <button class="view-switcher-menu-item" type="button" role="menuitemradio" data-fixed-period="month"><span class="view-switcher-menu-label" data-i18n="periodRange.month">This month</span></button>
+            <button class="view-switcher-menu-item" type="button" role="menuitemradio" data-fixed-period="yesterday"><span class="view-switcher-menu-label" data-i18n="periodRange.yesterday">Yesterday</span></button>
             <button class="view-switcher-menu-item" type="button" role="menuitemradio" data-fixed-period="week"><span class="view-switcher-menu-label" data-i18n="periodRange.week">This week</span></button>
             <button class="view-switcher-menu-item" type="button" role="menuitemradio" data-fixed-period="last7"><span class="view-switcher-menu-label" data-i18n="periodRange.last7">Last 7 days</span></button>
             <button class="view-switcher-menu-item" type="button" role="menuitemradio" data-fixed-period="last30"><span class="view-switcher-menu-label" data-i18n="periodRange.last30">Last 30 days</span></button>
@@ -48,7 +49,7 @@
           <div id="generalSettingsDetails" class="settings-section-details hidden">
             <div class="settings-subgroup settings-page-card settings-general-preferences">
               <div class="settings-group-header"><span data-i18n="settings.general.preferences">Preferences</span></div>
-              <label class="settings-item"><span class="settings-item-text"><span class="settings-item-title" data-i18n="settings.language.label">Interface language</span></span>
+              <div class="settings-item"><span class="settings-item-text" data-reset-setting="language"><label for="languageInput" class="settings-item-title" data-i18n="settings.language.label">Interface language</label></span>
                 <select id="languageInput">
                   <option value="auto" data-i18n="settings.language.auto">Auto (system)</option>
                   <option value="en" data-i18n="settings.language.english">English</option>
@@ -59,14 +60,14 @@
                   <option value="pt-BR" data-i18n="settings.language.portugueseBR">Português (Brasil)</option>
                   <option value="es" data-i18n="settings.language.spanish">Español</option>
                 </select>
-              </label>
-              <label id="startupGroup" class="checkbox-label settings-item">
-                <span class="settings-item-text">
-                  <span class="settings-item-title" data-i18n="settings.startup.startAtLogin">Start at login</span>
+              </div>
+              <div id="startupGroup" class="checkbox-label settings-item">
+                <span class="settings-item-text" data-reset-setting="startAtLogin">
+                  <label for="startAtLoginInput" class="settings-item-title" data-i18n="settings.startup.startAtLogin">Start at login</label>
                 </span>
-                <input id="startAtLoginInput" type="checkbox" />
+                <input id="startAtLoginInput" type="checkbox" aria-describedby="startupNote" />
                 <span id="startupNote" class="settings-note settings-item-desc" data-i18n="settings.startup.available">Available in packaged builds.</span>
-              </label>
+              </div>
             </div>
             <div class="settings-subgroup settings-page-card maintenance-section app-update-settings">
               <div class="settings-group-header maintenance-header"><span data-i18n="settings.appUpdate.title">App Updates</span><span data-i18n="settings.appUpdate.source">GitHub releases</span></div>
@@ -83,13 +84,13 @@
                   <button id="appUpdateViewReleaseButton" type="button" class="hidden" data-i18n="settings.appUpdate.viewRelease">View release</button>
                 </span>
               </div>
-              <label id="automaticAppUpdatesRow" class="checkbox-label settings-item">
-                <span class="settings-item-text">
-                  <span class="settings-item-title" data-i18n="settings.appUpdate.automatic">Download updates automatically</span>
+              <div id="automaticAppUpdatesRow" class="checkbox-label settings-item">
+                <span class="settings-item-text" data-reset-setting="automaticAppUpdates">
+                  <label for="automaticAppUpdatesInput" class="settings-item-title" data-i18n="settings.appUpdate.automatic">Download updates automatically</label>
                 </span>
                 <input id="automaticAppUpdatesInput" type="checkbox" aria-describedby="automaticAppUpdatesNote" />
                 <span id="automaticAppUpdatesNote" class="settings-note settings-item-desc" data-i18n="settings.appUpdate.automaticDescription">Download new versions in the background. You'll be prompted to restart when ready.</span>
-              </label>
+              </div>
               <div id="appUpdateNotes" class="app-update-notes hidden">
                 <button id="appUpdateNotesToggle" class="app-update-notes-toggle" type="button" aria-expanded="false" aria-controls="appUpdateNotesDetails">
                   <span class="settings-section-disclosure app-update-notes-disclosure" aria-hidden="true"></span>
@@ -105,13 +106,13 @@
             </div>
             <div class="settings-subgroup settings-page-card">
               <div class="settings-group-header"><span data-i18n="settings.integrations.title">Integrations</span></div>
-              <label class="checkbox-label settings-item">
-                <span class="settings-item-text">
-                  <span class="settings-item-title" data-i18n="settings.integrations.discord">Discord Rich Presence</span>
+              <div class="checkbox-label settings-item">
+                <span class="settings-item-text" data-reset-setting="discordRpcEnabled">
+                  <label for="discordRpcInput" class="settings-item-title" data-i18n="settings.integrations.discord">Discord Rich Presence</label>
                 </span>
                 <input id="discordRpcInput" type="checkbox" aria-describedby="discordRpcDescription" />
                 <span id="discordRpcDescription" class="settings-item-desc" data-i18n="settings.integrations.discordDescription">Show today's tokens, cost, and most-used AI tool in your Discord activity.</span>
-              </label>
+              </div>
             </div>
             <div id="advancedSettingsGroup" class="settings-subgroup settings-page-card advanced-settings">
               <button id="advancedSettingsToggle" class="settings-group-header advanced-settings-toggle" type="button" aria-expanded="false" aria-controls="advancedSettingsDetails">
@@ -216,19 +217,30 @@
             </div>
             <div class="settings-subgroup main-numbers-group">
               <div class="main-numbers-title" data-i18n="settings.main.statsCurrency">Stats &amp; currency</div>
-              <label class="settings-item period-default-setting">
-                <span class="settings-item-text">
-                  <span class="settings-item-title" data-i18n="periodRange.settingsTitle">Default usage range</span>
+              <div id="periodTabSettings" class="period-tab-settings">
+                <div class="edge-dock-composer-heading">
+                  <span id="periodTabsLabel" data-i18n="periodRange.tabsTitle">Usage range buttons</span>
+                  <button id="resetPeriodTabs" class="edge-dock-composer-reset" type="button" data-i18n="settings.edgeDock.reset" hidden>Reset</button>
+                </div>
+                <div id="shownPeriodTabs" class="period-tab-list period-tab-list-shown" role="group" aria-labelledby="periodTabsLabel" aria-describedby="periodTabsHint"></div>
+                <div id="availablePeriodTabs" class="period-tab-list" role="group" aria-label="Not shown" data-i18n-aria-label="settings.views.hiddenGroup" aria-describedby="periodTabsHint"></div>
+                <p id="periodTabsHint" class="settings-note" data-i18n="periodRange.tabsHint">Choose 3–6 ranges. Drag between rows to show or hide, and within the top row to reorder. You can also click to show or hide.</p>
+                <p id="periodTabsError" class="settings-note hidden" role="alert"></p>
+              </div>
+              <div class="settings-item period-default-setting">
+                <span class="settings-item-text" data-reset-setting="periodMonthMode">
+                  <label for="periodMonthModeInput" class="settings-item-title" data-i18n="periodRange.settingsTitle">Default usage range</label>
                 </span>
-                <select id="periodMonthModeInput">
+                <select id="periodMonthModeInput" aria-describedby="periodMonthModeNote">
                   <option value="month" data-i18n="periodRange.month">This month</option>
+                  <option value="yesterday" data-i18n="periodRange.yesterday">Yesterday</option>
                   <option value="week" data-i18n="periodRange.week">This week</option>
                   <option value="last7" data-i18n="periodRange.last7">Last 7 days</option>
                   <option value="last30" data-i18n="periodRange.last30">Last 30 days</option>
                 </select>
-                <span class="settings-note settings-item-desc" data-i18n="periodRange.settingsNote">Choose the default usage range shown on Home. On Home, click the selected period at the top again to open the menu and switch quickly.</span>
-              </label>
-              <label class="settings-item"><span class="settings-item-text"><span class="settings-item-title" data-i18n="settings.currency.label">Currency</span></span>
+                <span id="periodMonthModeNote" class="settings-note settings-item-desc" data-i18n="periodRange.settingsNote">Choose the default usage range shown on Home. On Home, click the selected period at the top again to open the menu and switch quickly.</span>
+              </div>
+              <div class="settings-item"><span class="settings-item-text" data-reset-setting="currency"><label for="currencyInput" class="settings-item-title" data-i18n="settings.currency.label">Currency</label></span>
                 <select id="currencyInput">
                   <option value="USD" data-i18n="settings.currency.usd">USD - US Dollar</option>
                   <option value="AUD" data-i18n="settings.currency.aud">AUD - Australian Dollar</option>
@@ -245,7 +257,7 @@
                   <option value="SGD" data-i18n="settings.currency.sgd">SGD - Singapore Dollar</option>
                   <option value="TWD" data-i18n="settings.currency.twd">TWD - New Taiwan Dollar</option>
                 </select>
-              </label>
+              </div>
               <div id="currencyRateRow" class="currency-rate-row">
                 <div class="settings-item">
                   <span class="settings-item-text"><span class="settings-item-title" data-i18n="settings.currency.rateMode">Exchange rate</span></span>
@@ -271,23 +283,23 @@
           </button>
           <div id="windowSettingsDetails" class="settings-section-details hidden">
             <div class="settings-subgroup settings-window-group">
-              <label class="settings-item">
-                <span class="settings-item-text">
-                  <span class="settings-item-title" data-i18n="settings.display.windowBehavior">Window behavior</span>
+              <div class="settings-item">
+                <span class="settings-item-text" data-reset-setting="windowBehavior">
+                  <label for="windowBehaviorInput" class="settings-item-title" data-i18n="settings.display.windowBehavior">Window behavior</label>
                 </span>
                 <select id="windowBehaviorInput">
                   <option value="floating" data-i18n="settings.windowBehavior.floating">Floating above apps</option>
                   <option value="normal" data-i18n="settings.windowBehavior.normal">Normal window</option>
                   <option value="desktop" data-i18n="settings.windowBehavior.desktop" data-select-description="settings.display.windowBehaviorNote">Desktop pinned</option>
                 </select>
-              </label>
-              <label id="keepAboveTaskbarRow" class="checkbox-label settings-item hidden">
-                <span class="settings-item-text">
-                  <span class="settings-item-title" data-i18n="settings.display.keepAboveTaskbar">Keep above taskbar (Experimental)</span>
+              </div>
+              <div id="keepAboveTaskbarRow" class="checkbox-label settings-item hidden">
+                <span class="settings-item-text" data-reset-setting="keepAboveTaskbar">
+                  <label for="keepAboveTaskbarInput" class="settings-item-title" data-i18n="settings.display.keepAboveTaskbar">Keep above taskbar (Experimental)</label>
                 </span>
-                <input id="keepAboveTaskbarInput" type="checkbox" />
-                <span class="settings-note settings-item-desc" data-i18n="settings.display.keepAboveTaskbarNote">Re-asserts the widget above the Windows taskbar while they overlap. It may briefly flicker during some app switches.</span>
-              </label>
+                <input id="keepAboveTaskbarInput" type="checkbox" aria-describedby="keepAboveTaskbarNote" />
+                <span id="keepAboveTaskbarNote" class="settings-note settings-item-desc" data-i18n="settings.display.keepAboveTaskbarNote">Re-asserts the widget above the Windows taskbar while they overlap. It may briefly flicker during some app switches.</span>
+              </div>
               <div class="settings-item settings-shortcut-item">
                 <span class="settings-item-text"><span class="settings-item-title" data-i18n="settings.display.windowShortcut">Shortcut</span></span>
                 <div class="shortcut-recorder">
@@ -300,26 +312,33 @@
             <div class="settings-subgroup settings-presence-group">
               <div class="settings-group-header"><span data-i18n="settings.display.presenceTitle">Floating & Tray</span></div>
               <div id="edgeDockFeature" class="presence-feature">
-                <label class="checkbox-label settings-item"><span class="settings-item-text"><span class="settings-item-title" data-i18n="settings.display.edgeDock">Edge Dock</span></span><input id="edgeDockInput" type="checkbox" /></label>
+                <div class="checkbox-label settings-item"><span class="settings-item-text"><label for="edgeDockInput" class="settings-item-title" data-i18n="settings.display.edgeDock">Edge Dock</label></span><input id="edgeDockInput" type="checkbox" /></div>
                 <div id="edgeDockOptions" class="presence-feature-body hidden">
                   <p class="settings-note" data-i18n="settings.display.edgeDockNote">A slim rail at the screen edge for limits and usage. Push the pointer to the edge to reveal it, drag to move or switch sides.</p>
                   <div class="settings-item">
-                    <span id="edgeDockModeLabel" class="settings-item-text"><span class="settings-item-title" data-i18n="settings.edgeDock.mode">Visibility</span></span>
+                    <span class="settings-item-text" data-reset-setting="edgeDockMode"><span id="edgeDockModeLabel" class="settings-item-title" data-i18n="settings.edgeDock.mode">Visibility</span></span>
                     <div class="inline-options" role="radiogroup" aria-labelledby="edgeDockModeLabel">
                       <label class="inline-option"><input type="radio" name="edgeDockMode" value="autoHide" /><span data-i18n="settings.edgeDock.mode.autoHide">Auto-hide</span></label>
                       <label class="inline-option"><input type="radio" name="edgeDockMode" value="always" /><span data-i18n="settings.edgeDock.mode.always">Always visible</span></label>
                       <label class="inline-option"><input type="radio" name="edgeDockMode" value="alwaysExceptFullScreen" /><span data-i18n="settings.edgeDock.mode.alwaysExceptFullScreen">Fullscreen auto-hide</span></label>
                     </div>
                   </div>
+                  <div id="edgeDockTriggerRangeRow" class="settings-item hidden">
+                    <span class="settings-item-text" data-reset-setting="edgeDockTriggerRange"><span id="edgeDockTriggerRangeLabel" class="settings-item-title" data-i18n="settings.edgeDock.triggerRange">Reveal trigger area</span></span>
+                    <div class="inline-options is-wrapping" role="radiogroup" aria-labelledby="edgeDockTriggerRangeLabel">
+                      <label class="inline-option"><input type="radio" name="edgeDockTriggerRange" value="rail" /><span data-i18n="settings.edgeDock.triggerRange.rail">Dock span</span></label>
+                      <label class="inline-option"><input type="radio" name="edgeDockTriggerRange" value="handle" /><span data-i18n="settings.edgeDock.triggerRange.handle">Near the handle only</span></label>
+                    </div>
+                  </div>
                   <div class="settings-item">
-                    <span id="edgeDockSideLabel" class="settings-item-text"><span class="settings-item-title" data-i18n="settings.display.edgeDockSide">Screen edge</span></span>
+                    <span class="settings-item-text" data-reset-setting="edgeDockSide"><span id="edgeDockSideLabel" class="settings-item-title" data-i18n="settings.display.edgeDockSide">Screen edge</span></span>
                     <div class="inline-options" role="radiogroup" aria-labelledby="edgeDockSideLabel">
                       <label class="inline-option"><input type="radio" name="edgeDockSide" value="left" /><span data-i18n="settings.edgeDockSide.left">Left</span></label>
                       <label class="inline-option"><input type="radio" name="edgeDockSide" value="right" /><span data-i18n="settings.edgeDockSide.right">Right</span></label>
                     </div>
                   </div>
                   <div class="settings-item">
-                    <span id="edgeDockSizeLabel" class="settings-item-text"><span class="settings-item-title" data-i18n="settings.edgeDock.size">Size</span></span>
+                    <span class="settings-item-text" data-reset-setting="edgeDockSize"><span id="edgeDockSizeLabel" class="settings-item-title" data-i18n="settings.edgeDock.size">Size</span></span>
                     <div class="inline-options is-wrapping" role="radiogroup" aria-labelledby="edgeDockSizeLabel">
                       <label class="inline-option"><input type="radio" name="edgeDockSize" value="small" /><span data-i18n="settings.edgeDock.size.small">Small</span></label>
                       <label class="inline-option"><input type="radio" name="edgeDockSize" value="medium" /><span data-i18n="settings.edgeDock.size.medium">Medium</span></label>
@@ -327,9 +346,9 @@
                       <label class="inline-option"><input type="radio" name="edgeDockSize" value="custom" /><span data-i18n="settings.edgeDock.size.custom">Custom</span></label>
                     </div>
                   </div>
-                  <div id="edgeDockCustomScaleRow" class="settings-item settings-slider-item hidden"><span class="settings-item-text"><span class="slider-label"><span id="edgeDockCustomScaleLabel" class="settings-item-title" data-i18n="settings.edgeDock.customScale">Custom size</span></span></span><input id="edgeDockCustomScaleInput" type="range" min="75" max="150" step="5" aria-labelledby="edgeDockCustomScaleLabel" /><span class="slider-value" aria-hidden="true"></span></div>
+                  <div id="edgeDockCustomScaleRow" class="settings-item settings-slider-item hidden"><span class="settings-item-text"><span class="slider-label" data-reset-setting="edgeDockCustomScale"><span id="edgeDockCustomScaleLabel" class="settings-item-title" data-i18n="settings.edgeDock.customScale">Custom size</span></span></span><input id="edgeDockCustomScaleInput" type="range" min="75" max="150" step="5" aria-labelledby="edgeDockCustomScaleLabel" /><span class="slider-value" aria-hidden="true"></span></div>
                   <div class="settings-item">
-                    <span id="edgeDockBubbleSizeLabel" class="settings-item-text"><span class="settings-item-title" data-i18n="settings.edgeDock.bubbleSize">Detail window size</span></span>
+                    <span class="settings-item-text" data-reset-setting="edgeDockBubbleSize"><span id="edgeDockBubbleSizeLabel" class="settings-item-title" data-i18n="settings.edgeDock.bubbleSize">Detail window size</span></span>
                     <div class="inline-options is-wrapping" role="radiogroup" aria-labelledby="edgeDockBubbleSizeLabel">
                       <label class="inline-option"><input type="radio" name="edgeDockBubbleSize" value="inherit" /><span data-i18n="settings.edgeDock.bubbleSize.inherit">Follow sidebar</span></label>
                       <label class="inline-option"><input type="radio" name="edgeDockBubbleSize" value="small" /><span data-i18n="settings.edgeDock.size.small">Small</span></label>
@@ -338,18 +357,18 @@
                       <label class="inline-option"><input type="radio" name="edgeDockBubbleSize" value="custom" /><span data-i18n="settings.edgeDock.size.custom">Custom</span></label>
                     </div>
                   </div>
-                  <div id="edgeDockBubbleCustomScaleRow" class="settings-item settings-slider-item hidden"><span class="settings-item-text"><span class="slider-label"><span id="edgeDockBubbleCustomScaleLabel" class="settings-item-title" data-i18n="settings.edgeDock.bubbleCustomScale">Custom detail size</span></span></span><input id="edgeDockBubbleCustomScaleInput" type="range" min="75" max="150" step="5" aria-labelledby="edgeDockBubbleCustomScaleLabel" /><span class="slider-value" aria-hidden="true"></span></div>
+                  <div id="edgeDockBubbleCustomScaleRow" class="settings-item settings-slider-item hidden"><span class="settings-item-text"><span class="slider-label" data-reset-setting="edgeDockBubbleCustomScale"><span id="edgeDockBubbleCustomScaleLabel" class="settings-item-title" data-i18n="settings.edgeDock.bubbleCustomScale">Custom detail size</span></span></span><input id="edgeDockBubbleCustomScaleInput" type="range" min="75" max="150" step="5" aria-labelledby="edgeDockBubbleCustomScaleLabel" /><span class="slider-value" aria-hidden="true"></span></div>
                   <div id="edgeDockMoreOptionsGroup" class="settings-group cursor-account-group">
                     <button id="edgeDockMoreOptionsToggle" class="settings-group-header cursor-settings-toggle" type="button" aria-expanded="false" aria-controls="edgeDockMoreOptionsDetails">
                       <span data-i18n="settings.edgeDock.moreOptions">More options</span>
                       <span class="cursor-settings-summary"><span class="cursor-disclosure-icon" aria-hidden="true"></span></span>
                     </button>
                     <div id="edgeDockMoreOptionsDetails" class="cursor-settings-details hidden" inert>
-                      <label id="edgeDockWindowsBackdropRow" class="settings-item hidden"><span class="settings-item-text"><span class="settings-item-title" data-i18n="settings.edgeDock.macBackdrop">Glass style</span></span><select id="edgeDockWindowsBackdropInput"><option value="inherit" data-i18n="settings.edgeDock.macBackdropInherit">Same as widget</option><option value="host-backdrop" data-i18n="settings.appearance.glassEffectSystem">System</option><option value="transparent" data-i18n="settings.appearance.glassEffectTransparent">Transparent</option></select></label>
-                      <label id="edgeDockMacBackdropRow" class="settings-item hidden"><span class="settings-item-text"><span class="settings-item-title" data-i18n="settings.edgeDock.macBackdrop">Glass style</span></span><select id="edgeDockMacBackdropInput"><option value="inherit" data-i18n="settings.edgeDock.macBackdropInherit">Same as widget</option><option value="vibrancy" data-i18n="settings.appearance.macBackdropVibrancy">Frosted Glass</option><option value="liquid-glass" data-i18n="settings.appearance.macBackdropLiquidGlass">Liquid Glass (Regular)</option><option value="liquid-glass-clear" data-i18n="settings.appearance.macBackdropLiquidGlassClear">Liquid Glass (Clear)</option><option value="transparent" data-i18n="settings.appearance.glassEffectTransparent">Transparent</option></select></label>
-                      <label class="checkbox-label settings-item"><span class="settings-item-text"><span class="settings-item-title" data-i18n="settings.edgeDock.warnColors">Highlight low limits in colour</span></span><input id="edgeDockWarnColorsInput" type="checkbox" /></label>
-                      <label class="checkbox-label settings-item"><span class="settings-item-text"><span class="settings-item-title" data-i18n="settings.edgeDock.runningIndicator">Show running indicator</span></span><input id="edgeDockRunningIndicatorInput" type="checkbox" /></label>
-                      <label id="edgeDockHapticRow" class="checkbox-label settings-item hidden"><span class="settings-item-text"><span class="settings-item-title" data-i18n="settings.edgeDock.haptic">Trackpad haptic feedback</span></span><input id="edgeDockHapticInput" type="checkbox" /></label>
+                      <div id="edgeDockWindowsBackdropRow" class="settings-item hidden"><span class="settings-item-text" data-reset-setting="edgeDockWindowsBackdrop"><label for="edgeDockWindowsBackdropInput" class="settings-item-title" data-i18n="settings.edgeDock.macBackdrop">Glass style</label></span><select id="edgeDockWindowsBackdropInput"><option value="inherit" data-i18n="settings.edgeDock.macBackdropInherit">Same as widget</option><option value="host-backdrop" data-i18n="settings.appearance.glassEffectSystem">System</option><option value="transparent" data-i18n="settings.appearance.glassEffectTransparent">Transparent</option></select></div>
+                      <div id="edgeDockMacBackdropRow" class="settings-item hidden"><span class="settings-item-text" data-reset-setting="edgeDockMacBackdrop"><label for="edgeDockMacBackdropInput" class="settings-item-title" data-i18n="settings.edgeDock.macBackdrop">Glass style</label></span><select id="edgeDockMacBackdropInput"><option value="inherit" data-i18n="settings.edgeDock.macBackdropInherit">Same as widget</option><option value="vibrancy" data-i18n="settings.appearance.macBackdropVibrancy">Frosted Glass</option><option value="liquid-glass" data-i18n="settings.appearance.macBackdropLiquidGlass">Liquid Glass (Regular)</option><option value="liquid-glass-clear" data-i18n="settings.appearance.macBackdropLiquidGlassClear">Liquid Glass (Clear)</option><option value="transparent" data-i18n="settings.appearance.glassEffectTransparent">Transparent</option></select></div>
+                      <div class="checkbox-label settings-item"><span class="settings-item-text" data-reset-setting="edgeDockWarnColors"><label for="edgeDockWarnColorsInput" class="settings-item-title" data-i18n="settings.edgeDock.warnColors">Highlight low limits in colour</label></span><input id="edgeDockWarnColorsInput" type="checkbox" /></div>
+                      <div class="checkbox-label settings-item"><span class="settings-item-text" data-reset-setting="edgeDockRunningIndicatorEnabled"><label for="edgeDockRunningIndicatorInput" class="settings-item-title" data-i18n="settings.edgeDock.runningIndicator">Show running indicator</label></span><input id="edgeDockRunningIndicatorInput" type="checkbox" /></div>
+                      <div id="edgeDockHapticRow" class="checkbox-label settings-item hidden"><span class="settings-item-text" data-reset-setting="edgeDockHaptic"><label for="edgeDockHapticInput" class="settings-item-title" data-i18n="settings.edgeDock.haptic">Trackpad haptic feedback</label></span><input id="edgeDockHapticInput" type="checkbox" /></div>
                     </div>
                   </div>
 
@@ -359,22 +378,22 @@
                 </div>
               </div>
               <div id="notchFeature" class="presence-feature hidden">
-                <label class="checkbox-label settings-item">
-                  <span class="settings-item-text"><span class="settings-item-title" data-i18n="settings.notch.title">Notch Panel</span></span>
+                <div class="checkbox-label settings-item">
+                  <span class="settings-item-text"><label for="notchInput" class="settings-item-title" data-i18n="settings.notch.title">Notch Panel</label></span>
                   <input id="notchInput" type="checkbox" />
-                </label>
+                </div>
                 <div id="notchOptions" class="presence-feature-body hidden">
                   <p class="settings-note" data-i18n="settings.notch.note">Click to open. What shows while closed follows Collapsed content.</p>
                   <div class="settings-item">
-                    <span id="notchHoverActionLabel" class="settings-item-text"><span class="settings-item-title" data-i18n="settings.notch.hoverAction">On hover</span></span>
+                    <span class="settings-item-text" data-reset-setting="notchHoverAction"><span id="notchHoverActionLabel" class="settings-item-title" data-i18n="settings.notch.hoverAction">On hover</span></span>
                     <div class="inline-options" role="radiogroup" aria-labelledby="notchHoverActionLabel">
                       <label class="inline-option"><input type="radio" name="notchHoverAction" value="peek" /><span data-i18n="settings.notch.hoverAction.peek">Grow</span></label>
                       <label class="inline-option"><input type="radio" name="notchHoverAction" value="open" /><span data-i18n="settings.notch.hoverAction.open">Open</span></label>
                     </div>
                   </div>
-                  <div id="notchHoverDelayRow" class="settings-item settings-slider-item hidden"><span class="settings-item-text"><span class="slider-label"><span id="notchHoverDelayLabel" class="settings-item-title" data-i18n="settings.notch.hoverDelay">Hover duration</span><button id="resetNotchHoverDelayButton" type="button" class="reset-appearance-button reset-inline" aria-label="Reset hover duration" data-i18n-aria-label="settings.notch.resetHoverDelay">↺</button></span></span><input id="notchHoverDelayInput" type="range" min="0" max="600" step="100" aria-labelledby="notchHoverDelayLabel" /><span class="slider-value" aria-hidden="true"></span></div>
+                  <div id="notchHoverDelayRow" class="settings-item settings-slider-item hidden"><span class="settings-item-text"><span class="slider-label"><span id="notchHoverDelayLabel" class="settings-item-title" data-i18n="settings.notch.hoverDelay">Hover duration</span><button id="resetNotchHoverDelayButton" type="button" class="settings-reset-button" aria-label="Reset hover duration" data-i18n-aria-label="settings.notch.resetHoverDelay" hidden></button></span></span><input id="notchHoverDelayInput" type="range" min="0" max="600" step="100" aria-labelledby="notchHoverDelayLabel" /><span class="slider-value" aria-hidden="true"></span></div>
                   <div class="settings-item">
-                    <span id="notchShapeLabel" class="settings-item-text"><span class="settings-item-title" data-i18n="settings.notch.shape">Entry shape</span></span>
+                    <span class="settings-item-text" data-reset-setting="notchShape"><span id="notchShapeLabel" class="settings-item-title" data-i18n="settings.notch.shape">Entry shape</span></span>
                     <div class="inline-options" role="radiogroup" aria-labelledby="notchShapeLabel">
                       <label class="inline-option"><input type="radio" name="notchShape" value="auto" /><span data-i18n="settings.notch.shape.auto">Auto</span></label>
                       <label class="inline-option"><input type="radio" name="notchShape" value="notch" /><span data-i18n="settings.notch.shape.notch">Notch</span></label>
@@ -382,7 +401,7 @@
                     </div>
                   </div>
                   <div class="settings-item">
-                    <span id="notchSizeLabel" class="settings-item-text"><span class="settings-item-title" data-i18n="settings.edgeDock.size">Size</span></span>
+                    <span class="settings-item-text" data-reset-setting="notchSize"><span id="notchSizeLabel" class="settings-item-title" data-i18n="settings.edgeDock.size">Size</span></span>
                     <div class="inline-options is-wrapping" role="radiogroup" aria-labelledby="notchSizeLabel">
                       <label class="inline-option"><input type="radio" name="notchSize" value="small" /><span data-i18n="settings.edgeDock.size.small">Small</span></label>
                       <label class="inline-option"><input type="radio" name="notchSize" value="medium" /><span data-i18n="settings.edgeDock.size.medium">Medium</span></label>
@@ -390,7 +409,7 @@
                       <label class="inline-option"><input type="radio" name="notchSize" value="custom" /><span data-i18n="settings.edgeDock.size.custom">Custom</span></label>
                     </div>
                   </div>
-                  <div id="notchCustomScaleRow" class="settings-item settings-slider-item hidden"><span class="settings-item-text"><span class="slider-label"><span id="notchCustomScaleLabel" class="settings-item-title" data-i18n="settings.edgeDock.customScale">Custom size</span></span></span><input id="notchCustomScaleInput" type="range" min="75" max="150" step="5" aria-labelledby="notchCustomScaleLabel" /><span class="slider-value" aria-hidden="true"></span></div>
+                  <div id="notchCustomScaleRow" class="settings-item settings-slider-item hidden"><span class="settings-item-text"><span class="slider-label" data-reset-setting="notchCustomScale"><span id="notchCustomScaleLabel" class="settings-item-title" data-i18n="settings.edgeDock.customScale">Custom size</span></span></span><input id="notchCustomScaleInput" type="range" min="75" max="150" step="5" aria-labelledby="notchCustomScaleLabel" /><span class="slider-value" aria-hidden="true"></span></div>
                   <div class="notch-page-settings"><div class="edge-dock-composer-heading"><span id="notchPagesLabel" data-i18n="settings.notch.pages">Pages</span><span class="edge-dock-composer-heading-actions"><span class="edge-dock-composer-heading-hint" data-i18n="settings.notch.pagesHint">Drag to reorder · Click to show or hide</span><button id="resetNotchPageOrderButton" class="edge-dock-composer-reset" type="button" aria-label="Reset order" data-i18n="settings.edgeDock.reset" data-i18n-aria-label="settings.views.resetOrder" hidden>Reset</button></span></div><div id="notchPageChoices" class="notch-page-chips" role="group" aria-labelledby="notchPagesLabel"></div><p class="settings-note" data-i18n="settings.notch.pagesNote">Use the arrows to browse when space is limited.</p></div>
                   <div id="notchMoreOptionsGroup" class="settings-group cursor-account-group">
                     <button id="notchMoreOptionsToggle" class="settings-group-header cursor-settings-toggle" type="button" aria-expanded="false" aria-controls="notchMoreOptionsDetails">
@@ -398,15 +417,15 @@
                       <span class="cursor-settings-summary"><span class="cursor-disclosure-icon" aria-hidden="true"></span></span>
                     </button>
                     <div id="notchMoreOptionsDetails" class="cursor-settings-details hidden" inert>
-                      <label class="settings-item"><span class="settings-item-text"><span class="settings-item-title" data-i18n="settings.edgeDock.macBackdrop">Glass style</span></span><select id="notchStyleInput"><option value="inherit" data-i18n="settings.edgeDock.macBackdropInherit">Same as widget</option><option value="black" data-i18n="settings.notch.black">Pure black</option><option value="vibrancy" data-i18n="settings.appearance.macBackdropVibrancy">Frosted Glass</option><option value="liquid-glass" data-i18n="settings.appearance.macBackdropLiquidGlass">Liquid Glass (Regular)</option><option value="liquid-glass-clear" data-i18n="settings.appearance.macBackdropLiquidGlassClear">Liquid Glass (Clear)</option></select></label>
-                      <label class="checkbox-label settings-item"><span class="settings-item-text"><span class="settings-item-title" data-i18n="settings.notch.progressiveBlur">Blur behind the panel</span></span><input id="notchProgressiveBlurInput" type="checkbox" /></label>
-                      <label class="checkbox-label settings-item"><span class="settings-item-text"><span class="settings-item-title" data-i18n="settings.notch.showSummary">Show collapsed summary</span></span><input id="notchSummaryInput" type="checkbox" /><span class="settings-item-desc" data-i18n="settings.notch.showSummaryNote">Off: hide the summary while closed.</span></label>
-                      <label class="checkbox-label settings-item"><span class="settings-item-text"><span class="settings-item-title" data-i18n="settings.notch.hideSummaryInFullScreen">Hide summary in full screen</span></span><input id="notchHideSummaryInFullScreenInput" type="checkbox" /><span class="settings-item-desc" data-i18n="settings.notch.hideSummaryInFullScreenNote">Other apps only.</span></label>
-                      <label id="notchRunningIndicatorRow" class="checkbox-label settings-item"><span class="settings-item-text"><span class="settings-item-title" data-i18n="settings.notch.iconRings">Quota &amp; activity status</span></span><input id="notchRunningIndicatorInput" type="checkbox" /></label>
-                      <label class="checkbox-label settings-item"><span class="settings-item-text"><span class="settings-item-title" data-i18n="settings.notch.warnColors">Highlight low limits in colour</span></span><input id="notchWarnColorsInput" type="checkbox" /></label>
-                      <label class="checkbox-label settings-item"><span class="settings-item-text"><span class="settings-item-title" data-i18n="settings.edgeDock.haptic">Trackpad haptic feedback</span></span><input id="notchHapticInput" type="checkbox" /></label>
-                      <label class="checkbox-label settings-item"><span class="settings-item-text"><span class="settings-item-title" data-i18n="settings.notch.swipeGestures">Swipe gestures</span></span><input id="notchSwipeGesturesInput" type="checkbox" aria-describedby="notchSwipeGesturesNote" /><span id="notchSwipeGesturesNote" class="settings-item-desc" data-i18n="settings.notch.swipeGesturesNote">Swipe sideways to change pages. Grow mode: down on the entry opens, up on the top row closes; up again hides the summary, down restores it.</span></label>
-                      <label class="settings-item"><span class="settings-item-text"><span class="settings-item-title" data-i18n="settings.notch.summaryMode">Collapsed content</span></span><select id="notchSummaryModeInput"><option value="sessions" data-i18n="settings.notch.summaryMode.sessions" data-select-description="settings.notch.summaryMode.sessionsNote">Session activity only</option><option value="auto" data-i18n="settings.notch.summaryMode.auto" data-select-description="settings.notch.summaryModeNote">Automatic</option><option value="tray" data-i18n="settings.notch.summaryMode.tray" data-select-description="settings.notch.summaryMode.trayNote">Same as tray</option><option value="custom" data-i18n="settings.notch.summaryMode.custom" data-select-description="settings.notch.summaryMode.customNote">Custom</option></select></label>
+                      <div class="settings-item"><span class="settings-item-text" data-reset-setting="notchStyle"><label for="notchStyleInput" class="settings-item-title" data-i18n="settings.edgeDock.macBackdrop">Glass style</label></span><select id="notchStyleInput"><option value="inherit" data-i18n="settings.edgeDock.macBackdropInherit">Same as widget</option><option value="black" data-i18n="settings.notch.black">Pure black</option><option value="vibrancy" data-i18n="settings.appearance.macBackdropVibrancy">Frosted Glass</option><option value="liquid-glass" data-i18n="settings.appearance.macBackdropLiquidGlass">Liquid Glass (Regular)</option><option value="liquid-glass-clear" data-i18n="settings.appearance.macBackdropLiquidGlassClear">Liquid Glass (Clear)</option></select></div>
+                      <div class="checkbox-label settings-item"><span class="settings-item-text" data-reset-setting="notchProgressiveBlur"><label for="notchProgressiveBlurInput" class="settings-item-title" data-i18n="settings.notch.progressiveBlur">Blur behind the panel</label></span><input id="notchProgressiveBlurInput" type="checkbox" /></div>
+                      <div class="checkbox-label settings-item"><span class="settings-item-text" data-reset-setting="notchSummaryEnabled"><label for="notchSummaryInput" class="settings-item-title" data-i18n="settings.notch.showSummary">Show collapsed summary</label></span><input id="notchSummaryInput" type="checkbox" aria-describedby="notchSummaryNote" /><span id="notchSummaryNote" class="settings-item-desc" data-i18n="settings.notch.showSummaryNote">Off: hide the summary while closed.</span></div>
+                      <div class="checkbox-label settings-item"><span class="settings-item-text" data-reset-setting="notchHideSummaryInFullScreen"><label for="notchHideSummaryInFullScreenInput" class="settings-item-title" data-i18n="settings.notch.hideSummaryInFullScreen">Hide summary in full screen</label></span><input id="notchHideSummaryInFullScreenInput" type="checkbox" aria-describedby="notchHideSummaryInFullScreenNote" /><span id="notchHideSummaryInFullScreenNote" class="settings-item-desc" data-i18n="settings.notch.hideSummaryInFullScreenNote">Other apps only.</span></div>
+                      <div id="notchRunningIndicatorRow" class="checkbox-label settings-item"><span class="settings-item-text" data-reset-setting="notchRunningIndicatorEnabled"><label for="notchRunningIndicatorInput" class="settings-item-title" data-i18n="settings.notch.iconRings">Quota &amp; activity status</label></span><input id="notchRunningIndicatorInput" type="checkbox" /></div>
+                      <div class="checkbox-label settings-item"><span class="settings-item-text" data-reset-setting="notchWarnColors"><label for="notchWarnColorsInput" class="settings-item-title" data-i18n="settings.notch.warnColors">Highlight low limits in colour</label></span><input id="notchWarnColorsInput" type="checkbox" /></div>
+                      <div class="checkbox-label settings-item"><span class="settings-item-text" data-reset-setting="notchHaptic"><label for="notchHapticInput" class="settings-item-title" data-i18n="settings.edgeDock.haptic">Trackpad haptic feedback</label></span><input id="notchHapticInput" type="checkbox" /></div>
+                      <div class="checkbox-label settings-item"><span class="settings-item-text" data-reset-setting="notchSwipeGestures"><label for="notchSwipeGesturesInput" class="settings-item-title" data-i18n="settings.notch.swipeGestures">Swipe gestures</label></span><input id="notchSwipeGesturesInput" type="checkbox" aria-describedby="notchSwipeGesturesNote" /><span id="notchSwipeGesturesNote" class="settings-item-desc" data-i18n="settings.notch.swipeGesturesNote">Swipe sideways to change pages. Grow mode: down on the entry opens, up on the top row closes; up again hides the summary, down restores it.</span></div>
+                      <div class="settings-item"><span class="settings-item-text" data-reset-setting="notchSummaryMode"><label for="notchSummaryModeInput" class="settings-item-title" data-i18n="settings.notch.summaryMode">Collapsed content</label></span><select id="notchSummaryModeInput"><option value="sessions" data-i18n="settings.notch.summaryMode.sessions" data-select-description="settings.notch.summaryMode.sessionsNote">Session activity only</option><option value="auto" data-i18n="settings.notch.summaryMode.auto" data-select-description="settings.notch.summaryModeNote">Automatic</option><option value="tray" data-i18n="settings.notch.summaryMode.tray" data-select-description="settings.notch.summaryMode.trayNote">Same as tray</option><option value="custom" data-i18n="settings.notch.summaryMode.custom" data-select-description="settings.notch.summaryMode.customNote">Custom</option></select></div>
                       <div id="notchComposerDetails" class="cursor-settings-details hidden" inert>
                         <div id="notchComposer" class="tray-composer" data-surface="notch"></div>
                       </div>
@@ -416,17 +435,17 @@
                 </div>
               </div>
               <div class="presence-feature">
-                <label class="checkbox-label settings-item"><span class="settings-item-text"><span class="settings-item-title" data-i18n="settings.display.floatingBubble">Floating Bubble</span></span><input id="floatingBubbleInput" type="checkbox" /></label>
+                <div class="checkbox-label settings-item"><span class="settings-item-text"><label for="floatingBubbleInput" class="settings-item-title" data-i18n="settings.display.floatingBubble">Floating Bubble</label></span><input id="floatingBubbleInput" type="checkbox" /></div>
                 <div id="floatingBubbleOptions" class="presence-feature-body hidden">
                   <p class="settings-note" data-i18n="settings.display.floatingBubbleNote">Collapse the widget into a slim draggable mini-window; click it to reopen.</p>
                   <div id="floatingBubbleTriggerRow" class="settings-item">
-                    <span id="floatingBubbleTriggerLabel" class="settings-item-text"><span class="settings-item-title" data-i18n="settings.display.floatingBubbleTrigger">Open on</span></span>
+                    <span class="settings-item-text" data-reset-setting="floatingBubbleTrigger"><span id="floatingBubbleTriggerLabel" class="settings-item-title" data-i18n="settings.display.floatingBubbleTrigger">Open on</span></span>
                     <div class="inline-options" role="radiogroup" aria-labelledby="floatingBubbleTriggerLabel">
                       <label class="inline-option"><input type="radio" name="floatingBubbleTrigger" value="click" id="floatingBubbleTriggerClick" /><span data-i18n="settings.floatingBubbleTrigger.click">Click</span></label>
                       <label class="inline-option"><input type="radio" name="floatingBubbleTrigger" value="hover" id="floatingBubbleTriggerHover" /><span data-i18n="settings.floatingBubbleTrigger.hover">Hover (preview)</span></label>
                     </div>
                   </div>
-                  <label id="floatingBubbleContentRow" class="settings-item"><span class="settings-item-text"><span class="settings-item-title" data-i18n="settings.display.floatingBubbleContent">Bubble display</span></span>
+                  <div id="floatingBubbleContentRow" class="settings-item"><span class="settings-item-text" data-reset-setting="floatingBubbleContent"><label for="floatingBubbleContentInput" class="settings-item-title" data-i18n="settings.display.floatingBubbleContent">Bubble display</label></span>
                     <select id="floatingBubbleContentInput">
                       <option value="icon" data-i18n="settings.tray.iconOnly">Icon only</option>
                       <option value="tokens" data-i18n="settings.tray.tokensToday">Tokens Today</option>
@@ -446,14 +465,14 @@
                       <option value="bars" data-i18n="settings.tray.barsWindow">Limit bars: lowest remaining limit</option>
                       <option value="custom" data-i18n="settings.tray.custom">Custom…</option>
                     </select>
-                  </label>
+                  </div>
                   <div id="floatingBubbleComposer" class="tray-composer hidden" data-surface="floatingBubble"></div>
                 </div>
               </div>
               <div class="presence-feature">
-                <label class="checkbox-label settings-item"><span class="settings-item-text"><span class="settings-item-title" data-i18n="settings.display.showTrayIcon">Show tray icon</span></span><input id="showTrayIconInput" type="checkbox" /></label>
+                <div class="checkbox-label settings-item"><span class="settings-item-text"><label for="showTrayIconInput" class="settings-item-title" data-i18n="settings.display.showTrayIcon">Show tray icon</label></span><input id="showTrayIconInput" type="checkbox" /></div>
                 <div id="trayIconOptions" class="presence-feature-body hidden">
-                  <label class="settings-item"><span class="settings-item-text"><span class="settings-item-title" data-i18n="settings.display.trayText">Tray text</span></span>
+                  <div class="settings-item"><span class="settings-item-text" data-reset-setting="trayContent"><label for="trayContentInput" class="settings-item-title" data-i18n="settings.display.trayText">Tray text</label></span>
                     <select id="trayContentInput">
                       <option value="tokens" data-i18n="settings.tray.tokensToday">Tokens Today</option>
                       <option value="cost" data-i18n="settings.tray.costToday">Cost Today ($1.23)</option>
@@ -473,14 +492,14 @@
                       <option value="icon" data-i18n="settings.tray.iconOnly">Icon only</option>
                       <option value="custom" data-i18n="settings.tray.custom">Custom…</option>
                     </select>
-                  </label>
+                  </div>
                   <div id="trayComposer" class="tray-composer hidden" data-surface="tray"></div>
-                  <label class="checkbox-label settings-item"><span class="settings-item-text"><span class="settings-item-title" data-i18n="settings.display.trayProviderBadge">Show Token Monitor badge on provider icons</span></span><input id="showTrayProviderBadgeInput" type="checkbox" /></label>
-                  <label class="checkbox-label settings-item"><span class="settings-item-text"><span class="settings-item-title" data-i18n="settings.display.trayMode">Tray-only mode</span></span><input id="trayModeInput" type="checkbox" /></label>
+                  <div class="checkbox-label settings-item"><span class="settings-item-text" data-reset-setting="showTrayProviderBadge"><label for="showTrayProviderBadgeInput" class="settings-item-title" data-i18n="settings.display.trayProviderBadge">Show Token Monitor badge on provider icons</label></span><input id="showTrayProviderBadgeInput" type="checkbox" /></div>
+                  <div class="checkbox-label settings-item"><span class="settings-item-text"><label for="trayModeInput" class="settings-item-title" data-i18n="settings.display.trayMode">Tray-only mode</label></span><input id="trayModeInput" type="checkbox" /></div>
                   <div id="trayOptions" class="presence-feature-body hidden">
                     <p class="settings-note" data-i18n="settings.display.trayNote">Hide the main window; show a popover from the system tray.</p>
                   </div>
-                  <label id="hideAppIconRow" class="checkbox-label settings-item hidden"><span class="settings-item-text"><span class="settings-item-title" data-i18n="settings.display.hideAppIcon">Hide taskbar icon</span></span><input id="hideAppIconInput" type="checkbox" /></label>
+                  <div id="hideAppIconRow" class="checkbox-label settings-item hidden"><span class="settings-item-text" data-reset-setting="hideAppIcon"><label for="hideAppIconInput" class="settings-item-title" data-i18n="settings.display.hideAppIcon">Hide taskbar icon</label></span><input id="hideAppIconInput" type="checkbox" /></div>
                   <div id="hideAppIconOptions" class="presence-feature-body hidden">
                     <p class="settings-note" data-i18n="settings.display.hideAppIconNote">The widget stays on the desktop; use the tray icon or the shortcut to bring it to the front.</p>
                   </div>
@@ -528,13 +547,13 @@
             </div>
             <div class="settings-subgroup settings-appearance-material">
               <div class="settings-group-header"><span data-i18n="settings.appearance.group.material">Background &amp; glass</span></div>
-              <div class="settings-item"><span class="settings-item-text"><span id="windowGlassEffectLabel" class="settings-item-title" data-i18n="settings.appearance.systemGlass">Glass Backdrop</span></span><div class="inline-options" role="radiogroup" aria-labelledby="windowGlassEffectLabel"><label class="inline-option"><input type="radio" name="systemGlassOption" value="system" /><span data-i18n="settings.appearance.glassEffectSystem">System</span></label><label class="inline-option"><input type="radio" name="systemGlassOption" value="off" /><span data-i18n="settings.appearance.glassEffectTransparent">Transparent</span></label></div></div>
-              <label id="windowsBackdropRow" class="settings-item hidden"><span class="settings-item-text"><span class="settings-item-title" data-i18n="settings.appearance.windowsBackdrop">Windows Glass Style</span></span><select id="windowsBackdropInput"><option value="acrylic" data-i18n="settings.appearance.windowsBackdropAcrylic">Acrylic</option><option value="accent" data-i18n="settings.appearance.windowsBackdropAccent" data-select-description="settings.appearance.windowsBackdropNote">Accent Blur (experimental)</option><option value="mica" data-i18n="settings.appearance.windowsBackdropMica" data-select-description="settings.appearance.windowsBackdropMicaNote">Mica</option><option value="mica-alt" data-i18n="settings.appearance.windowsBackdropMicaAlt" data-select-description="settings.appearance.windowsBackdropMicaNote">Mica Alt</option></select><span id="windowsBackdropNote" class="settings-note settings-item-desc hidden" role="status"></span></label>
-              <label id="macBackdropRow" class="settings-item hidden"><span class="settings-item-text"><span class="settings-item-title" data-i18n="settings.appearance.macBackdrop">macOS Glass Style</span></span><select id="macBackdropInput"><option value="vibrancy" data-i18n="settings.appearance.macBackdropVibrancy">Frosted Glass</option><option value="liquid-glass" data-i18n="settings.appearance.macBackdropLiquidGlass">Liquid Glass (Regular)</option><option value="liquid-glass-clear" data-i18n="settings.appearance.macBackdropLiquidGlassClear">Liquid Glass (Clear)</option></select></label>
-              <div id="glassOpacityRow" class="settings-item settings-slider-item"><span class="settings-item-text"><span class="slider-label"><span id="glassSliderLabel" class="settings-item-title" data-i18n="settings.appearance.glass">Glass</span><button id="resetGlassButton" type="button" class="reset-appearance-button reset-inline" aria-label="Reset glass" data-i18n-aria-label="settings.appearance.resetGlass">↺</button></span><span id="glassInputNote" class="settings-note settings-item-desc hidden" data-i18n="settings.appearance.nativeManaged">Managed by macOS</span></span><input id="glassInput" type="range" min="0" max="100" step="1" aria-labelledby="glassSliderLabel" aria-describedby="glassInputNote" /><span class="slider-value" aria-hidden="true"></span></div>
-              <div id="macGlassTintRow" class="settings-item settings-slider-item hidden"><span class="settings-item-text"><span class="slider-label"><span id="macGlassTintLabel" class="settings-item-title" data-i18n="settings.appearance.nativeTint">Backdrop tint</span><button id="macGlassTintReset" type="button" class="reset-appearance-button reset-inline" aria-label="Reset tint" data-i18n-aria-label="settings.appearance.resetTint">↺</button></span><span id="macGlassTintNote" class="settings-note settings-item-desc" data-i18n="settings.appearance.nativeTintNote">Saved separately for each glass style</span></span><input id="macGlassTintInput" type="range" min="0" max="100" step="1" aria-labelledby="macGlassTintLabel" aria-describedby="macGlassTintNote" /><span class="slider-value" aria-hidden="true"></span></div>
-              <div id="macClearGlassTintRow" class="settings-item settings-slider-item hidden"><span class="settings-item-text"><span class="slider-label"><span id="macClearGlassTintLabel" class="settings-item-title" data-i18n="settings.appearance.nativeTint">Backdrop tint</span><button id="macClearGlassTintReset" type="button" class="reset-appearance-button reset-inline" aria-label="Reset tint" data-i18n-aria-label="settings.appearance.resetTint">↺</button></span><span id="macClearGlassTintNote" class="settings-note settings-item-desc" data-i18n="settings.appearance.nativeTintNote">Saved separately for each glass style</span></span><input id="macClearGlassTintInput" type="range" min="0" max="100" step="1" aria-labelledby="macClearGlassTintLabel" aria-describedby="macClearGlassTintNote" /><span class="slider-value" aria-hidden="true"></span></div>
-              <div class="settings-item settings-slider-item"><span class="settings-item-text"><span class="slider-label"><span id="depthSliderLabel" class="settings-item-title" data-i18n="settings.appearance.depth">Depth</span><button id="resetDepthButton" type="button" class="reset-appearance-button reset-inline" aria-label="Reset depth" data-i18n-aria-label="settings.appearance.resetDepth">↺</button></span><span id="blurInputNote" class="settings-note settings-item-desc hidden" data-i18n="settings.appearance.nativeBlurManaged">Blur is managed by macOS</span></span><input id="blurInput" type="range" min="0" max="100" step="1" aria-labelledby="depthSliderLabel" aria-describedby="blurInputNote" /><span class="slider-value" aria-hidden="true"></span></div>
+              <div class="settings-item"><span class="settings-item-text" data-reset-setting="systemGlass"><span id="windowGlassEffectLabel" class="settings-item-title" data-i18n="settings.appearance.systemGlass">Glass Backdrop</span></span><div class="inline-options" role="radiogroup" aria-labelledby="windowGlassEffectLabel"><label class="inline-option"><input type="radio" name="systemGlassOption" value="system" /><span data-i18n="settings.appearance.glassEffectSystem">System</span></label><label class="inline-option"><input type="radio" name="systemGlassOption" value="off" /><span data-i18n="settings.appearance.glassEffectTransparent">Transparent</span></label></div></div>
+              <div id="windowsBackdropRow" class="settings-item hidden"><span class="settings-item-text" data-reset-setting="windowsBackdrop"><label for="windowsBackdropInput" class="settings-item-title" data-i18n="settings.appearance.windowsBackdrop">Windows Glass Style</label></span><select id="windowsBackdropInput" aria-describedby="windowsBackdropNote"><option value="acrylic" data-i18n="settings.appearance.windowsBackdropAcrylic">Acrylic</option><option value="accent" data-i18n="settings.appearance.windowsBackdropAccent" data-select-description="settings.appearance.windowsBackdropNote">Accent Blur (experimental)</option><option value="mica" data-i18n="settings.appearance.windowsBackdropMica" data-select-description="settings.appearance.windowsBackdropMicaNote">Mica</option><option value="mica-alt" data-i18n="settings.appearance.windowsBackdropMicaAlt" data-select-description="settings.appearance.windowsBackdropMicaNote">Mica Alt</option></select><span id="windowsBackdropNote" class="settings-note settings-item-desc hidden" role="status"></span></div>
+              <div id="macBackdropRow" class="settings-item hidden"><span class="settings-item-text" data-reset-setting="macBackdrop"><label for="macBackdropInput" class="settings-item-title" data-i18n="settings.appearance.macBackdrop">macOS Glass Style</label></span><select id="macBackdropInput"><option value="vibrancy" data-i18n="settings.appearance.macBackdropVibrancy">Frosted Glass</option><option value="liquid-glass" data-i18n="settings.appearance.macBackdropLiquidGlass">Liquid Glass (Regular)</option><option value="liquid-glass-clear" data-i18n="settings.appearance.macBackdropLiquidGlassClear">Liquid Glass (Clear)</option></select></div>
+              <div id="glassOpacityRow" class="settings-item settings-slider-item"><span class="settings-item-text"><span class="slider-label"><span id="glassSliderLabel" class="settings-item-title" data-i18n="settings.appearance.glass">Glass</span><button id="resetGlassButton" type="button" class="settings-reset-button" aria-label="Reset glass" data-i18n-aria-label="settings.appearance.resetGlass" hidden data-single-setting-reset></button></span><span id="glassInputNote" class="settings-note settings-item-desc hidden" data-i18n="settings.appearance.nativeManaged">Managed by macOS</span></span><input id="glassInput" type="range" min="0" max="100" step="1" aria-labelledby="glassSliderLabel" aria-describedby="glassInputNote" /><span class="slider-value" aria-hidden="true"></span></div>
+              <div id="macGlassTintRow" class="settings-item settings-slider-item hidden"><span class="settings-item-text"><span class="slider-label"><span id="macGlassTintLabel" class="settings-item-title" data-i18n="settings.appearance.nativeTint">Backdrop tint</span><button id="macGlassTintReset" type="button" class="settings-reset-button" aria-label="Reset tint" data-i18n-aria-label="settings.appearance.resetTint" hidden></button></span><span id="macGlassTintNote" class="settings-note settings-item-desc" data-i18n="settings.appearance.nativeTintNote">Saved separately for each glass style</span></span><input id="macGlassTintInput" type="range" min="0" max="100" step="1" aria-labelledby="macGlassTintLabel" aria-describedby="macGlassTintNote" /><span class="slider-value" aria-hidden="true"></span></div>
+              <div id="macClearGlassTintRow" class="settings-item settings-slider-item hidden"><span class="settings-item-text"><span class="slider-label"><span id="macClearGlassTintLabel" class="settings-item-title" data-i18n="settings.appearance.nativeTint">Backdrop tint</span><button id="macClearGlassTintReset" type="button" class="settings-reset-button" aria-label="Reset tint" data-i18n-aria-label="settings.appearance.resetTint" hidden></button></span><span id="macClearGlassTintNote" class="settings-note settings-item-desc" data-i18n="settings.appearance.nativeTintNote">Saved separately for each glass style</span></span><input id="macClearGlassTintInput" type="range" min="0" max="100" step="1" aria-labelledby="macClearGlassTintLabel" aria-describedby="macClearGlassTintNote" /><span class="slider-value" aria-hidden="true"></span></div>
+              <div class="settings-item settings-slider-item"><span class="settings-item-text"><span class="slider-label"><span id="depthSliderLabel" class="settings-item-title" data-i18n="settings.appearance.depth">Depth</span><button id="resetDepthButton" type="button" class="settings-reset-button" aria-label="Reset depth" data-i18n-aria-label="settings.appearance.resetDepth" hidden data-single-setting-reset></button></span><span id="blurInputNote" class="settings-note settings-item-desc hidden" data-i18n="settings.appearance.nativeBlurManaged">Blur is managed by macOS</span></span><input id="blurInput" type="range" min="0" max="100" step="1" aria-labelledby="depthSliderLabel" aria-describedby="blurInputNote" /><span class="slider-value" aria-hidden="true"></span></div>
               <div class="settings-item background-image-setting">
                 <span class="settings-item-text">
                   <span class="settings-item-title" data-i18n="settings.appearance.backgroundImage">Background image</span>
@@ -545,14 +564,14 @@
                   <button id="clearBackgroundImageButton" type="button" class="hidden" data-i18n="settings.appearance.backgroundImageClear">Remove</button>
                 </div>
               </div>
-              <div id="backgroundImageOpacityRow" class="settings-item settings-slider-item hidden"><span class="settings-item-text"><span class="slider-label"><span id="backgroundImageOpacityLabel" class="settings-item-title" data-i18n="settings.appearance.backgroundImageOpacity">Image opacity</span><button id="resetBackgroundImageOpacityButton" type="button" class="reset-appearance-button reset-inline" aria-label="Reset image opacity" data-i18n-aria-label="settings.appearance.resetBackgroundImageOpacity">↺</button></span></span><input id="backgroundImageOpacityInput" type="range" min="0" max="100" step="1" aria-labelledby="backgroundImageOpacityLabel" /><span class="slider-value" aria-hidden="true"></span></div>
+              <div id="backgroundImageOpacityRow" class="settings-item settings-slider-item hidden"><span class="settings-item-text"><span class="slider-label"><span id="backgroundImageOpacityLabel" class="settings-item-title" data-i18n="settings.appearance.backgroundImageOpacity">Image opacity</span><button id="resetBackgroundImageOpacityButton" type="button" class="settings-reset-button" aria-label="Reset image opacity" data-i18n-aria-label="settings.appearance.resetBackgroundImageOpacity" hidden></button></span></span><input id="backgroundImageOpacityInput" type="range" min="0" max="100" step="1" aria-labelledby="backgroundImageOpacityLabel" /><span class="slider-value" aria-hidden="true"></span></div>
             </div>
             <div class="settings-subgroup settings-appearance-type">
               <div class="settings-group-header"><span data-i18n="settings.appearance.group.type">Text &amp; zoom</span></div>
-              <div class="settings-item"><span class="settings-item-text"><span id="textSizeLabel" class="settings-item-title" data-i18n="settings.appearance.textSize">Text size</span></span><select id="textSizeInput" aria-labelledby="textSizeLabel" aria-describedby="textSizeNote"><option value="standard" data-i18n="settings.appearance.textSizeStandard">Standard</option><option value="larger" data-i18n="settings.appearance.textSizeLarger">Larger</option><option value="largest" data-i18n="settings.appearance.textSizeLargest">Largest</option></select><span id="textSizeNote" class="settings-note settings-item-desc" data-i18n="settings.appearance.textSizeNote">Adjust labels and data text. Token total and icons keep their size.</span></div>
-              <div class="settings-item settings-slider-item"><span class="settings-item-text"><span class="slider-label"><span id="zoomSliderLabel" class="settings-item-title" data-i18n="settings.appearance.zoom">Zoom</span><button id="resetZoomButton" type="button" class="reset-appearance-button reset-inline" aria-label="Reset zoom" data-i18n-aria-label="settings.appearance.resetZoom">↺</button></span></span><input id="zoomInput" type="range" min="70" max="160" step="5" aria-labelledby="zoomSliderLabel" /><span class="slider-value" aria-hidden="true"></span></div>
+              <div class="settings-item"><span class="settings-item-text" data-reset-setting="textSize"><span id="textSizeLabel" class="settings-item-title" data-i18n="settings.appearance.textSize">Text size</span></span><select id="textSizeInput" aria-labelledby="textSizeLabel" aria-describedby="textSizeNote"><option value="standard" data-i18n="settings.appearance.textSizeStandard">Standard</option><option value="larger" data-i18n="settings.appearance.textSizeLarger">Larger</option><option value="largest" data-i18n="settings.appearance.textSizeLargest">Largest</option></select><span id="textSizeNote" class="settings-note settings-item-desc" data-i18n="settings.appearance.textSizeNote">Adjust labels and data text. Token total and icons keep their size.</span></div>
+              <div class="settings-item settings-slider-item"><span class="settings-item-text"><span class="slider-label"><span id="zoomSliderLabel" class="settings-item-title" data-i18n="settings.appearance.zoom">Zoom</span><button id="resetZoomButton" type="button" class="settings-reset-button" aria-label="Reset zoom" data-i18n-aria-label="settings.appearance.resetZoom" hidden></button></span></span><input id="zoomInput" type="range" min="70" max="160" step="5" aria-labelledby="zoomSliderLabel" /><span class="slider-value" aria-hidden="true"></span></div>
               <div class="settings-font-field">
-                <label class="settings-item-title" for="interfaceFontPreset" data-i18n="settings.appearance.fontInterface">Interface font</label>
+                <span class="settings-reset-heading"><label class="settings-item-title" for="interfaceFontPreset" data-i18n="settings.appearance.fontInterface">Interface font</label><button id="resetInterfaceFontButton" class="settings-reset-button" type="button" aria-label="Reset interface font" data-i18n-aria-label="settings.appearance.resetInterfaceFont" hidden></button></span>
                 <span class="settings-font-input-row">
                   <select id="interfaceFontPreset">
                     <option value="app" data-i18n="settings.appearance.fontPresetApp" data-select-description="settings.appearance.fontPresetAppDesc">App default</option>
@@ -560,7 +579,6 @@
                     <option value="mono" data-i18n="settings.appearance.fontPresetMono" data-select-description="settings.appearance.fontPresetMonoDesc">Monospace</option>
                     <option value="custom" data-i18n="settings.appearance.fontPresetCustom" data-select-description="settings.appearance.fontPresetCustomDesc">Custom…</option>
                   </select>
-                  <button id="resetInterfaceFontButton" class="reset-appearance-button reset-inline" type="button" aria-label="Reset interface font" data-i18n-aria-label="settings.appearance.resetInterfaceFont">↺</button>
                 </span>
                 <div id="interfaceFontCustomRow" class="settings-font-custom-row hidden">
                   <label for="interfaceFontInput" data-i18n="settings.appearance.fontCustomLabel">Custom font family</label>
@@ -572,7 +590,7 @@
                 </div>
               </div>
               <div class="settings-font-field">
-                <label class="settings-item-title" for="displayFontPreset" data-i18n="settings.appearance.fontDisplay">Display font</label>
+                <span class="settings-reset-heading"><label class="settings-item-title" for="displayFontPreset" data-i18n="settings.appearance.fontDisplay">Display font</label><button id="resetDisplayFontButton" class="settings-reset-button" type="button" aria-label="Reset display font" data-i18n-aria-label="settings.appearance.resetDisplayFont" hidden></button></span>
                 <span class="settings-font-input-row">
                   <select id="displayFontPreset">
                     <option value="follow" data-i18n="settings.appearance.fontPresetFollow" data-select-description="settings.appearance.fontPresetFollowDesc">Follow interface</option>
@@ -581,7 +599,6 @@
                     <option value="mono" data-i18n="settings.appearance.fontPresetMono" data-select-description="settings.appearance.fontPresetMonoDesc">Monospace</option>
                     <option value="custom" data-i18n="settings.appearance.fontPresetCustom" data-select-description="settings.appearance.fontPresetCustomDesc">Custom…</option>
                   </select>
-                  <button id="resetDisplayFontButton" class="reset-appearance-button reset-inline" type="button" aria-label="Reset display font" data-i18n-aria-label="settings.appearance.resetDisplayFont">↺</button>
                 </span>
                 <div id="displayFontCustomRow" class="settings-font-custom-row hidden">
                   <label for="displayFontInput" data-i18n="settings.appearance.fontCustomLabel">Custom font family</label>
@@ -595,25 +612,25 @@
             </div>
             <div class="settings-subgroup settings-appearance-usage">
               <div class="settings-group-header"><span data-i18n="settings.appearance.group.usage">Usage display</span></div>
-              <label class="checkbox-label settings-item"><span class="settings-item-text"><span class="settings-item-title" data-i18n="settings.appearance.compactTotalTokens">Show compact token total</span></span><input id="showCompactTotalTokensInput" type="checkbox" /></label>
-              <label id="compactTokenUnitsRow" class="settings-item hidden"><span class="settings-item-text"><span class="settings-item-title" data-i18n="settings.appearance.compactTokenUnits">Compact token units</span></span><select id="compactTokenUnitsInput"><option value="western" data-i18n="settings.appearance.compactTokenUnitsWestern">International (K/M/B)</option><option value="localized" data-i18n="settings.appearance.compactTokenUnitsLocalized">East Asian (萬/億)</option></select></label>
-              <label class="checkbox-label settings-item"><span class="settings-item-text"><span class="settings-item-title" data-i18n="settings.appearance.liveTokenRate">Show live token rate</span></span><input id="showLiveTokenRateInput" type="checkbox" aria-describedby="showLiveTokenRateNote" /><span id="showLiveTokenRateNote" class="settings-note settings-item-desc" data-i18n="settings.appearance.liveTokenRateNote">Show the latest generation speed in the footer. Click it to switch between tok/s and TPM.</span></label>
-              <label id="liveTokenRateScopeRow" class="settings-item hidden"><span class="settings-item-text"><span class="settings-item-title" data-i18n="settings.appearance.liveTokenRateScope">Live rate scope</span></span><select id="liveTokenRateScopeInput"><option value="all" data-i18n="settings.appearance.liveTokenRateScopeAll">All devices</option><option value="device" data-i18n="settings.appearance.liveTokenRateScopeDevice">This device</option></select></label>
+              <div class="checkbox-label settings-item"><span class="settings-item-text" data-reset-setting="showCompactTotalTokens"><label for="showCompactTotalTokensInput" class="settings-item-title" data-i18n="settings.appearance.compactTotalTokens">Show compact token total</label></span><input id="showCompactTotalTokensInput" type="checkbox" /></div>
+              <div id="compactTokenUnitsRow" class="settings-item hidden"><span class="settings-item-text" data-reset-setting="compactTokenUnits"><label for="compactTokenUnitsInput" class="settings-item-title" data-i18n="settings.appearance.compactTokenUnits">Compact token units</label></span><select id="compactTokenUnitsInput"><option value="western" data-i18n="settings.appearance.compactTokenUnitsWestern">International (K/M/B)</option><option value="localized" data-i18n="settings.appearance.compactTokenUnitsLocalized">East Asian (萬/億)</option></select></div>
+              <div class="checkbox-label settings-item"><span class="settings-item-text" data-reset-setting="showLiveTokenRate"><label for="showLiveTokenRateInput" class="settings-item-title" data-i18n="settings.appearance.liveTokenRate">Show live token rate</label></span><input id="showLiveTokenRateInput" type="checkbox" aria-describedby="showLiveTokenRateNote" /><span id="showLiveTokenRateNote" class="settings-note settings-item-desc" data-i18n="settings.appearance.liveTokenRateNote">Show the latest generation speed in the footer. Click it to switch between tok/s and TPM.</span></div>
+              <div id="liveTokenRateScopeRow" class="settings-item hidden"><span class="settings-item-text" data-reset-setting="liveTokenRateScope"><label for="liveTokenRateScopeInput" class="settings-item-title" data-i18n="settings.appearance.liveTokenRateScope">Live rate scope</label></span><select id="liveTokenRateScopeInput"><option value="all" data-i18n="settings.appearance.liveTokenRateScopeAll">All devices</option><option value="device" data-i18n="settings.appearance.liveTokenRateScopeDevice">This device</option></select></div>
             </div>
             <div class="settings-subgroup settings-appearance-motion">
               <div class="settings-group-header"><span data-i18n="settings.appearance.group.motion">Motion</span></div>
               <div class="settings-item">
-                <span class="settings-item-text">
-                  <span class="settings-item-title" data-i18n="settings.appearance.reduceMotion">Reduce Motion</span>
+                <span class="settings-item-text" data-reset-setting="reduceMotion">
+                  <span id="reduceMotionLabel" class="settings-item-title" data-i18n="settings.appearance.reduceMotion">Reduce Motion</span>
                 </span>
-                <div class="inline-options" role="radiogroup">
+                <div class="inline-options" role="radiogroup" aria-labelledby="reduceMotionLabel">
                   <label class="inline-option"><input type="radio" name="reduceMotionOption" value="system" /><span data-i18n="settings.appearance.motion.system">System</span></label>
                   <label class="inline-option"><input type="radio" name="reduceMotionOption" value="on" /><span data-i18n="settings.appearance.motion.on">On</span></label>
                   <label class="inline-option"><input type="radio" name="reduceMotionOption" value="off" /><span data-i18n="settings.appearance.motion.off">Off</span></label>
                 </div>
                 <span class="settings-note settings-item-desc" data-i18n="settings.appearance.reduceMotionNote">Reduce animations, or follow the system setting.</span>
               </div>
-              <label class="settings-item"><span class="settings-item-text"><span class="settings-item-title" data-i18n="settings.appearance.tokenNumberAnimation">Token number animation</span></span><select id="tokenNumberAnimationInput"><option value="roll" data-i18n="settings.appearance.tokenNumberAnimation.roll">Digit roll</option><option value="count" data-i18n="settings.appearance.tokenNumberAnimation.count">Count up</option></select></label>
+              <div class="settings-item"><span class="settings-item-text" data-reset-setting="tokenNumberAnimation"><label for="tokenNumberAnimationInput" class="settings-item-title" data-i18n="settings.appearance.tokenNumberAnimation">Token number animation</label></span><select id="tokenNumberAnimationInput"><option value="roll" data-i18n="settings.appearance.tokenNumberAnimation.roll">Digit roll</option><option value="count" data-i18n="settings.appearance.tokenNumberAnimation.count">Count up</option></select></div>
             </div>
             <div class="settings-subgroup settings-appearance-vendors">
               <div id="themeVendorGroup" class="settings-group cursor-account-group theme-color-accordion settings-vendor-color-group">
@@ -640,10 +657,10 @@
                 <span class="cursor-settings-summary"><span class="cursor-disclosure-icon" aria-hidden="true"></span></span>
               </button>
               <div id="appearanceLegacyDetails" class="cursor-settings-details hidden" inert>
-                <label class="checkbox-label settings-item"><span class="settings-item-text"><span class="settings-item-title" data-i18n="settings.appearance.swapSettingsRefresh">Swap Settings and Refresh buttons</span></span><input id="swapSettingsRefreshInput" type="checkbox" /></label>
-                <label class="checkbox-label settings-item"><span class="settings-item-text"><span class="settings-item-title" data-i18n="settings.appearance.liveIndicator">Live Indicator</span></span><input id="liveDotInput" type="checkbox" /></label>
-                <label class="checkbox-label settings-item"><span class="settings-item-text"><span class="settings-item-title" data-i18n="settings.appearance.toolIcons">Tool Icons</span></span><input id="toolIconsInput" type="checkbox" /></label>
-                <label class="checkbox-label settings-item"><span class="settings-item-text"><span class="settings-item-title" data-i18n="settings.appearance.titleIcon">Use Title Icon</span></span><input id="titleIconInput" type="checkbox" /></label>
+                <div class="checkbox-label settings-item"><span class="settings-item-text" data-reset-setting="settingsInTitlebar"><label for="swapSettingsRefreshInput" class="settings-item-title" data-i18n="settings.appearance.swapSettingsRefresh">Swap Settings and Refresh buttons</label></span><input id="swapSettingsRefreshInput" type="checkbox" /></div>
+                <div class="checkbox-label settings-item"><span class="settings-item-text" data-reset-setting="showLiveDot"><label for="liveDotInput" class="settings-item-title" data-i18n="settings.appearance.liveIndicator">Live Indicator</label></span><input id="liveDotInput" type="checkbox" /></div>
+                <div class="checkbox-label settings-item"><span class="settings-item-text" data-reset-setting="showToolIcons"><label for="toolIconsInput" class="settings-item-title" data-i18n="settings.appearance.toolIcons">Tool Icons</label></span><input id="toolIconsInput" type="checkbox" /></div>
+                <div class="checkbox-label settings-item"><span class="settings-item-text" data-reset-setting="titleIconOnly"><label for="titleIconInput" class="settings-item-title" data-i18n="settings.appearance.titleIcon">Use Title Icon</label></span><input id="titleIconInput" type="checkbox" /></div>
               </div>
             </div>
           </div>
@@ -669,9 +686,9 @@
             </div>
             <div class="settings-subgroup session-archive-settings settings-page-card">
               <div class="settings-group-header"><span data-i18n="settings.collection.captureAndRetention">Collection and retention</span></div>
-              <label class="settings-item">
-                <span class="settings-item-text">
-                  <span class="settings-item-title" data-i18n="settings.collection.cadence">Collection frequency</span>
+              <div class="settings-item">
+                <span class="settings-item-text" data-reset-setting="collectionMode">
+                  <label for="collectionCadenceInput" class="settings-item-title" data-i18n="settings.collection.cadence">Collection frequency</label>
                 </span>
                 <select id="collectionCadenceInput">
                   <option value="live" data-i18n="settings.collection.mode.live" data-select-description="settings.collection.mode.liveDesc">Live watch</option>
@@ -680,15 +697,15 @@
                   <option value="900000" data-i18n="settings.collection.interval.15m" data-select-description="settings.collection.mode.intervalDesc">Every 15 minutes</option>
                   <option value="1800000" data-i18n="settings.collection.interval.30m" data-select-description="settings.collection.mode.intervalDesc">Every 30 minutes</option>
                 </select>
-              </label>
+              </div>
               <div id="wslScanRow" class="settings-wsl-block hidden">
-                <label class="checkbox-label wsl-scan-toggle settings-item">
+                <div class="checkbox-label wsl-scan-toggle settings-item">
                   <span class="settings-item-text">
-                    <span class="settings-item-title" data-i18n="settings.collection.wslScan">Scan tools inside WSL</span>
+                    <label for="wslScanInput" class="settings-item-title" data-i18n="settings.collection.wslScan">Scan tools inside WSL</label>
                   </span>
-                  <input id="wslScanInput" type="checkbox" />
-                  <span class="settings-note settings-item-desc" data-i18n="settings.collection.wslScanDesc">Scans only running WSL distributions and may increase WSL memory use.</span>
-                </label>
+                  <input id="wslScanInput" type="checkbox" aria-describedby="wslScanNote" />
+                  <span id="wslScanNote" class="settings-note settings-item-desc" data-i18n="settings.collection.wslScanDesc">Scans only running WSL distributions and may increase WSL memory use.</span>
+                </div>
                 <div id="wslPanel" class="wsl-panel"></div>
               </div>
               <label class="checkbox-label session-archive-toggle settings-item">
@@ -706,15 +723,15 @@
             <div class="settings-subgroup settings-export-block settings-page-card">
               <div class="settings-group-header"><span data-i18n="settings.export.title">Data export</span></div>
               <div class="export-auto-head">
-                <label class="checkbox-label export-auto-toggle settings-item">
+                <div class="checkbox-label export-auto-toggle settings-item">
                   <span class="settings-item-text">
                     <span class="settings-item-heading">
-                      <span class="settings-item-title" data-i18n="settings.export.autoLabel">Auto-export to a folder</span>
+                      <label for="exportAutoInput" class="settings-item-title" data-i18n="settings.export.autoLabel">Auto-export to a folder</label>
                       <span id="exportAutoStatus" class="cursor-status-pill export-status-pill hidden"></span>
                     </span>
                   </span>
                   <input id="exportAutoInput" type="checkbox" />
-                </label>
+                </div>
               </div>
               <div id="exportAutoDetails" class="export-auto-details hidden">
                 <div class="export-dir-row">
@@ -723,7 +740,7 @@
                     <button id="exportPickDirButton" type="button" data-i18n="settings.export.pickDir">Choose folder…</button>
                   </div>
                 </div>
-                <label class="export-interval-row settings-item"><span class="settings-item-text"><span class="settings-item-title" data-i18n="settings.export.interval">Auto-export frequency</span></span>
+                <div class="export-interval-row settings-item"><span class="settings-item-text" data-reset-setting="exportIntervalMs"><label for="exportIntervalInput" class="settings-item-title" data-i18n="settings.export.interval">Auto-export frequency</label></span>
                   <select id="exportIntervalInput">
                     <option value="30000" data-i18n="settings.export.interval.30s">Every 30 seconds</option>
                     <option value="60000" data-i18n="settings.export.interval.1m">Every minute</option>
@@ -732,7 +749,7 @@
                     <option value="1800000" data-i18n="settings.export.interval.30m">Every 30 minutes</option>
                     <option value="3600000" data-i18n="settings.export.interval.60m">Every 60 minutes</option>
                   </select>
-                </label>
+                </div>
               </div>
               <div class="export-manual-row">
                 <span class="settings-note export-manual-note">CSV / JSON</span>
@@ -890,7 +907,7 @@
             <div id="limitProviderCheckboxes" class="client-checkboxes limit-provider-list"></div>
             <div class="settings-subgroup settings-page-card">
               <div class="settings-group-header"><span data-i18n="settings.limits.refreshGroup">Updates</span></div>
-              <label class="settings-item"><span class="settings-item-text"><span class="settings-item-title" data-i18n="settings.limits.refresh">Refresh</span></span>
+              <div class="settings-item"><span class="settings-item-text" data-reset-setting="limitsRefresh"><label for="limitsRefreshInput" class="settings-item-title" data-i18n="settings.limits.refresh">Refresh</label></span>
                 <select id="limitsRefreshInput">
                   <option value="adaptive" data-i18n="settings.limits.refreshAdaptive" data-select-description="settings.limits.refreshAdaptiveNote">Adaptive</option>
                   <option value="60000">1 min</option>
@@ -899,14 +916,14 @@
                   <option value="900000">15 min</option>
                   <option value="1800000">30 min</option>
                 </select>
-              </label>
+              </div>
             </div>
             <div class="settings-subgroup settings-page-card">
               <div class="settings-group-header"><span data-i18n="settings.limits.displayGroup">Display</span></div>
-              <label class="checkbox-label settings-item"><span class="settings-item-text"><span class="settings-item-title" data-i18n="settings.limits.showSource">Show Source</span></span><input id="showLimitSourceInput" type="checkbox" /></label>
+              <div class="checkbox-label settings-item"><span class="settings-item-text" data-reset-setting="showLimitSource"><label for="showLimitSourceInput" class="settings-item-title" data-i18n="settings.limits.showSource">Show Source</label></span><input id="showLimitSourceInput" type="checkbox" /></div>
               <label class="checkbox-label settings-item"><span class="settings-item-text"><span class="settings-item-title" data-i18n="settings.limits.maskAccountEmails">Mask account emails</span></span><input id="maskLimitAccountEmailsInput" type="checkbox" /></label>
               <div class="settings-item">
-                <span id="showLimitUsedLabel" class="settings-item-text"><span class="settings-item-title" data-i18n="settings.limits.barsShow">Bars show</span></span>
+                <span class="settings-item-text" data-reset-setting="showLimitUsed"><span id="showLimitUsedLabel" class="settings-item-title" data-i18n="settings.limits.barsShow">Bars show</span></span>
                 <div class="inline-options" role="radiogroup" aria-labelledby="showLimitUsedLabel">
                   <label class="inline-option"><input type="radio" name="showLimitUsed" value="remaining" id="showLimitUsedRemaining" /><span data-i18n="settings.limits.barsRemaining">Remaining</span></label>
                   <label class="inline-option"><input type="radio" name="showLimitUsed" value="used" id="showLimitUsedUsed" /><span data-i18n="settings.limits.barsUsed">Used</span></label>
@@ -1429,9 +1446,9 @@
             <span class="settings-section-meta"><span id="syncSettingsSummary" class="settings-section-summary"></span><span class="settings-section-disclosure" aria-hidden="true"></span></span>
           </button>
           <div id="syncSettingsDetails" class="settings-section-details hidden">
-            <div class="sync-connection-fields">
-              <div class="settings-field sync-mode-field">
-                <span id="syncModeLabel" data-i18n="settings.sync.mode">Sync method</span>
+            <section id="syncMap" class="settings-page-card sync-map" aria-labelledby="syncModeLabel">
+              <div class="sync-map-head">
+                <span id="syncModeLabel" class="sync-map-label" data-i18n="settings.sync.mode">Sync method</span>
                 <span class="sync-mode-select">
                   <select id="hubModeOptions" aria-labelledby="syncModeLabel">
                     <option value="local" data-i18n="settings.sync.localOnly">Local only</option>
@@ -1442,39 +1459,48 @@
                   <span class="settings-section-disclosure" aria-hidden="true"></span>
                 </span>
               </div>
-              <div id="hubClientFields" class="hub-mode-fields hidden">
-                <div id="syncPanelConnection" class="sync-panel-connection" hidden>
-                  <div class="sync-panel-state">
+              <div id="syncLocalIntro" class="sync-node sync-node-placeholder" data-sync-modes="local">
+                <span class="sync-node-icon" data-sync-icon="client" aria-hidden="true"></span>
+                <span class="sync-node-text">
+                  <strong class="sync-node-title" data-i18n="settings.sync.noHub">No Hub yet</strong>
+                  <span class="sync-node-sub" data-i18n="settings.sync.localIntro">Connect to or host a Hub to combine usage from your other devices.</span>
+                </span>
+              </div>
+              <div id="hubClientFields" class="hub-mode-fields sync-map-hub hidden">
+                <div id="syncPanelConnection" class="sync-panel-connection sync-node" hidden>
+                  <span class="sync-node-icon">
+                    <span id="syncPanelSignal" class="sync-panel-signal" aria-hidden="true">
+                      <svg class="sync-panel-signal-linked" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+                        <circle cx="12" cy="12" r="9" />
+                        <path d="m8 12 3 3 5-6" />
+                      </svg>
+                      <svg class="sync-panel-signal-unlinked" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+                        <circle cx="12" cy="12" r="9" />
+                        <path d="m6 6 12 12" />
+                      </svg>
+                      <svg class="sync-panel-signal-pending" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round">
+                        <circle cx="12" cy="12" r="9" opacity="0.2" />
+                        <path d="M12 3a9 9 0 0 1 9 9" />
+                      </svg>
+                    </span>
+                  </span>
+                  <div class="sync-panel-state sync-node-text">
                     <div class="sync-connection-heading">
-                      <span class="sync-connection-status">
-                        <span id="syncPanelSignal" class="sync-panel-signal" aria-hidden="true">
-                          <svg class="sync-panel-signal-linked" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
-                            <circle cx="12" cy="12" r="9" />
-                            <path d="m8 12 3 3 5-6" />
-                          </svg>
-                          <svg class="sync-panel-signal-unlinked" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
-                            <circle cx="12" cy="12" r="9" />
-                            <path d="m6 6 12 12" />
-                          </svg>
-                          <svg class="sync-panel-signal-pending" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round">
-                            <circle cx="12" cy="12" r="9" opacity="0.2" />
-                            <path d="M12 3a9 9 0 0 1 9 9" />
-                          </svg>
-                        </span>
-                        <strong id="syncPanelState" role="status" aria-live="polite"></strong>
-                      </span>
-                      <button id="syncConnectionEdit" type="button" class="sync-connection-edit" data-i18n="settings.sync.editConnection">Change connection</button>
+                      <div id="syncConnectionIdentity" class="sync-connection-identity sync-node-title">
+                        <span id="hubProfilePicker" class="hub-profile-picker" hidden><select id="hubProfileSelect" aria-label="Hub" data-i18n-aria-label="settings.sync.hubPicker"></select></span>
+                        <span id="syncConnectionEndpoint"></span>
+                      </div>
                     </div>
-                    <div id="syncConnectionIdentity" class="sync-connection-identity">
-                      <span id="hubProfilePicker" class="hub-profile-picker" hidden><select id="hubProfileSelect" aria-label="Hub" data-i18n-aria-label="settings.sync.hubPicker"></select></span>
-                      <span id="syncConnectionEndpoint"></span>
-                      <span id="syncPanelBuild" class="sync-panel-build" hidden></span>
+                    <div class="sync-node-meta">
+                      <strong id="syncPanelState" class="sync-node-state" role="status" aria-live="polite"></strong>
+                      <span id="syncPanelUpload" class="sync-node-sub"></span>
                     </div>
-                    <span id="syncPanelUpload"></span>
-                    <span id="syncPanelDetail" role="status" aria-live="polite" hidden></span>
+                    <span id="syncPanelBuild" class="sync-panel-build sync-node-sub" hidden></span>
+                    <span id="syncPanelDetail" class="sync-node-sub" role="status" aria-live="polite" hidden></span>
                   </div>
+                  <button id="syncConnectionEdit" type="button" class="sync-connection-edit" data-i18n="settings.sync.editConnection" data-i18n-aria-label="settings.sync.editConnection" aria-label="Change connection">Change connection</button>
                 </div>
-                <div id="syncConnectionEditor" class="sync-connection-editor">
+                <div id="syncConnectionEditor" class="sync-connection-editor sync-map-form">
                   <label><span data-i18n="settings.sync.hubName">Hub name</span><input id="hubProfileNameInput" type="text" maxlength="120" spellcheck="false" placeholder="Home / Worker" data-i18n-placeholder="settings.sync.hubNamePlaceholder" /></label>
                   <label><span data-i18n="settings.sync.hubUrl">Hub URL</span><input id="hubUrlInput" type="text" spellcheck="false" placeholder="http://hub-host:17321" /></label>
                   <div class="settings-field hub-secret-field">
@@ -1485,83 +1511,97 @@
                     </div>
                   </div>
                 </div>
-                <div id="hubBuildStatus" class="hub-status hub-build-status" role="status" hidden></div>
+                <div id="hubBuildStatus" class="hub-status hub-build-status sync-map-notice" role="status" hidden></div>
               </div>
-              <div id="hubHostFields" class="hub-mode-fields hidden">
-                <label><span data-i18n="settings.sync.port">Port</span><input id="hubPortInput" type="number" min="1" max="65535" spellcheck="false" /></label>
-                <label><span data-i18n="settings.sync.sharedSecret">Shared Secret</span>
-                  <div class="hub-secret-row">
-                    <input id="hubSecretInput" type="text" spellcheck="false" readonly />
-                    <button id="hubSecretCopyButton" type="button" class="icon-button" aria-label="Copy secret" data-i18n-aria-label="settings.sync.copySecret">⧉</button>
-                    <button id="hubSecretRegenButton" type="button" class="icon-button" aria-label="Regenerate" data-i18n-aria-label="settings.sync.regenerateSecret">↺</button>
+              <div id="hubHostFields" class="hub-mode-fields sync-map-hub hidden">
+                <div class="sync-node">
+                  <span class="sync-node-icon" data-sync-icon="host" aria-hidden="true"></span>
+                  <span class="sync-node-text">
+                    <span id="hubStatusRow" class="hub-status"></span>
+                    <span class="sync-node-sub" data-i18n="settings.sync.hostWarningShort">Quitting Token Monitor stops the Hub for every connected device.</span>
+                  </span>
+                </div>
+                <div class="sync-share sync-map-form">
+                  <div id="hubAddressList" class="hub-address-list"></div>
+                  <div class="settings-field sync-share-secret">
+                    <label for="hubSecretInput" data-i18n="settings.sync.sharedSecret">Shared Secret</label>
+                    <div class="hub-secret-row">
+                      <input id="hubSecretInput" type="text" spellcheck="false" readonly />
+                      <button id="hubSecretCopyButton" type="button" class="icon-button" aria-label="Copy secret" data-i18n-aria-label="settings.sync.copySecret">⧉</button>
+                      <button id="hubSecretRegenButton" type="button" class="icon-button" aria-label="Regenerate" data-i18n-aria-label="settings.sync.regenerateSecret">↺</button>
+                    </div>
                   </div>
-                </label>
-                <div id="hubStatusRow" class="hub-status"></div>
-                <div id="hubAddressList" class="hub-address-list"></div>
-                <p class="settings-note" data-i18n="settings.sync.hostNote">Other devices connect using one of the URLs above with the shared secret. For cross-network use, run Tailscale or ZeroTier on both sides - the virtual IP works the same.</p>
-                <p class="settings-note hub-warning" data-i18n="settings.sync.hostWarning">The hub runs while Token Monitor is running. Quitting (not just closing the window) stops the hub for all connected devices.</p>
-              </div>
-              <div id="icloudFields" class="hub-mode-fields hidden">
-                <div id="icloudStatus" class="hub-status" role="status" aria-live="polite"></div>
-                <div id="icloudRootStatus" class="icloud-root-status"></div>
-                <p class="settings-note" data-i18n="settings.sync.icloudNote">Sync usage, limits, history, devices and subscriptions across Macs signed into the same Apple ID. No Token Monitor server is used; updates may take a moment to appear.</p>
-              </div>
-              <div id="syncDeviceSettings" class="sync-device-settings">
-                <label><span data-i18n="settings.sync.deviceId">Device ID</span><input id="deviceIdInput" type="text" spellcheck="false" placeholder="auto (hostname)" data-i18n-placeholder="settings.sync.deviceIdPlaceholder" /></label>
-                <div class="settings-actions">
-                  <button id="saveSettingsButton" type="button" data-i18n="settings.common.save">Save</button>
-                  <button id="syncConnectionCancel" type="button" data-i18n="settings.common.cancel" hidden>Cancel</button>
-                  <button id="hubProfileRemove" type="button" class="hub-profile-remove" data-i18n="settings.sync.removeHub" hidden>Remove Hub</button>
+                  <label class="sync-port-field"><span data-i18n="settings.sync.port">Port</span><input id="hubPortInput" type="number" min="1" max="65535" spellcheck="false" /></label>
+                  <p class="settings-note" data-i18n="settings.sync.hostNote">Other devices connect using one of the URLs above with the shared secret. For cross-network use, run Tailscale or ZeroTier on both sides - the virtual IP works the same.</p>
                 </div>
               </div>
-              <div id="syncConnectionSaveError" class="hub-status error" role="alert" hidden></div>
-              <div id="deviceIconLocalRow" class="settings-item"><span id="deviceIconLocalLabel" class="settings-item-text settings-field" data-i18n="devices.icon.thisDevice">This device’s icon</span><span class="device-icon-local-control"><select id="deviceIconInput" aria-labelledby="deviceIconLocalLabel"></select></span></div>
-              <label id="syncUploadIntervalRow" class="sync-upload-interval-row settings-item" hidden><span class="settings-item-text"><span class="settings-item-title" data-i18n="settings.sync.uploadInterval">Sync upload frequency</span></span>
+              <div id="icloudFields" class="hub-mode-fields sync-map-hub hidden">
+                <div class="sync-node">
+                  <span class="sync-node-icon" data-sync-icon="icloud" aria-hidden="true"></span>
+                  <span class="sync-node-text">
+                    <span id="icloudStatus" class="hub-status" role="status" aria-live="polite"></span>
+                    <span id="icloudRootStatus" class="icloud-root-status sync-node-sub"></span>
+                    <span class="sync-node-sub" data-i18n="settings.sync.icloudNote">Sync usage, limits, history, devices and subscriptions across Macs signed into the same Apple ID. No Token Monitor server is used; updates may take a moment to appear.</span>
+                  </span>
+                </div>
+              </div>
+              <div id="syncDeviceSettings" class="sync-device-settings sync-map-form">
+                <label><span data-i18n="settings.sync.deviceId">Device ID</span><input id="deviceIdInput" type="text" spellcheck="false" placeholder="auto (hostname)" data-i18n-placeholder="settings.sync.deviceIdPlaceholder" /></label>
+                <div class="settings-actions">
+                  <button id="hubProfileRemove" type="button" class="hub-profile-remove" data-i18n="settings.sync.removeHub" hidden>Remove Hub</button>
+                  <button id="syncConnectionCancel" type="button" data-i18n="settings.common.cancel" hidden>Cancel</button>
+                  <button id="saveSettingsButton" type="button" data-i18n="settings.common.save">Save</button>
+                </div>
+              </div>
+              <div id="syncConnectionSaveError" class="hub-status error sync-map-notice" role="alert" hidden></div>
+              <div id="syncDevicePanel" class="sync-panel" hidden>
+                <div class="sync-panel-heading">
+                  <span data-i18n="settings.sync.panel.devices">Devices</span>
+                  <span id="syncPanelCount" class="sync-panel-count"></span>
+                </div>
+                <div id="syncDeviceList" class="sync-device-list"></div>
+              </div>
+            </section>
+            <div id="syncThisDeviceCard" class="settings-subgroup settings-page-card sync-this-device">
+              <div id="deviceIconLocalRow" class="settings-item"><span id="deviceIconLocalLabel" class="settings-item-text settings-item-title" data-i18n="devices.icon.thisDevice">This device’s icon</span><span class="device-icon-local-control"><select id="deviceIconInput" aria-labelledby="deviceIconLocalLabel"></select></span></div>
+              <div id="syncUploadIntervalRow" class="sync-upload-interval-row settings-item" hidden><span class="settings-item-text" data-reset-setting="syncUploadIntervalMs"><label for="syncUploadIntervalInput" class="settings-item-title" data-i18n="settings.sync.uploadInterval">Sync upload frequency</label></span>
                 <select id="syncUploadIntervalInput">
                   <option value="0" data-i18n="settings.sync.uploadInterval.live">Live</option>
                   <option value="600000" data-i18n="settings.sync.uploadInterval.10m">Every 10 minutes</option>
                   <option value="1200000" data-i18n="settings.sync.uploadInterval.20m">Every 20 minutes</option>
                   <option value="1800000" data-i18n="settings.sync.uploadInterval.30m">Every 30 minutes</option>
                 </select>
-              </label>
-            </div>
-            <div id="syncContentGroup" class="settings-group cursor-account-group theme-color-accordion">
-              <button id="syncContentToggle" class="settings-group-header cursor-settings-toggle" type="button" aria-expanded="false" aria-controls="syncContentDetails">
-                <span data-i18n="settings.sync.content.title">Additional sync</span>
-                <span class="cursor-settings-summary"><span class="cursor-disclosure-icon" aria-hidden="true"></span></span>
-              </button>
-              <div id="syncContentDetails" class="cursor-settings-details hidden" inert>
-                <div class="sync-content-body">
-                  <p class="settings-note" data-i18n="settings.sync.content.basis">Usage, cost, tool limits and subscriptions sync automatically.</p>
-                  <p id="syncContentLocalNote" class="settings-note" data-i18n="settings.sync.content.localNote">Optional content sync is available when connected to or hosting a hub.</p>
-                  <div id="syncContentNotice" class="sync-content-notice" hidden>
-                    <p id="syncContentStatus" class="settings-note" role="status" aria-live="polite" hidden></p>
-                    <button id="syncContentRetry" class="sync-content-retry" type="button" data-i18n="settings.sync.content.retry" hidden>Check again</button>
-                  </div>
-                  <div id="syncContentOptions" class="sync-content-options" hidden>
-                    <label id="syncContentHostRow" class="settings-item checkbox-label sync-content-option" hidden><span class="settings-item-text"><span class="settings-item-title" data-i18n="settings.sync.content.hostPermission">Allow devices to sync session titles</span><span class="settings-item-desc" data-i18n="settings.sync.content.hostNote">Controls what this hub accepts. Each device chooses separately whether to send titles.</span></span><input id="syncContentHostPermission" type="checkbox" /></label>
-                    <div class="settings-item checkbox-label sync-content-option">
-                      <div class="settings-item-text">
-                        <span class="settings-help-heading"><label for="syncContentsessionTitles" class="settings-item-title" data-i18n="settings.sync.content.sessionTitles">Session titles</label><button id="syncContentTitleHelp" class="settings-help-trigger" type="button" aria-describedby="syncContentTitleHelpPopover" aria-expanded="false" aria-controls="syncContentTitleHelpPopover" data-i18n-aria-label="settings.sync.content.helpLabel" aria-label="How to enable title sync"><span aria-hidden="true">i</span></button></span>
-                        <span id="syncContentTitleNote" class="settings-item-desc" data-i18n="settings.sync.content.titleNote">Let other devices display session titles.</span>
-                        <span id="syncContentTitleUnavailable" class="settings-item-desc sync-title-unavailable" hidden><span data-i18n="settings.sync.content.titleUnavailable">Title sync is not enabled on the server.</span></span>
-                      </div>
-                      <input id="syncContentsessionTitles" type="checkbox" aria-describedby="syncContentStatus syncContentTitleUnavailable syncContentCleanup" disabled />
+              </div>
+              <div id="syncContentGroup" class="settings-group cursor-account-group theme-color-accordion">
+                <button id="syncContentToggle" class="settings-group-header cursor-settings-toggle" type="button" aria-expanded="false" aria-controls="syncContentDetails">
+                  <span data-i18n="settings.sync.content.title">Additional sync</span>
+                  <span class="cursor-settings-summary"><span id="syncContentSummary" class="cursor-status-pill" hidden></span><span class="cursor-disclosure-icon" aria-hidden="true"></span></span>
+                </button>
+                <div id="syncContentDetails" class="cursor-settings-details hidden" inert>
+                  <div class="sync-content-body">
+                    <p class="settings-note" data-i18n="settings.sync.content.basis">Usage, cost, tool limits and subscriptions sync automatically.</p>
+                    <p id="syncContentLocalNote" class="settings-note" data-i18n="settings.sync.content.localNote">Optional content sync is available when connected to or hosting a hub.</p>
+                    <div id="syncContentNotice" class="sync-content-notice" hidden>
+                      <p id="syncContentStatus" class="settings-note" role="status" aria-live="polite" hidden></p>
+                      <button id="syncContentRetry" class="sync-content-retry" type="button" data-i18n="settings.sync.content.retry" hidden>Check again</button>
                     </div>
-                    <label class="settings-item checkbox-label sync-content-option"><span class="settings-item-text"><span class="settings-item-title" data-i18n="settings.sync.content.modelAliases">Model aliases and grouping</span><span class="settings-item-desc" data-i18n="settings.sync.content.aliasesNote">Use the same model names and groups on your devices.</span></span><input id="syncContentmodelAliases" type="checkbox" aria-describedby="syncContentStatus" disabled /></label>
-                    <label class="settings-item checkbox-label sync-content-option"><span class="settings-item-text"><span class="settings-item-title" data-i18n="settings.sync.content.customPricing">Custom pricing</span><span class="settings-item-desc" data-i18n="settings.sync.content.pricingNote">Use the same custom rates on your devices.</span></span><input id="syncContentcustomPricing" type="checkbox" aria-describedby="syncContentStatus" disabled /></label>
+                    <div id="syncContentOptions" class="sync-content-options" hidden>
+                      <label id="syncContentHostRow" class="settings-item checkbox-label sync-content-option" hidden><span class="settings-item-text"><span class="settings-item-title" data-i18n="settings.sync.content.hostPermission">Allow devices to sync session titles</span><span class="settings-item-desc" data-i18n="settings.sync.content.hostNote">Controls what this hub accepts. Each device chooses separately whether to send titles.</span></span><input id="syncContentHostPermission" type="checkbox" /></label>
+                      <div class="settings-item checkbox-label sync-content-option">
+                        <div class="settings-item-text">
+                          <span class="settings-help-heading"><label for="syncContentsessionTitles" class="settings-item-title" data-i18n="settings.sync.content.sessionTitles">Session titles</label><button id="syncContentTitleHelp" class="settings-help-trigger" type="button" aria-describedby="syncContentTitleHelpPopover" aria-expanded="false" aria-controls="syncContentTitleHelpPopover" data-i18n-aria-label="settings.sync.content.helpLabel" aria-label="How to enable title sync"><span aria-hidden="true">i</span></button></span>
+                          <span id="syncContentTitleNote" class="settings-item-desc" data-i18n="settings.sync.content.titleNote">Let other devices display session titles.</span>
+                          <span id="syncContentTitleUnavailable" class="settings-item-desc sync-title-unavailable" hidden><span data-i18n="settings.sync.content.titleUnavailable">Title sync is not enabled on the server.</span></span>
+                        </div>
+                        <input id="syncContentsessionTitles" type="checkbox" aria-describedby="syncContentStatus syncContentTitleUnavailable syncContentCleanup" disabled />
+                      </div>
+                      <label class="settings-item checkbox-label sync-content-option"><span class="settings-item-text"><span class="settings-item-title" data-i18n="settings.sync.content.modelAliases">Model aliases and grouping</span><span class="settings-item-desc" data-i18n="settings.sync.content.aliasesNote">Use the same model names and groups on your devices.</span></span><input id="syncContentmodelAliases" type="checkbox" aria-describedby="syncContentStatus" disabled /></label>
+                      <label class="settings-item checkbox-label sync-content-option"><span class="settings-item-text"><span class="settings-item-title" data-i18n="settings.sync.content.customPricing">Custom pricing</span><span class="settings-item-desc" data-i18n="settings.sync.content.pricingNote">Use the same custom rates on your devices.</span></span><input id="syncContentcustomPricing" type="checkbox" aria-describedby="syncContentStatus" disabled /></label>
+                    </div>
+                    <div id="syncContentCleanup" class="sync-content-cleanup" hidden><p class="settings-note hub-warning" data-i18n="settings.sync.content.cleanup_pending">Title sync is off, but previously shared titles still need to be removed from the server. Retry when connected.</p><div class="settings-actions"><button id="syncContentCleanupRetry" type="button" data-i18n="settings.sync.content.cleanupRetry">Retry title removal</button></div></div>
                   </div>
-                  <div id="syncContentCleanup" class="sync-content-cleanup" hidden><p class="settings-note hub-warning" data-i18n="settings.sync.content.cleanup_pending">Title sync is off, but previously shared titles still need to be removed from the server. Retry when connected.</p><div class="settings-actions"><button id="syncContentCleanupRetry" type="button" data-i18n="settings.sync.content.cleanupRetry">Retry title removal</button></div></div>
                 </div>
               </div>
-            </div>
-            <div id="syncDevicePanel" class="sync-panel" hidden>
-              <div class="sync-panel-heading">
-                <span data-i18n="settings.sync.panel.devices">Devices</span>
-                <span id="syncPanelCount" class="sync-panel-count"></span>
-              </div>
-              <div id="syncDeviceList" class="sync-device-list"></div>
-              <button id="syncPanelOpenDevices" type="button" class="sync-panel-link"><span data-i18n="settings.sync.panel.viewUsage">View usage by device</span><span class="sync-panel-link-arrow" aria-hidden="true"></span></button>
             </div>
           </div>
         </div>
@@ -1582,6 +1622,7 @@
         <div class="total-number-row"><div id="totalTokens" class="total-number">0</div><div id="totalTokensCompact" class="total-compact hidden" aria-hidden="true"></div></div>
         <div class="total-cost-row">
           <div id="cost" class="cost">$0.00</div>
+          <button id="sessionSortToggle" class="session-sort-toggle hidden" type="button" aria-controls="breakdown">Newest</button>
           <button id="sessionSearchToggle" class="session-search-toggle hidden" type="button" aria-label="Search sessions" data-i18n-aria-label="sessions.search" aria-controls="sessionSearchHost" aria-expanded="false">
             <span class="session-search-toggle-icon" aria-hidden="true"></span>
           </button>
@@ -1791,6 +1832,7 @@
     <script src="limits/displayMode.js"></script>
     <script src="limits/resetMotion.js"></script>
     <script src="limits/resetAnimator.js"></script>
+    <script src="limits/homeMotion.js"></script>
     <script src="clientStatusPresentation.js"></script>
     <script src="clientHealthPresentation.js"></script>
     <script src="clientSourceCache.js"></script>

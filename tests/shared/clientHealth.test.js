@@ -310,6 +310,7 @@ test('countOverall tallies by headline state', () => {
 // but this test stops a new client's root from being silently dropped on ingest.
 test('every source-root id the collector emits is in the allowlist', () => {
   const roots = clientSourceRoots(KNOWN_CLIENTS, {
+    antigravityAcpPaths: [path.resolve('tmp', 'antigravity-acp')],
     customScanPaths: { codex: [path.resolve('tmp', 'codex-extra')] }
   });
   const emitted = new Set();
@@ -558,6 +559,10 @@ test('MiniMax Code watches every runtime store and the headless captures', () =>
     const custom = path.join(homeDir, 'custom-data');
     const overridden = clientSourceRoots('mcode', { homeDir, env: { ...env, MAVIS_DATA_DIR: custom } }).mcode;
     assert.deepEqual(overridden.slice(0, 1), [{ id: 'mcode-sessions', dir: path.join(custom, 'v2', 'sessions') }]);
+
+    const relocated = path.join(homeDir, 'relocated-minimax');
+    const withCustom = clientSourceRoots('mcode', { ...options, customScanPaths: { mcode: [relocated] } }).mcode;
+    assert.deepEqual(withCustom.slice(-1), [{ id: 'custom-scan-path', dir: relocated, custom: true }]);
   } finally {
     fs.rmSync(homeDir, { recursive: true, force: true });
     fs.rmSync(elsewhere, { recursive: true, force: true });
@@ -643,7 +648,7 @@ test('labelling roots keeps diagnostics separate from watcher roots', () => {
 // variant per platform and only one of them can exist, so reporting four checks
 // with three absent would read as breakage on a healthy machine.
 test('clientSourceChecks collapses same-kind roots into one entry', () => {
-  const checks = clientSourceChecks('copilot,zed,cline,antigravity');
+  const checks = clientSourceChecks('copilot,zed,cline,antigravity', { antigravityAcpPaths: [] });
   const ids = (client) => checks[client].map((check) => check.id);
   // The desktop and CLI databases are distinct sources, not same-kind variants:
   // both can exist at once, so each reports its own check.
@@ -692,7 +697,8 @@ test('Qoder CN roots honor the injected environment over process globals', () =>
 });
 
 test('diagnostic roots expose antigravity native sources without treating them as watch roots', () => {
-  const diagnostics = clientDiagnosticRoots('antigravity').antigravity;
+  const options = { antigravityAcpPaths: [] };
+  const diagnostics = clientDiagnosticRoots('antigravity', options).antigravity;
   assert.deepEqual(diagnostics.map(({ id }) => id), [
     'antigravity-ide-source',
     'antigravity-ide-source',
@@ -712,8 +718,8 @@ test('diagnostic roots expose antigravity native sources without treating them a
     assert.equal(typeof root.exists, 'boolean');
   }
   assert.deepEqual(
-    clientWatchCandidates('antigravity').antigravity,
-    clientSourceRoots('antigravity').antigravity.map(({ dir }) => dir),
+    clientWatchCandidates('antigravity', options).antigravity,
+    clientSourceRoots('antigravity', options).antigravity.map(({ dir }) => dir),
     'the native source roots add diagnostics, not duplicate watches'
   );
 });

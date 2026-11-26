@@ -531,10 +531,19 @@ function groupEvents(events) {
   return exchanges;
 }
 
+// `range:<YYYY-MM-DD>:<YYYY-MM-DD>` selects local days inclusively, for the
+// native Yesterday / Week / Last 7 days / Last 30 days a session row was opened from.
+const DAY_RANGE_PERIOD = /^range:(\d{4}-\d{2}-\d{2}):(\d{4}-\d{2}-\d{2})$/;
+
 function withinPeriod(timestamp, period, now) {
   if (period === 'total') return true;
   const date = new Date(timestamp || '');
   if (Number.isNaN(date.getTime())) return false;
+  const range = DAY_RANGE_PERIOD.exec(String(period));
+  if (range) {
+    const day = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
+    return day >= range[1] && day <= range[2];
+  }
   if (period === 'today') {
     return date.getFullYear() === now.getFullYear() && date.getMonth() === now.getMonth() && date.getDate() === now.getDate();
   }

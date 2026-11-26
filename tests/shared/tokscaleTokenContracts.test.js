@@ -2,8 +2,11 @@
 
 const assert = require('node:assert/strict');
 const test = require('node:test');
+const fs = require('node:fs');
+const os = require('node:os');
+const path = require('node:path');
 const { CLIENT_CATALOG } = require('../../src/shared/clientCatalog');
-const { TOKEN_CONTRACT_CASES, applicableTokenContracts } = require('../../scripts/verify-vendored-tokscale');
+const { TOKEN_CONTRACT_CASES, KIMI_NATIVE_TIMING_CONTRACT, KIMI_UNTIMED_CONTRACT_CASES, applicableTokenContracts, assertTokenContract, hermeticEnv } = require('../../scripts/verify-vendored-tokscale');
 
 // Existing Tokscale-parsed clients before this gate was introduced. Keep this
 // baseline fixed when adding a client: each new id needs a runnable contract
@@ -38,6 +41,50 @@ test('the token contract gate rejects an untested future Tokscale client', () =>
   const tokScaleClients = CLIENT_CATALOG.map(({ id }) => id);
   assert.deepEqual(missingContracts([...tokScaleClients, 'future-client']), ['future-client']);
 });
+
+test('the native-only Kimi fixture has no request anchor or default-model shortcut', () => {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'tm-kimi-native-shape-'));
+  try {
+    KIMI_NATIVE_TIMING_CONTRACT.writeFixture(home);
+    const file = path.join(home, '.kimi-code', 'sessions', 'workspace', 'kimi-native-contract', 'agents', 'main', 'wire.jsonl');
+    const records = fs.readFileSync(file, 'utf8').trim().split('\n').map(line => JSON.parse(line));
+    assert.equal(records.some(record => record.type === 'llm.request'), false);
+    assert.equal(records.filter(record => record.type === 'usage.record').length, 1);
+    assert.equal(records.filter(record => record.event?.type === 'step.end').length, 1);
+    assert.notEqual(KIMI_NATIVE_TIMING_CONTRACT.expectedRow.model, 'kimi-for-coding');
+  } finally {
+    fs.rmSync(home, { recursive: true, force: true });
+  }
+});
+
+test('an inherited Kimi home cannot redirect the binary contract scan', () => {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'tm-kimi-env-'));
+  const previous = process.env.KIMI_CODE_HOME;
+  try {
+    process.env.KIMI_CODE_HOME = path.join(home, 'host-override');
+    const env = hermeticEnv(home);
+    assert.equal(Object.hasOwn(env, 'KIMI_CODE_HOME'), false);
+    assert.equal(env.HOME, home);
+    assert.equal(env.USERPROFILE, home);
+  } finally {
+    if (previous === undefined) delete process.env.KIMI_CODE_HOME;
+    else process.env.KIMI_CODE_HOME = previous;
+    fs.rmSync(home, { recursive: true, force: true });
+  }
+});
+
+for (const contract of KIMI_UNTIMED_CONTRACT_CASES) {
+  test(`${contract.expectedSession.id} rejects invented timing while preserving usage`, () => {
+    const entry = { client: 'kimi', sessionId: contract.expectedSession.id, ...contract.expectedRow };
+    const performance = contract.expectedPerformance;
+    assert.doesNotThrow(() => assertTokenContract({ entries: [{ ...entry, performance }] }, contract));
+    for (const key of Object.keys(performance)) {
+      const invented = { ...performance, [key]: 1 };
+      assert.throws(() => assertTokenContract({ entries: [{ ...entry, performance: invented }] }, contract), /timing contract mismatch/);
+    }
+    assert.throws(() => assertTokenContract({ entries: [{ ...entry, output: 0 }] }, contract), /fixture mismatch/);
+  });
+}
 
 
 test('CatPaw nonzero fixtures run only on supported app platforms', () => {

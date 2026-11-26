@@ -100,26 +100,37 @@ function isLocalDeviceRecord(device, options = {}) {
   return options.syncActive !== true;
 }
 
-function projectDeviceForDisplay(device, options = {}) {
+function hidesLocalAntigravityRpc(provider, options) {
+  return options.antigravityLocalLimitsEnabled === false
+    && normalizeEnumId(provider?.provider) === 'antigravity'
+    && normalizeEnumId(provider?.source) === 'rpc'
+    && isLocalDeviceProvider(provider, options);
+}
+
+function projectProviders(providers, options, changedProviders) {
+  let changed = false;
+  const visible = providers.flatMap((provider) => {
+    if (hidesLocalAntigravityRpc(provider, options)) {
+      changed = true;
+      changedProviders?.add('antigravity');
+      return [];
+    }
+    const projected = projectLimitProviderForDisplay(provider, options);
+    if (projected !== provider) {
+      changed = true;
+      changedProviders?.add('opencode');
+    }
+    return [projected];
+  });
+  return changed ? visible : providers;
+}
+
+function projectDeviceForDisplay(device, options, changedProviders) {
   const providers = device?.limits?.providers;
   if (!Array.isArray(providers) || !isLocalDeviceRecord(device, options)) return device;
-  let changed = false;
-  const visibleProviders = providers.map((provider) => {
-    const visible = projectLimitProviderForDisplay(provider, {
-      ...options,
-      localDeviceProvider: true
-    });
-    if (visible !== provider) changed = true;
-    return visible;
-  });
-  if (!changed) return device;
-  return {
-    ...device,
-    limits: {
-      ...device.limits,
-      providers: visibleProviders
-    }
-  };
+  const visibleProviders = projectProviders(providers, { ...options, localDeviceProvider: true }, changedProviders);
+  if (visibleProviders === providers) return device;
+  return { ...device, limits: { ...device.limits, providers: visibleProviders } };
 }
 
 function projectionNowMs(stats, options = {}) {
@@ -136,13 +147,13 @@ function projectionStaleAfterMs(stats) {
   return DEFAULT_STALE_AFTER_MS;
 }
 
-function replaceOpenCodeProviders(currentProviders, aggregateProviders) {
+function replaceProviders(currentProviders, aggregateProviders, providerId) {
   const replacements = (aggregateProviders || [])
-    .filter((provider) => normalizeEnumId(provider?.provider) === 'opencode');
+    .filter((provider) => normalizeEnumId(provider?.provider) === providerId);
   const providers = [];
   let inserted = false;
   for (const provider of currentProviders || []) {
-    if (normalizeEnumId(provider?.provider) !== 'opencode') {
+    if (normalizeEnumId(provider?.provider) !== providerId) {
       providers.push(provider);
       continue;
     }
@@ -156,45 +167,37 @@ function replaceOpenCodeProviders(currentProviders, aggregateProviders) {
 function projectAggregateProviders(stats, options = {}) {
   const providers = stats?.limits?.providers;
   if (!Array.isArray(providers)) return stats;
-  let changed = false;
-  const visibleProviders = providers.map((provider) => {
-    const visible = projectLimitProviderForDisplay(provider, options);
-    if (visible !== provider) changed = true;
-    return visible;
-  });
-  if (!changed) return stats;
-  return {
-    ...stats,
-    limits: {
-      ...stats.limits,
-      providers: visibleProviders
-    }
-  };
+  const visibleProviders = projectProviders(providers, options);
+  if (visibleProviders === providers) return stats;
+  return { ...stats, limits: { ...stats.limits, providers: visibleProviders } };
 }
 
 function projectLimitStatsForDisplay(stats, options = {}) {
   if (!Array.isArray(stats?.devices)) return projectAggregateProviders(stats, options);
 
-  let changed = false;
-  const visibleDevices = stats.devices.map((device) => {
-    const visible = projectDeviceForDisplay(device, options);
-    if (visible !== device) changed = true;
-    return visible;
-  });
-  if (!changed) return stats;
+  const changedProviders = new Set();
+  const visibleDevices = stats.devices.map(device => projectDeviceForDisplay(device, options, changedProviders));
+  // Older Hub snapshots can still carry a local RPC aggregate after sync
+  // composition has replaced this device's record with a fresh OAuth-only one.
+  if (stats.limits?.providers?.some(provider => hidesLocalAntigravityRpc(provider, options))) {
+    changedProviders.add('antigravity');
+  }
+  if (changedProviders.size === 0) return stats;
 
   const limits = aggregateLimits(
     visibleDevices,
     projectionStaleAfterMs(stats),
     projectionNowMs(stats, options)
   );
+  let providers = stats?.limits?.providers;
+  for (const providerId of changedProviders) providers = replaceProviders(providers, limits.providers, providerId);
   return {
     ...stats,
     devices: visibleDevices,
     limits: {
       ...stats.limits,
       updatedAt: limits.updatedAt,
-      providers: replaceOpenCodeProviders(stats?.limits?.providers, limits.providers)
+      providers
     }
   };
 }

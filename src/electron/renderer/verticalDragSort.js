@@ -5,8 +5,10 @@
   if (typeof module === 'object' && module.exports) module.exports = api;
   if (root) root.TokenMonitorVerticalDragSort = api;
 })(typeof window !== 'undefined' ? window : null, function createVerticalDragSortApi() {
-  function normalizeId(value) {
-    return String(value || '').trim().toLowerCase();
+  // Callers use these ids to find the original rows after a drop. Account
+  // profile names can differ by case, so preserve their spelling.
+  function rowId(value) {
+    return String(value ?? '');
   }
 
   function numberOr(value, fallback) {
@@ -17,7 +19,7 @@
   function normalizeRows(rows) {
     return (rows || [])
       .map((row) => ({
-        id: normalizeId(row?.id),
+        id: rowId(row?.id),
         top: numberOr(row?.top, 0),
         height: numberOr(row?.height, 0)
       }))
@@ -44,7 +46,7 @@
   // to the old press position would leave the row that far off the cursor.
   function createVerticalDragSnapshot(rows, draggedId, grabOffset) {
     const normalized = normalizeRows(rows);
-    const dragged = normalizeId(draggedId);
+    const dragged = rowId(draggedId);
     const sourceIndex = normalized.findIndex((row) => row.id === dragged);
     return {
       rows: normalized,
@@ -104,10 +106,10 @@
   // Wrapped flex rows retain their measured item widths. Repack the proposed
   // order using the same start alignment and gaps as the browser's flex layout.
   function createWrappedDragSnapshot(items, draggedId, grab = {}, layout = {}) {
-    const rows = (items || []).map(row => ({ id: normalizeId(row.id),
+    const rows = (items || []).map(row => ({ id: rowId(row.id),
       left: numberOr(row.left, 0), top: numberOr(row.top, 0),
       width: Math.max(0, numberOr(row.width, 0)), height: Math.max(0, numberOr(row.height, 0)) })).filter(row => row.id);
-    const sourceIndex = rows.findIndex(row => row.id === normalizeId(draggedId));
+    const sourceIndex = rows.findIndex(row => row.id === rowId(draggedId));
     const source = rows[sourceIndex];
     return { rows, sourceIndex, width: Math.max(1, numberOr(layout.width, 1)),
       columnGap: Math.max(0, numberOr(layout.columnGap, 0)), rowGap: Math.max(0, numberOr(layout.rowGap, 0)),

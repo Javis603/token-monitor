@@ -24,6 +24,38 @@ function deferred() {
   return { promise, resolve, reject };
 }
 
+test('session detail keeps its group destination only while replacement pages are pending', () => {
+  const group = { kind: 'session-group', period: 'month', summary: { key: 'group', name: 'old group' } };
+  const request = { kind: 'session', client: 'codex', sessionId: 'child', returnTo: group, headingSignature: 'heading' };
+  let pending = true;
+  let rows = [];
+  const state = { period: 'month', openSession: request, stats: { periods: { month: {} } } };
+  const start = rendererSource.indexOf('function refreshSessionDetailHeading(');
+  const end = rendererSource.indexOf('\nfunction sessionDetailBackLabel(', start);
+  const context = {
+    state, els: {}, sessionRowsForPeriod: () => rows, sessionDetailHeadingSignature: () => 'heading',
+    pagedSessionsPending: () => pending
+  };
+  vm.runInNewContext(rendererSource.slice(start, end), context);
+  context.refreshSessionDetailHeading();
+  assert.strictEqual(request.returnTo, group);
+
+  rows = [{ key: 'group', name: 'fresh group', groupRows: [{ key: 'session:codex:child' }] }];
+  context.refreshSessionDetailHeading();
+  assert.strictEqual(request.returnTo.summary, rows[0]);
+
+  rows = [];
+  pending = false;
+  context.refreshSessionDetailHeading();
+  assert.equal(request.returnTo, null);
+
+  pending = true;
+  request.returnTo = group;
+  state.settings = { sessionTitlesEnabled: false };
+  context.refreshSessionDetailHeading();
+  assert.equal(request.returnTo, null, 'a title-bearing destination must clear when titles are disabled');
+});
+
 test('session detail renders its heading before loading, errors and empty results, and keeps it when sorting', async () => {
   const timers = [];
   const frames = [];
@@ -67,6 +99,7 @@ test('session detail renders its heading before loading, errors and empty result
   let render;
   const context = {
     rendererDom,
+    displayedSessions: key => state.stats?.periods?.[key]?.sessions,
     els, state, document: { createElement: element, querySelectorAll: () => [els.sessionDetailHead.querySelector('.detail-heading')].filter(Boolean) }, window: { addEventListener() {} }, t: (key, params) => translate('en', key, params),
     sessionDetailBack() { state.backClicked = true; },
     detailNote: text => ({ textContent: text }),
@@ -193,6 +226,7 @@ test('session detail renders its heading before loading, errors and empty result
   const openEnd = rendererSource.indexOf('\nfunction toggleDetailSort', openStart);
   assert.ok(openStart >= 0 && openEnd > openStart, 'detail navigation should be present');
   context.visibleStatsSurface = () => 'main';
+  context.currentNativeRangeSnapshot = () => null;
   context.renderSessionDetail = render;
   const detailRequest = deferred();
   context.window.tokenMonitor = { getSessionDetail: () => detailRequest.promise };
@@ -372,6 +406,13 @@ test('session detail renders its heading before loading, errors and empty result
   assert.equal(els.sessionDetailHead.querySelector('.detail-heading'), null);
   assert.equal(els.sessionDetailHead.children[0].textContent, 'sessions');
   assert.equal(els.sessionDetailHead.children[0].attributes['aria-label'], 'Back to sessions');
+  state.settings = { deviceId: 'local' };
+  render({ loading: true });
+  assert.equal(els.sessionDetail.querySelector('.detail-session-source').textContent, 'Unknown source');
+  state.openSession.sourceDevice = { deviceId: 'local', name: 'MacBook' };
+  render({ loading: true });
+  assert.equal(els.sessionDetail.querySelector('.detail-session-source').textContent, 'This device');
+  delete state.settings;
   state.openSession = { title: 'gpt-5.6-sol · 12:34', returnTo: { kind: 'session-group' } };
   render({ loading: true });
   assert.equal(els.sessionDetailHead.children[0].attributes['aria-label'], 'gpt-5.6-sol · 12:34 — Back to Codex Auto Review');
@@ -447,11 +488,14 @@ function sessionDetailHarness(getSessionDetail) {
   const context = {
     rendererDom,
     state,
+    displayedSessions: key => state.stats?.periods?.[key]?.sessions,
+    sessionRowsApi: require('../../src/electron/renderer/sessionRows'),
     visibleStatsSurface: () => 'main',
     isRendererWindowHidden: () => false,
     statsRenderScheduler: { request() {} },
     sessionTooltipShouldHoldRender: () => false,
     renderSessionDetail: (args) => renders.push(args),
+    currentNativeRangeSnapshot: () => null,
     window: { tokenMonitor: { getSessionDetail } }
   };
   vm.runInNewContext(
@@ -589,6 +633,23 @@ test('openSessionDetail ignores a stale period result that completes last', asyn
   assert.equal(state.openSession.period, 'month');
   assert.equal(state.openSession.detail.marker, 'month');
   assert.deepEqual(renders.filter((render) => render.detail).map((render) => render.detail.marker), ['month']);
+});
+
+test('a confirmed remote session never opens a local transcript with the same ID', async () => {
+  let localReads = 0;
+  const { openSessionDetail, refreshOpenSessionDetail, renders, state } = sessionDetailHarness(() => {
+    localReads++;
+    return { found: true, marker: 'local transcript' };
+  });
+  state.settings = { deviceId: 'local' };
+  const sourceDevice = { deviceId: 'imac', name: 'imac-m1' };
+  await openSessionDetail({ client: 'codex', sessionId: 'same-session', sourceDevice });
+  state.stats = { periods: { today: { sessions: { 'codex:same-session': { totalTokens: 10 } } } } };
+  await refreshOpenSessionDetail();
+  assert.equal(localReads, 0);
+  assert.equal(state.openSession.sourceDevice, sourceDevice);
+  assert.equal(renders.length, 1);
+  assert.equal(renders[0].detail.found, false);
 });
 
 test('Reasonix rows enter the shared detail navigation path instead of a native accordion', () => {

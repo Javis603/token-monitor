@@ -107,6 +107,18 @@ test('the form initializes before the asynchronous settings query has returned',
   form.dispose();
 });
 
+test('the collapsed row counts the optional kinds this device shares', async () => {
+  const f = fixture();
+  assert.equal(f.get('Summary').hidden, true);
+  await f.form.refresh();
+  assert.equal(f.get('Summary').hidden, false);
+  assert.equal(f.get('Summary').textContent, '0/3 on');
+  f.push(status({ enabled: { sessionTitles: true, modelAliases: false, customPricing: true } }));
+  assert.equal(f.get('Summary').textContent, '2/3 on');
+  f.settings({ hubMode: 'local' });
+  assert.equal(f.get('Summary').hidden, true);
+});
+
 test('all optional checkboxes default off and stay disabled until a supported status arrives', async () => {
   const f = fixture();
   for (const kind of ['sessionTitles', 'modelAliases', 'customPricing']) {

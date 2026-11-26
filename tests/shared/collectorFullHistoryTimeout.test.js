@@ -8,6 +8,7 @@ const path = require('node:path');
 const test = require('node:test');
 const childProcess = require('node:child_process');
 const { createDeviceRuntime } = require('../../src/shared/usage/deviceRuntime');
+const { withoutWindowedScan } = require('../helpers/tokscaleWithoutWindows');
 
 async function until(predicate) {
   for (let i = 0; i < 200; i++) {
@@ -30,7 +31,7 @@ function fixture(t, overrides = {}, delayMs = 120001) {
   t.mock.timers.enable({ apis: ['setTimeout'] });
   const children = [];
   let slow = true;
-  t.mock.method(childProcess, 'spawn', (_bin, args) => {
+  t.mock.method(childProcess, 'spawn', withoutWindowedScan((_bin, args) => {
     const child = new EventEmitter();
     child.stdout = new EventEmitter();
     child.stderr = new EventEmitter();
@@ -49,7 +50,7 @@ function fixture(t, overrides = {}, delayMs = 120001) {
     if (args.includes('--since') && slow) setTimeout(complete, delayMs);
     else setImmediate(complete);
     return child;
-  });
+  }));
   const collectorPath = require.resolve('../../src/shared/collector');
   delete require.cache[collectorPath];
   const collector = require(collectorPath);

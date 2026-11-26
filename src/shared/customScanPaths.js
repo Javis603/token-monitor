@@ -23,9 +23,7 @@ const CUSTOM_SCAN_PATH_LIMIT_ERRORS = Object.freeze({
 // similarly misleading. Keep both controls hidden rather than accepting paths
 // that appear healthy but contribute no usage. Token Monitor's Kilo row combines
 // the `kilo` CLI database and `kilocode` extension sources; the former rejects
-// extra roots, so persisted Kilo roots are forwarded to the latter. MiniMax
-// Code's runtime store is read by the fork only from its data directories, so
-// an extra `mcode` root would reach upstream's headless-capture scan alone.
+// extra roots, so persisted Kilo roots are forwarded to the latter.
 // Goose selects one database from its fixed/env candidates; extra directories
 // are ignored by the pinned scanner. Proma never offered extra roots while it
 // was fork-only; offering them is a separate feature from moving its parser
@@ -35,7 +33,6 @@ const UNSUPPORTED_CUSTOM_SCAN_CLIENTS = new Set([
   'opencode',
   'cursor',
   'goose',
-  'mcode',
   'proma'
 ]);
 const CUSTOM_SCAN_CLIENT_IDS = Object.freeze(
@@ -133,11 +130,27 @@ function customScanPathsFingerprint(value, options = {}) {
 }
 
 function tokscaleExtraDirsEnv(value, inherited = '', options = {}) {
-  const additions = customScanPathEntries(value, options).flatMap(({ client, dir }) => (
-    suppressedCustomScanIds(client, dir, options)
-      .map((scanId) => `${scanId}:${dir}`)
-  ));
-  return [String(inherited || '').trim(), ...additions].filter(Boolean).join(',');
+  const entries = customScanPathEntries(value, options);
+  const mod = platformPath(options.platform || process.platform);
+  const acp = (options.antigravityAcpPaths || [])
+    .filter(dir => suppressedCustomScanIds('antigravity', dir, options).includes('antigravity-cli'))
+    .map(dir => ({ dir, canonical: canonicalDir(dir, options) }));
+  const automatic = acp.filter(({ canonical }) => !entries.some(({ client, dir }) => {
+    if (client !== 'antigravity') return false;
+    const root = canonicalDir(dir, options);
+    // A manually selected parent can contain other conversations as well.
+    return root !== canonical && dirContains(root, canonical, mod)
+      && suppressedCustomScanIds(client, dir, options).includes('antigravity-cli');
+  }));
+  const additions = entries.flatMap(({ client, dir }) => {
+    const ids = suppressedCustomScanIds(client, dir, options);
+    const covered = client === 'antigravity' && automatic.some(({ canonical }) => (
+      dirContains(canonical, canonicalDir(dir, options), mod)
+    ));
+    return ids.filter(id => !(covered && id === 'antigravity-cli')).map(id => `${id}:${dir}`);
+  });
+  return [String(inherited || '').trim(), ...additions, ...automatic.map(({ dir }) => `antigravity-cli:${dir}`)]
+    .filter(Boolean).join(',');
 }
 
 function platformPath(platform) {

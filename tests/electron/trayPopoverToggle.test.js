@@ -57,7 +57,7 @@ function fixture({ visible = true, focused = visible, platform = 'darwin', histo
     settings: { trayMode: true, showTrayIcon: true },
     process: { platform }, performance: { now: () => now }, screen,
     popoverBlurMatchesPress, popoverToggleAction, trayToggleAction, windowToggleShortcutAction,
-    suppressNextBlurHide: false, quitRequested: false, floatingBubbleState: { collapsed: false },
+    suppressNextBlurHide: false, quitRequested: false, screenUiSuspended: false, floatingBubbleState: { collapsed: false },
     popoverBounds: () => ({}), setTimeout: (fn) => timers.push(fn),
     applyMacActivationPolicy() {}, applyMacSpaceBehavior() {}, applyWindowSettings() {},
     nudgeTaskbarZOrder() {}, scheduleFloatingBubbleAutoCollapse() {}, expandFloatingBubble() {},

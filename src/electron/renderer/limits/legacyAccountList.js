@@ -64,6 +64,13 @@
       await options.refresh();
       return { ok: true };
     };
+    // The provider owns the account rows. The generic slot response can carry
+    // fewer identity fields, so apply only its presentation and save outcome.
+    /** @param {string | undefined} key @param {string} operation @param {string | string[]} value */
+    const savePresentation = async (key, operation, value) => {
+      const { ok, errorCode, presentation } = await bridge.limits.accountSlots.presentation(provider, key, operation, value);
+      return { ok, errorCode, presentation };
+    };
     const list = panel.createPanel({
       form: { id: provider, fields: [] }, label: options.label || provider,
       document: options.document, t: options.t, hideAdd: !options.add, onAdd: options.add ? () => open(options.add) : undefined,
@@ -74,13 +81,13 @@
       statusReading: options.statusReading, sourceText: (/** @type {any} */ account, /** @type {any} */ reading) => account.source === 'remote' ? '' : options.sourceLabel?.(account, reading) || account.sourceName || '', secondaryText: options.secondaryText, detailText: options.detailText,
       ipc: {
         /** @param {string} _provider @param {string} id @param {string} value */
-        rename: (_provider, id, value) => bridge.limits.accountSlots.presentation(provider, accounts.find(row => row.id === id)?.accountKey, 'rename', value),
+        rename: (_provider, id, value) => savePresentation(accounts.find(row => row.id === id)?.accountKey, 'rename', value),
         /** @param {string} _provider @param {string} id @param {boolean} value */
         setEnabled: (_provider, id, value) => mutate(options.enabled, id, value),
         /** @param {string} _provider @param {string} id */
         remove: (_provider, id) => mutate(options.remove, id),
-        /** @param {any[]} args */
-        presentation: (...args) => bridge.limits.accountSlots.presentation(...args)
+        /** @param {string} _provider @param {string} key @param {string} operation @param {string | string[]} value */
+        presentation: (_provider, key, operation, value) => savePresentation(key, operation, value)
       },
       forms: {}, preserveScroll: options.preserveScroll,
       onChanged: () => {}, openExternal: (/** @type {string} */ url) => bridge.openExternal(url),

@@ -698,7 +698,7 @@ test('disabling only the side dock preserves the shared rate expiry timer for th
   const code = source.slice(source.indexOf('function syncDockSurfaces('), source.indexOf('function refreshLimitStatsPresentation('));
   const cleared = [];
   let topRunning = true;
-  const context = { settings: {}, syncPluginQuotaSurfaceDemand() {}, syncNotch() {}, canUseEdgeDock: () => false,
+  const context = { settings: {}, screenUiSuspended: false, syncPluginQuotaSurfaceDemand() {}, syncNotch() {}, canUseEdgeDock: () => false,
     edgeDockController: { stop() {} }, notchController: { isRunning: () => topRunning },
     edgeDockRateTimer: 42, edgeDockRateTracker: null, edgeDockRateContext: '', edgeDockRateHistory: require('../../src/electron/renderer/tokenRatePresentation').createLiveTokenRateHistory(), clearTimeout: (timer) => cleared.push(timer) };
   vm.runInNewContext(`${code}; syncDockSurfaces({});`, context);
@@ -3165,6 +3165,28 @@ test('scroll gestures step between the hidden summary, the summary and the open 
   assert.equal(last(f.top).expanded, false);
   f.scroll(30);
   assert.equal(last(f.top).expanded, true);
+});
+
+test('a screen-lock stop preserves a dismissed summary, an ordinary stop resets it', (t) => {
+  const f = scrollFixture(t);
+  f.scroll(30);
+  f.scroll(-30);
+  f.scroll(-30);
+  assert.equal(last(notchWindow(f)).summary, null);
+
+  f.controller.stop({ preserveSummary: true });
+  f.controller.sync();
+  const locked = notchWindow(f);
+  f.ipcMain.emit('topNotch:ready', { sender: locked.webContents });
+  f.controller.setData(buildNotchData(stats(), [], { trayContent: 'tokens' }));
+  assert.equal(last(locked).summary, null, 'the dismissed summary stays hidden after unlock');
+
+  f.controller.stop();
+  f.controller.sync();
+  const restored = notchWindow(f);
+  f.ipcMain.emit('topNotch:ready', { sender: restored.webContents });
+  f.controller.setData(buildNotchData(stats(), [], { trayContent: 'tokens' }));
+  assert.ok(last(restored).summary, 'an ordinary stop still resets the choice');
 });
 
 test('opening the panel any way clears a dismissed summary', (t) => {

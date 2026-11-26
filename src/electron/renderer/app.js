@@ -151,6 +151,14 @@ const limitResetAnimator = window.TokenMonitorLimitResetAnimator.createLimitRese
   cancelAnimationFrame: (handle) => cancelAnimationFrame(handle),
   performance
 });
+const homeLimitMotion = window.TokenMonitorHomeLimitMotion.createHomeLimitMotion({
+  motion: limitResetMotionApi,
+  resetEasing: window.TokenMonitorLimitResetAnimator.EASING,
+  numbers: tokenNumberAnimationApi,
+  numberMode: () => tokenNumberAnimationApi.normalize(state.settings?.tokenNumberAnimation),
+  prefersReducedMotion: () => prefersReducedMotion(),
+  formatPercent: (value) => formatPercent(value)
+});
 const appUpdatePresentationApi = window.TokenMonitorAppUpdatePresentation;
 const accountIdentityApi = window.TokenMonitorAccountIdentity;
 const clientStatusPresentationApi = window.TokenMonitorClientStatusPresentation;
@@ -267,7 +275,7 @@ const VIEW_DISPLAY_OPTIONS = [
   { id: 'trends', labelKey: 'views.trends' },
   { id: 'status', labelKey: 'views.status' }
 ];
-const viewPeriodValues = new Set(['today', 'month', 'week', 'last7', 'last30', 'allTime']);
+const viewPeriodValues = new Set(fixedPeriodRangesApi.PERIOD_TAB_OPTIONS);
 const viewBreakdownValues = new Set(['home', ...baseBreakdownOrder, 'status', 'limits', 'trends']);
 const HOME_MODULE_OPTIONS = [
   { id: 'limits', labelKey: 'home.limits', viewId: 'limits' },
@@ -385,12 +393,16 @@ state.fixedPeriodHistoryRetryTimer = null;
 state.fixedPeriodHistoryPromise = null;
 state.fixedPeriodHistoryCoordinator = null;
 state.fixedPeriodSnapshot = null;
+state.syncedFixedPeriod = null;
+state.syncedFixedPeriodCache = new Map();
+state.syncedFixedPeriodWarmup = null;
 state.periodMenuOpen = false;
 state.sessionToolFilter = '';
 state.sessionPage = 0;
 state.sessionPagerSignature = '';
 state.sessionSearchOpen = false;
 state.sessionSearchQuery = '';
+state.sessionSort = 'recent';
 state.sessionRowsCache = null;
 let directBreakdownOverride = null;
 state.homeActivitySettingsExpanded = false;
@@ -414,6 +426,7 @@ const els = {
   subscriptionList: document.getElementById('subscriptionList'), subscriptionAddForm: document.getElementById('subscriptionAddForm'), subscriptionAddToggle: document.getElementById('subscriptionAddToggle'), subscriptionAddDetails: document.getElementById('subscriptionAddDetails'), subscriptionProviderInput: document.getElementById('subscriptionProviderInput'), subscriptionAccountInput: document.getElementById('subscriptionAccountInput'), subscriptionPlanNameInput: document.getElementById('subscriptionPlanNameInput'), subscriptionAmountInput: document.getElementById('subscriptionAmountInput'), subscriptionCurrencyInput: document.getElementById('subscriptionCurrencyInput'), subscriptionIntervalCountInput: document.getElementById('subscriptionIntervalCountInput'), subscriptionIntervalInput: document.getElementById('subscriptionIntervalInput'), subscriptionStartDateInput: document.getElementById('subscriptionStartDateInput'), subscriptionAutoRenewInput: document.getElementById('subscriptionAutoRenewInput'), subscriptionNextRenewalInput: document.getElementById('subscriptionNextRenewalInput'), subscriptionNote: document.getElementById('subscriptionNote'), subscriptionOrphanNotice: document.getElementById('subscriptionOrphanNotice'), subscriptionOrphanText: document.getElementById('subscriptionOrphanText'), subscriptionOrphanAdopt: document.getElementById('subscriptionOrphanAdopt'), subscriptionOrphanDiscard: document.getElementById('subscriptionOrphanDiscard'), subscriptionSyncError: document.getElementById('subscriptionSyncError'), subscriptionNextRenewalLabel: document.getElementById('subscriptionNextRenewalLabel'), subscriptionNextRenewalNote: document.getElementById('subscriptionNextRenewalNote'), subscriptionSubmit: document.getElementById('subscriptionSubmit'), subscriptionCancelEdit: document.getElementById('subscriptionCancelEdit'), subscriptionTotalRow: document.getElementById('subscriptionTotalRow'), subscriptionErrorMessage: document.getElementById('subscriptionErrorMessage'), subscriptionPlanFields: document.getElementById('subscriptionPlanFields'), subscriptionTopUpFields: document.getElementById('subscriptionTopUpFields'), subscriptionTopUpList: document.getElementById('subscriptionTopUpList'), subscriptionTopUpDateInput: document.getElementById('subscriptionTopUpDateInput'), subscriptionTopUpAmountInput: document.getElementById('subscriptionTopUpAmountInput'), subscriptionTopUpAddButton: document.getElementById('subscriptionTopUpAddButton'), subscriptionAmountRow: document.getElementById('subscriptionAmountRow'), subscriptionTopUpHeadingRow: document.getElementById('subscriptionTopUpHeadingRow'), subscriptionKindInputs: [...document.querySelectorAll('input[name="subscriptionKind"]')]
 };
 Object.assign(els, {
+  sessionSortToggle: document.getElementById('sessionSortToggle'),
   sessionSearchToggle: document.getElementById('sessionSearchToggle'),
   sessionSearchHost: document.getElementById('sessionSearchHost'),
   sessionSearchInput: document.getElementById('sessionSearchInput'),
@@ -477,6 +490,8 @@ Object.assign(els, {
   edgeDockMoreOptionsDetails: document.getElementById('edgeDockMoreOptionsDetails'),
   edgeDockSideInputs: Array.from(document.querySelectorAll('input[name="edgeDockSide"]')),
   edgeDockModeInputs: Array.from(document.querySelectorAll('input[name="edgeDockMode"]')),
+  edgeDockTriggerRangeRow: document.getElementById('edgeDockTriggerRangeRow'),
+  edgeDockTriggerRangeInputs: Array.from(document.querySelectorAll('input[name="edgeDockTriggerRange"]')),
   edgeDockBubbleSizeInputs: Array.from(document.querySelectorAll('input[name="edgeDockBubbleSize"]')),
   edgeDockBubbleCustomScaleRow: document.getElementById('edgeDockBubbleCustomScaleRow'),
   edgeDockBubbleCustomScaleInput: document.getElementById('edgeDockBubbleCustomScaleInput'),
@@ -523,6 +538,7 @@ Object.assign(els, {
   secretPasteButton: document.getElementById('secretPasteButton'),
   hubStatusRow: document.getElementById('hubStatusRow'),
   syncDevicePanel: document.getElementById('syncDevicePanel'),
+  syncMap: document.getElementById('syncMap'),
   syncPanelConnection: document.getElementById('syncPanelConnection'),
   syncPanelSignal: document.getElementById('syncPanelSignal'),
   syncPanelState: document.getElementById('syncPanelState'),
@@ -531,7 +547,6 @@ Object.assign(els, {
   syncPanelBuild: document.getElementById('syncPanelBuild'),
   syncPanelCount: document.getElementById('syncPanelCount'),
   syncDeviceList: document.getElementById('syncDeviceList'),
-  syncPanelOpenDevices: document.getElementById('syncPanelOpenDevices'),
   hubAddressList: document.getElementById('hubAddressList'),
   syncUploadIntervalInput: document.getElementById('syncUploadIntervalInput'),
   collectionCadenceInput: document.getElementById('collectionCadenceInput'),
@@ -684,6 +699,7 @@ const syncModeSelect = window.TokenMonitorSelectControl?.enhance(els.hubModeOpti
   getOptionMeta: option => ({ description: t(SYNC_MODE_DESCRIPTIONS[option.value]), icon: syncModeIcons[option.value] })
 });
 window.addEventListener('unload', () => syncModeSelect?.destroy(), { once: true });
+for (const slot of document.querySelectorAll('[data-sync-icon]')) slot.replaceChildren(syncModeIcons[slot.dataset.syncIcon](document));
 window.addEventListener('unload', () => {
   for (const select of document.querySelectorAll('.device-icon-select, #deviceIconInput')) deviceIconsApi.destroyDeviceIconSelect(select);
 }, { once: true });
@@ -754,7 +770,7 @@ function currentLocale() {
 }
 
 function currentCalendarLocale() {
-  return i18n.resolveRegionalLocale([...preferredLanguages(), state.settings?.locale]);
+  return state.settings?.calendarLocale || i18n.resolveRegionalLocale([...preferredLanguages(), state.settings?.locale]);
 }
 
 function supportsLocalizedCompactTokenUnits(locale) {
@@ -2208,6 +2224,7 @@ function settleMotionAnimations() {
   updateTotalCompact(state.currentTotal);
   settleRowNumberAnimations();
   limitResetAnimator.settle(els.limitsPanel);
+  homeLimitMotion.settle();
   for (const animation of document.getAnimations?.() || []) {
     try { animation.finish(); } catch (_) { animation.cancel(); }
   }
@@ -2360,9 +2377,8 @@ function animateBreakdownFrom(snapshot, { duration = 420, synchronized = false }
   }
   let enteringIndex = 0;
   for (const row of motionRows) {
-    // An unavailable native session value must stay a semantic label. The
-    // ordinary row-number tween formats its zero placeholder as "0", which
-    // would turn unknown data into a false numeric reading after every render.
+    // Show the zero placeholder immediately. Tweening from a previous reading
+    // would briefly show token values we don't have for this session.
     if (row.dataset.tokenDataUnavailable === 'true') {
       cancelRowNumberAnimation(row.querySelector('.row-value'));
       continue;
@@ -2507,20 +2523,10 @@ function animateHomeHistoryVisuals(activityScroll, activityCanvas, trendChart) {
     });
   });
 
-  const line = trendChart?.querySelector('.area-line-stroke');
-  const fill = trendChart?.querySelector('.area-line-fill');
-  const length = line?.getTotalLength?.() || 0;
-  if (length > 0) {
-    line.animate([
-      { strokeDasharray: `${length} ${length}`, strokeDashoffset: length },
-      { strokeDasharray: `${length} ${length}`, strokeDashoffset: 0 }
-    ], {
-      duration: HOME_HISTORY_MOTION_MS,
-      easing: 'cubic-bezier(0.22, 1, 0.36, 1)',
-      fill: 'backwards'
-    });
-  }
-  fill?.animate([
+  // Wipe the line and its fill in together. A dash-offset draw-in would need the
+  // on-screen path length: the stroke is non-scaling, so dashes are laid out in
+  // screen space while getTotalLength() reports stretched viewBox units.
+  trendChart?.querySelector('.area-line')?.animate([
     { clipPath: 'inset(0 100% 0 0)' },
     { clipPath: 'inset(0 0 0 0)' }
   ], {
@@ -2944,7 +2950,7 @@ function updateRowLive(row, activityState, activityAt) {
   dot.classList.add('pulse');
 }
 
-function updateRow(row, { name, subtitle, subtitleIdentity, subagentCountLabel, activity, detail, value, cost, unpricedTokens, barValue, max, color, barBackground, accordionRows, deviceDetail, stale, platform, local, client, clientLabel, sourceDevice, kind, modelSource, cacheReadTokens, outputTokens, unclassifiedTokens, modelRows, modelLabel, modelTooltipEntries, titleModelLabel, reasoningEffort, tokenDataUnavailable, sessionDetailAvailable, sessionGroup, running, activityState, context, promptCache, contextSnapshot, sortTime }) {
+function updateRow(row, { name, subtitle, subtitleIdentity, subagentCountLabel, activity, detail, sessionDetailHeading, value, cost, unpricedTokens, barValue, max, color, barBackground, accordionRows, deviceDetail, stale, platform, local, client, clientLabel, sourceDevice, kind, modelSource, cacheReadTokens, outputTokens, unclassifiedTokens, modelRows, modelLabel, modelTooltipEntries, titleModelLabel, reasoningEffort, tokenDataUnavailable, sessionDetailAvailable, sessionGroup, running, activityState, context, promptCache, contextSnapshot, sortTime }) {
   const width = rowWidth(barValue, max);
   const isExpanded = row.classList.contains('expanded');
   // `running` still drives the row class for layout, but the mark's own state
@@ -3051,8 +3057,8 @@ function updateRow(row, { name, subtitle, subtitleIdentity, subagentCountLabel, 
   // Local sessions keep their usual density; only a confirmed remote source
   // adds a separate line below the session's activity.
   const deviceEl = row.querySelector('.row-device');
-  const remoteDevice = state.settings?.deviceId && sourceDevice?.deviceId
-    && sourceDevice.deviceId !== state.settings.deviceId && sourceDevice.name ? sourceDevice : null;
+  if (kind === 'session') window.TokenMonitorDomReconcile.data(row, { sourceDevice, sessionDetailHeading });
+  const remoteDevice = sessionRowsApi.remoteSessionDevice(sourceDevice, state.settings?.deviceId);
   setHoverMarqueeText(deviceEl, remoteDevice?.name || '');
   deviceEl.classList.toggle('hidden', !remoteDevice);
   if (remoteDevice) {
@@ -3065,34 +3071,33 @@ function updateRow(row, { name, subtitle, subtitleIdentity, subagentCountLabel, 
     if (!existingIcon) content.prepend(icon);
     overflowText.update(deviceEl);
   }
-  // A titled session already has name, client/model and activity lines. Move
-  // its ID into Details, but keep the ID when only two lines remain so untitled
-  // sessions can still be distinguished (including when titles are disabled).
-  const shownDetail = kind === 'session' && interactive && activity ? '' : detail;
+  // Move the ID into Details for named sessions. A project can label several
+  // untitled sessions, so keep their IDs visible to distinguish them.
+  const shownDetail = kind === 'session' && interactive && activity && !sessionDetailHeading ? '' : detail;
   const detailEl = row.querySelector('.row-detail');
   setHoverMarqueeText(detailEl, shownDetail);
   detailEl.classList.toggle('hidden', !shownDetail);
   const valueEl = row.querySelector('.row-value');
+  const tokenLabel = formatNumber(value);
   if (tokenDataUnavailable === true) {
     row.dataset.tokenDataUnavailable = 'true';
     cancelRowNumberAnimation(valueEl);
-    valueEl.textContent = t('detailTokenUnavailable') || 'Unavailable';
+    valueEl.textContent = tokenLabel;
   } else {
     delete row.dataset.tokenDataUnavailable;
     // Metadata-only updates must not replace the glyphs of a matching roll.
     // Changed readings are restarted from the captured visual value below.
     if (rowNumberAnimations.get(valueEl)?.target !== Number(value)) {
       cancelRowNumberAnimation(valueEl);
-      valueEl.textContent = formatNumber(value);
+      valueEl.textContent = tokenLabel;
     }
   }
   valueEl.dataset.motionValue = String(Number(value) || 0);
   row.dataset.motionValue = String(Number(value) || 0);
   const costEl = row.querySelector('.row-cost');
   const costLabelText = formatCost(cost || 0, unpricedTokens);
-  costEl.textContent = tokenDataUnavailable === true ? ''
-    : unpricedTokens > 0 ? (cost > 0 ? `${formatCost(cost)} + ?` : '—') : costLabelText;
-  costEl.setAttribute('aria-label', tokenDataUnavailable === true ? '' : costLabelText);
+  costEl.textContent = unpricedTokens > 0 ? (cost > 0 ? `${formatCost(cost)} + ?` : '—') : costLabelText;
+  costEl.setAttribute('aria-label', costLabelText);
   // The row builder already applied the shared gate (recent enough to have a
   // reading), so this draws whatever arrived rather than re-deciding from
   // `running` - that second gate is exactly what made the dock card and this
@@ -3164,10 +3169,7 @@ function updateRow(row, { name, subtitle, subtitleIdentity, subagentCountLabel, 
   }
   const rowHead = row.querySelector('.row-head');
   const hasAccordion = row.classList.contains('has-accordion');
-  const tokenLabel = tokenDataUnavailable === true
-    ? (t('detailTokenUnavailable') || 'Unavailable')
-    : formatNumber(value);
-  const costLabel = tokenDataUnavailable === true ? '' : `, ${t('dashboard.stat.totalCost')}: ${formatCost(cost || 0, unpricedTokens)}`;
+  const costLabel = `, ${t('dashboard.stat.totalCost')}: ${costLabelText}`;
   sessionRowsApi.applyBreakdownRowSemantics(row, rowHead, {
     interactive,
     hasAccordion,
@@ -3284,6 +3286,9 @@ function setSessionSearchStatus(query, count) {
 function syncSessionSearchChrome() {
   const visible = state.breakdown === 'session' && !state.openSession;
   const open = visible && state.sessionSearchOpen;
+  els.sessionSortToggle.classList.toggle('hidden', !visible);
+  const sortLabel = t(state.sessionSort === 'tokens' ? 'sortMostTokens' : 'sortNewest').replace(/^↕ /, '');
+  if (els.sessionSortToggle.textContent !== sortLabel) els.sessionSortToggle.textContent = sortLabel;
   els.sessionSearchToggle?.classList.toggle('hidden', !visible);
   els.sessionSearchToggle?.classList.toggle('is-active', open);
   els.sessionSearchToggle?.setAttribute('aria-expanded', String(open));
@@ -3322,7 +3327,7 @@ function updateSessionSearchQuery(value) {
   const cache = state.sessionRowsCache;
   if (state.breakdown === 'session' && cache?.stats === state.stats && cache?.period === state.period) {
     syncSessionSearchChrome();
-    const incompleteHint = sessionRowsApi.sessionBreakdownIncomplete(state.stats, state.period)
+    const incompleteHint = sessionBreakdownIncomplete()
       ? 'sessions.incomplete' : '';
     overflowText.batch(() => renderRows(cache.rows, { incompleteHint, fromSearch: true, reuseToolFilter: true }));
     return;
@@ -3535,8 +3540,12 @@ function stableColor(value, colors) {
 }
 
 function fixedPeriodDevices() {
-  if (!fixedPeriodRangesApi.isDerived(state.period)) return state.stats?.devices || [];
-  return fixedPeriodRangesApi.devicesForReadySnapshot(state.fixedPeriodSnapshot, state.period);
+  const devices = state.stats?.devices || [];
+  if (!fixedPeriodRangesApi.isDerived(state.period)) return devices;
+  const localDevice = state.fixedPeriodSnapshot?.native
+    ? devices.find(device => device.deviceId === state.settings?.deviceId)
+    : undefined;
+  return fixedPeriodRangesApi.devicesForReadySnapshot(state.fixedPeriodSnapshot, state.period, localDevice);
 }
 
 function fixedPeriodSources() {
@@ -3552,7 +3561,8 @@ function buildFixedPeriodSourcesSnapshot() {
     historyEnabled: state.settings?.historyEnabled !== false,
     historyAvailable: meta.historyTransportAvailable === true,
     todayKey: fixedPeriodTodayKey(),
-    locale: currentCalendarLocale()
+    locale: currentCalendarLocale(),
+    weekStartsOn: state.mode === 'sync' ? state.settings?.syncWeekStartsOn : undefined
   });
 }
 
@@ -3658,6 +3668,7 @@ function modelRowsForPeriod(period, rankingMetric = state.settings?.modelRanking
 function sessionPresentationOptions() {
   const localDevice = state.stats?.devices?.find(device => device.deviceId === state.settings?.deviceId);
   return {
+    localDeviceId: state.settings?.deviceId,
     clientLabels,
     clientColors,
     modelColor,
@@ -3694,8 +3705,13 @@ function sessionPresentationOptions() {
   };
 }
 
+function displayedSessions(periodKey, period = state.stats?.periods?.[periodKey]) {
+  const paged = periodKey === state.period ? syncedSessionPeriod() : null;
+  return paged?.period.sessions ?? period?.sessions;
+}
+
 function rawSessionRowsForPeriod(period, options = sessionPresentationOptions()) {
-  return sessionRowsApi.sessionRowsForPeriod(period, options);
+  return sessionRowsApi.sessionRowsForPeriod({ ...period, sessions: displayedSessions(state.period, period) }, options);
 }
 
 const sessionRowLabelCache = {};
@@ -3704,7 +3720,9 @@ function sessionRowsForPeriod(period) {
   const options = sessionPresentationOptions();
   if (state.breakdown === 'session') options.rowLabelCache = sessionRowLabelCache;
   const rows = rawSessionRowsForPeriod(period, options);
-  if (rows.length > 0) return sessionRowsApi.groupSessionRows(rows, options);
+  if (rows.length > 0) return sessionRowsApi.sessionListRows(rows, {
+    ...options, sortBy: state.sessionSort, sessionTitlesEnabled: state.settings?.sessionTitlesEnabled
+  });
   if (Number(period?.totalTokens || 0) === 0) return [];
   return modelRowsForPeriod(period);
 }
@@ -5190,8 +5208,10 @@ function formatHomeLimitWindowValue(window, showUsed) {
     }
     return formatCompactMoney(window.remaining, window.currency, state.settings?.compactTokenUnits, currentLocale());
   }
+  if (optionalFiniteNumber(window?.remainingPercent) == null && optionalFiniteNumber(window?.usedPercent) == null) return '—';
   const percent = limitFillPercent(window?.remainingPercent, window?.usedPercent, showUsed);
-  return `${formatPercent(percent)} ${limitModeSuffix(showUsed)}`;
+  // The module heading names the mode, so the reading stays a bare number.
+  return formatPercent(percent);
 }
 
 
@@ -5682,21 +5702,38 @@ function applySessionDetailResult(request, options) {
   renderSessionDetail(options);
 }
 
-async function openSessionDetail({ client, sessionId, sessionCost, title, returnTo = null, titleFollowsSession = false }) {
+// A native range's turns are its days; other periods keep their names.
+function sessionDetailPeriod() {
+  const range = currentNativeRangeSnapshot()?.range
+    || (state.fixedPeriodSnapshot?.selection === state.period && state.fixedPeriodSnapshot.detailsAvailable && state.fixedPeriodSnapshot.devices
+      .find(device => device.deviceId === state.settings?.deviceId)?.range);
+  return range ? `range:${range.start}:${range.end}` : state.period;
+}
+
+async function openSessionDetail({ client, sessionId, sessionCost, title, sourceDevice, returnTo = null, titleFollowsSession = false }) {
   // A review run is headed by model and time; a named group run (a subagent, a
   // Grok Bot record) is headed by its session title and follows title display.
   const fixedGroupHeading = returnTo?.kind === 'session-group' && titleFollowsSession !== true;
   const request = { kind: 'session', client, sessionId, sessionCost,
     title: state.settings?.sessionTitlesEnabled === false && !fixedGroupHeading ? '' : title,
-    period: state.period, detail: null, returnTo, titleFollowsSession: titleFollowsSession === true };
+    sourceDevice,
+    remote: sourceDevice?.ambiguous === true || Boolean(sourceDevice?.deviceId && sourceDevice.deviceId !== state.settings?.deviceId),
+    period: state.period, detailPeriod: sessionDetailPeriod(), detail: null, returnTo, titleFollowsSession: titleFollowsSession === true };
   state.openSession = request;
+  if (request.remote) {
+    // Transcript readers look at this machine. A matching local ID cannot
+    // establish the contents of a session attributed to another device.
+    request.detail = { found: false };
+    renderSessionDetail({ detail: request.detail });
+    return;
+  }
   renderSessionDetail({ loading: true });
   // Read before the request, not after: a stats push that lands while it is in
   // flight has to stay unseen so catch-up re-reads, instead of being written
   // off against a response that predates it.
   const liveSignature = sessionDetailLiveSignature();
   try {
-    const detail = await window.tokenMonitor.getSessionDetail({ client, sessionId, period: request.period, sessionCost });
+    const detail = await window.tokenMonitor.getSessionDetail({ client, sessionId, period: request.detailPeriod || request.period, sessionCost });
     if (state.openSession === request) {
       request.detail = detail;
       request.liveSignature = liveSignature;
@@ -5715,20 +5752,28 @@ function sessionLiveStatsEntry(request) {
   const periodKey = request.period || state.period;
   return request.client === 'reasonix'
     ? state.stats?.nativeSessions?.[periodKey]?.[request.sessionId] || null
-    : state.stats?.periods?.[periodKey]?.sessions?.[`${request.client}:${request.sessionId}`] || null;
+    : displayedSessions(periodKey)?.[`${request.client}:${request.sessionId}`] || null;
 }
 
 function sessionLiveCost(entry, client) {
   return client === 'reasonix' ? Number(entry?.reportedCostUsd || 0) : Number(entry?.costUsd || 0);
 }
 
+// The dates a native-range detail reads move with the range (a new day), even
+// when the session's totals do not.
+function openSessionDetailPeriod(request) {
+  return request?.detailPeriod && request.period === state.period ? sessionDetailPeriod() : request?.detailPeriod;
+}
+
 function sessionDetailLiveSignature() {
   const entry = sessionLiveStatsEntry(state.openSession);
   if (!entry) return '';
+  const detailPeriod = openSessionDetailPeriod(state.openSession);
   return JSON.stringify([
     Number(entry.totalTokens) || 0,
     Number(entry.costUsd) || 0,
-    Number(entry.reportedCostUsd) || 0
+    Number(entry.reportedCostUsd) || 0,
+    ...(String(detailPeriod || '').startsWith('range:') ? [detailPeriod] : [])
   ]);
 }
 
@@ -5740,22 +5785,24 @@ function sessionDetailLiveSignature() {
 // the controls being read while the new transcript snapshot is applied.
 async function refreshOpenSessionDetail() {
   const request = state.openSession;
-  if (request?.kind !== 'session' || !request.detail || request.detailLiveBusy) return;
+  if (request?.kind !== 'session' || request.remote || !request.detail || request.detailLiveBusy) return;
   if (visibleStatsSurface() !== 'main') return;
   const signature = sessionDetailLiveSignature();
   if (!signature || signature === request.liveSignature) return;
   const sessionCost = sessionLiveCost(sessionLiveStatsEntry(request), request.client);
+  const detailPeriod = openSessionDetailPeriod(request);
   request.detailLiveBusy = true;
   let readSucceeded = false;
   try {
     const detail = await window.tokenMonitor.getSessionDetail({
-      client: request.client, sessionId: request.sessionId, period: request.period, sessionCost
+      client: request.client, sessionId: request.sessionId, period: detailPeriod || request.period, sessionCost
     });
     if (state.openSession !== request) return;
     // Readers resolve filesystem failures as payloads rather than rejecting.
     // Keep the last good snapshot and signature so the next tick can retry.
     if (!detail || detail.found !== true || detail.error) return;
     request.sessionCost = sessionCost;
+    request.detailPeriod = detailPeriod;
     request.detail = detail;
     request.liveSignature = signature;
     readSucceeded = true;
@@ -5806,6 +5853,7 @@ function sessionDetailBack() {
 function renderSessionDetail({ detail, loading, error, preserveScroll = false } = {}) {
   els.sessionToolFilter.classList.add('hidden');
   els.sessionSearchHost?.classList.add('hidden');
+  els.sessionSortToggle?.classList.add('hidden');
   els.sessionSearchToggle?.classList.add('hidden');
   els.breakdown.classList.add('hidden');
   els.sessionDetail.classList.remove('hidden');
@@ -5828,6 +5876,19 @@ function renderSessionDetail({ detail, loading, error, preserveScroll = false } 
 
   const idLabel = sessionRowsApi.sessionDetailIdLabel(state.openSession?.client, state.openSession?.sessionId, detail);
   if (idLabel) container.append(sessionIdLine(idLabel));
+  const localDeviceId = state.settings?.deviceId;
+  if (state.openSession && localDeviceId) {
+    const source = state.openSession.sourceDevice;
+    const provenance = document.createElement('div');
+    provenance.className = 'detail-session-source';
+    const remote = sessionRowsApi.remoteSessionDevice(source, localDeviceId);
+    if (remote) provenance.append(deviceIconsApi.sessionDeviceNode(document, remote, {
+      settings: state.settings, bindOverflow: bindHoverMarquee
+    }));
+    else provenance.textContent = source?.deviceId === localDeviceId
+      ? t('settings.sync.panel.thisDevice') : t('session.sourceUnknown');
+    container.append(provenance);
+  }
 
   if (loading) { container.append(detailNote(t('detailLoading') || 'Loading…')); return; }
   if (error || detail?.error) {
@@ -5896,9 +5957,10 @@ function sessionDetailTitle() {
   const period = request?.period || state.period;
   const session = request?.client === 'reasonix'
     ? state.stats?.nativeSessions?.[period]?.[request.sessionId]
-    : state.stats?.periods?.[period]?.sessions?.[`${request?.client}:${request?.sessionId}`];
+    : displayedSessions(period)?.[`${request?.client}:${request?.sessionId}`];
+  const syncedRange = state.mode === 'sync' && fixedPeriodRangesApi.isDerived(period);
   return sessionRowsApi.sessionTitleForDisplay({
-    client: request?.client, title: session?.title || request?.title
+    client: request?.client, title: session?.title || (syncedRange ? '' : request?.title)
   });
 }
 
@@ -5926,7 +5988,11 @@ function refreshSessionDetailHeading() {
       // would keep quoting titles the current stats no longer carry, so return
       // to whichever group holds this session now, or to Sessions when none does.
       const holder = rows.find(holds);
-      state.openSession.returnTo = holder ? { kind: 'session-group', period: group.period, summary: holder } : null;
+      if (holder) {
+        state.openSession.returnTo = { kind: 'session-group', period: group.period, summary: holder };
+      } else if (state.settings?.sessionTitlesEnabled === false || !pagedSessionsPending()) {
+        state.openSession.returnTo = null;
+      }
     }
   }
   const head = els.sessionDetailHead;
@@ -6023,6 +6089,7 @@ function sessionGroupRunNode(row, max, parent) {
         sessionId: row.client === 'reasonix' ? `reasonix:${sessionId}` : sessionId,
         sessionCost: Number(row.cost || 0),
         title,
+        sourceDevice: row.sourceDevice,
         returnTo: parent,
         titleFollowsSession: namedGroup
       });
@@ -6035,6 +6102,7 @@ function sessionGroupRunNode(row, max, parent) {
 function renderSessionGroupDetail(request) {
   els.sessionToolFilter.classList.add('hidden');
   els.sessionSearchHost?.classList.add('hidden');
+  els.sessionSortToggle?.classList.add('hidden');
   els.sessionSearchToggle?.classList.add('hidden');
   els.breakdown.classList.add('hidden');
   els.sessionDetail.classList.remove('hidden');
@@ -6589,8 +6657,239 @@ function fixedPeriodHistoryInventoriesMatch(history) {
     === fixedPeriodRangesApi.deviceInventorySignature(state.stats?.devices || []);
 }
 
+function showFixedPeriod(snapshot) {
+  if (snapshot?.status !== 'ready' || !state.stats?.periods) return;
+  const current = state.stats.periods[state.period];
+  if (current !== snapshot.period && state.stats.nativeRangeWindows?.[state.period]) {
+    const replaced = replacedNativeRangePeriods.get(state.stats) || {};
+    if (!replaced[state.period]) replacedNativeRangePeriods.set(state.stats, { ...replaced, [state.period]: current });
+  }
+  state.stats.periods[state.period] = snapshot.period;
+}
+
+function currentNativeRangeSnapshot(period = state.period) {
+  return fixedPeriodRangesApi.nativeRangeSnapshot(period, statsWithNativeRangePeriods(state.stats), {
+    todayKey: fixedPeriodTodayKey(),
+    locale: currentCalendarLocale()
+  });
+}
+
+function canRenderNativeDevices() {
+  return state.breakdown === 'device' && Boolean(currentNativeRangeSnapshot());
+}
+
+function syncedFixedPeriodKey(period = state.period) {
+  const stats = state.stats;
+  const revisionMap = stats?.fixedRangeRevisions || {};
+  const revisions = Object.entries(revisionMap).sort();
+  if (state.settings?.hubMode === 'local' || (!revisions.length && !stats?.localFixedRangeRevision) || !stats?.snapshot) return '';
+  if (!fixedPeriodRangesApi.isDerived(period)) {
+    if (!needsPagedSessions()) return '';
+    const canReadPages = stats.devices?.some(device => device.sessionDetailsOmitted?.[state.period] > 0
+      && device.periodWindows?.today?.key && Object.hasOwn(revisionMap, device.deviceId) && revisionMap[device.deviceId]);
+    if (!canReadPages) return '';
+  }
+  // A fallback device can update live Today without a range or History revision.
+  const deviceObservations = (stats.devices || []).map(device => [
+    device.deviceId, device.updatedAt, fixedPeriodRangesApi.deviceDayState(device)?.currentKey || ''
+  ]);
+  return JSON.stringify([
+    syncedFixedPeriodScope(), period, deviceObservations, revisions, stats.localFixedRangeRevision, stats.deviceHistoryRevision
+  ]);
+}
+
+function syncedFixedPeriodScope() {
+  const settings = state.settings;
+  return JSON.stringify([
+    state.stats?.snapshot?.source, settings?.hubMode, settings?.deviceId, currentCalendarLocale(), fixedPeriodTodayKey(),
+    settings?.syncWeekStartsOn, settings?.historyEnabled, settings?.projectsEnabled, settings?.sessionTitlesEnabled,
+    settings?.modelAliases, settings?.modelAliasGrouping,
+    (state.stats?.devices || []).map(device => [device.deviceId, device.projectsEnabled, device.trackedClients,
+      device.periodWindows?.timeZone, fixedPeriodRangesApi.deviceDayState(device)?.currentKey])
+  ]);
+}
+
+function readSyncedFixedPeriod(period, key) {
+  const { id, source } = state.stats.snapshot;
+  if (!fixedPeriodRangesApi.isDerived(period)) return window.tokenMonitor.getSyncedFixedPeriod(id, source, period);
+  const scope = syncedFixedPeriodScope();
+  const cache = state.syncedFixedPeriodCache;
+  const previous = cache.get(period);
+  if (previous?.scope === scope && previous.key === key && previous.promise) return previous.promise;
+  if (previous?.scope === scope && previous.snapshotKey === key) return Promise.resolve(previous.snapshot);
+  const revisions = state.stats.fixedRangeRevisions || {};
+  let snapshot = previous?.scope === scope ? previous.snapshot : null;
+  if (snapshot && (Object.keys(previous.revisions).length !== Object.keys(revisions).length
+    || Object.entries(previous.revisions).some(([id, revision]) => revisions[id] !== revision))) {
+    snapshot = retainVerifiedFixedRangeTitles(snapshot, previous.revisions, revisions);
+  }
+  const entry = { scope, key, revisions, snapshot, promise: null };
+  cache.set(period, entry);
+  entry.promise = window.tokenMonitor.getSyncedFixedPeriod(id, source, period).then(result => {
+    if (cache.get(period) !== entry || syncedFixedPeriodKey(period) !== key) return null;
+    if (result?.detailsAvailable) {
+      entry.snapshot = result;
+      entry.snapshotKey = key;
+    } else if (result?.status === 'ready') {
+      entry.snapshot = null;
+    }
+    return result;
+  }).finally(() => { entry.promise = null; });
+  return entry.promise;
+}
+
+function retainVerifiedFixedRangeTitles(snapshot, previous, current) {
+  const stats = state.stats;
+  const localId = state.settings?.deviceId;
+  const sessions = snapshot.period.sessions;
+  const uncertain = Object.fromEntries(Object.entries(sessions || {}).filter(([key, row]) => {
+    const id = row.sourceDevice?.deviceId;
+    // A local scan owns its own titles. Remote titles are confirmed by the
+    // same accepted range revision or by an inline row from the same device.
+    if (id && id === localId && stats.localFixedRangeRevision) return false;
+    if (id && Object.hasOwn(previous, id) && previous[id] === current[id]) return false;
+    return !id || !['today', 'month'].some(name => {
+      const inline = stats.periods?.[name]?.sessions?.[key];
+      return inline?.sourceDevice?.deviceId === id && inline.title && inline.title === row.title;
+    });
+  }));
+  const redacted = window.TokenMonitorSessionTitleDisplay.withoutSessionTitles(uncertain);
+  if (redacted === uncertain) return snapshot;
+  return { ...snapshot, period: { ...snapshot.period, sessions: { ...sessions, ...redacted } } };
+}
+
+function warmSyncedFixedPeriod() {
+  if (!['session', 'project'].includes(state.breakdown) || !window.tokenMonitor.getSyncedFixedPeriod
+    || state.settings?.hubMode === 'local' || !state.stats?.snapshot || isRendererWindowHidden()
+    || visibleStatsSurface() !== 'main' || state.syncedFixedPeriodWarmup || state.syncedFixedPeriod?.pending) return;
+  const scope = syncedFixedPeriodScope();
+  const period = shownPeriodOrder().find(candidate => {
+    if (candidate === state.period || !fixedPeriodRangesApi.isDerived(candidate)) return false;
+    const cached = state.syncedFixedPeriodCache.get(candidate);
+    return cached?.scope !== scope || (!cached.snapshot && cached.key !== syncedFixedPeriodKey(candidate));
+  });
+  const key = period && syncedFixedPeriodKey(period);
+  if (!key) return;
+  const request = readSyncedFixedPeriod(period, key);
+  state.syncedFixedPeriodWarmup = request;
+  const finish = () => {
+    state.syncedFixedPeriodWarmup = null;
+    warmSyncedFixedPeriod();
+  };
+  void request.then(finish, finish);
+}
+
+function needsPagedSessions() {
+  return state.breakdown === 'session' && (state.period === 'today' || state.period === 'month')
+    && state.stats?.sessionDetailsOmitted?.[state.period] > 0;
+}
+
+function syncedSessionPeriod() {
+  if (!needsPagedSessions()) return null;
+  const request = state.syncedFixedPeriod;
+  return request?.key === syncedFixedPeriodKey() ? request.snapshot : null;
+}
+
+function sessionBreakdownIncomplete() {
+  return sessionRowsApi.sessionBreakdownIncomplete(state.stats, state.period) && !syncedSessionPeriod()?.detailsAvailable;
+}
+
+function pagedSessionsPending() {
+  const key = needsPagedSessions() && syncedFixedPeriodKey();
+  if (!key || !window.tokenMonitor.getSyncedFixedPeriod) return false;
+  const request = state.syncedFixedPeriod;
+  return request?.key !== key || request.pending || Number.isFinite(request.retryAt);
+}
+
+function requestSyncedFixedPeriod() {
+  const key = syncedFixedPeriodKey();
+  if (!key || !window.tokenMonitor.getSyncedFixedPeriod) return;
+  const previous = state.syncedFixedPeriod;
+  if (previous?.key === key && (previous.pending || Date.now() < previous.retryAt)) return;
+  clearTimeout(previous?.retryTimer);
+  const sameKey = previous?.key === key;
+  const request = {
+    key, pending: true, snapshot: sameKey ? previous.snapshot : null,
+    retries: sameKey ? previous.retries : 0
+  };
+  state.syncedFixedPeriod = request;
+  const finish = (snapshot) => {
+    if (state.syncedFixedPeriod !== request) return;
+    if (key !== syncedFixedPeriodKey()) {
+      state.syncedFixedPeriod = null;
+      return;
+    }
+    request.snapshot = snapshot;
+    request.pending = false;
+    // Pages can arrive late, and a transient transport failure can also leave
+    // the selected revision without details until the next read.
+    const canRetry = !snapshot?.detailsAvailable && request.retries < FIXED_PERIOD_HISTORY_MAX_RETRIES;
+    request.retryAt = canRetry ? Date.now() + FIXED_PERIOD_HISTORY_RETRY_MS : Infinity;
+    if (canRetry) {
+      request.retryTimer = setTimeout(() => {
+        if (state.syncedFixedPeriod !== request || key !== syncedFixedPeriodKey()) return;
+        request.retries += 1;
+        request.retryAt = 0;
+        requestSyncedFixedPeriod();
+      }, FIXED_PERIOD_HISTORY_RETRY_MS);
+    }
+    state.sessionRowsCache = null;
+    statsRenderScheduler.request();
+  };
+  void readSyncedFixedPeriod(state.period, key)
+    .then(finish, () => finish(null));
+}
+
 function buildFixedPeriodSnapshot() {
   if (!fixedPeriodRangesApi.isDerived(state.period)) return { status: 'native', period: null };
+  const key = syncedFixedPeriodKey();
+  const request = state.syncedFixedPeriod?.key === key ? state.syncedFixedPeriod : null;
+  const cached = state.syncedFixedPeriodCache?.get(state.period);
+  if (key && cached?.publicationTimer != null) {
+    clearTimeout(cached.publicationTimer);
+    cached.publicationTimer = null;
+  }
+  const usableCache = cached?.snapshot && cached.scope === syncedFixedPeriodScope();
+  let synced = request?.snapshot;
+  if (!synced && usableCache) {
+    if (!key) {
+      // Usage can arrive before its detail pages. Give publication one retry
+      // interval while retaining the same range and checking title consent.
+      const period = state.period;
+      cached.publicationTimer ??= setTimeout(() => {
+        if (state.syncedFixedPeriodCache.get(period) !== cached) return;
+        cached.publicationTimer = null;
+        if (syncedFixedPeriodKey(period)) return;
+        const active = state.syncedFixedPeriod;
+        if (active && (active.key === cached.key || active.key === cached.snapshotKey)) {
+          clearTimeout(active.retryTimer);
+          state.syncedFixedPeriod = null;
+        }
+        cached.snapshot = null;
+        cached.snapshotKey = null;
+        if (state.period === period) statsRenderScheduler.request();
+      }, FIXED_PERIOD_HISTORY_RETRY_MS);
+      synced = retainVerifiedFixedRangeTitles(cached.snapshot, cached.revisions, {});
+    } else if (cached.snapshotKey === key || request?.pending || Number.isFinite(request?.retryAt)) {
+      synced = cached.snapshot;
+    }
+  }
+  if (synced) {
+    const history = state.settings?.historyEnabled !== false && !state.fixedPeriodHistoryFailed
+      ? buildFixedPeriodSourcesSnapshot() : null;
+    return { ...synced, synchronized: true, daily: history?.daily, summary: history?.summary };
+  }
+  const native = currentNativeRangeSnapshot();
+  if (native) {
+    // While History refreshes, the last snapshot for this range still holds
+    // its Trends summary and device rows.
+    const history = state.settings?.historyEnabled === false || !state.fixedPeriodHistoryRequested || state.fixedPeriodHistoryFailed
+      ? null
+      : state.fixedPeriodHistoryBusy
+        ? fixedPeriodRangesApi.readySnapshotForSelection(state.fixedPeriodSnapshot, state.period)
+        : buildFixedPeriodSourcesSnapshot();
+    return fixedPeriodRangesApi.nativeRangeWithHistory(native, history, state.settings?.deviceId);
+  }
   if (state.settings?.historyEnabled === false) {
     return { status: 'unavailable', reason: 'historyDisabled', period: null };
   }
@@ -6602,7 +6901,7 @@ function buildFixedPeriodSnapshot() {
       state.fixedPeriodSnapshot,
       state.period
     );
-    return ready
+    return ready && !ready.synchronized
       ? ready
       : { status: 'loading', reason: 'loading', period: null };
   }
@@ -6666,9 +6965,7 @@ async function performFixedPeriodHistoryLoad({ force = false, signature = fixedP
         }, FIXED_PERIOD_HISTORY_RETRY_MS);
       }
       state.fixedPeriodSnapshot = buildFixedPeriodSnapshot();
-      if (state.fixedPeriodSnapshot.status === 'ready' && state.stats?.periods) {
-        state.stats.periods[state.period] = state.fixedPeriodSnapshot.period;
-      }
+      showFixedPeriod(state.fixedPeriodSnapshot);
     }
   }
   return true;
@@ -6734,6 +7031,14 @@ async function warmFixedPeriodHistory(options = {}) {
 }
 
 function fixedPeriodMessage(snapshot, breakdown = '') {
+  if (state.syncedFixedPeriod?.pending && state.syncedFixedPeriod.key === syncedFixedPeriodKey()
+    && (snapshot?.status !== 'ready' || breakdown === 'session' || breakdown === 'project')) {
+    return t(breakdown === 'session' ? 'periodRange.sessionLoading'
+      : breakdown === 'project' ? 'periodRange.projectLoading' : 'periodRange.loading');
+  }
+  if (state.stats?.nativeRangesPending && (breakdown === 'session' || breakdown === 'project')) {
+    return t(breakdown === 'session' ? 'periodRange.sessionLoading' : 'periodRange.projectLoading');
+  }
   if (snapshot?.status === 'loading') return t('periodRange.loading');
   if (breakdown === 'session') return t('periodRange.sessionUnavailable');
   if (breakdown === 'project') return t('periodRange.projectUnavailable');
@@ -6787,10 +7092,14 @@ function setPeriodMenuOpen(open, { restoreFocus = false, focus = '' } = {}) {
   if (!state.periodMenuOpen && restoreFocus) els.monthPeriodTab?.focus();
 }
 
-function syncPeriodMenu() {
-  const mode = fixedPeriodRangesApi.slotForSelection(state.period) === 'month'
+function legacyMiddlePeriod() {
+  return fixedPeriodRangesApi.slotForSelection(state.period) === 'month'
     ? fixedPeriodRangesApi.normalizeMonthMode(state.period)
     : fixedPeriodRangesApi.normalizeMonthMode(state.settings?.periodMonthMode);
+}
+
+function syncPeriodMenu() {
+  const mode = legacyMiddlePeriod();
   for (const button of periodMenuButtons()) {
     const active = button.dataset.fixedPeriod === mode;
     button.classList.toggle('is-current', active);
@@ -7029,7 +7338,8 @@ function renderViewSwitcher({ focusMenu = false, focusDisclosure = false } = {})
 function homeModuleShell(kind, title, viewId, meta = '') {
   const module = document.createElement('section');
   module.className = `home-module home-module-${kind}`;
-  module.setAttribute('aria-label', title);
+  // The meta (the Limits mode) is part of what the module's numbers mean.
+  module.setAttribute('aria-label', meta ? `${title}: ${meta}` : title);
   // Plugin modules have no detail view to jump to.
   if (viewId) {
     module.tabIndex = 0;
@@ -7082,20 +7392,33 @@ function homeLimitRows() {
   const isWindowHidden = (providerId, window) => limitUsageItemsApi.isLimitWindowHidden(
     state.settings?.limitProviderHiddenItems, providerId, window
   );
+  // The row layout lists every window the user still shows; the classic Text /
+  // Progress bars layouts keep their compact pick of at most two per account.
+  // Hidden rows go first either way, so each pick sees only the shown ones.
+  const compact = homeModulePreferencesApi.resolveHomeLimitDisplayMode(state.settings?.homeLimitDisplayMode) !== 'rows';
   return homeOverviewApi.homeLimitAccountsForProviders({
-    // Hidden rows go before the compact pick, so Antigravity's tightest window
-    // per group is chosen among the ones the user still shows.
-    providers: limitWindowsView.collapseWorkbuddyAccounts(desktopLimitRecords()).map((provider) => ({
-      ...provider,
-      windows: limitProviderPresentationApi.limitProviderCompactWindows(
-        provider,
-        (provider.windows || []).filter((window) => !isWindowHidden(provider.provider, window))
-      )
-    })),
+    providers: limitWindowsView.collapseWorkbuddyAccounts(desktopLimitRecords()).map((provider) => {
+      // An install still carrying the retired `showCodexAdditionalLimits: false`
+      // (its migration could not save) keeps the extra pools off Home too.
+      const legacyHidden = (window) => provider.provider === 'codex' && window?.additional === true
+        && state.settings?.showCodexAdditionalLimits === false;
+      const shown = (provider.windows || []).filter((window) => !isWindowHidden(provider.provider, window) && !legacyHidden(window));
+      return {
+        ...provider,
+        // The reset count follows the card's "Resets" usage item.
+        resetCredits: limitUsageItemsApi.hiddenUsageItemSet(state.settings?.limitProviderHiddenItems, provider.provider).has('resets')
+          ? null
+          : provider.resetCredits,
+        windows: compact
+          ? limitProviderPresentationApi.limitProviderCompactWindows(provider, shown)
+          : limitProviderPresentationApi.limitProviderHomeWindows(provider, shown)
+      };
+    }),
     providerOptions,
     enabledProviderIds: Array.from(enabled),
     hiddenProviderIds: Array.from(hiddenHomeLimitProviderSet()),
     isWindowHidden,
+    compact,
     colors: { ...clientColors, factory: clientColors.droid },
     limit: state.settings?.homeLimitAccountCount ?? 3,
     sort: hasConfiguredOrder ? 'configured' : 'remaining',
@@ -7141,6 +7464,246 @@ function homeLimitRows() {
 }
 
 function homeLimitWindowLabel(window, providerId = '', visibleWindows = []) {
+  const providerLabel = limitProviderPresentationApi.limitProviderHomeWindowLabel(providerId, window);
+  if (providerLabel) return providerLabel;
+  if (providerId === 'codex' && window?.additional === true) {
+    return limitWindowsView.codexAdditionalWindowLabel(window, visibleWindows.filter((candidate) => candidate?.additional === true));
+  }
+  const label = String(window?.label || '').trim();
+  if (window?.kind === 'billing') {
+    if (providerId === 'cursor' && label === 'Included usage') return t('home.limit.monthly');
+    if (label) return label;
+  }
+  const key = {
+    session: 'home.limit.session',
+    daily: 'home.limit.daily',
+    weekly: 'home.limit.weekly',
+    billing: 'home.limit.billing',
+    monthly: 'home.limit.monthly'
+  }[window?.kind];
+  if (!key) return window?.label;
+  const period = t(key);
+  // Every window is listed, so a second window of the same period (Claude's
+  // Fable weekly, a Kimi model quota) keeps its own name beside the period.
+  // A label that only restates the period marks the account's plain window.
+  const generic = ['', 'session', '5-hour', '5h', 'daily', 'weekly', 'monthly', 'billing', period.toLowerCase()];
+  const named = !generic.includes(label.toLowerCase());
+  const sharesPeriod = visibleWindows.some((candidate) => candidate !== window && candidate?.kind === window.kind);
+  return named && sharesPeriod ? `${label} ${period}` : period;
+}
+
+// The reset column reads as a countdown ("4h 26m") for every timed boundary,
+// expiries included, so Home rows read alike; the full sentence ("Expires in
+// 23d 1h") remains the accessible name and the Limits page keeps the wording.
+// A provider's own description has no time to count down, so it stays as is.
+function homeLimitResetText(window, nowMs = Date.now()) {
+  const full = window?.resetsAt
+    ? formatLimitBoundary(window) || ''
+    : window?.resetDescription ? t('home.reset', { value: window.resetDescription }) : '';
+  const remainingMs = full && window.resetsAt
+    ? limitProviderPresentationApi.limitResetRemainingMs(window.resetsAt, nowMs)
+    : null;
+  return { text: remainingMs ? limitProviderPresentationApi.limitDurationText(remainingMs) : full, full };
+}
+
+function renderHomeLimitModule() {
+  const rows = homeLimitRows();
+  const showUsed = Boolean(state.settings?.showLimitUsed);
+  // Readings are bare percentages, so the heading says once which way they count.
+  const { module, body } = homeModuleShell('limits', t('home.limits'), 'limits',
+    rows.length ? t(showUsed ? 'settings.limits.barsUsed' : 'settings.limits.barsRemaining') : '');
+  if (rows.length === 0) {
+    const empty = document.createElement('div');
+    empty.className = 'home-module-empty';
+    const providerOrder = state.settings?.homeLimitProviderOrder || state.settings?.limitProviderOrder;
+    const awaitingFirstData = homeOverviewApi.homeLimitsAwaitingFirstData({
+      providers: desktopLimitRecords(),
+      providerOptions: limitProviderOrderApi.orderedLimitProviders(desktopLimitProviders(), providerOrder),
+      enabledProviderIds: Array.from(enabledLimitProviderSet()),
+      hiddenProviderIds: Array.from(hiddenHomeLimitProviderSet())
+    });
+    empty.textContent = t(awaitingFirstData ? 'home.limitsInitializing' : 'home.noLimits');
+    body.append(empty);
+    return module;
+  }
+  const displayMode = homeModulePreferencesApi.resolveHomeLimitDisplayMode(state.settings?.homeLimitDisplayMode);
+  if (displayMode !== 'rows') return renderClassicHomeLimits(module, body, rows, displayMode === 'bars');
+  const vendorColors = homeVendorColorsEnabled();
+  // Low-limit colour is opt-in in every layout; the reading and meter length
+  // already show how much is left.
+  const highlightLow = state.settings?.showHomeLimitBars === true;
+  const nowMs = Date.now();
+  for (const row of rows) {
+    const item = document.createElement('div');
+    item.className = 'home-limit-account';
+    item.dataset.key = row.key;
+    // Monochrome meters reveal the account's colour while it is hovered.
+    item.style.setProperty('--home-vendor-color', homeVendorRevealColor(row.color));
+    const account = document.createElement('div');
+    account.className = 'home-limit-account-head';
+    const mark = document.createElement('span');
+    const pluginModule = state.pluginCatalog?.limits?.modules?.find(module => module.id === row.providerId);
+    if (pluginModule) mark.append(window.TokenMonitorPluginViews.navigationIcon(document, pluginModule, 14));
+    else applyHomeListMark(mark, iconKindFor({ key: row.iconId || row.providerId || row.key }, 'limits'), row.color);
+    const name = document.createElement('span');
+    name.className = 'home-list-name';
+    name.textContent = row.name;
+    if (row.resetCount) {
+      // Spare full resets belong to the account, so they sit beside its name.
+      const title = document.createElement('span');
+      title.className = 'home-limit-account-title';
+      // A reset glyph and the count; the full phrase is its accessible name.
+      const resets = document.createElement('span');
+      resets.className = 'home-limit-resets';
+      resets.setAttribute('role', 'img');
+      resets.setAttribute('aria-label', t('home.limitResets', { count: row.resetCount }));
+      const glyph = document.createElement('span');
+      glyph.className = 'home-limit-resets-icon';
+      glyph.setAttribute('aria-hidden', 'true');
+      const count = document.createElement('span');
+      count.className = 'home-limit-resets-count';
+      count.textContent = String(row.resetCount);
+      resets.append(glyph, count);
+      title.append(name, resets);
+      account.append(mark, title);
+    } else {
+      account.append(mark, name);
+    }
+    if (row.plan) {
+      const plan = document.createElement('span');
+      plan.className = 'home-limit-plan';
+      plan.textContent = row.plan;
+      plan.setAttribute('aria-label', row.plan);
+      account.append(plan);
+    }
+    // One row per window, on columns the whole card shares: name, reset,
+    // meter, reading. Rows look the same however many windows an account has.
+    const windows = document.createElement('div');
+    windows.className = 'home-limit-windows';
+    for (const window of row.windows) {
+      const metric = document.createElement('div');
+      metric.className = 'home-limit-window';
+      metric.dataset.key = `${window.kind}:${window.label || ''}`;
+      const label = document.createElement('span');
+      label.className = 'home-limit-window-label';
+      label.textContent = homeLimitWindowLabel(window, row.providerId, row.windows);
+      metric.append(label);
+      // Identifies the window across refreshes so a change can animate; the
+      // label is already unique within its account.
+      metric.setAttribute('data-limit-motion-key', `${row.key}\0${row.name}\0${label.textContent}`);
+      if (window.resetsAt) metric.setAttribute('data-limit-reset-at', String(window.resetsAt));
+      // The reset sits beside the name it belongs to.
+      const reset = homeLimitResetText(window, nowMs);
+      if (reset.text) {
+        const resetText = document.createElement('span');
+        resetText.className = 'home-limit-reset';
+        resetText.textContent = reset.text;
+        if (reset.full !== reset.text) {
+          // A plain span cannot carry a name, so the shortened countdown is
+          // exposed as an image of its full wording, like the reset count.
+          resetText.setAttribute('role', 'img');
+          resetText.setAttribute('aria-label', reset.full);
+        }
+        metric.append(resetText);
+      }
+      const value = document.createElement('span');
+      value.className = 'home-list-value';
+      value.textContent = window.value || formatHomeLimitWindowValue(window, showUsed);
+      const remainingPercent = optionalFiniteNumber(window.remainingPercent);
+      const fixedValue = Boolean(window.value) || isCreditsWindow(window);
+      if (remainingPercent != null) metric.setAttribute('data-limit-remaining-percent', String(remainingPercent));
+      const readingPercent = fixedValue ? null : limitFillPercent(window.remainingPercent, window.usedPercent, showUsed);
+      // Only a plain percentage reading rolls; plan states and amounts stay put.
+      if (readingPercent != null && value.textContent === formatPercent(readingPercent)) {
+        value.setAttribute('data-limit-motion-value', String(readingPercent));
+        value.setAttribute('data-limit-motion-text', value.textContent);
+      }
+      if (highlightLow && remainingPercent != null) {
+        const clamped = Math.max(0, Math.min(100, remainingPercent));
+        if (!vendorColors) {
+          // Red only when exhausted, amber when nearly out.
+          if (clamped === 0) {
+            value.classList.add('home-limit-value-critical');
+            metric.classList.add('is-exhausted');
+          } else if (clamped < 20) {
+            value.classList.add('home-limit-value-low');
+            metric.classList.add('is-low');
+          }
+        } else if (clamped < 20) {
+          value.classList.add('home-limit-value-critical');
+          metric.classList.add('is-critical');
+          if (clamped === 0) metric.classList.add('is-exhausted');
+        } else if (clamped < 50) {
+          value.classList.add('home-limit-value-low');
+          value.style.setProperty('--home-limit-accent', row.color);
+        }
+      }
+      // An untouched window needs no attention, so it steps back.
+      if (remainingPercent === 100 && !fixedValue) metric.classList.add('is-untouched');
+      let reading = value;
+      const info = limitWindowsView.limitDetailInfoNode(window.detailEntries);
+      if (info) {
+        reading = document.createElement('span');
+        reading.className = 'home-limit-window-value';
+        reading.append(value, info);
+      }
+      // Money and fixed labels retain a remaining meter; only percentage
+      // labels follow the global used/remaining display preference.
+      const meterPercent = window.showMeter !== false ? remainingPercent : null;
+      if (meterPercent != null) {
+        // A groove whose fill brightens toward a lit tail. The ghost is the
+        // just-used chunk while it drains (limits/homeMotion.js).
+        const track = document.createElement('div');
+        track.className = 'home-limit-track';
+        const percentUsed = showUsed && !fixedValue;
+        const fillPercent = Math.max(0, Math.min(100, limitFillPercent(meterPercent, null, percentUsed)));
+        track.setAttribute('data-limit-fill', String(fillPercent));
+        track.style.setProperty('--home-limit-fill', `${fillPercent}%`);
+        if (vendorColors) {
+          track.style.setProperty('--home-limit-bar', row.color);
+          track.style.setProperty('--home-limit-tail', row.color);
+        }
+        const meter = document.createElement('div');
+        meter.className = 'home-limit-meter';
+        meter.setAttribute('aria-hidden', 'true');
+        const ghost = document.createElement('span');
+        ghost.className = 'home-limit-ghost';
+        const fill = document.createElement('span');
+        fill.className = 'home-limit-fill';
+        meter.append(ghost, fill);
+        const tip = document.createElement('span');
+        tip.className = 'home-limit-tip';
+        tip.setAttribute('aria-hidden', 'true');
+        track.append(meter, tip);
+        // The notch marks where an even pace through the window would be now;
+        // a fill short of it (or past it, in used mode) is running fast.
+        const pace = fixedValue ? null : homeOverviewApi.limitWindowPaceRemainingPercent(window, nowMs);
+        if (pace != null) {
+          const pacePercent = percentUsed ? 100 - pace : pace;
+          track.classList.add('has-pace');
+          track.style.setProperty('--home-limit-pace', `${pacePercent}%`);
+          const tick = document.createElement('span');
+          tick.className = 'home-limit-pace';
+          tick.setAttribute('aria-hidden', 'true');
+          track.append(tick);
+          // No standing caption: it read as clutter under every card.
+          track.setAttribute('aria-description', t(percentUsed ? 'home.limitPace.used' : 'home.limitPace.remaining'));
+        }
+        metric.append(track, reading);
+      } else {
+        reading.classList.add('home-limit-reading-wide');
+        metric.append(reading);
+      }
+      windows.append(metric);
+    }
+    item.append(account, windows);
+    body.append(item);
+  }
+  return module;
+}
+
+// The classic layouts' label, for their compact pick.
+function classicHomeLimitWindowLabel(window, providerId = '', visibleWindows = []) {
   const compactLabel = limitProviderPresentationApi.limitProviderCompactWindowLabel(providerId, window, visibleWindows);
   if (compactLabel) return compactLabel;
   if (window?.kind === 'billing') {
@@ -7159,24 +7722,13 @@ function homeLimitWindowLabel(window, providerId = '', visibleWindows = []) {
   return window.label;
 }
 
-function renderHomeLimitModule() {
-  const { module, body } = homeModuleShell('limits', t('home.limits'), 'limits');
-  const rows = homeLimitRows();
-  if (rows.length === 0) {
-    const empty = document.createElement('div');
-    empty.className = 'home-module-empty';
-    const providerOrder = state.settings?.homeLimitProviderOrder || state.settings?.limitProviderOrder;
-    const awaitingFirstData = homeOverviewApi.homeLimitsAwaitingFirstData({
-      providers: desktopLimitRecords(),
-      providerOptions: limitProviderOrderApi.orderedLimitProviders(desktopLimitProviders(), providerOrder),
-      enabledProviderIds: Array.from(enabledLimitProviderSet()),
-      hiddenProviderIds: Array.from(hiddenHomeLimitProviderSet())
-    });
-    empty.textContent = t(awaitingFirstData ? 'home.limitsInitializing' : 'home.noLimits');
-    body.append(empty);
-    return module;
-  }
-  const showBars = state.settings?.homeLimitDisplayMode === 'bars';
+// The earlier Home layouts, kept as choices: each account's compact pick of
+// windows sits two to a row, a reading beside its name and the reset
+// underneath, with or without a meter.
+function renderClassicHomeLimits(module, body, rows, showBars) {
+  module.classList.add('home-module-limits-classic');
+  const showUsed = Boolean(state.settings?.showLimitUsed);
+  const highlightLow = state.settings?.showHomeLimitBars === true;
   for (const row of rows) {
     const item = document.createElement('div');
     item.className = 'home-limit-account';
@@ -7209,16 +7761,21 @@ function renderHomeLimitModule() {
       line.className = 'home-limit-window-line';
       const label = document.createElement('span');
       label.className = 'home-limit-window-label';
-      label.textContent = homeLimitWindowLabel(window, row.providerId, row.windows);
+      label.textContent = classicHomeLimitWindowLabel(window, row.providerId, row.windows);
       const value = document.createElement('span');
       value.className = 'home-list-value';
-      const showUsed = Boolean(state.settings?.showLimitUsed);
       value.textContent = window.value || formatHomeLimitWindowValue(window, showUsed);
-      if (state.settings?.showHomeLimitBars === true && window.remainingPercent != null) {
-        const remainingPercent = Math.max(0, Math.min(100, Number(window.remainingPercent) || 0));
-        if (remainingPercent < 20) {
+      const remainingPercent = optionalFiniteNumber(window.remainingPercent);
+      if (highlightLow && remainingPercent != null) {
+        const clamped = Math.max(0, Math.min(100, remainingPercent));
+        if (!homeVendorColorsEnabled()) {
+          // Same monochrome thresholds as the default rows: red only when
+          // exhausted, amber when nearly out.
+          if (clamped === 0) value.classList.add('home-limit-value-critical');
+          else if (clamped < 20) value.classList.add('home-limit-value-low');
+        } else if (clamped < 20) {
           value.classList.add('home-limit-value-critical');
-        } else if (remainingPercent < 50) {
+        } else if (clamped < 50) {
           value.classList.add('home-limit-value-low');
           value.style.setProperty('--home-limit-accent', row.color);
         }
@@ -7235,21 +7792,16 @@ function renderHomeLimitModule() {
       metric.append(line);
       // Money and fixed labels retain a remaining meter; only percentage
       // labels follow the global used/remaining display preference.
-      if (showBars && window.showMeter !== false) {
-        const remainingPercent = optionalFiniteNumber(window.remainingPercent);
-        if (remainingPercent != null) {
-          const fillPercent = limitFillPercent(remainingPercent, null, showUsed && !isCreditsWindow(window) && !window.value);
-          const tone = window.kind === 'session' || window.kind === 'daily' ? 0.95 : 0.68;
-          const meter = limitWindowsView.limitMeterNode(row.color, fillPercent, tone);
-          meter.setAttribute('aria-hidden', 'true');
-          metric.append(meter);
-        }
+      if (showBars && window.showMeter !== false && remainingPercent != null) {
+        const fillPercent = limitFillPercent(remainingPercent, null, showUsed && !isCreditsWindow(window) && !window.value);
+        const tone = window.kind === 'session' || window.kind === 'daily' ? 0.95 : 0.68;
+        const meter = limitWindowsView.limitMeterNode(row.color, fillPercent, tone);
+        meter.setAttribute('aria-hidden', 'true');
+        metric.append(meter);
       }
       const resetLabel = window.resetsAt
         ? formatLimitBoundary(window) || ''
-        : window.resetDescription
-        ? t('home.reset', { value: window.resetDescription })
-        : '';
+        : window.resetDescription ? t('home.reset', { value: window.resetDescription }) : '';
       if (resetLabel) {
         const resetText = document.createElement('span');
         resetText.className = 'home-limit-reset';
@@ -7265,6 +7817,55 @@ function renderHomeLimitModule() {
   return module;
 }
 
+function homeNearBlackColor(color) {
+  const raw = String(color || '').replace('#', '');
+  if (!/^[0-9a-f]{6}$/i.test(raw)) return false;
+  const [r, g, b] = [0, 2, 4].map((i) => parseInt(raw.slice(i, i + 2), 16) / 255);
+  return 0.2126 * r + 0.7152 * g + 0.0722 * b < 0.12;
+}
+
+// Home is monochrome unless vendor colours are switched on: list marks and
+// limit meters share one neutral ink, and colour is left to status
+// (exhausted, nearly out).
+function homeVendorColorsEnabled() {
+  return state.settings?.homeVendorColors === true;
+}
+
+// The colour a limit account reveals on hover in monochrome (and already shows
+// with vendor colours on). Near-black brand colours (Grok, Copilot) read as a
+// gap on a dark panel, so they take the theme ink instead.
+function homeVendorRevealColor(color) {
+  return homeNearBlackColor(color) ? 'rgba(var(--overlay-rgb), 0.55)' : color;
+}
+
+// A list mark without an icon: the vendor colour when vendor colours are on
+// (near-black ones take the theme ink), otherwise ink, so monochrome Home
+// keeps colour for status alone.
+function homeListMarkColor(color) {
+  return homeVendorColorsEnabled() ? homeVendorRevealColor(color) : 'rgba(var(--overlay-rgb), 0.5)';
+}
+
+// Tools and Models list their split as aligned rows; the share column carries
+// the proportion, so Home keeps horizontal bars for limits alone.
+function homeSplitRow(className, row, iconKind) {
+  const item = document.createElement('div');
+  item.className = `home-list-row ${className}`;
+  item.dataset.key = row.key;
+  const mark = document.createElement('span');
+  applyHomeListMark(mark, iconKind, homeListMarkColor(row.color));
+  const name = document.createElement('span');
+  name.className = 'home-list-name';
+  name.textContent = row.name;
+  const value = document.createElement('span');
+  value.className = 'home-list-value';
+  value.textContent = formatCompact(row.value);
+  const share = document.createElement('span');
+  share.className = 'home-list-aux';
+  share.textContent = formatPercent(row.share * 100);
+  item.append(mark, name, value, share);
+  return item;
+}
+
 function renderHomeModelModule(period) {
   const { module, body } = homeModuleShell('model', t('home.models'), 'model');
   const rows = homeOverviewApi.homeModelRows(modelRowsForPeriod(period, 'tokens'), period?.totalTokens, homeModulePreferencesApi.homeModuleCount(state.settings, 'model'));
@@ -7276,22 +7877,7 @@ function renderHomeModelModule(period) {
     return module;
   }
   for (const row of rows) {
-    const item = document.createElement('div');
-    item.className = 'home-list-row home-model-row';
-    item.dataset.key = row.key;
-    const mark = document.createElement('span');
-    applyHomeListMark(mark, iconKindFor({ key: row.key || row.name, modelSource: row.modelSource }, 'model'), row.color);
-    const name = document.createElement('span');
-    name.className = 'home-list-name';
-    name.textContent = row.name;
-    const value = document.createElement('span');
-    value.className = 'home-list-value';
-    value.textContent = formatCompact(row.value);
-    const share = document.createElement('span');
-    share.className = 'home-list-aux';
-    share.textContent = formatPercent(row.share * 100);
-    item.append(mark, name, value, share);
-    body.append(item);
+    body.append(homeSplitRow('home-model-row', row, iconKindFor({ key: row.key || row.name, modelSource: row.modelSource }, 'model')));
   }
   return module;
 }
@@ -7316,29 +7902,14 @@ function renderHomeToolModule(period) {
     return module;
   }
   for (const row of rows) {
-    const item = document.createElement('div');
-    item.className = 'home-list-row home-tool-row';
-    item.dataset.key = row.key;
-    const mark = document.createElement('span');
-    applyHomeListMark(mark, iconKindFor({ key: row.key }, 'tool'), row.color);
-    const name = document.createElement('span');
-    name.className = 'home-list-name';
-    name.textContent = row.name;
-    const value = document.createElement('span');
-    value.className = 'home-list-value';
-    value.textContent = formatCompact(row.value);
-    const share = document.createElement('span');
-    share.className = 'home-list-aux';
-    share.textContent = formatPercent(row.share * 100);
-    item.append(mark, name, value, share);
-    body.append(item);
+    body.append(homeSplitRow('home-tool-row', row, iconKindFor({ key: row.key }, 'tool')));
   }
   return module;
 }
 
-function homeSessionAgo(value) {
+function homeSessionAgo(value, now = Date.now()) {
   if (!Number.isFinite(value) || value <= 0) return '';
-  const minutes = Math.round(Math.max(0, Date.now() - value) / 60000);
+  const minutes = Math.round(Math.max(0, now - value) / 60000);
   if (minutes < 1) return t('edgeDock.agoNow');
   if (minutes < 60) return t('edgeDock.agoMinutes', { count: minutes });
   const hours = Math.round(minutes / 60);
@@ -7382,7 +7953,7 @@ function scheduleSessionStatusRepaint(period, incompleteHint = '') {
   stopSessionStatusRepaint();
   const now = Date.now();
   const sessions = [
-    ...Object.entries(period?.sessions || {}).map(([key, session]) => window.TokenMonitorSessionLive.sessionWithActivity(period, key, session)),
+    ...Object.entries(displayedSessions(state.period, period) || {}).map(([key, session]) => window.TokenMonitorSessionLive.sessionWithActivity(period, key, session)),
     ...Object.values(state.stats?.nativeSessions?.[state.period] || {})
   ];
   const next = window.TokenMonitorSessionLive.nextSessionStatusChangeAt(sessions, now);
@@ -7409,11 +7980,27 @@ function renderHomeSessionModule(rows) {
     body.append(empty);
     return module;
   }
-  for (const row of rows) {
-    const activityState = window.TokenMonitorEdgeDockPresentation.sessionActivityState(row);
+  // Live sessions (running, waiting) lead with their full details; the rest
+  // close the list one line each. When both are present, the first quiet row
+  // carries the Recent heading, drawn by CSS so the rows stay the module's only
+  // children. Live rows need none: their state marks say so, the module heading
+  // counts the running ones, and a "Running" heading would mislabel waiting rows.
+  const isLive = (activityState) => activityState === 'running' || activityState === 'waiting';
+  const entries = rows.map((row) => ({ row, activityState: window.TokenMonitorEdgeDockPresentation.sessionActivityState(row) }));
+  // The Detailed setting keeps every row's details, in the order received.
+  const detailed = homeModulePreferencesApi.normalizeHomeSessionDisplayMode(state.settings?.homeSessionDisplayMode) === 'detailed';
+  const ordered = detailed ? entries
+    : [...entries.filter((entry) => isLive(entry.activityState)), ...entries.filter((entry) => !isLive(entry.activityState))];
+  ordered.forEach(({ row, activityState }, index) => {
+    const live = isLive(activityState);
+    const full = detailed || live;
     const item = document.createElement('div');
-    item.className = 'home-list-row home-session-row';
+    item.className = full ? 'home-list-row home-session-row' : 'home-list-row home-session-row is-compact';
     item.dataset.key = row.key;
+    if (!full && index > 0 && isLive(ordered[index - 1].activityState)) {
+      item.dataset.groupLabel = t('session.recent');
+      item.classList.add('starts-recent');
+    }
     const mark = document.createElement('span');
     applyHomeListMark(mark, iconKindFor({ client: row.client }, 'session'), clientColors[row.client] || stableColor(row.key, fallbackModelColors));
     const stateMark = document.createElement('span');
@@ -7438,49 +8025,89 @@ function renderHomeSessionModule(rows) {
     const value = document.createElement('span');
     value.className = 'home-list-value';
     value.textContent = formatCompact(row.totalTokens);
+    const device = row.remoteDevice && deviceIconsApi.sessionDeviceNode(document, row.remoteDevice, {
+      settings: state.settings, bindOverflow: bindHoverMarquee
+    });
+    // One age reading serves both layouts: the short form is what a row shows,
+    // the full phrase is what assistive technology hears.
+    const ageAt = Date.parse(row.lastUsedAt || row.startedAt || '');
+    // One clock reading, so the short form and the phrase it announces cannot
+    // disagree across a minute boundary.
+    const now = Date.now();
+    const age = homeSessionAgo(ageAt, now);
+    const shortAge = sessionRowsApi.sessionAgeShort(ageAt, now);
+    if (!full) {
+      const ago = document.createElement('span');
+      ago.className = 'home-list-aux home-session-ago';
+      ago.textContent = shortAge;
+      if (age) {
+        ago.setAttribute('role', 'img');
+        ago.setAttribute('aria-label', age);
+      }
+      item.append(mark, stateMark, name);
+      if (device) {
+        item.classList.add('has-source-device');
+        item.append(device);
+      }
+      item.append(ago, value);
+      body.append(item);
+      return;
+    }
     const meta = document.createElement('div');
     meta.className = 'home-session-meta';
-    const age = homeSessionAgo(Date.parse(row.lastUsedAt || row.startedAt || ''));
     const description = document.createElement('span');
-    description.className = 'home-list-sub';
-    const memberLabel = row.sessionGroup && (!row.subagentGroup || row.subagentCount > 0)
-      ? (row.subagentGroup ? t('sessions.subagentCount', { count: row.subagentCount })
-        : t('sessions.grokBotCount', { count: row.groupRows.length })) : '';
+    description.className = 'home-list-sub session-compact-description';
     // The same "N models" hover the Sessions list draws: the label stays the
     // row's own text, and the tooltip lists the models behind the count.
     const modelLabel = sessionRowsApi.sessionModelLabel(row);
-    const metadataLabel = sessionRowsApi.sessionModelMetadataLabel(row);
-    description.append(sessionRowsApi.sessionModelMetadataNode(document, { ...row, modelLabel }, {
+    const metadata = sessionRowsApi.sessionModelMetadataNode(document, { ...row, modelLabel }, {
       translate: t, view: limitWindowsView,
       latestModelLabel: t('session.latestModel'),
       unattributedLabel: t('dashboard.tooltip.unclassified'),
       formatTokens: formatCompact
-    }));
-    if (memberLabel) {
-      if (metadataLabel) description.append(document.createTextNode(' · '));
+    });
+    if (device) meta.append(device);
+    if (metadata.childElementCount) description.append(metadata);
+    if (row.sessionGroup === 'cursor-grok-bot') {
+      if (description.childElementCount) description.append(document.createTextNode(' · '));
       const count = document.createElement('span');
-      count.className = 'home-session-member-count';
-      count.textContent = memberLabel;
+      count.textContent = t('sessions.grokBotCount', { count: row.groupRows.length });
       description.append(count);
     }
-    if (age) description.append(document.createTextNode(`${memberLabel || metadataLabel ? ' · ' : ''}${age}`));
-    meta.append(description);
+    // A live row keeps its age once it is a minute old: running covers up to ten
+    // minutes of quiet, so "8m" separates an active session from a stalled one
+    // where "<1m" would only repeat the state mark. Detailed rows show it always.
+    if (age && shortAge && (detailed || shortAge !== '<1m')) {
+      const ago = document.createElement('span');
+      ago.className = 'home-session-ago-inline';
+      ago.textContent = shortAge;
+      ago.setAttribute('role', 'img');
+      ago.setAttribute('aria-label', age);
+      if (description.childElementCount) description.append(document.createTextNode(' · '));
+      description.append(ago);
+    }
+    if (description.childElementCount) {
+      bindHoverMarquee(description);
+      meta.append(description);
+    }
     const status = sessionRowsApi.sessionStatusNode(document, row, { prefix: 'home-session', translate: t,
       view: limitWindowsView, showUsed: state.settings?.sessionContextMetric !== 'remaining' });
     if (status) meta.append(status);
     item.append(mark, stateMark, name, value, meta);
     body.append(item);
-  }
+  });
   return module;
 }
 
 function renderHomeDeviceModule() {
   const { module, body } = homeModuleShell('device', t('home.devices'), 'device');
-  const rows = homeOverviewApi.homeDeviceRows(fixedPeriodDevices(), {
+  // Shares are of every device's usage; the count setting only caps the rows.
+  const allRows = homeOverviewApi.homeDeviceRows(fixedPeriodDevices(), {
     localDeviceId: state.settings?.deviceId || '',
     period: state.period,
-    limit: homeModulePreferencesApi.homeModuleCount(state.settings, 'device')
+    limit: Infinity
   });
+  const rows = allRows.slice(0, homeModulePreferencesApi.homeModuleCount(state.settings, 'device'));
   if (rows.length === 0) {
     const empty = document.createElement('div');
     empty.className = 'home-module-empty';
@@ -7488,16 +8115,22 @@ function renderHomeDeviceModule() {
     body.append(empty);
     return module;
   }
+  // Devices take the same rows as Tools and Models, with the local device
+  // badged and offline ones muted. A lone device owns 100%, which says
+  // nothing, so a share column appears only beside another device.
+  const total = allRows.reduce((sum, row) => sum + row.value, 0);
   for (const row of rows) {
     const item = document.createElement('div');
     item.className = 'home-list-row home-device-row';
     item.dataset.key = row.key;
+    if (allRows.length > 1) item.classList.add('has-share');
     if (row.isStale) {
       item.classList.add('is-stale');
       item.setAttribute('aria-description', t('home.staleDevice'));
     }
     const mark = document.createElement('span');
-    applyHomeListMark(mark, iconKindFor({ platform: row.platform }, 'device'), row.isStale ? deviceStaleColor : deviceAccent);
+    const color = row.isStale ? deviceStaleColor : deviceAccent;
+    applyHomeListMark(mark, iconKindFor({ platform: row.platform }, 'device'), homeListMarkColor(color));
     const label = document.createElement('span');
     label.className = 'home-list-name home-device-label';
     const name = document.createElement('span');
@@ -7514,6 +8147,12 @@ function renderHomeDeviceModule() {
     value.className = 'home-list-value';
     value.textContent = formatCompact(row.value);
     item.append(mark, label, value);
+    if (allRows.length > 1) {
+      const share = document.createElement('span');
+      share.className = 'home-list-aux';
+      share.textContent = formatPercent(total > 0 ? (row.value / total) * 100 : 0);
+      item.append(share);
+    }
     body.append(item);
   }
   return module;
@@ -8101,6 +8740,7 @@ function renderHome() {
     return;
   }
   let sessionRows;
+  const limitMotion = homeLimitMotion.capture(els.homePanel);
   const nodes = moduleIds.map((id) => {
     if (id === 'limits') return renderHomeLimitModule();
     if (id === 'tool') return renderHomeToolModule(period);
@@ -8135,11 +8775,37 @@ function renderHome() {
   for (const child of [...els.homePanel.children]) {
     if (!ordered.includes(child)) child.remove();
   }
+  // Attached now, so meters and readings can measure and animate. Page entry
+  // grows the meters from zero like the other breakdowns' bars.
+  homeLimitMotion.animate(els.homePanel, limitMotion, { entry: state.animateBarsFromZero });
   if (moduleIds.includes('session')) scheduleHomeSessionRepaint(sessionRows);
   updateHomeActivity();
 }
 
 let localSessionActivity = null;
+// Native range periods are part of the stats the next delta applies to. A
+// History fallback shown in their place keeps the native period here, so the
+// delta base and a later native snapshot still see every session row.
+const replacedNativeRangePeriods = new WeakMap();
+
+function statsWithNativeRangePeriods(stats) {
+  const replaced = stats ? replacedNativeRangePeriods.get(stats) : null;
+  return replaced ? { ...stats, periods: { ...stats.periods, ...replaced } } : stats;
+}
+
+// Stats derived from the current ones (an activity patch, hidden titles)
+// carry the native periods a History fallback replaced.
+function replaceDerivedStats(next) {
+  const replaced = state.stats ? replacedNativeRangePeriods.get(state.stats) : null;
+  if (replaced && next && next !== state.stats) {
+    // Saved periods follow the same title policy as the stats they belong to.
+    replacedNativeRangePeriods.set(next, state.settings?.sessionTitlesEnabled === false
+      ? window.TokenMonitorSessionTitleDisplay.withoutSessionTitleStats({ periods: replaced }).periods
+      : replaced);
+  }
+  state.stats = next;
+}
+
 function applyLocalSessionActivity(stats) {
   const incoming = localSessionActivity;
   if (!stats || !incoming || incoming.snapshot?.id !== stats.snapshot?.id
@@ -8157,7 +8823,13 @@ function setRendererSettings(next) {
   const titlesChanged = (state.settings?.sessionTitlesEnabled !== false) !== (next.sessionTitlesEnabled !== false);
   const animationChanged = tokenNumberAnimationApi.normalize(state.settings?.tokenNumberAnimation)
     !== tokenNumberAnimationApi.normalize(next.tokenNumberAnimation);
+  const restoringPeriodTabs = state.settings?.periodTabOrder?.length && !next.periodTabOrder?.length;
   state.settings = next;
+  if (next.periodTabOrder?.length) ensureVisiblePeriod(next.periodTabOrder);
+  else if (restoringPeriodTabs && fixedPeriodRangesApi.slotForSelection(state.period) === 'month') {
+    const defaultPeriod = fixedPeriodRangesApi.normalizeMonthMode(next.periodMonthMode);
+    if (state.period !== defaultPeriod && setPeriod(defaultPeriod)) followOpenSessionToPeriod();
+  }
   if (animationChanged) {
     pluginViewHost?.refreshMotion();
     cancelNumberAnimation();
@@ -8167,7 +8839,7 @@ function setRendererSettings(next) {
     updateTotalCompact(state.currentTotal);
   }
   if (titlesChanged) {
-    if (next.sessionTitlesEnabled === false) state.stats = sessionStatsForDisplay(state.stats);
+    if (next.sessionTitlesEnabled === false) replaceDerivedStats(sessionStatsForDisplay(state.stats));
     // Main may have returned a titleless map while disabled. Pull it again
     // when re-enabled, even if no new usage snapshot has arrived.
     allTimeSessions.invalidate();
@@ -8181,7 +8853,9 @@ function periodContentAvailability() {
   return {
     fixedUnavailable: derived && state.fixedPeriodSnapshot?.status !== 'ready',
     detailUnavailable: derived && !fixedPeriodRangesApi.supportsBreakdown(state.period, state.breakdown, {
-      deviceHistoriesAvailable: Array.isArray(state.fixedPeriodHistory?.deviceHistories)
+      deviceRowsAvailable: Array.isArray(state.fixedPeriodHistory?.deviceHistories)
+        || (state.breakdown === 'device' && fixedPeriodDevices().length > 0),
+      native: state.fixedPeriodSnapshot?.native === true || state.fixedPeriodSnapshot?.detailsAvailable === true
     })
   };
 }
@@ -8245,19 +8919,21 @@ function renderAppContent({ fromSearch = false } = {}) {
       // visible repaint, so switching to a fixed range cannot remain on loading.
       void loadFixedPeriodHistory();
     }
+    requestSyncedFixedPeriod();
     state.fixedPeriodSnapshot = buildFixedPeriodSnapshot();
-    if (state.fixedPeriodSnapshot.status === 'ready') {
-      state.stats.periods[state.period] = state.fixedPeriodSnapshot.period;
-    }
+    showFixedPeriod(state.fixedPeriodSnapshot);
   } else {
     state.fixedPeriodSnapshot = null;
+    if (needsPagedSessions()) requestSyncedFixedPeriod();
   }
+  warmSyncedFixedPeriod();
   if (state.openSession && state.breakdown !== 'session') { state.openSession = null; els.sessionDetail.classList.add('hidden'); rendererDom.clear(els.sessionDetail); els.sessionDetailHead.classList.add('hidden'); rendererDom.clear(els.sessionDetailHead); }
   if (state.openSession) { els.sessionDetail.classList.remove('hidden'); els.sessionDetailHead.classList.remove('hidden'); } else { els.sessionDetail.classList.add('hidden'); els.sessionDetailHead.classList.add('hidden'); }
   const period = state.stats.periods?.[state.period] || { totalTokens: 0, costUsd: 0, clients: {} };
   const { fixedUnavailable, detailUnavailable } = periodContentAvailability();
   if (fixedUnavailable || detailUnavailable) {
     els.sessionToolFilter.classList.add('hidden');
+    els.sessionSortToggle.classList.add('hidden');
     els.sessionSearchToggle.classList.add('hidden');
     els.sessionSearchHost.classList.add('hidden');
     cancelNumberAnimation();
@@ -8350,8 +9026,11 @@ function renderAppContent({ fromSearch = false } = {}) {
     els.breakdown.classList.add('hidden');
     if (state.openSession.kind === 'session-group') {
       const latest = sessionRowsForPeriod(period).find((row) => row.key === state.openSession.summary.key);
-      if (!latest) { closeSessionDetail(); return; }
-      state.openSession.summary = latest;
+      if (!latest && (state.settings?.sessionTitlesEnabled === false || !pagedSessionsPending())) {
+        closeSessionDetail();
+        return;
+      }
+      if (latest) state.openSession.summary = latest;
       // Update group readings while retaining the controls being read.
       renderSessionGroupDetail(state.openSession);
     }
@@ -8375,7 +9054,7 @@ function renderAppContent({ fromSearch = false } = {}) {
     let incompleteHint = '';
     if (state.breakdown === 'project' && projectRowsApi.projectBreakdownIncomplete(state.stats, state.period)) {
       incompleteHint = 'projects.incomplete';
-    } else if (state.breakdown === 'session' && sessionRowsApi.sessionBreakdownIncomplete(state.stats, state.period)) {
+    } else if (state.breakdown === 'session' && sessionBreakdownIncomplete()) {
       incompleteHint = 'sessions.incomplete';
     }
     renderRows(rows, { incompleteHint, fromSearch });
@@ -8528,10 +9207,14 @@ async function refreshStats(options = {}) {
       state.homeHistoryRetrySignature = '';
       state.homeHistoryRetries = 0;
       state.homeHistorySignature = '';
+      clearTimeout(state.syncedFixedPeriod?.retryTimer);
+      state.syncedFixedPeriod = null;
+      state.syncedFixedPeriodCache.clear();
     }
     applyCodexActiveAccountFromStats();
     const forceFixedPeriodHistory = options.forceHistory === true;
     if (fixedPeriodRangesApi.isDerived(state.period)) {
+      if (syncedFixedPeriodKey() || canRenderNativeDevices()) statsRenderScheduler.request();
       await warmFixedPeriodHistory({
         force: forceFixedPeriodHistory,
         retryFailed: forceFixedPeriodHistory,
@@ -8716,7 +9399,11 @@ function applyAppearanceSettings(settings) {
   const systemGlassDisabled = settings?.systemGlass === false;
   const isWindows = navigator.userAgent.toLowerCase().includes('windows');
   const isMac = navigator.userAgent.includes('Macintosh');
-  const windowsGlass = windowsGlassApi.appearanceState(settings, { isWindows });
+  const windowsGlass = windowsGlassApi.appearanceState(settings, {
+    isWindows,
+    osRelease: state.appInfo?.osRelease,
+    accentActive: (settings?.windowsAccentActive ?? state.settings?.windowsAccentActive) === true
+  });
   const macGlass = macBackdropApi.appearanceState(settings, {
     liquidGlassSupported: nativeMaterialState.liquidGlassSupported
   });
@@ -8789,6 +9476,7 @@ function applyAppearanceSettings(settings) {
   document.body.classList.remove('is-windows-glass');
   
   document.documentElement.classList.toggle('is-windows', isWindows);
+  document.documentElement.classList.toggle('windows-accent-square', windowsGlass.squareCorners);
   document.body.classList.toggle('is-windows', isWindows);
   
   document.documentElement.classList.toggle('is-mac-legacy', isMacLegacyRadius);
@@ -8983,7 +9671,7 @@ function renderThemePresetChips() {
   }
 }
 
-function renderAppearanceColorRows(container, keys, { rowClass, nameClass, resetLabel, nameFor, colorFor, preview, save, reset }) {
+function renderAppearanceColorRows(container, keys, { rowClass, nameClass, resetLabel, nameFor, colorFor, hasOverride, preview, save, reset }) {
   if (!container) return;
   const existing = new Map([...container.children].map(row => [row.dataset.colorKey, row]));
   for (const key of keys) {
@@ -9005,25 +9693,31 @@ function renderAppearanceColorRows(container, keys, { rowClass, nameClass, reset
       }, event.detail === 0));
       const resetButton = document.createElement('button');
       resetButton.type = 'button';
-      resetButton.className = 'reset-appearance-button reset-inline';
-      resetButton.textContent = '↺';
+      resetButton.className = 'settings-reset-button';
       resetButton.addEventListener('click', () => queueAppearanceColorChange(() => reset(key)));
-      row.append(name, swatch, resetButton);
+      const heading = document.createElement('span');
+      heading.className = 'settings-reset-heading';
+      heading.append(name, resetButton);
+      row.append(heading, swatch);
       container.appendChild(row);
     }
-    const [name, swatch, resetButton] = row.children;
+    const [heading, swatch] = row.children;
+    const [name, resetButton] = heading.children;
     const label = nameFor(key);
     name.textContent = label;
     swatch.setAttribute('aria-label', label);
     resetButton.setAttribute('aria-label', t(resetLabel));
+    syncSettingResetVisibility(resetButton, swatch, !hasOverride(key));
     appearanceColorPicker.setSwatch(swatch, colorFor(key));
   }
 }
 
 function renderThemeColorGrid() {
+  const overrides = currentThemeOverrides();
   renderAppearanceColorRows(els.themeColorGrid, ['bg', 'text', 'muted', 'accent', 'chart'], {
     rowClass: 'color-picker-row', nameClass: 'color-picker-name', resetLabel: 'settings.appearance.resetColor',
     nameFor: key => t(`settings.appearance.color.${key}`), colorFor: resolvedThemeColor,
+    hasOverride: key => Object.hasOwn(overrides, key),
     preview: previewThemeColor, save: saveThemeColor, reset: resetThemeColor
   });
 }
@@ -9034,6 +9728,7 @@ function renderVendorColorList() {
     rowClass: 'vendor-color-row', nameClass: 'vendor-color-name', resetLabel: 'settings.appearance.resetBrand',
     nameFor: id => id === 'default' ? t('settings.appearance.vendorDefault') : themePresetsApi.vendorLabel(id),
     colorFor: id => overrides[id] || BRAND_VENDOR_COLORS[id],
+    hasOverride: id => Object.hasOwn(overrides, id),
     preview: previewVendorColor, save: saveVendorColor, reset: resetVendorColor
   });
 }
@@ -9652,6 +10347,10 @@ function syncFontSettingsControls() {
     if (controls.preset) controls.preset.value = preset;
     if (controls.input) controls.input.value = preset === 'custom' ? value : '';
     syncFontCustomRow(role);
+    const isInterface = role === 'interface';
+    const reset = isInterface ? els.resetInterfaceFontButton : els.resetDisplayFontButton;
+    const control = controls.preset?.parentElement.querySelector('.select-control-trigger') || controls.preset;
+    syncSettingResetVisibility(reset, control, value === (isInterface ? '' : fontSettingsApi.DEFAULT_DISPLAY_FONT));
   }
 }
 
@@ -9662,11 +10361,19 @@ function syncSliderRow(input) {
 }
 
 function syncSliderRows() {
-  syncSliderRow(els.glassInput);
-  for (const [key] of nativeGlassTintSettings) syncSliderRow(els[`${key}Input`]);
-  syncSliderRow(els.blurInput);
-  syncSliderRow(els.backgroundImageOpacityInput);
-  syncSliderRow(els.zoomInput);
+  const sliders = [
+    [els.glassInput, els.resetGlassButton, defaultAppearance.glassOpacity],
+    [els.blurInput, els.resetDepthButton, defaultAppearance.glassBlur],
+    [els.backgroundImageOpacityInput, els.resetBackgroundImageOpacityButton, defaultAppearance.backgroundImageOpacity],
+    [els.zoomInput, els.resetZoomButton, Math.round(defaultAppearance.zoomFactor * 100)],
+    ...nativeGlassTintSettings.map(([key, mode]) => [
+      els[`${key}Input`], els[`${key}Reset`], macBackdropApi.normalizeLiquidGlassTint(undefined, mode)
+    ])
+  ];
+  for (const [input, reset, defaultValue] of sliders) {
+    syncSliderRow(input);
+    if (input) syncSettingResetVisibility(reset, input, Number(input.value) === defaultValue);
+  }
 }
 
 function applyAppearanceFromControls() {
@@ -9694,6 +10401,12 @@ function syncHubModeUi() {
   if (els.icloudFields) {
     els.icloudFields.classList.toggle('hidden', mode !== 'icloud');
     els.icloudFields.inert = mode !== 'icloud';
+  }
+  // Blocks outside the per-mode field groups name the modes they belong to.
+  for (const node of els.syncMap.querySelectorAll('[data-sync-modes]')) {
+    const shown = node.dataset.syncModes.split(' ').includes(mode);
+    node.hidden = !shown;
+    node.inert = !shown;
   }
   if (mode === 'host') {
     els.hubSecretInput.value = state.settings.hubHostSecret || '';
@@ -9875,7 +10588,6 @@ function stopSyncPanelAgeTimer() {
 function renderSyncPanelDevices(rows) {
   const counts = syncDevicePanelApi.deviceCounts(rows);
   els.syncPanelCount.textContent = counts.total > 0 ? t('settings.sync.panel.onlineCount', counts) : '';
-  els.syncPanelOpenDevices.hidden = counts.total === 0 || !availableBreakdownIds().includes('device');
   const list = els.syncDeviceList;
   const scope = JSON.stringify([
     state.settings?.hubMode, state.mode, state.settings?.deviceId,
@@ -10068,6 +10780,26 @@ function renderHubBuildStatus() {
   els.hubBuildStatus.hidden = false;
 }
 
+let hubAddressesExpanded = false;
+function hubAddressRow(addr, port) {
+  const url = `http://${addr.address}:${port}`;
+  const row = document.createElement('div');
+  row.className = 'hub-address-row';
+  const code = document.createElement('code');
+  code.textContent = url;
+  const ifaceLabel = document.createElement('span');
+  ifaceLabel.className = 'hub-address-iface';
+  ifaceLabel.textContent = addr.interface;
+  const copy = document.createElement('button');
+  copy.type = 'button';
+  copy.className = 'icon-button';
+  copy.setAttribute('aria-label', t('settings.sync.copyUrl', { url }));
+  copy.textContent = '⧉';
+  copy.addEventListener('click', () => copyToClipboard(url, copy));
+  row.append(code, ifaceLabel, copy);
+  return row;
+}
+
 function renderHubAddresses(addresses, port) {
   els.hubAddressList.replaceChildren();
   if (addresses.length === 0) {
@@ -10077,28 +10809,34 @@ function renderHubAddresses(addresses, port) {
     els.hubAddressList.appendChild(empty);
     return;
   }
+  // Lead with the network card other devices most likely share, not a VPN or
+  // virtual adapter; the rest stay one click away.
+  const physical = addr => /^(en|eth|wl|wi-?fi|ethernet)/i.test(String(addr.interface || ''));
+  const ordered = [...addresses.filter(physical), ...addresses.filter(addr => !physical(addr))];
   const header = document.createElement('div');
   header.className = 'hub-address-header';
   header.textContent = t('settings.sync.connectWith');
-  els.hubAddressList.appendChild(header);
-  for (const addr of addresses) {
-    const url = `http://${addr.address}:${port}`;
-    const row = document.createElement('div');
-    row.className = 'hub-address-row';
-    const code = document.createElement('code');
-    code.textContent = url;
-    const ifaceLabel = document.createElement('span');
-    ifaceLabel.className = 'hub-address-iface';
-    ifaceLabel.textContent = addr.interface;
-    const copy = document.createElement('button');
-    copy.type = 'button';
-    copy.className = 'icon-button';
-    copy.setAttribute('aria-label', t('settings.sync.copyUrl', { url }));
-    copy.textContent = '⧉';
-    copy.addEventListener('click', () => copyToClipboard(url, copy));
-    row.append(code, ifaceLabel, copy);
-    els.hubAddressList.appendChild(row);
-  }
+  els.hubAddressList.append(header, hubAddressRow(ordered[0], port));
+  const rest = ordered.slice(1);
+  if (rest.length === 0) return;
+  const extra = document.createElement('div');
+  extra.className = 'hub-address-extra';
+  extra.id = 'hubAddressExtra';
+  extra.hidden = !hubAddressesExpanded;
+  extra.append(...rest.map(addr => hubAddressRow(addr, port)));
+  const more = document.createElement('button');
+  more.type = 'button';
+  more.className = 'hub-address-more';
+  more.setAttribute('aria-expanded', String(hubAddressesExpanded));
+  more.setAttribute('aria-controls', extra.id);
+  more.textContent = hubAddressesExpanded ? t('settings.sync.fewerAddresses') : t('settings.sync.moreAddresses', { count: rest.length });
+  more.addEventListener('click', () => {
+    hubAddressesExpanded = !hubAddressesExpanded;
+    renderHubAddresses(addresses, port);
+    els.hubAddressList.querySelector('.hub-address-more')?.focus({ preventScroll: true });
+  });
+  // The toggle precedes the rows it reveals, so Tab reaches them next.
+  els.hubAddressList.append(more, extra);
 }
 
 async function copyToClipboard(text, button) {
@@ -10160,24 +10898,242 @@ async function refreshHubBuildStatus() {
   renderHubBuildStatus();
 }
 
-function syncPeriodTabs() {
-  const tabs = Array.from(document.querySelectorAll('.tab'));
-  const activeSlot = fixedPeriodRangesApi.slotForSelection(state.period);
-  const activeIndex = Math.max(0, tabs.findIndex((tab) => tab.dataset.periodSlot === activeSlot));
-  document.querySelector('.tabs')?.style.setProperty('--period-index', String(activeIndex));
-  for (const tab of tabs) {
-    const active = tab.dataset.periodSlot === activeSlot;
-    tab.classList.toggle('active', active);
-    tab.setAttribute('aria-pressed', String(active));
+const periodTabs = document.getElementById('periodTabs');
+const legacyPeriodTabs = Array.from(periodTabs.querySelectorAll('.tab'));
+let periodTabSignature = '';
+const shownPeriodTabs = document.getElementById('shownPeriodTabs');
+const availablePeriodTabs = document.getElementById('availablePeriodTabs');
+const resetPeriodTabs = document.getElementById('resetPeriodTabs');
+const periodTabsError = document.getElementById('periodTabsError');
+let periodOrderSaving = false;
+
+let draggedPeriod = '';
+let periodDropMarker = null;
+
+function clearPeriodDropMarker() {
+  periodDropMarker?.removeAttribute('data-period-drop');
+  periodDropMarker = null;
+}
+
+const periodTabDrag = rowDragControllerApi.createRowDragController({
+  axis: 'grid',
+  dragSort: verticalDragSortApi,
+  getList: () => shownPeriodTabs,
+  getScrollPanel: () => els.settingsPanel,
+  rowSelector: '.period-tab-chip',
+  idKey: 'period',
+  preserveScroll: preserveSettingsPanelScroll,
+  applyOrder: order => placePeriodChips(shownPeriodTabs, order),
+  previewOrderAt(x, y) {
+    const target = x === undefined ? null : document.elementFromPoint(x, y);
+    const canRemove = availablePeriodTabs.contains(target)
+      && shownPeriodOrder().length > fixedPeriodRangesApi.MIN_PERIOD_TABS;
+    if (canRemove) availablePeriodTabs.dataset.periodDrop = 'list';
+    else availablePeriodTabs.removeAttribute('data-period-drop');
+    return shownPeriodTabs.contains(target);
+  },
+  onDropOutside(event, period) {
+    const target = document.elementFromPoint(event.clientX, event.clientY);
+    if (shownPeriodTabs.contains(target)) return false;
+    const order = shownPeriodOrder();
+    if (availablePeriodTabs.contains(target) && order.length > fixedPeriodRangesApi.MIN_PERIOD_TABS) {
+      void savePeriodTabOrder(order.filter(id => id !== period), period);
+    }
+    return true;
+  },
+  mirrorOrder: () => { periodOrderSaving = true; },
+  persistOrder: (order, period) => void savePeriodTabOrder(order, period),
+  requestRender: syncPeriodTabSettings
+});
+
+function periodInsertionTarget(event) {
+  const chip = event.target.closest('.period-tab-chip');
+  if (!chip) return { chip: shownPeriodTabs, edge: 'list' };
+  const rect = chip.getBoundingClientRect();
+  return { chip, edge: event.clientX < rect.left + rect.width / 2 ? 'before' : 'after' };
+}
+
+shownPeriodTabs.addEventListener('dragover', event => {
+  clearPeriodDropMarker();
+  if (!draggedPeriod || periodOrderSaving || shownPeriodOrder().length >= fixedPeriodRangesApi.MAX_PERIOD_TABS) return;
+  event.preventDefault();
+  event.dataTransfer.dropEffect = 'move';
+  const { chip, edge } = periodInsertionTarget(event);
+  periodDropMarker = chip;
+  chip.dataset.periodDrop = edge;
+});
+shownPeriodTabs.addEventListener('dragleave', event => {
+  if (!shownPeriodTabs.contains(event.relatedTarget)) clearPeriodDropMarker();
+});
+shownPeriodTabs.addEventListener('drop', event => {
+  clearPeriodDropMarker();
+  const order = [...shownPeriodOrder()];
+  if (!draggedPeriod || periodOrderSaving || order.length >= fixedPeriodRangesApi.MAX_PERIOD_TABS) return;
+  event.preventDefault();
+  const { chip, edge } = periodInsertionTarget(event);
+  const index = edge === 'list' ? order.length : order.indexOf(chip.dataset.period) + Number(edge === 'after');
+  order.splice(index, 0, draggedPeriod);
+  void savePeriodTabOrder(order, draggedPeriod);
+});
+
+function shownPeriodOrder() {
+  const custom = state.settings?.periodTabOrder;
+  if (custom?.length) return custom;
+  return ['today', legacyMiddlePeriod(), 'allTime'];
+}
+
+function periodLabelKey(period) {
+  return period === 'today' || period === 'allTime' ? `trayComposer.period.${period}` : `periodRange.${period}`;
+}
+
+function syncPeriodButtonName(button, period, { tooltip = false } = {}) {
+  const name = t(periodLabelKey(period));
+  if (button.getAttribute('aria-label') === name) return;
+  if (tooltip) limitWindowsView.setDetailTooltip(button, [{ full: name }], { centered: true });
+  else button.setAttribute('aria-label', name);
+}
+
+function placePeriodChips(list, order) {
+  if (Array.from(list.children).every((chip, index) => chip.dataset.period === order[index])
+    && list.children.length === order.length) return;
+  const focused = document.activeElement;
+  list.append(...order.map(period => periodChips.get(period)));
+  if (list.contains(focused) && document.activeElement !== focused) focused.focus({ preventScroll: true });
+}
+
+async function savePeriodTabOrder(order, focusPeriod) {
+  periodOrderSaving = true;
+  shownPeriodTabs.setAttribute('aria-busy', 'true');
+  periodTabsError.classList.add('hidden');
+  try {
+    await saveSettings({ periodTabOrder: order });
+  } catch (_) {
+    periodTabsError.textContent = t('periodRange.tabsSaveFailed');
+    periodTabsError.classList.remove('hidden');
+  } finally {
+    periodOrderSaving = false;
+    shownPeriodTabs.removeAttribute('aria-busy');
+    const restoreFocus = document.activeElement === resetPeriodTabs;
+    preserveSettingsPanelScroll(syncPeriodTabSettings);
+    if (restoreFocus && resetPeriodTabs.hidden) periodChips.get(focusPeriod)?.focus({ preventScroll: true });
   }
-  if (els.monthPeriodTab) {
-    const mode = activeSlot === 'month'
-      ? fixedPeriodRangesApi.normalizeMonthMode(state.period)
-      : fixedPeriodRangesApi.normalizeMonthMode(state.settings?.periodMonthMode);
+}
+
+const periodChips = new Map(fixedPeriodRangesApi.PERIOD_TAB_OPTIONS.map(period => {
+  const chip = document.createElement('button');
+  chip.type = 'button';
+  chip.className = 'tab period-tab-chip';
+  chip.dataset.period = period;
+  chip.append(document.createElement('span'));
+  chip.addEventListener('pointerdown', event => {
+    if (!periodOrderSaving && chip.parentElement === shownPeriodTabs) {
+      chip.querySelector('.limit-detail-tooltip:popover-open')?.hidePopover();
+      periodTabDrag.startRowDrag(event, period);
+    }
+  });
+  chip.addEventListener('dragstart', event => {
+    if (periodOrderSaving || chip.parentElement !== availablePeriodTabs || chip.getAttribute('aria-disabled') === 'true') {
+      event.preventDefault();
+      return;
+    }
+    draggedPeriod = period;
+    event.dataTransfer.effectAllowed = 'move';
+    event.dataTransfer.setData('text/plain', period);
+    chip.querySelector('.limit-detail-tooltip:popover-open')?.hidePopover();
+    chip.classList.add('dragging');
+  });
+  chip.addEventListener('dragend', () => {
+    chip.classList.remove('dragging');
+    draggedPeriod = '';
+    clearPeriodDropMarker();
+    syncPeriodTabSettings();
+  });
+  chip.addEventListener('click', () => {
+    if (periodOrderSaving || draggedPeriod || periodTabDrag.isDragging() || chip.getAttribute('aria-disabled') === 'true') return;
+    const order = shownPeriodOrder();
+    const next = order.includes(period) ? order.filter(id => id !== period) : [...order, period];
+    void savePeriodTabOrder(next, period);
+  });
+  chip.addEventListener('keydown', event => {
+    if (!event.altKey || periodOrderSaving || draggedPeriod || periodTabDrag.isDragging() || chip.parentElement !== shownPeriodTabs) return;
+    const offset = event.key === 'ArrowLeft' ? -1 : event.key === 'ArrowRight' ? 1 : 0;
+    if (!offset) return;
+    event.preventDefault();
+    const order = [...shownPeriodOrder()];
+    const index = order.indexOf(period);
+    const target = index + offset;
+    if (target < 0 || target >= order.length) return;
+    order.splice(target, 0, ...order.splice(index, 1));
+    void savePeriodTabOrder(order, period);
+  });
+  return [period, chip];
+}));
+
+function syncPeriodTabSettings() {
+  if (periodOrderSaving || draggedPeriod || periodTabDrag.deferRender()) return;
+  const order = shownPeriodOrder();
+  const available = fixedPeriodRangesApi.PERIOD_TAB_OPTIONS.filter(period => !order.includes(period));
+  placePeriodChips(shownPeriodTabs, order);
+  placePeriodChips(availablePeriodTabs, available);
+  resetPeriodTabs.hidden = !state.settings.periodTabOrder?.length;
+  for (const [period, chip] of periodChips) {
+    const shown = order.includes(period);
+    const countLimit = shown ? fixedPeriodRangesApi.MIN_PERIOD_TABS : fixedPeriodRangesApi.MAX_PERIOD_TABS;
+    chip.firstElementChild.textContent = fixedPeriodRangesApi.displayLabel(period);
+    syncPeriodButtonName(chip, period, { tooltip: true });
+    chip.draggable = !shown;
+    chip.setAttribute('aria-pressed', String(shown));
+    chip.setAttribute('aria-disabled', String(order.length === countLimit));
+    if (shown) chip.setAttribute('aria-keyshortcuts', 'Alt+ArrowLeft Alt+ArrowRight');
+    else chip.removeAttribute('aria-keyshortcuts');
+  }
+}
+
+resetPeriodTabs.addEventListener('click', () => {
+  if (!periodOrderSaving && !draggedPeriod && !periodTabDrag.isDragging()) void savePeriodTabOrder([], 'today');
+});
+
+function ensureVisiblePeriod(order) {
+  if (!order.includes(state.period) && setPeriod(order[0])) followOpenSessionToPeriod();
+}
+
+function syncPeriodTabs() {
+  const order = state.settings?.periodTabOrder || [];
+  const custom = order.length > 0;
+  const signature = order.join(',');
+  if (signature !== periodTabSignature) {
+    if (state.periodMenuOpen) setPeriodMenuOpen(false);
+    periodTabSignature = signature;
+    const buttons = custom ? order.map(period => {
+      const button = document.createElement('button');
+      button.type = 'button';
+      button.className = 'tab';
+      button.dataset.period = period;
+      button.textContent = fixedPeriodRangesApi.displayLabel(period);
+      return button;
+    }) : legacyPeriodTabs;
+    for (const tab of periodTabs.querySelectorAll('.tab')) tab.remove();
+    periodTabs.append(...buttons);
+    periodTabs.style.setProperty('--period-count', String(buttons.length));
+    periodTabs.parentElement.style.setProperty('--period-width', `${Math.max(148, buttons.length * 44)}px`);
+    periodTabs.classList.toggle('custom-period-tabs', custom);
+  }
+  const tabs = Array.from(periodTabs.querySelectorAll('.tab'));
+  const activeSlot = custom ? state.period : fixedPeriodRangesApi.slotForSelection(state.period);
+  const activeIndex = Math.max(0, tabs.findIndex(tab => (tab.dataset.periodSlot || tab.dataset.period) === activeSlot));
+  periodTabs.style.setProperty('--period-index', String(activeIndex));
+  if (!custom) {
+    const mode = legacyMiddlePeriod();
     els.monthPeriodTab.textContent = fixedPeriodRangesApi.displayLabel(mode);
     els.monthPeriodTab.dataset.period = mode;
+    syncPeriodMenu();
   }
-  syncPeriodMenu();
+  for (const tab of tabs) {
+    const active = (tab.dataset.periodSlot || tab.dataset.period) === activeSlot;
+    tab.classList.toggle('active', active);
+    tab.setAttribute('aria-pressed', String(active));
+    syncPeriodButtonName(tab, tab.dataset.period);
+  }
 }
 
 function applyInitialBreakdownPreference() {
@@ -10526,6 +11482,86 @@ function syncHideAppIconControl(showTrayIcon, trayMode) {
   els.hideAppIconOptions?.classList.toggle('hidden', !els.hideAppIconInput.checked);
 }
 
+const settingResetRows = [];
+
+function settingResetControl(row) {
+  return row.querySelector('.select-control-trigger')
+    || row.querySelector('select, input:not([type="radio"]), input[type="radio"]:checked');
+}
+
+function syncSettingResetVisibility(button, control, hide) {
+  if (!button) return;
+  if (hide && document.activeElement === button) control?.focus({ preventScroll: true });
+  button.hidden = hide;
+}
+
+function createSettingReset(row, heading, title, defaultValue, read, save) {
+  const button = document.createElement('button');
+  button.type = 'button';
+  button.className = 'settings-reset-button';
+  button.hidden = true;
+  heading.append(button);
+  let saving = false;
+  const sync = () => {
+    const control = settingResetControl(row);
+    const hidden = !saving && (control?.disabled || (read() ?? defaultValue) === defaultValue);
+    syncSettingResetVisibility(button, control, hidden);
+    const setting = title.dataset.i18n ? t(title.dataset.i18n) : title.textContent;
+    button.setAttribute('aria-label', t('settings.common.resetSetting', { setting }));
+  };
+  button.addEventListener('click', async () => {
+    if (button.hidden || saving || settingResetControl(row)?.disabled) return;
+    saving = true;
+    button.setAttribute('aria-disabled', 'true');
+    try {
+      await save(defaultValue);
+    } catch (_) {
+      window.alert(t('settings.common.resetSettingFailed'));
+    } finally {
+      saving = false;
+      button.removeAttribute('aria-disabled');
+      sync();
+    }
+  });
+  return sync;
+}
+
+function setupSettingResets() {
+  const defaults = state.appInfo?.resettableSettingsDefaults || {};
+  for (const heading of els.settingsPanel.querySelectorAll('[data-reset-setting]')) {
+    const key = heading.dataset.resetSetting;
+    if (defaults[key] === undefined) continue;
+    const row = heading.closest('.settings-item');
+    const title = heading.querySelector('.settings-item-title');
+    let read = () => state.settings[key];
+    let save = value => saveSettings({ [key]: value });
+    if (key === 'edgeDockSide') {
+      read = () => Number.isFinite(state.settings.edgeDockFloatingX) ? 'floating' : state.settings.edgeDockSide;
+    }
+    if (key === 'periodMonthMode') save = saveDefaultUsageRange;
+    if (key === 'liveTokenRateScope') save = saveLiveTokenRateScope;
+    if (key === 'limitsRefresh') {
+      read = () => els.limitsRefreshInput.value;
+      save = saveLimitsRefresh;
+    }
+    settingResetRows.push(createSettingReset(row, heading, title, defaults[key], read, save));
+  }
+}
+
+function syncSettingResets() {
+  for (const sync of settingResetRows) sync();
+}
+
+function addRenderedSettingReset(row, heading, title, key, itemId) {
+  const defaults = state.appInfo?.resettableSettingsDefaults;
+  const defaultValue = itemId === undefined ? defaults?.[key] : defaults?.[key]?.[itemId];
+  if (defaultValue === undefined) return;
+  heading.dataset.inspectorReset = itemId === undefined ? key : `${key}:${itemId}`;
+  const read = () => itemId === undefined ? state.settings[key] : state.settings[key]?.[itemId];
+  const save = value => saveSettings({ [key]: itemId === undefined ? value : { [itemId]: value } });
+  createSettingReset(row, heading, title, defaultValue, read, save)();
+}
+
 function syncSettingsForm() {
   if (isRendererWindowHidden()) {
     applyInitialBreakdownPreference();
@@ -10553,7 +11589,9 @@ function syncSettingsForm() {
   if (els.languageInput) els.languageInput.value = currentLanguage();
   if (els.periodMonthModeInput) {
     els.periodMonthModeInput.value = fixedPeriodRangesApi.normalizeMonthMode(state.settings?.periodMonthMode);
+    els.periodMonthModeInput.closest('.period-default-setting').classList.toggle('hidden', Boolean(state.settings.periodTabOrder?.length));
   }
+  syncPeriodTabSettings();
   if (els.currencyInput) els.currencyInput.value = currentCurrency();
   syncCurrencyRateControls();
   syncNetworkProxyControls();
@@ -10692,6 +11730,7 @@ function syncSettingsForm() {
   modelAliasForm?.syncSettings();
   renderCursorStatus();
   displaySettings?.sync();
+  syncSettingResets();
 }
 
 function applyVisibleSettingsAppearance() {
@@ -11074,6 +12113,9 @@ function renderViewPreferences() {
 function renderMainViewInspector(view, { off, lastVisible, unavailable }) {
   const inspector = els.mainViewInspector;
   if (!inspector) return;
+  const focusedReset = document.activeElement?.matches('.settings-reset-button')
+    ? document.activeElement.parentElement.dataset.inspectorReset
+    : undefined;
   inspector.classList.toggle('is-subpage', view.id === 'home' && Boolean(state.homeLimitProvidersOpen));
   if (view.id === 'home' && state.homeLimitProvidersOpen) {
     inspector.removeAttribute('aria-labelledby');
@@ -11116,6 +12158,13 @@ function renderMainViewInspector(view, { off, lastVisible, unavailable }) {
   inspector.replaceChildren(header);
   const settings = MAIN_VIEW_SETTINGS[view.id];
   if (settings) inspector.append(settings());
+  if (focusedReset && document.activeElement === document.body) {
+    const heading = inspector.querySelector(`[data-inspector-reset="${CSS.escape(focusedReset)}"]`);
+    const row = heading?.closest('.settings-item, .home-limit-status-setting') || heading?.parentElement;
+    const target = heading?.querySelector('.settings-reset-button:not([hidden])')
+      || (row && settingResetControl(row));
+    target?.focus({ preventScroll: true });
+  }
 }
 
 function homeLimitProviders() {
@@ -11137,7 +12186,7 @@ function setHomeLimitProvidersOpen(open) {
 function renderHomeLimitSettings() {
   const wrap = document.createElement('div');
   wrap.className = 'settings-nested-list home-limit-settings';
-  const displayRow = document.createElement('label');
+  const displayRow = document.createElement('div');
   displayRow.className = 'settings-item home-limit-display-setting';
   const displayText = document.createElement('span');
   displayText.className = 'settings-item-text';
@@ -11146,36 +12195,55 @@ function renderHomeLimitSettings() {
   displayTitle.textContent = t('settings.home.limitDisplayMode');
   displayText.append(displayTitle);
   const displayInput = document.createElement('select');
-  for (const mode of ['text', 'bars']) {
+  // `default` follows the recommended layout; `rows` joins this list once a
+  // newer layout replaces it as the recommendation.
+  for (const mode of ['default', 'text', 'bars']) {
     const option = document.createElement('option');
     option.value = mode;
     option.textContent = t(`settings.home.limitDisplayMode.${mode}`);
     displayInput.append(option);
   }
-  displayInput.value = homeModulePreferencesApi.normalizeHomeLimitDisplayMode(state.settings?.homeLimitDisplayMode);
+  const storedDisplayMode = homeModulePreferencesApi.normalizeHomeLimitDisplayMode(state.settings?.homeLimitDisplayMode);
+  // `rows` is not offered while it is the recommendation, so Default stands for it.
+  displayInput.value = storedDisplayMode === 'rows' ? 'default' : storedDisplayMode;
   displayInput.addEventListener('change', () => void saveSettings({ homeLimitDisplayMode: displayInput.value }));
+  displayInput.setAttribute('aria-label', displayTitle.textContent);
   displayRow.append(displayText, displayInput);
-  const statusLabel = document.createElement('label');
+  addRenderedSettingReset(displayRow, displayText, displayTitle, 'homeLimitDisplayMode');
+  const statusLabel = document.createElement('div');
   statusLabel.className = 'checkbox-label home-limit-status-setting';
   const statusInput = document.createElement('input');
   statusInput.type = 'checkbox';
   statusInput.checked = state.settings?.showHomeLimitBars === true;
-  const statusText = document.createElement('span');
+  statusInput.id = 'homeLimitBarsInput';
+  const statusText = document.createElement('label');
+  statusText.htmlFor = statusInput.id;
   statusText.textContent = t('settings.home.showLimitBars');
   statusInput.addEventListener('change', () => void saveSettings({ showHomeLimitBars: statusInput.checked }));
-  statusLabel.append(statusInput, statusText);
-  const providerNamesLabel = document.createElement('label');
+  statusText.className = 'settings-item-title';
+  const statusCopy = document.createElement('span');
+  statusCopy.className = 'settings-item-text';
+  statusCopy.append(statusText);
+  statusLabel.append(statusInput, statusCopy);
+  addRenderedSettingReset(statusLabel, statusCopy, statusText, 'showHomeLimitBars');
+  const providerNamesLabel = document.createElement('div');
   providerNamesLabel.className = 'checkbox-label home-limit-status-setting';
   const providerNamesInput = document.createElement('input');
   providerNamesInput.type = 'checkbox';
   const providerNamesRequired = state.settings?.showToolIcons === false;
   providerNamesInput.checked = providerNamesRequired || state.settings?.showHomeLimitProviderNames === true;
   providerNamesInput.disabled = providerNamesRequired;
-  const providerNamesText = document.createElement('span');
+  providerNamesInput.id = 'homeLimitProviderNamesInput';
+  const providerNamesText = document.createElement('label');
+  providerNamesText.htmlFor = providerNamesInput.id;
   providerNamesText.textContent = t('settings.home.showLimitProviderNames');
   const providerNamesCopy = document.createElement('span');
   providerNamesCopy.className = 'home-limit-provider-names-copy';
-  providerNamesCopy.append(providerNamesText);
+  providerNamesText.className = 'settings-item-title';
+  const providerNamesHeading = document.createElement('span');
+  providerNamesHeading.className = 'settings-item-text';
+  providerNamesHeading.append(providerNamesText);
+  providerNamesCopy.append(providerNamesHeading);
   if (providerNamesRequired) {
     const requiredReason = t('settings.home.providerNamesRequiredWithoutIcons');
     const requiredReasonText = document.createElement('span');
@@ -11191,7 +12259,8 @@ function renderHomeLimitSettings() {
     renderHomeIfVisible();
   });
   providerNamesLabel.append(providerNamesInput, providerNamesCopy);
-  const countLabel = document.createElement('label');
+  addRenderedSettingReset(providerNamesLabel, providerNamesHeading, providerNamesText, 'showHomeLimitProviderNames');
+  const countLabel = document.createElement('div');
   countLabel.className = 'settings-item home-limit-account-count-setting';
   const countText = document.createElement('span');
   countText.className = 'settings-item-text';
@@ -11210,7 +12279,9 @@ function renderHomeLimitSettings() {
     await saveSettings({ homeLimitAccountCount: Number(countInput.value) });
     renderHomeIfVisible();
   });
+  countInput.setAttribute('aria-label', countTitle.textContent);
   countLabel.append(countText, countInput);
+  addRenderedSettingReset(countLabel, countText, countTitle, 'homeLimitAccountCount');
   const providers = homeLimitProviders();
   const hidden = hiddenHomeLimitProviderSet();
   const link = document.createElement('button');
@@ -11298,7 +12369,7 @@ function renderHomeLimitProviderList() {
 function renderHomeModuleCountSettings(id) {
   const wrap = document.createElement('div');
   wrap.className = 'settings-nested-list';
-  const label = document.createElement('label');
+  const label = document.createElement('div');
   label.className = 'settings-item home-module-count-setting';
   const text = document.createElement('span');
   text.className = 'settings-item-text';
@@ -11324,7 +12395,9 @@ function renderHomeModuleCountSettings(id) {
     }
     renderHomeIfVisible();
   });
+  input.setAttribute('aria-label', title.textContent);
   label.append(text, input);
+  addRenderedSettingReset(label, text, title, 'homeModuleCounts', id);
   wrap.append(label);
   if (id === 'session') {
     const note = document.createElement('p');
@@ -11332,14 +12405,42 @@ function renderHomeModuleCountSettings(id) {
     note.className = 'settings-note';
     note.textContent = t('settings.home.sessionCountNote');
     input.setAttribute('aria-describedby', note.id);
-    wrap.append(note);
+    wrap.append(note, renderHomeSessionDisplaySetting());
   }
   return wrap;
 }
 
+function renderHomeSessionDisplaySetting() {
+  const row = document.createElement('div');
+  row.className = 'settings-item home-session-display-setting';
+  const text = document.createElement('span');
+  text.className = 'settings-item-text';
+  const title = document.createElement('span');
+  title.className = 'settings-item-title';
+  title.textContent = t('settings.home.sessionDisplayMode');
+  text.append(title);
+  const input = document.createElement('select');
+  for (const mode of ['compact', 'detailed']) {
+    const option = document.createElement('option');
+    option.value = mode;
+    option.textContent = t(`settings.home.sessionDisplayMode.${mode}`);
+    input.append(option);
+  }
+  input.value = homeModulePreferencesApi.normalizeHomeSessionDisplayMode(state.settings?.homeSessionDisplayMode);
+  input.addEventListener('change', () => {
+    // saveSettings reports a failed write and restores the persisted choice.
+    saveSettings({ homeSessionDisplayMode: input.value }).catch(() => {});
+  });
+  input.setAttribute('aria-label', title.textContent);
+  row.append(text, input);
+  addRenderedSettingReset(row, text, title, 'homeSessionDisplayMode');
+  return row;
+}
+
 function homeModuleSummary(id) {
   if (id === 'limits') {
-    return t(`settings.home.limitDisplayMode.${homeModulePreferencesApi.normalizeHomeLimitDisplayMode(state.settings?.homeLimitDisplayMode)}`);
+    const mode = homeModulePreferencesApi.normalizeHomeLimitDisplayMode(state.settings?.homeLimitDisplayMode);
+    return t(`settings.home.limitDisplayMode.${mode === 'rows' ? 'default' : mode}`);
   }
   if (id === 'trends') return t((state.settings?.heatmapMetric || 'cost') === 'tokens' ? 'dashboard.heatmap.tokens' : 'dashboard.heatmap.cost');
   if (HOME_MODULE_SUBGROUPS[id]) return t('settings.home.itemCountValue', { n: homeModulePreferencesApi.homeModuleCount(state.settings, id) });
@@ -11424,6 +12525,25 @@ function renderHomeSettingsList() {
       wrap.append(listContainer);
     }
   }
+  // Home is monochrome by default; this brings back each provider's colour.
+  // The row is not a <label>, so a click on its reset button does not toggle it.
+  const vendorColors = document.createElement('div');
+  vendorColors.className = 'checkbox-label settings-item';
+  const vendorColorsText = document.createElement('span');
+  vendorColorsText.className = 'settings-item-text';
+  const vendorColorsTitle = document.createElement('label');
+  vendorColorsTitle.className = 'settings-item-title';
+  vendorColorsTitle.htmlFor = 'homeVendorColorsInput';
+  vendorColorsTitle.textContent = t('settings.home.vendorColors');
+  vendorColorsText.append(vendorColorsTitle);
+  const vendorColorsInput = document.createElement('input');
+  vendorColorsInput.id = 'homeVendorColorsInput';
+  vendorColorsInput.type = 'checkbox';
+  vendorColorsInput.checked = homeVendorColorsEnabled();
+  vendorColorsInput.addEventListener('change', () => void saveSettings({ homeVendorColors: vendorColorsInput.checked }));
+  vendorColors.append(vendorColorsText, vendorColorsInput);
+  addRenderedSettingReset(vendorColors, vendorColorsText, vendorColorsTitle, 'homeVendorColors');
+  wrap.append(vendorColors);
   return wrap;
 }
 
@@ -11433,8 +12553,8 @@ function renderHomeSettingsList() {
 function renderHomeActivitySettings() {
   const wrap = document.createElement('div');
   wrap.className = 'settings-nested-list';
-  const row = (titleKey, options, value, onChange) => {
-    const label = document.createElement('label');
+  const row = (key, titleKey, options, value, onChange) => {
+    const label = document.createElement('div');
     label.className = 'settings-item';
     const text = document.createElement('span');
     text.className = 'settings-item-text';
@@ -11451,18 +12571,20 @@ function renderHomeActivitySettings() {
     }
     select.value = value;
     select.addEventListener('change', () => void onChange(select.value).then(renderHomeIfVisible));
+    select.setAttribute('aria-label', title.textContent);
     label.append(text, select);
+    addRenderedSettingReset(label, text, title, key);
     wrap.append(label);
   };
-  row('settings.home.heatmapColor',
+  row('heatmapMetric', 'settings.home.heatmapColor',
     [['tokens', 'dashboard.heatmap.tokens'], ['cost', 'dashboard.heatmap.cost']],
     state.settings?.heatmapMetric || 'cost',
     (metric) => saveSettings({ heatmapMetric: metric }));
-  row('settings.home.activeDaysWindow',
+  row('homeActiveDaysWindow', 'settings.home.activeDaysWindow',
     ['all', 'year'].map((mode) => [mode, `settings.home.activeDaysWindow.${mode}`]),
     state.settings?.homeActiveDaysWindow || 'all',
     (mode) => saveSettings({ homeActiveDaysWindow: mode }));
-  row('settings.home.trendTokens',
+  row('showExactHomeTrendTokens', 'settings.home.trendTokens',
     ['compact', 'exact'].map((mode) => [mode, `settings.home.trendTokens.${mode}`]),
     state.settings?.showExactHomeTrendTokens === true ? 'exact' : 'compact',
     (mode) => saveSettings({ showExactHomeTrendTokens: mode === 'exact' }));
@@ -11472,7 +12594,7 @@ function renderHomeActivitySettings() {
 function renderLimitsViewSettingsList() {
   const wrap = document.createElement('div');
   wrap.className = 'settings-nested-list';
-  const row = document.createElement('label');
+  const row = document.createElement('div');
   row.className = 'settings-item';
   const text = document.createElement('span');
   text.className = 'settings-item-text';
@@ -11493,7 +12615,9 @@ function renderLimitsViewSettingsList() {
     await saveSettings({ limitsHistoryOpenMode: input.value });
     renderLimits();
   });
+  input.setAttribute('aria-label', title.textContent);
   row.append(text, input);
+  addRenderedSettingReset(row, text, title, 'limitsHistoryOpenMode');
   wrap.appendChild(row);
   return wrap;
 }
@@ -11505,7 +12629,7 @@ function renderModelViewSettingsList() {
   row.className = 'settings-item';
   const label = document.createElement('span');
   label.id = 'modelRankingMetricLabel';
-  label.className = 'settings-item-text settings-item-title';
+  label.className = 'settings-item-title';
   label.textContent = t('settings.modelRanking.label');
   const options = document.createElement('div');
   options.className = 'inline-options';
@@ -11530,7 +12654,11 @@ function renderModelViewSettingsList() {
     option.append(input, text);
     options.append(option);
   }
-  row.append(label, options);
+  const heading = document.createElement('span');
+  heading.className = 'settings-item-text';
+  heading.append(label);
+  row.append(heading, options);
+  addRenderedSettingReset(row, heading, label, 'modelRankingMetric');
   wrap.append(row);
   return wrap;
 }
@@ -11550,10 +12678,11 @@ function renderTrendSettingsList() {
   wrap.append(label);
 
   const HISTORY_INTERVAL_OPTIONS = [300000, 600000, 900000, 1800000, 3600000];
-  const intervalRow = document.createElement('label');
+  const intervalRow = document.createElement('div');
   intervalRow.className = 'status-provider-interval';
   intervalRow.classList.toggle('hidden', !input.checked);
   const intervalLabel = document.createElement('span');
+  intervalLabel.className = 'settings-item-text';
   intervalLabel.textContent = t('settings.views.trendInterval');
   const select = document.createElement('select');
   select.id = 'trendIntervalSelect';
@@ -11566,7 +12695,9 @@ function renderTrendSettingsList() {
     select.appendChild(option);
   }
   select.addEventListener('change', () => void saveSettings({ historyIntervalMs: Number(select.value) }));
+  select.setAttribute('aria-label', intervalLabel.textContent);
   intervalRow.append(intervalLabel, select);
+  addRenderedSettingReset(intervalRow, intervalLabel, intervalLabel, 'historyIntervalMs');
   wrap.append(intervalRow);
 
   input.addEventListener('change', async () => {
@@ -11682,6 +12813,7 @@ function renderSessionSettingsList() {
     options.append(option);
   }
   row.append(label, options);
+  addRenderedSettingReset(row, label, title, 'sessionContextMetric');
   wrap.append(row);
   return wrap;
 }
@@ -11711,9 +12843,10 @@ function renderServiceProviderList() {
   header.append(note, headerActions);
   wrap.append(header);
   const SERVICE_STATUS_REFRESH_OPTIONS = [0, 60000, 120000, 300000, 900000, 1800000];
-  const intervalRow = document.createElement('label');
+  const intervalRow = document.createElement('div');
   intervalRow.className = 'status-provider-interval';
   const intervalLabel = document.createElement('span');
+  intervalLabel.className = 'settings-item-text';
   intervalLabel.textContent = t('serviceStatus.refreshEvery');
   const select = document.createElement('select');
   select.id = 'serviceStatusRefreshSelect';
@@ -11726,7 +12859,9 @@ function renderServiceProviderList() {
     select.appendChild(option);
   }
   select.addEventListener('change', () => void saveSettings({ serviceStatusRefreshMs: Number(select.value) }));
+  select.setAttribute('aria-label', intervalLabel.textContent);
   intervalRow.append(intervalLabel, select);
+  addRenderedSettingReset(intervalRow, intervalLabel, intervalLabel, 'serviceStatusRefreshMs');
   wrap.append(intervalRow);
   for (const { id, label } of providers) {
     const isHidden = hidden.has(id);
@@ -11784,7 +12919,8 @@ function setClientHealthExpanded(clientId, options = {}) {
     // left alone so a collapse still has something to animate.
     if (open) {
       const force = options.refreshPlaceholder === true
-        && !clientHealthPresentationApi.hasClientHealth(localClientHealth(), row.dataset.client);
+        && (row.dataset.client === 'antigravity'
+          || !clientHealthPresentationApi.hasClientHealth(localClientHealth(), row.dataset.client));
       loadClientSources(row.dataset.client, { force });
       if (container.childElementCount === 0) {
         fillClientHealthPanel(container, row.dataset.client);
@@ -11936,7 +13072,7 @@ function clientHealthDetailFor(clientId) {
 function clientEditionHealthDetail(clientId) {
   const options = {
     usage: clientPeriodUsage(clientId),
-    sources: localClientSources(clientId),
+    sources: localClientSources(clientId)?.filter(source => source.id !== 't3-antigravity-acp'),
     collectionState: enabledClientSet().has(clientId) ? 'waiting' : 'notTracked'
   };
   const detail = clientHealthPresentationApi.clientHealthDetail(localClientHealth(), clientId, options);
@@ -12430,6 +13566,41 @@ function clientHealthActions(clientId, detail) {
   return actions;
 }
 
+let antigravityAcpDisclosureOpen = false;
+
+function antigravityAcpSourceGroup(sources) {
+  const section = document.createElement('section');
+  section.className = 'tool-health-group';
+  const heading = document.createElement('h4');
+  heading.className = 'tool-health-group-title';
+  heading.textContent = t('settings.tools.health.autoDiscovery');
+  const disclosure = document.createElement('details');
+  disclosure.className = 'tool-health-auto-source';
+  disclosure.open = antigravityAcpDisclosureOpen;
+  const summary = document.createElement('summary');
+  summary.textContent = 'T3 Code ACP';
+  summary.addEventListener('click', (event) => {
+    event.preventDefault();
+    antigravityAcpDisclosureOpen = !disclosure.open;
+    disclosure.open = antigravityAcpDisclosureOpen;
+  });
+  const paths = document.createElement('div');
+  paths.className = 'tool-health-checks';
+  for (const { dir, exists, pending } of sources) {
+    const row = document.createElement('div');
+    row.className = 'tool-health-check-row';
+    const chip = document.createElement('code');
+    chip.className = `tool-health-check${exists ? ' found' : pending ? ' pending' : ''}`;
+    chip.textContent = friendlyPath(dir);
+    chip.setAttribute('aria-label', dir);
+    row.append(chip);
+    paths.append(row);
+  }
+  disclosure.append(summary, paths);
+  section.append(heading, disclosure);
+  return section;
+}
+
 function clientHealthPanel(detail, clientId) {
   const inner = document.createElement('div');
   inner.className = 'accordion-animation-inner';
@@ -12448,6 +13619,11 @@ function clientHealthPanel(detail, clientId) {
       detail.notes.filter((note) => note.group === group.id),
       clientId
     ));
+    if (group.id === 'source' && clientId === 'antigravity') {
+      const sources = (localClientSources(clientId) || [])
+        .filter(source => source.id === 't3-antigravity-acp' && source.dir);
+      if (sources.length > 0) groups.append(antigravityAcpSourceGroup(sources));
+    }
   }
   box.append(groups);
   for (const id of clientSourcesPanelIds(clientId)) {
@@ -12586,14 +13762,23 @@ function toolPreferenceRows() {
   return { clients, matched: new Set(matches.map(({ id }) => id)) };
 }
 
-// Leads a tracked-tool or limit-provider row, always in the text colour. A tool
-// without a mark keeps the same footprint with its initial, so names still
-// line up.
+// Leads a tracked-tool or limit-provider row, always in the text colour. A
+// plugin limit shows the mark its manifest declares, as it does on the Limits
+// page. A tool without a mark keeps the same footprint with its initial, so
+// names still line up.
 function settingsListIcon(id, label, iconSet, extraClass = '') {
   const icon = document.createElement('span');
   icon.setAttribute('aria-hidden', 'true');
+  const pluginModule = iconSet.has(id) ? null : pluginLimitMetadata(id);
   if (iconSet.has(id)) {
     icon.className = `settings-list-icon ink-icon row-icon-${id}${extraClass ? ` ${extraClass}` : ''}`;
+  } else if (pluginModule?.presentation?.icon || pluginModule?.identityIcon) {
+    icon.className = 'settings-list-icon settings-list-plugin-icon';
+    const mark = window.TokenMonitorPluginViews.navigationIcon(document, pluginModule, 14);
+    // The list sizes the slot (smaller in the collapsed group's chips).
+    mark.style.width = '100%';
+    mark.style.height = '100%';
+    icon.append(mark);
   } else {
     icon.className = 'settings-list-icon settings-list-icon-fallback';
     icon.textContent = String(label || id).trim().charAt(0).toUpperCase();
@@ -12674,7 +13859,10 @@ function restoreSettingsListFocus(focusedId) {
   const target = document.getElementById(focusedId);
   const group = target?.closest('.settings-list-group');
   const toggle = group?.inert ? document.getElementById(`${group.id}Toggle`) : null;
-  (toggle || target)?.focus({ preventScroll: true });
+  const control = target?.hidden && target.matches('.settings-reset-button')
+    ? settingResetControl(target.closest('.settings-item'))
+    : target;
+  (toggle || control)?.focus({ preventScroll: true });
   // The toggle can sit below the fold of a long list. Reveal it after the
   // repaint's scroll preservation, by id since a later repaint may replace it,
   // and as an interaction so a pending restore does not scroll it away again.
@@ -13661,6 +14849,12 @@ const LIMIT_PROVIDER_SETTINGS = {
     descKey: 'settings.limits.claudeCliFallbackDesc',
     defaultValue: true
   }],
+  antigravity: [{
+    key: 'antigravityLocalLimitsEnabled',
+    titleKey: 'settings.limits.antigravityLocalLimits',
+    descKey: 'settings.limits.antigravityLocalLimitsDesc',
+    defaultValue: true
+  }],
   codex: [{
     key: 'codexResetForecastEnabled',
     titleKey: 'settings.limits.codexResetForecast',
@@ -13740,7 +14934,8 @@ function limitProviderSettingsList(providerId, settings, reusableInputs = null) 
     // not part of the title cell, so the switch stays on the title's line and
     // the note wraps full-width underneath instead of squeezing it onto its own
     // row.
-    const item = document.createElement('label');
+    const canReset = setting.key === 'workbuddyQuotaTotalEnabled';
+    const item = document.createElement(canReset ? 'div' : 'label');
     item.className = 'checkbox-label settings-item';
     const copy = document.createElement('span');
     copy.className = 'settings-item-text';
@@ -13773,6 +14968,14 @@ function limitProviderSettingsList(providerId, settings, reusableInputs = null) 
     desc.className = 'settings-note settings-item-desc';
     desc.textContent = t(setting.descKey);
     item.append(copy, input, desc);
+    if (canReset) {
+      desc.id = 'workbuddyQuotaTotalNote';
+      input.setAttribute('aria-describedby', desc.id);
+      input.setAttribute('aria-label', title.textContent);
+      addRenderedSettingReset(item, copy, title, setting.key);
+      const reset = copy.querySelector('.settings-reset-button');
+      if (reset) reset.id = 'resetWorkbuddyQuotaTotalButton';
+    }
     list.append(item);
   }
   return list;
@@ -14641,6 +15844,7 @@ async function init() {
   });
   window.tokenMonitor.onSystemUiThemePush?.((payload) => applySystemUiTheme(payload?.dark === true));
   try { state.appInfo = await window.tokenMonitor.getAppInfo?.(); } catch (_) {}
+  setupSettingResets();
   if (!notchCapabilitiesSeeded) state.notchCapabilities = state.appInfo?.notchCapabilities || null;
   syncNotchCapabilities();
   // Seeding assigns directly: the rest of init delivers both icon sets anyway,
@@ -14648,6 +15852,7 @@ async function init() {
   if (!systemUiThemeSeeded) state.systemDarkUi = state.appInfo?.systemDarkUi === true;
   if (els.aboutVersion) els.aboutVersion.textContent = state.appInfo?.version ? `v${state.appInfo.version}` : '—';
   state.settings = await window.tokenMonitor.getSettings();
+  if (state.settings.periodTabOrder?.length) ensureVisiblePeriod(state.settings.periodTabOrder);
   await refreshAccountSlotPanels();
   // Local appearance is sufficient for first reveal. Plugin discovery, sync,
   // updater and stats queries below must not hold the window off screen.
@@ -14688,6 +15893,7 @@ async function init() {
     renderAppUpdatePill();
     renderSettingsAppUpdateRow();
     renderAutomaticAppUpdateControl();
+    syncSettingResets();
     if (els.appUpdatePopover.matches(':popover-open')) renderAppUpdatePopover(payload);
   });
   if (state.appInfo?.loginItemSupported) {
@@ -14716,44 +15922,54 @@ async function init() {
   updateTitleFit();
 }
 
-for (const tab of document.querySelectorAll('.tab')) {
-  tab.addEventListener('click', (event) => {
-    const slot = tab.dataset.periodSlot || tab.dataset.period;
-    const activeSlot = fixedPeriodRangesApi.slotForSelection(state.period);
-    if (slot === 'month' && activeSlot === 'month') {
-      event.stopPropagation();
-      setPeriodMenuOpen(!state.periodMenuOpen, { focus: state.periodMenuOpen ? '' : 'current' });
-      return;
-    }
-    setPeriodMenuOpen(false);
-    const targetPeriod = slot === 'month'
-      ? fixedPeriodRangesApi.normalizeMonthMode(state.settings?.periodMonthMode)
-      : tab.dataset.period;
-    const snapshot = captureBreakdownMotion();
-    if (!setPeriod(targetPeriod)) return;
-    syncPeriodTabs();
-    if (state.openSession && fixedPeriodRangesApi.supportsBreakdown(state.period, 'session')) {
-      if (state.openSession.kind === 'session-group') {
-        const period = state.stats?.periods?.[state.period];
-        const summary = sessionRowsForPeriod(period).find((row) => row.key === state.openSession.summary.key);
-        if (summary) {
-          state.openSession = { kind: 'session-group', period: state.period, summary };
-        } else {
-          state.openSession = null;
-        }
+// An open session follows a period change when the new period lists sessions,
+// re-reading its detail for the new period (and range); otherwise it closes.
+function followOpenSessionToPeriod() {
+  if (state.openSession && fixedPeriodRangesApi.supportsBreakdown(state.period, 'session', {
+    native: Boolean(currentNativeRangeSnapshot())
+  })) {
+    if (state.openSession.kind === 'session-group') {
+      const period = state.stats?.periods?.[state.period];
+      const summary = sessionRowsForPeriod(period).find((row) => row.key === state.openSession.summary.key);
+      if (summary || pagedSessionsPending()) {
+        state.openSession = { kind: 'session-group', period: state.period, summary: summary || state.openSession.summary };
       } else {
-        openSessionDetail({ ...state.openSession, returnTo: null });
+        state.openSession = null;
       }
-    } else if (state.openSession) {
-      state.openSession = null;
+    } else {
+      // The detail's cost is the destination period's row, like its turns;
+      // no row there means no cost to spread over its turns.
+      const entry = sessionLiveStatsEntry({ ...state.openSession, period: state.period });
+      openSessionDetail({
+        ...state.openSession,
+        sessionCost: sessionLiveCost(entry, state.openSession.client),
+        returnTo: null
+      });
     }
-    state.rowSignature = '';
-    state.periodMotionActive = true;
-    render();
-    state.periodMotionActive = false;
-    animateBreakdownFrom(snapshot, { duration: periodBreakdownMotionDuration(), synchronized: true });
-  });
+  } else if (state.openSession) {
+    state.openSession = null;
+  }
 }
+
+periodTabs.addEventListener('click', (event) => {
+  const tab = event.target.closest('.tab');
+  if (!tab) return;
+  if (tab === els.monthPeriodTab && fixedPeriodRangesApi.slotForSelection(state.period) === 'month') {
+    event.stopPropagation();
+    setPeriodMenuOpen(!state.periodMenuOpen, { focus: state.periodMenuOpen ? '' : 'current' });
+    return;
+  }
+  setPeriodMenuOpen(false);
+  const snapshot = captureBreakdownMotion();
+  if (!setPeriod(tab.dataset.period)) return;
+  syncPeriodTabs();
+  followOpenSessionToPeriod();
+  state.rowSignature = '';
+  state.periodMotionActive = true;
+  render();
+  state.periodMotionActive = false;
+  animateBreakdownFrom(snapshot, { duration: periodBreakdownMotionDuration(), synchronized: true });
+});
 
 for (const button of els.monthPeriodMenu?.querySelectorAll('[data-fixed-period]') || []) {
   button.addEventListener('click', async (event) => {
@@ -14764,8 +15980,8 @@ for (const button of els.monthPeriodMenu?.querySelectorAll('[data-fixed-period]'
     const changed = setPeriod(selection);
     state.settings.periodMonthMode = selection;
     syncPeriodTabs();
-    syncPeriodMenu();
     if (changed) {
+      followOpenSessionToPeriod();
       state.rowSignature = '';
       state.periodMotionActive = true;
       render();
@@ -14796,14 +16012,16 @@ els.monthPeriodMenu?.addEventListener('keydown', (event) => {
   });
 });
 
-els.periodMonthModeInput?.addEventListener('change', async () => {
-  const selection = fixedPeriodRangesApi.normalizeMonthMode(els.periodMonthModeInput.value);
+async function saveDefaultUsageRange(value) {
+  const selection = fixedPeriodRangesApi.normalizeMonthMode(value);
   state.settings.periodMonthMode = selection;
-  if (fixedPeriodRangesApi.slotForSelection(state.period) === 'month') setPeriod(selection);
+  if (fixedPeriodRangesApi.slotForSelection(state.period) === 'month' && setPeriod(selection)) followOpenSessionToPeriod();
   syncPeriodTabs();
   render();
   await saveSettings({ periodMonthMode: selection });
-});
+}
+
+els.periodMonthModeInput?.addEventListener('change', () => saveDefaultUsageRange(els.periodMonthModeInput.value));
 
 document.addEventListener('click', (event) => {
   if (!state.periodMenuOpen) return;
@@ -14842,15 +16060,16 @@ els.breakdown.addEventListener('click', (event) => {
   const match = key.match(/^session:([^:]+):(.+)$/);
   if (!match) return;
   const sessionId = client === 'reasonix' ? `reasonix:${match[2]}` : match[2];
-  const period = state.stats?.periods?.[state.period];
   const session = client === 'reasonix'
     ? state.stats?.nativeSessions?.[state.period]?.[sessionId]
-    : period?.sessions?.[`${client}:${sessionId}`];
+    : displayedSessions(state.period)?.[`${client}:${sessionId}`];
+  const { sourceDevice, sessionDetailHeading } = window.TokenMonitorDomReconcile.data(rowEl) || {};
   openSessionDetail({
     client,
     sessionId,
     sessionCost: client === 'reasonix' ? Number(session?.reportedCostUsd || 0) : Number(session?.costUsd || 0),
-    title: rowEl.querySelector('.row-title')?.textContent || ''
+    sourceDevice,
+    title: sessionDetailHeading || rowEl.querySelector('.row-title')?.textContent || ''
   });
 });
 
@@ -14998,8 +16217,6 @@ els.hubProfileRemove?.addEventListener('click', async () => {
   await changeHubProfile({ type: 'delete', id: state.settings?.activeHubProfileId });
 });
 
-els.syncPanelOpenDevices?.addEventListener('click', () => openViewFromTray('device'));
-
 els.hubModeOptions.addEventListener('change', async (event) => {
   const target = event.target;
   if (target !== els.hubModeOptions) return;
@@ -15095,14 +16312,16 @@ els.secretPasteButton?.addEventListener('click', async () => {
     }
   } catch (_) {}
 });
-els.limitsRefreshInput.addEventListener('change', async () => {
+async function saveLimitsRefresh(value) {
   // Adaptive carries its own baseline, so the stored interval is left alone and
   // comes back unchanged when a fixed option is selected again.
-  const value = els.limitsRefreshInput.value;
   await saveSettings(value === 'adaptive'
     ? { limitsRefreshMode: 'adaptive' }
     : { limitsRefreshMode: 'fixed', limitsRefreshMs: Number(value) });
   await refreshStats({ force: true });
+}
+els.limitsRefreshInput.addEventListener('change', async () => {
+  await saveLimitsRefresh(els.limitsRefreshInput.value);
 });
 els.showLimitSourceInput.addEventListener('change', async () => {
   await saveSettings({ showLimitSource: els.showLimitSourceInput.checked });
@@ -15373,6 +16592,12 @@ for (const input of els.reduceMotionInputs || []) {
   });
 }
 els.liveDotInput.addEventListener('change', saveAppearanceFromControls);
+els.sessionSortToggle.addEventListener('click', () => {
+  state.sessionSort = state.sessionSort === 'tokens' ? 'recent' : 'tokens';
+  state.sessionPage = 0;
+  els.breakdown.scrollTop = 0;
+  render();
+});
 els.sessionSearchToggle?.addEventListener('click', () => {
   const open = !state.sessionSearchOpen;
   setSessionSearchOpen(open, { focus: open });
@@ -15436,13 +16661,15 @@ els.showLiveTokenRateInput.addEventListener('change', async () => {
   if (state.settings.showLiveTokenRate) observeLiveTokenRate(state.stats);
   renderLiveTokenRate();
 });
-els.liveTokenRateScopeInput?.addEventListener('change', async () => {
-  state.settings.liveTokenRateScope = els.liveTokenRateScopeInput.value === 'device' ? 'device' : 'all';
+async function saveLiveTokenRateScope(scope) {
+  await saveSettings({ liveTokenRateScope: scope });
   resetLiveTokenRateTracking();
   observeLiveTokenRate(state.stats);
   renderLiveTokenRate();
-  await saveAppearanceFromControls();
-});
+}
+els.liveTokenRateScopeInput?.addEventListener('change', () => saveLiveTokenRateScope(
+  els.liveTokenRateScopeInput.value === 'device' ? 'device' : 'all'
+));
 els.compactTokenUnitsInput?.addEventListener('change', async () => {
   await saveAppearanceFromControls();
 });
@@ -15502,7 +16729,11 @@ function syncNotchHoverControls() {
 
 function syncNotchHoverDelayValue() {
   const value = els.notchHoverDelayRow?.querySelector('.slider-value');
-  if (value && els.notchHoverDelayInput) value.textContent = `${(Number(els.notchHoverDelayInput.value) / 1000).toFixed(1)} s`;
+  const input = els.notchHoverDelayInput;
+  if (!input) return;
+  const delay = Number(input.value);
+  if (value) value.textContent = `${(delay / 1000).toFixed(1)} s`;
+  syncSettingResetVisibility(els.resetNotchHoverDelayButton, input, delay === NOTCH_HOVER_DELAY_DEFAULT_MS);
 }
 
 function syncNotchStyleInput(preview) {
@@ -15546,6 +16777,9 @@ function syncDockControls() {
   const modes = (els.edgeDockModeInputs || []).map((input) => input.value);
   const mode = modes.includes(state.settings?.edgeDockMode) ? state.settings.edgeDockMode : 'autoHide';
   for (const input of els.edgeDockModeInputs || []) input.checked = input.value === mode;
+  els.edgeDockTriggerRangeRow?.classList.toggle('hidden', mode === 'always' || floating);
+  const triggerRange = state.settings?.edgeDockTriggerRange ?? 'rail';
+  for (const input of els.edgeDockTriggerRangeInputs || []) input.checked = input.value === triggerRange;
   syncDockSizeControls('edgeDock');
   syncDockSizeControls('edgeDockBubble');
   syncDockSizeControls('notch');
@@ -15727,6 +16961,11 @@ els.edgeDockHapticInput?.addEventListener('change', () => {
 for (const input of els.edgeDockModeInputs || []) {
   input.addEventListener('change', () => {
     if (input.checked) void saveSettings({ edgeDockMode: input.value });
+  });
+}
+for (const input of els.edgeDockTriggerRangeInputs || []) {
+  input.addEventListener('change', () => {
+    if (input.checked) void saveSettings({ edgeDockTriggerRange: input.value });
   });
 }
 for (const surface of ['edgeDock', 'edgeDockBubble', 'notch']) {
@@ -16125,7 +17364,7 @@ const allTimeSessions = allTimeSessionsApi.createAllTimeSessionsLoader({
     ? window.TokenMonitorSessionTitleDisplay.withoutSessionTitles(sessions) : sessions,
   projectionKey: () => state.settings?.sessionTitlesEnabled !== false,
   onLoaded: () => {
-    if (state.stats) state.stats = sessionStatsForDisplay(allTimeSessions.attach(state.stats));
+    if (state.stats) replaceDerivedStats(sessionStatsForDisplay(allTimeSessions.attach(state.stats)));
     statsRenderScheduler.request();
   },
   onError: (error) => console.log(`[stats] all-time sessions failed: ${error?.message || error}`)
@@ -16168,7 +17407,7 @@ window.tokenMonitor.onStatsPush?.((payload) => {
   if (!payload) return;
   if (payload.event === 'session-activity') {
     localSessionActivity = payload.data;
-    state.stats = applyLocalSessionActivity(state.stats);
+    replaceDerivedStats(applyLocalSessionActivity(state.stats));
     statsRenderScheduler.request();
     return;
   }
@@ -16184,7 +17423,7 @@ window.tokenMonitor.onStatsPush?.((payload) => {
       incomingStats = payload.data.stats;
       state.statsDeltaResyncPending = null;
     } else if (payload.data?.statsDelta) {
-      incomingStats = window.TokenMonitorStatsDelta?.applyStatsDelta(state.stats, payload.data.statsDelta) || null;
+      incomingStats = window.TokenMonitorStatsDelta?.applyStatsDelta(statsWithNativeRangePeriods(state.stats), payload.data.statsDelta) || null;
       if (!incomingStats) {
         // Recover on the stats push channel, where a full snapshot arrives
         // before any delta based on it. The invoke reply carries no stats.
@@ -16234,6 +17473,7 @@ window.tokenMonitor.onStatsPush?.((payload) => {
       // fetched; repaint once with the coherent snapshot instead of flashing an
       // intermediate loading layout.
       if (fixedPeriodHistoryNeedsWarmup()) {
+        if (syncedFixedPeriodKey() || canRenderNativeDevices()) statsRenderScheduler.request();
         void warmFixedPeriodHistory({ renderOnComplete: true });
       } else {
         statsRenderScheduler.request();

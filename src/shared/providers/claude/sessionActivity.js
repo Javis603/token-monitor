@@ -8,12 +8,12 @@ const { readLinuxPidDomain, readLinuxProcessStarts } = require('./linuxProcessId
 const { resolveClaudeConfigDir, claudeSessionRoots } = require('./paths');
 const { claudeProbeDir, isClaudeProbeCwd } = require('./probe');
 const { isSafeSessionId } = require('../../sessionFiles');
-const { readT3Activity } = require('../../t3SessionActivity');
-const { readT3SessionMeta } = require('../../t3SessionMetadata');
+const { readT3Activity } = require('../../t3/sessionActivity');
+const { readT3SessionMeta } = require('../../t3/sessionMetadata');
 const { readSessionTitle } = require('./sessionMetadata');
 const { isArchivedSession } = require('../../sessionLive');
 
-const { hasKnownSession, nativeSessionsForPeriod, activityEntries, rememberProjection, compactActivity } = require('../../sessionActivityProjection');
+const { hasKnownSession, projectNativeActivitySessions, activityEntries, rememberProjection, compactActivity } = require('../../sessionActivityProjection');
 
 const RENEW_INTERVAL_MS = 10_000;
 const MAX_RECORD_BYTES = 64 * 1024;
@@ -142,22 +142,10 @@ function projectSessionActivity(summary, readings, now = Date.now(), nativeSessi
     next ||= { ...summary, updatedAt: new Date(now).toISOString() };
     next[name] = { ...summary[name], sessionActivity: sessions };
   }
-  if (nativeSessions) {
-    const oldNative = summary.nativeSessions || {};
-    const claudeOnly = (view) => Object.fromEntries(Object.entries(view || {}).filter(([, session]) => session.client === 'claude'));
-    const withoutClock = (view) => JSON.stringify(view, (key, value) => key === 'observedAt' ? undefined : value);
-    const byPeriod = Object.fromEntries(['today', 'month', 'allTime'].map((name) =>
-      [name, nativeSessionsForPeriod(summary, 'claude', nativeSessions, name)]));
-    const changed = ['today', 'month', 'allTime'].some((name) => withoutClock(claudeOnly(oldNative[name])) !== withoutClock(byPeriod[name]));
-    const renew = Object.values(claudeOnly(oldNative.today)).some((session) => now - Date.parse(session.liveActivity?.observedAt) >= RENEW_INTERVAL_MS);
-    if (changed || renew) {
-      next ||= { ...summary, updatedAt: new Date(now).toISOString() };
-      next.nativeSessions = { ...oldNative };
-      for (const name of ['today', 'month', 'allTime']) {
-        const existing = Object.fromEntries(Object.entries(oldNative[name] || {}).filter(([, session]) => session.client !== 'claude'));
-        next.nativeSessions[name] = { ...existing, ...byPeriod[name] };
-      }
-    }
+  const nativeView = nativeSessions && projectNativeActivitySessions(summary, 'claude', nativeSessions, now, RENEW_INTERVAL_MS);
+  if (nativeView) {
+    next ||= { ...summary, updatedAt: new Date(now).toISOString() };
+    next.nativeSessions = nativeView;
   }
   rememberProjection(summary, next, observations);
   return next;

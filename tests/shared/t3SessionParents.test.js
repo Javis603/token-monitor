@@ -6,7 +6,7 @@ const os = require('node:os');
 const path = require('node:path');
 const test = require('node:test');
 const sqlite = require('node:sqlite');
-const { readT3SessionParents, readT3SessionRelations, readT3SessionRelationResult } = require('../../src/shared/t3SessionMetadata');
+const { readT3SessionParents, readT3SessionRelations, readT3SessionRelationResult } = require('../../src/shared/t3/sessionMetadata');
 const { applySessionMetadata, applyT3SessionParents, applySessionIdentities } = require('../../src/shared/sessionMetadata');
 const { normalizePeriod, mergePeriods, extractUsageFromTokscale, stripSessionTextFromPeriod } = require('../../src/shared/usage');
 
@@ -83,6 +83,186 @@ test('ACP agent identity comes from its configured instance, with mixed-provider
   delete ss['codex:parent-native']; delete ss['devin:bird-notebook'].parentSessionId; delete ss['devin:bird-notebook'].parentClient;
   applyT3SessionParents(periods, s.home, { env: {} });
   assert.equal(ss['devin:bird-notebook'].parentSessionId, 'like-paperback', 'visible main provider switch is a proven parent');
+});
+
+test('T3 Antigravity context follows the current native conversation and clears after an empty update', t => {
+  const s = store(t);
+  const current = '1349661f-2212-4dae-b0b5-000000000001';
+  const historical = '1349661f-2212-4dae-b0b5-000000000002';
+  s.thread('app');
+  s.provider('provider', 'app', current, 'antigravity');
+  s.db.exec(`CREATE TABLE orchestration_v2_projection_run_attempts (
+    thread_id TEXT, provider_thread_id TEXT, root_node_id TEXT, status TEXT, payload_json TEXT)`);
+  s.db.prepare('INSERT INTO orchestration_v2_projection_nodes VALUES (?, ?, ?, ?, ?)')
+    .run('root', 'app', 'root', 'root_turn', 'provider');
+  s.db.prepare('INSERT INTO orchestration_v2_projection_run_attempts VALUES (?, ?, ?, ?, ?)')
+    .run('app', 'provider', 'root', 'completed', JSON.stringify({ nativeThreadId: historical }));
+  const setContext = context => s.db.prepare(`UPDATE orchestration_v2_projection_provider_threads
+    SET payload_json = json_set(payload_json, '$.contextUsage', json(?))`).run(JSON.stringify(context));
+  setContext({ usedTokens: 250000, maxTokens: 1048576, cost: { amount: 100, currency: 'USD' } });
+  const now = Date.now();
+  const sessions = Object.fromEntries([current, historical].map(sessionId => [
+    `antigravity:${sessionId}`,
+    { sessionId, client: 'antigravity', lastUsedAt: new Date(now).toISOString(), totalTokens: 50 }
+  ]));
+  const periods = { today: { sessions } };
+  const row = sessions[`antigravity:${current}`];
+  applySessionMetadata(periods, s.home, { now });
+  assert.equal(row.contextTokens, 250000);
+  assert.equal(row.contextWindow, 1048576);
+  assert.equal(row.totalTokens, 50);
+  assert.equal(sessions[`antigravity:${historical}`].contextWindow, undefined);
+
+  setContext({ usedTokens: 13000, maxTokens: 1048576 });
+  applySessionMetadata(periods, s.home, { now });
+  assert.equal(row.contextTokens, 13000);
+
+  setContext(null);
+  applySessionMetadata(periods, s.home, { now });
+  assert.equal(row.contextTokens, 0);
+  assert.equal(row.contextWindow, 0);
+
+  setContext({ usedTokens: Number.MAX_SAFE_INTEGER + 1, maxTokens: 1048576 });
+  s.db.prepare("UPDATE orchestration_v2_projection_threads SET title = 'Verified title' WHERE thread_id = 'app'").run();
+  applySessionMetadata(periods, s.home, { now });
+  assert.equal(row.title, 'Verified title');
+  assert.equal(row.contextWindow, 0);
+});
+
+test('T3 Antigravity ACP displays its thread title and groups same-thread runs and delegated usage', t => {
+  const s = store(t);
+  const main = '1349661f-2212-4dae-b0b5-000000000001';
+  const second = '1349661f-2212-4dae-b0b5-000000000002';
+  s.thread('parent');
+  s.thread('child', 'parent');
+  s.thread('unverified');
+  s.provider('launch-provider', 'parent', main, 'antigravity');
+  s.db.exec(`CREATE TABLE orchestration_v2_projection_run_attempts (
+    thread_id TEXT, provider_thread_id TEXT, root_node_id TEXT, status TEXT, payload_json TEXT)`);
+  s.db.prepare('INSERT INTO orchestration_v2_projection_nodes VALUES (?, ?, ?, ?, ?)')
+    .run('old-root', 'parent', 'old-root', 'root_turn', 'launch-provider');
+  s.db.prepare('INSERT INTO orchestration_v2_projection_run_attempts VALUES (?, ?, ?, ?, ?)')
+    .run('parent', 'launch-provider', 'old-root', 'superseded', JSON.stringify({ nativeThreadId: second }));
+  s.provider('child-provider', 'child', 'child-native', 'claudeAgent');
+  s.provider('weak-provider', 'unverified', 'weak-id', 'antigravity', 'weak');
+  s.provider('wrong-provider', 'unverified', 'wrong-id', 'codex');
+  s.delegation('child-provider', 'launch-provider', 'parent');
+  s.db.exec("UPDATE orchestration_v2_projection_threads SET title = 'T3 ACP title' WHERE thread_id = 'parent'");
+  s.db.exec("UPDATE orchestration_v2_projection_threads SET title = 'Wrong title' WHERE thread_id = 'unverified'");
+  const nativeDir = path.join(s.home, '.gemini', 'antigravity');
+  fs.mkdirSync(nativeDir, { recursive: true });
+  const catalog = new sqlite.DatabaseSync(path.join(nativeDir, 'conversation_summaries.db'));
+  try {
+    catalog.exec('CREATE TABLE conversation_summaries (conversation_id TEXT PRIMARY KEY, title TEXT, preview TEXT, workspace_uris TEXT)');
+    catalog.prepare('INSERT INTO conversation_summaries VALUES (?, ?, NULL, ?)').run(
+      main, 'Native Antigravity title', JSON.stringify([require('node:url').pathToFileURL(s.home).href]));
+  } finally {
+    catalog.close();
+  }
+  const makeRow = (client, sessionId, value) => ({ client, sessionId, totalTokens: value, costUsd: value / 10 });
+  const periods = { today: normalizePeriod({ sessions: {
+    a: makeRow('antigravity', main, 10),
+    b: makeRow('antigravity', second, 20),
+    c: makeRow('claude', 'child-native', 30),
+    d: makeRow('antigravity', 'weak-id', 40),
+    e: makeRow('antigravity', 'wrong-id', 50)
+  } }) };
+  const deps = { env: {}, metadataCache: new Map(), catalogProjectRows: new WeakSet(), catalogProjects: { today: {} } };
+  applySessionMetadata(periods, s.home, deps);
+  const sessions = periods.today.sessions;
+  const launch = sessions[`antigravity:${main}`];
+  assert.equal(launch.title, 'T3 ACP title');
+  assert.ok(launch.projectId);
+  const projectId = launch.projectId;
+  const catalogTitleSource = deps.metadataCache.get(`antigravity:${main}`).catalogTitleSource;
+  const nativeDb = path.join(nativeDir, 'conversation_summaries.db');
+  const otherDir = path.join(s.home, '.gemini', 'antigravity-ide');
+  fs.mkdirSync(otherDir, { recursive: true });
+  fs.copyFileSync(nativeDb, path.join(otherDir, 'conversation_summaries.db'));
+  const otherCatalog = new sqlite.DatabaseSync(path.join(otherDir, 'conversation_summaries.db'));
+  try { otherCatalog.exec('UPDATE conversation_summaries SET title = NULL, workspace_uris = NULL'); } finally { otherCatalog.close(); }
+  fs.renameSync(nativeDb, nativeDb + '.moved');
+  const coldDeps = { env: {}, metadataCache: new Map(), antigravityTitleCache: new Map(),
+    t3Titles: { [`antigravity:${main}`]: launch.title },
+    catalogTitleSources: { [`antigravity:${main}`]: catalogTitleSource },
+    catalogProjects: { today: { [`antigravity:${main}`]: projectId } } };
+  applySessionMetadata(periods, s.home, coldDeps);
+  assert.equal(coldDeps.metadataCache.get(`antigravity:${main}`).catalogProjectResolved, undefined);
+  fs.renameSync(nativeDb + '.moved', nativeDb);
+  assert.equal(launch.t3ThreadId, 'parent');
+  assert.equal(sessions[`antigravity:${second}`].t3ThreadId, 'parent');
+  assert.equal(sessions[`antigravity:${second}`].title, 'T3 ACP title', 'historical runs share the verified thread title');
+  assert.equal(sessions['claude:child-native'].parentClient, 'antigravity');
+  assert.equal(sessions['claude:child-native'].parentSessionId, main);
+  for (const id of ['weak-id', 'wrong-id']) {
+    assert.equal(sessions[`antigravity:${id}`].title, '');
+    assert.equal(sessions[`antigravity:${id}`].t3ThreadId, undefined);
+  }
+  const { sessionRowsForPeriod, groupSessionRows } = require('../../src/electron/renderer/sessionRows');
+  const group = groupSessionRows(sessionRowsForPeriod(periods.today)).find(row => row.groupRows?.length === 3);
+  assert.equal(group?.subagentCount, 1);
+  assert.equal(group?.value, 60);
+  assert.equal(group?.cost, 6);
+
+  s.db.exec("UPDATE orchestration_v2_projection_threads SET title = 'Renamed T3 ACP title' WHERE thread_id = 'parent'");
+  applySessionMetadata(periods, s.home, deps);
+  assert.equal(launch.title, 'Renamed T3 ACP title');
+  const unrelated = store(t);
+  applySessionMetadata(periods, s.home, { ...deps, t3DbPaths: [unrelated.file] });
+  assert.equal(launch.title, 'Renamed T3 ACP title', 'a miss in another store does not revoke the cached title');
+  s.db.exec("UPDATE orchestration_v2_projection_threads SET title = 'New thread' WHERE thread_id = 'parent'");
+  applySessionMetadata(periods, s.home, deps);
+  assert.equal(launch.title, 'Native Antigravity title', 'the T3 placeholder does not replace the native title');
+  s.db.exec("UPDATE orchestration_v2_projection_threads SET title = 'Renamed T3 ACP title' WHERE thread_id = 'parent'");
+  applySessionMetadata(periods, s.home, deps);
+  assert.equal(launch.title, 'Renamed T3 ACP title');
+  const strength = s.db.prepare("UPDATE orchestration_v2_projection_provider_threads SET payload_json = json_set(payload_json, '$.nativeThreadRef.strength', ?) WHERE provider_thread_id = 'launch-provider'");
+  strength.run('weak');
+  applySessionMetadata(periods, s.home, deps);
+  assert.equal(launch.title, 'Native Antigravity title');
+  strength.run('strong');
+  applySessionMetadata(periods, s.home, deps);
+  assert.equal(launch.title, 'Renamed T3 ACP title');
+  s.thread('ambiguous');
+  s.provider('ambiguous-provider', 'ambiguous', second, 'antigravity');
+  s.db.exec("UPDATE orchestration_v2_projection_threads SET title = 'Conflicting title' WHERE thread_id = 'ambiguous'");
+  applySessionMetadata(periods, s.home, deps);
+  assert.equal(sessions[`antigravity:${second}`].title, undefined, 'a current claim conflicting with a historical run clears the override');
+  const native = new sqlite.DatabaseSync(path.join(nativeDir, 'conversation_summaries.db'));
+  try { native.exec('DELETE FROM conversation_summaries'); } finally { native.close(); }
+  applySessionMetadata(periods, s.home, deps);
+  assert.equal(launch.title, 'Renamed T3 ACP title');
+  assert.equal(launch.projectId, undefined);
+  assert.equal(deps.catalogProjects.today[`antigravity:${main}`], undefined);
+});
+
+for (const schema of [
+  'DROP TABLE orchestration_v2_projection_nodes',
+  'CREATE TABLE orchestration_v2_projection_run_attempts (thread_id TEXT)'
+]) test(`incomplete T3 ownership retains the cached Antigravity title: ${schema}`, t => {
+  const s = store(t);
+  s.thread('thread');
+  s.provider('provider', 'thread', 'conversation', 'antigravity');
+  s.db.exec("UPDATE orchestration_v2_projection_threads SET title = 'T3 title'");
+  const key = 'antigravity:conversation';
+  const periods = () => ({ today: normalizePeriod({ sessions: {
+    [key]: { client: 'antigravity', sessionId: 'conversation', totalTokens: 10 }
+  } }) });
+  const deps = { env: {}, metadataCache: new Map() };
+  const before = periods();
+  applySessionMetadata(before, s.home, deps);
+  assert.equal(before.today.sessions[key].title, 'T3 title');
+  s.db.exec(schema + '; DELETE FROM orchestration_v2_projection_provider_threads');
+  const incomplete = periods();
+  applySessionMetadata(incomplete, s.home, deps);
+  assert.equal(incomplete.today.sessions[key].title, 'T3 title', 'a missing historical schema makes absence inconclusive');
+  assert.equal(deps.metadataCache.get(key).t3ThreadRevoked, undefined);
+  s.provider('provider', 'thread', 'conversation', 'antigravity');
+  s.db.exec('ALTER TABLE orchestration_v2_projection_threads DROP COLUMN title');
+  const after = periods();
+  applySessionMetadata(after, s.home, deps);
+  assert.equal(after.today.sessions[key].title, '');
+  assert.equal(after.today.sessions[key].t3ThreadId, 'thread');
 });
 
 for (const driver of ['cursor', 'opencode', 'grok', 'muse']) {
@@ -218,6 +398,7 @@ test('app parent enrichment is independent of titles and resolves period-specifi
   }
   periods.today.sessions['claude:child-native'].parentSessionId = 'native-authoritative';
   delete periods.today.sessions['claude:child-native'].parentClient;
+  delete periods.today.sessions['claude:child-native'].t3ParentLink;
   applyT3SessionParents(periods, s.home, { env: {} });
   assert.equal(periods.today.sessions['claude:child-native'].parentSessionId, 'native-authoritative');
   assert.equal(periods.today.sessions['claude:child-native'].parentClient, undefined);
@@ -579,7 +760,7 @@ test('ACP projection instance column must agree with its payload and uses only c
 
 test('unknown drivers and Pi file-path identities remain unbound instead of guessing an accounting id', t => {
   const s = store(t); s.thread('main');
-  for (const driver of ['unknown', 'pi', 'antigravity', 'constructor']) s.provider(driver, 'main', 'same-id', driver);
+  for (const driver of ['unknown', 'pi', 'constructor']) s.provider(driver, 'main', 'same-id', driver);
   assert.equal(readT3SessionRelations(['same-id'], { homeDir: s.home, env: {} }).size, 0);
 });
 
@@ -719,6 +900,284 @@ test('anchored SQLite metadata preserves the resolvable Month parent pair across
   assert.equal(groups.length, 1); assert.equal(groups[0].groupRows.length, 2);
 });
 
+for (const change of ['corrupt', 'locked', 'reassigned', 'parent removed', 'incomplete delegation schema']) test(`an Antigravity relationship change refreshes retained grouping: ${change}`, async t => {
+  const { collectUsageOnce, localTodayKey } = require('../../src/shared/collector');
+  const s = store(t);
+  const key = 'antigravity:acp-conversation';
+  const nativeKey = 'antigravity:native-child';
+  s.thread('parent');
+  s.thread('original', 'parent');
+  s.thread('native', 'parent');
+  s.provider('parent-provider', 'parent', 'acp-parent', 'antigravity');
+  s.provider('original-provider', 'original', 'acp-conversation', 'antigravity');
+  s.provider('native-provider', 'native', 'native-child', 'antigravity');
+  s.delegation('original-provider', 'parent-provider', 'parent');
+  let captured;
+  const options = { clients: 'antigravity', homeDir: s.home, env: {}, osInfo: {},
+    historyEnabled: false, limitsEnabled: false, wslScanEnabled: false,
+    allTimeSince: '2024-01-01', nativeRangesEnabled: true, dailySessionSyncEnabled: true,
+    runTokscaleWindows: async ({ windows }) => {
+      const report = await options.runTokscale();
+      return Object.fromEntries(windows.map(({ name }) => [name, structuredClone(report)]));
+    },
+    onAnchorComputed: value => { captured = value; },
+    runTokscale: async () => ({ entries: [
+      { client: 'antigravity', sessionId: 'acp-parent', model: 'm', input: 30 },
+      { client: 'antigravity', sessionId: 'new-parent', model: 'm', input: 15 },
+      { client: 'antigravity', sessionId: 'acp-conversation', model: 'm', input: 20 },
+      { client: 'antigravity', sessionId: 'native-child', parentSessionId: 'acp-parent', model: 'm', input: 10 }
+    ] }) };
+  const full = await collectUsageOnce(options);
+  const closedDay = full.nativeRangeWindows.yesterday.start;
+  assert.equal(full.dailySessionPeriods[closedDay].sessions[key].parentSessionId, 'acp-parent');
+  assert.equal(full.month.sessions[key].t3ThreadId, 'original');
+  assert.equal(full.month.sessions[key].parentSessionId, 'acp-parent');
+  assert.equal(full.month.sessions[nativeKey].parentSessionId, 'acp-parent');
+  const parentRemoved = change === 'parent removed';
+  const incomplete = change === 'incomplete delegation schema';
+  if (!parentRemoved && !incomplete) {
+    s.thread('competing');
+    s.provider('competing-provider', 'competing', 'acp-conversation', 'antigravity');
+    s.provider('competing-native-provider', 'competing', 'native-child', 'antigravity');
+  }
+  const legacyPath = path.join(path.dirname(s.file), 'state.sqlite');
+  const reassigned = change === 'reassigned';
+  let legacy;
+  let next;
+  try {
+    if (reassigned) {
+      s.db.exec("UPDATE orchestration_v2_projection_threads SET deleted_at = '2026-11-25' WHERE thread_id IN ('original', 'native')");
+      s.thread('new-parent-thread');
+      s.provider('new-parent-provider', 'new-parent-thread', 'new-parent', 'antigravity');
+      s.db.exec(`UPDATE orchestration_v2_projection_threads SET payload_json =
+        json_set(payload_json, '$.lineage.parentThreadId', 'new-parent-thread', '$.lineage.relationshipToParent', 'subagent')
+        WHERE thread_id = 'competing'`);
+      s.delegation('competing-provider', 'new-parent-provider', 'new-parent-thread');
+    } else if (change === 'locked') {
+      legacy = new sqlite.DatabaseSync(legacyPath);
+      legacy.exec('CREATE TABLE legacy (id TEXT); BEGIN EXCLUSIVE');
+    } else if (parentRemoved) {
+      s.db.exec("UPDATE orchestration_v2_projection_threads SET deleted_at = '2026-11-25' WHERE thread_id = 'parent'");
+    } else if (incomplete) {
+      s.db.exec('DROP TABLE orchestration_v2_projection_nodes');
+    } else {
+      fs.writeFileSync(legacyPath, 'corrupt unrelated legacy store');
+    }
+    next = await collectUsageOnce({ ...options, todayOnlyAnchor: { dateKey: localTodayKey(),
+      today: full.today, month: full.month, allTime: full.allTime, todayPartitions: captured.todayPartitions,
+      sessionIdentityVersion: captured.sessionIdentityVersion, nativePastRanges: captured.nativePastRanges,
+      dailySessionPastDays: captured.dailySessionPastDays } });
+  } finally {
+    legacy?.close();
+  }
+  for (const name of ['today', 'month', 'allTime']) {
+    assert.equal(next[name].sessions[key].t3ThreadId, reassigned ? 'competing' : parentRemoved || incomplete ? 'original' : undefined);
+    assert.equal(next[name].sessions[key].parentSessionId, reassigned ? 'new-parent' : incomplete && name !== 'today' ? 'acp-parent' : undefined);
+    assert.equal(next[name].sessions[nativeKey].parentSessionId, 'acp-parent');
+    assert.equal(next[name].sessions[key].totalTokens, 20);
+  }
+  if (reassigned) assert.deepEqual(new Set(captured.changedT3ThreadKeys), new Set([key, nativeKey, 'antigravity:new-parent']));
+  else if (parentRemoved) assert.deepEqual(captured.changedT3ThreadKeys, [key]);
+  else if (incomplete) assert.deepEqual(captured.changedT3ThreadKeys, []);
+  else {
+    assert.deepEqual(new Set(captured.revokedT3ThreadKeys), new Set([key, nativeKey]));
+    const closedSessions = next.dailySessionPeriods[closedDay].sessions;
+    assert.equal(closedSessions[key].t3ThreadId, undefined);
+    assert.equal(closedSessions[key].parentSessionId, undefined);
+    assert.equal(closedSessions[nativeKey].parentSessionId, 'acp-parent', 'native lineage survives T3 revocation');
+  }
+});
+
+for (const [client, driver, change] of [
+  ['claude', 'claudeAgent', 'delete parent'],
+  ['codex', 'codex', 'delete parent'],
+  ['claude', 'acpRegistry', 'unreadable settings'],
+  ['claude', 'claudeAgent', 'replace with unaccounted parent'],
+  ['antigravity', 'antigravity', 'replace with unaccounted parent'],
+  ['codex', 'codex', 'delete parent with fresh native parent'],
+  ['codex', 'codex', 'delete child with fresh native parent'],
+  ['codex', 'codex', 'delete parent with unrelated unreadable ACP settings'],
+]) {
+  test(`retained ${client} delegation follows T3 evidence: ${change}`, async t => {
+    const { collectUsageOnce, localTodayKey } = require('../../src/shared/collector');
+    const s = store(t);
+    pair(s, driver, 'antigravity');
+    if (driver === 'acpRegistry') {
+      registry(s, { agent: { driver, config: { agentId: 'claude-acp' } } });
+      s.db.exec(`UPDATE orchestration_v2_projection_provider_threads SET payload_json =
+        json_set(payload_json, '$.providerInstanceId', 'agent') WHERE provider_thread_id = 'child-provider'`);
+    }
+    const key = `${client}:child-native`;
+    const keepLink = change === 'unreadable settings';
+    const unrelatedAcp = change.endsWith('unrelated unreadable ACP settings');
+    if (unrelatedAcp) {
+      s.thread('devin');
+      s.provider('devin-provider', 'devin', 'devin-native', 'acpRegistry', 'strong', 'other');
+      fs.writeFileSync(path.join(path.dirname(s.file), 'settings.json'), '{');
+    }
+    const childRemoved = change.startsWith('delete child');
+    const nativeParent = change.endsWith('fresh native parent') ? 'unaccounted-native-parent' : undefined;
+    let refreshed = false;
+    let captured;
+    const scan = () => ({ entries: [
+      ...(unrelatedAcp ? [{ client: 'devin', sessionId: 'devin-native', model: 'm', input: 10 }] : []),
+      { client: 'antigravity', sessionId: 'parent-native', model: 'm', input: 30 },
+      { client, sessionId: 'child-native', parentSessionId: refreshed ? nativeParent : undefined, model: 'm', input: 20 }
+    ] });
+    const options = { clients: [...new Set(['antigravity', client, ...(unrelatedAcp ? ['devin'] : [])])].join(','), homeDir: s.home, env: {}, osInfo: {},
+      historyEnabled: false, limitsEnabled: false, wslScanEnabled: false,
+      nativeRangesEnabled: true, allTimeSince: '2024-01-01',
+      onAnchorComputed: value => { captured = value; },
+      runTokscale: async () => scan(),
+      runTokscaleWindows: async ({ windows }) => Object.fromEntries(windows.map(({ name }) => [name, scan()])) };
+    const before = await collectUsageOnce(options);
+    assert.equal(before.month.sessions[key].parentSessionId, 'parent-native');
+    if (keepLink) {
+      fs.writeFileSync(path.join(path.dirname(s.file), 'settings.json'), '{');
+      assert.deepEqual(readT3SessionRelationResult(['child-native'], {
+        homeDir: s.home, env: {}, includeOwnershipStatus: true
+      }).incompleteNativeIds, new Set(['child-native']));
+    } else if (change === 'replace with unaccounted parent') {
+      s.thread('replacement');
+      s.provider('replacement-provider', 'replacement', 'unaccounted-t3-parent', 'antigravity');
+      s.db.exec(`UPDATE orchestration_v2_projection_threads SET payload_json =
+        json_set(payload_json, '$.lineage.parentThreadId', 'replacement') WHERE thread_id = 'child'`);
+      s.delegation('child-provider', 'replacement-provider', 'replacement', 'replacement');
+    } else {
+      s.db.prepare("UPDATE orchestration_v2_projection_threads SET deleted_at = '2026-11-25' WHERE thread_id = ?")
+        .run(childRemoved ? 'child' : 'parent');
+    }
+    refreshed = true;
+    const after = await collectUsageOnce({ ...options, todayOnlyAnchor: { dateKey: localTodayKey(),
+      today: before.today, month: before.month, allTime: before.allTime, todayPartitions: captured.todayPartitions,
+      sessionIdentityVersion: captured.sessionIdentityVersion, nativePastRanges: captured.nativePastRanges } });
+    assert.deepEqual(captured.revokedT3ThreadKeys, childRemoved ? [key] : change.startsWith('delete parent') ? ['antigravity:parent-native'] : []);
+    assert.deepEqual(captured.changedT3ThreadKeys, keepLink || childRemoved ? [] : [key]);
+    for (const name of ['today', 'month', 'allTime']) {
+      const row = after[name].sessions[key];
+      const retained = keepLink && name !== 'today';
+      assert.equal(row.t3ThreadId, childRemoved || (keepLink && !retained) ? undefined : 'child', name);
+      assert.equal(row.parentSessionId, retained ? 'parent-native' : nativeParent, name);
+      assert.equal(row.parentClient, retained ? 'antigravity' : undefined, name);
+      assert.equal(row.t3ParentLink, retained ? true : undefined, name);
+      assert.equal(row.totalTokens, 20, name);
+    }
+    for (const period of [after.nativeRanges.yesterday, captured.nativePastRanges.periods.yesterday]) {
+      assert.equal(period.sessions[key].parentSessionId, keepLink ? 'parent-native' : nativeParent);
+      assert.equal(period.sessions[key].totalTokens, 20);
+    }
+  });
+}
+
+
+test('a targeted tick cannot restore a cleared T3 parent from another client partition', async t => {
+  const { collectUsageOnce, localTodayKey } = require('../../src/shared/collector');
+  const s = store(t);
+  pair(s, 'claudeAgent', 'antigravity');
+  const key = 'claude:child-native';
+  const entries = [
+    { client: 'antigravity', sessionId: 'parent-native', model: 'm', input: 30 },
+    { client: 'claude', sessionId: 'child-native', model: 'm', input: 20 }
+  ];
+  const targets = [];
+  let captured;
+  const options = { clients: 'antigravity,claude', homeDir: s.home, env: {}, osInfo: {},
+    historyEnabled: false, limitsEnabled: false, wslScanEnabled: false,
+    onAnchorComputed: value => { captured = value; },
+    runTokscale: async ({ clients, flags }) => {
+      targets.push(clients);
+      const found = entries.filter(row => clients.split(',').includes(row.client));
+      if (flags.includes('--today')) return { entries: found };
+      return { entries: [
+        ...found.map(row => row.client === 'claude' ? { ...row, parentSessionId: 'native-parent' } : row),
+        { client: 'claude', sessionId: 'native-parent', model: 'm', input: 10 }
+      ] };
+    } };
+  const anchor = () => ({ ...captured.windowsPeriods, dateKey: localTodayKey(),
+    todayPartitions: captured.todayPartitions, sessionIdentityVersion: captured.sessionIdentityVersion });
+  await collectUsageOnce(options);
+  assert.equal(captured.todayPartitions.claude.sessions[key].parentSessionId, 'parent-native');
+  assert.equal(captured.windowsPeriods.month.sessions[key].parentSessionId, 'native-parent');
+  assert.equal(captured.windowsPeriods.allTime.sessions[key].parentSessionId, 'native-parent');
+  targets.length = 0;
+
+  s.db.exec("UPDATE orchestration_v2_projection_threads SET deleted_at = '2026-11-25' WHERE thread_id = 'parent'");
+  const tick = () => collectUsageOnce({ ...options, targetClients: ['antigravity'], todayOnlyAnchor: anchor() });
+  const first = await tick();
+  assert.equal(first.today.sessions[key].parentSessionId, undefined);
+  assert.equal(captured.todayPartitions.claude.sessions[key].t3ParentLink, undefined);
+  assert.equal(captured.todayPartitions.claude.sessions[key].parentSessionId, undefined);
+  assert.equal(first.month.sessions[key].parentSessionId, 'native-parent');
+  assert.equal(first.allTime.sessions[key].parentSessionId, 'native-parent');
+  assert.deepEqual(captured.changedT3ThreadKeys, [key]);
+
+  // The incomplete read permits retaining an old verified edge, but must not
+  // bring one back from the frozen Claude portion of the Today scan.
+  s.db.exec('DROP TABLE orchestration_v2_projection_nodes');
+  const second = await tick();
+  assert.deepEqual(targets, ['antigravity', 'antigravity']);
+  assert.equal(second.today.sessions[key].parentSessionId, undefined);
+  assert.equal(second.today.sessions[key].t3ThreadId, 'child');
+  assert.equal(second.today.sessions[key].totalTokens, 20);
+});
+
+test('unreadable ACP bindings make only the affected parent relationship incomplete', t => {
+  const s = store(t);
+  s.thread('parent');
+  s.thread('child', 'parent');
+  registry(s, { agent: { driver: 'acpRegistry', config: { agentId: 'claude-acp' } } });
+  s.provider('launch-provider', 'parent', 'parent-native', 'acpRegistry', 'strong', 'agent');
+  s.provider('child-provider', 'child', 'child-native');
+  s.delegation('child-provider', 'launch-provider', 'parent');
+  const periods = { today: extractUsageFromTokscale({ entries: [
+    { client: 'claude', sessionId: 'parent-native', model: 'm', input: 10 },
+    { client: 'codex', sessionId: 'child-native', model: 'm', input: 20 }
+  ] }) };
+  const row = periods.today.sessions['codex:child-native'];
+  applyT3SessionParents(periods, s.home, { env: {} });
+  assert.equal(row.parentSessionId, 'parent-native');
+
+  fs.writeFileSync(path.join(path.dirname(s.file), 'settings.json'), '{');
+  const result = readT3SessionRelationResult(['child-native'], { homeDir: s.home, env: {}, includeOwnershipStatus: true });
+  assert.equal(result.ownershipComplete, true);
+  assert.deepEqual(result.incompleteNativeIds, new Set());
+  assert.deepEqual(result.incompleteParentThreads, new Set(['child']));
+  applyT3SessionParents(periods, s.home, { env: {} });
+  assert.equal(row.parentSessionId, 'parent-native');
+});
+
+test('a saved Antigravity range gains the first verified T3 thread and parent', async t => {
+  const { collectUsageOnce, localTodayKey } = require('../../src/shared/collector');
+  const s = store(t);
+  const key = 'antigravity:child-native';
+  let captured;
+  const options = { clients: 'antigravity', homeDir: s.home, env: {}, osInfo: {},
+    allTimeSince: '2024-01-01', historyEnabled: false, limitsEnabled: false, wslScanEnabled: false,
+    nativeRangesEnabled: true,
+    onAnchorComputed: value => { captured = value; },
+    runTokscale: async () => ({ entries: ['parent-native', 'parent-local', 'child-native'].map(sessionId =>
+      ({ client: 'antigravity', sessionId, model: 'm', input: 20 })) }) };
+  const full = await collectUsageOnce(options);
+  assert.equal(full.month.sessions[key].t3ThreadId, undefined);
+  const todayKey = localTodayKey();
+  const date = new Date(todayKey);
+  const daysAgo = days => new Date(date.getTime() - days * 86400000).toISOString().slice(0, 10);
+  const starts = { yesterday: daysAgo(1), week: daysAgo((date.getUTCDay() + 6) % 7), last7: daysAgo(6), last30: daysAgo(29) };
+  const nativePastRanges = { todayKey, weekStartsOn: 1, starts,
+    periods: Object.fromEntries(Object.keys(starts).map(name => [name, extractUsageFromTokscale({ entries: ['parent-local', 'child-native'].map(sessionId =>
+      ({ client: 'antigravity', sessionId, model: 'm', input: 20 })) })])) };
+  pair(s, 'antigravity', 'antigravity');
+  s.provider('parent-local-provider', 'parent', 'parent-local', 'antigravity');
+  const next = await collectUsageOnce({ ...options, todayOnlyAnchor: { dateKey: todayKey,
+    today: full.today, month: full.month, allTime: full.allTime, todayPartitions: captured.todayPartitions,
+    sessionIdentityVersion: captured.sessionIdentityVersion, nativePastRanges } });
+  assert.equal(next.allTime.sessions[key].parentSessionId, 'parent-native');
+  for (const range of [next.nativeRanges.yesterday, captured.nativePastRanges.periods.yesterday]) {
+    assert.equal(range.sessions[key].t3ThreadId, 'child');
+    assert.equal(range.sessions[key].parentSessionId, 'parent-local');
+    assert.equal(range.totalTokens, 40);
+  }
+});
 
 test('relationship queries retain every requested child across the 400-ID query boundary', t => {
   const s = store(t);
@@ -767,6 +1226,8 @@ test('relationship read status distinguishes legal emptiness from retryable and 
   const unsupported = new sqlite.DatabaseSync(emptyPath);
   unsupported.exec('CREATE TABLE unrelated (id TEXT)'); unsupported.close();
   assert.equal(read({ t3DbPaths: [emptyPath] }).status, 'unavailable');
+  assert.equal(read({ includeOwnershipStatus: true }).ownershipComplete, true);
+  assert.equal(read({ includeOwnershipStatus: true, t3DbPaths: [s.file, emptyPath] }).ownershipComplete, false);
   const corrupt = path.join(s.home, 'corrupt.sqlite');
   fs.writeFileSync(corrupt, 'not sqlite');
   assert.equal(read({ t3DbPaths: [corrupt] }).status, 'unavailable');
@@ -799,4 +1260,27 @@ test('later store query failures discard partial facts without suppressing compl
   assert.equal(result.facts.get('claude:child-native').parentNativeId, 'parent-native', 'completed healthy store still supplies facts');
   errorCode = 6;
   assert.deepEqual(readT3SessionRelationResult(['child-native'], { ...deps, t3DbPaths: [copied, s.file] }), { facts: new Map(), status: 'retryable' }, 'later success cannot mask LOCKED');
+});
+
+test('built-in antigravity and kiro drivers group within T3 threads and across delegated tasks', t => {
+  const s = store(t);
+  s.thread('parent');
+  s.thread('child-kiro', 'parent');
+  s.provider('parent-agy', 'parent', '32964522-c967-4d55-9c35-eca7059ff0dd', 'antigravity');
+  s.provider('child-kiro-p', 'child-kiro', 'sess_50d40b40-c470-4fd3-8f5d-1a0c1f57cfce', 'kiro');
+  s.delegation('child-kiro-p', 'parent-agy', 'parent', 'k');
+  const periods = {
+    today: normalizePeriod({
+      sessions: {
+        a: { client: 'antigravity', sessionId: '32964522-c967-4d55-9c35-eca7059ff0dd', totalTokens: 100, costUsd: 1 },
+        k: { client: 'kiro', sessionId: 'sess_50d40b40-c470-4fd3-8f5d-1a0c1f57cfce', totalTokens: 50, costUsd: 0.5 }
+      }
+    })
+  };
+  applyT3SessionParents(periods, s.home, { env: {} });
+  const ss = periods.today.sessions;
+  assert.equal(ss['antigravity:32964522-c967-4d55-9c35-eca7059ff0dd'].t3ThreadId, 'parent');
+  assert.equal(ss['kiro:sess_50d40b40-c470-4fd3-8f5d-1a0c1f57cfce'].t3ThreadId, 'child-kiro');
+  assert.equal(ss['kiro:sess_50d40b40-c470-4fd3-8f5d-1a0c1f57cfce'].parentSessionId, '32964522-c967-4d55-9c35-eca7059ff0dd');
+  assert.equal(ss['kiro:sess_50d40b40-c470-4fd3-8f5d-1a0c1f57cfce'].parentClient, 'antigravity');
 });

@@ -128,7 +128,8 @@ function createIcloudSyncRuntime(options = {}) {
       ...aggregate,
       historyPreview: historyPreview(history),
       historyRevision: historyRevision(history),
-      deviceHistoryRevision: deviceHistoryRevision(nextRecords)
+      deviceHistoryRevision: deviceHistoryRevision(nextRecords),
+      fixedRangeRevisions: store.fixedRangeRevisions?.()
     };
   }
 
@@ -512,6 +513,7 @@ function createIcloudSyncRuntime(options = {}) {
   return {
     deleteDevice,
     getDevices: () => records.slice(),
+    readFixedRange: (...args) => store.readFixedRange?.(...args),
     getHistory: () => {
       const historyEnabled = typeof options.historyEnabled === 'function'
         ? options.historyEnabled()

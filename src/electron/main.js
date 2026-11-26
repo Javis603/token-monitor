@@ -180,6 +180,9 @@ const {
   projectModelAliasHistory
 } = require('./modelAliasPresentation');
 const { createHub } = require('../hub/server');
+const { fetchFixedRange, fixedRangeUploadPages } = require('../shared/fixedRangeClient');
+const { SYNC_WEEK_STARTS_ON } = require('../shared/fixedRangeSync');
+const { createFixedRangeReadCache, resolveSyncedFixedPeriod, resolveSyncedSessionPeriod, historyFallbackForDevices } = require('./syncedFixedPeriod');
 const { probeHubBuild } = require('./hubBuildStatus');
 const { normalizeLimitsRefreshMode, normalizeLimitsRefreshMs, parseBoolean, parseLimitProviders } = require('../shared/limits/collector');
 const { createCursorUsageEventIndex } = require('../shared/providers/cursor/usageEvents');
@@ -227,10 +230,12 @@ const {
 } = require('./renderer/viewDisplayPreferences');
 const {
   defaultHomeModulePreferences,
+  migrateHomeLimitDisplayMode,
   normalizeHiddenHomeModules,
   normalizeHomeLimitDisplayMode,
   normalizeHomeModuleCounts,
-  normalizeHomeModuleOrder
+  normalizeHomeModuleOrder,
+  normalizeHomeSessionDisplayMode
 } = require('./renderer/homeModulePreferences');
 const {
   APP_UPDATE_STARTUP_DELAY_MS,
@@ -356,6 +361,7 @@ const { createCodexResetForecastClient } = require('./providers/codex/resetForec
 const { createUpdateInstallQuitGuard, observeUpdateInstallHandoff } = require('./updateInstallQuit');
 const { classifyStreamFailure } = require('./syncConnection');
 const {
+  attachLocalNativeRanges,
   attachLocalNativeViews,
   attachLocalPresentationNativeViews,
   completeLocalSyncStats,
@@ -452,6 +458,7 @@ const {
   normalizeEdgeDockOffset,
   normalizeEdgeDockSide,
   normalizeEdgeDockSize,
+  normalizeEdgeDockTriggerRange,
   normalizeEdgeDockBubbleSize
 } = require('./edgeDock/geometry');
 const { buildEdgeDockCells } = require('./renderer/edgeDock/presentation');
@@ -482,7 +489,7 @@ const {
   normalizeWindowsBackdropMode,
   normalizeWindowsDockBackdropMode
 } = require('./windowsBackdropMode');
-const { refreshWindowsBackdrop, syncWindowsBackdrop, windowsBackdropFallback } = require('./windowsBackdrop');
+const { refreshWindowsBackdrop, syncWindowsBackdrop, windowsAccentActive, windowsBackdropFallback } = require('./windowsBackdrop');
 const {
   isLiquidGlassBackdrop,
   liquidGlassStyle,
@@ -553,6 +560,9 @@ let initialLimitProvidersPending = false;
 // settings are written through saveSettings() after the window exists, so the flag
 // carries the decision from the read to that first save.
 let seededClientSplitsPending = false;
+// Set by readSettings() when the one-time reset of the Home limits layout to
+// `default` changed a saved value; saved at the same point as a client split.
+let homeLimitDisplayModePending = false;
 let persistedSettingsSnapshot = null;
 let credentialStore = null;
 let openrouterSlotsMigrated = false;
@@ -579,7 +589,7 @@ if (!gotLock) app.exit(0);
 
 const HOME_LIMIT_ACCOUNT_COUNT_DEFAULT = 3;
 const HOME_LIMIT_ACCOUNT_COUNT_MAX = 12;
-const PERIOD_MONTH_MODES = new Set(['month', 'week', 'last7', 'last30']);
+const PERIOD_MONTH_MODES = new Set(['month', 'yesterday', 'week', 'last7', 'last30']);
 
 function normalizePeriodMonthMode(value) {
   return PERIOD_MONTH_MODES.has(value) ? value : 'month';
@@ -629,6 +639,7 @@ function defaultSettings() {
     showLiveDot: true,
     showToolIcons: true,
     titleIconOnly: true,
+    settingsInTitlebar: false,
     showCompactTotalTokens: false,
     showLiveTokenRate: false,
     liveTokenRateScope: 'all',
@@ -645,6 +656,7 @@ function defaultSettings() {
     sessionContextMetric: 'used',
     sessionTitlesEnabled: true,
     periodMonthMode: 'month',
+    periodTabOrder: [],
     themeColors: {},
     vendorColors: {},
     textSize: 'standard',
@@ -679,6 +691,7 @@ function defaultSettings() {
     edgeDockRunningIndicatorEnabled: true,
     edgeDockMode: 'autoHide',
     edgeDockHaptic: true,
+    edgeDockTriggerRange: 'rail',
     edgeDockWarnColors: false,
     edgeDockMacBackdrop: 'inherit',
     edgeDockWindowsBackdrop: 'inherit',
@@ -721,7 +734,10 @@ function defaultSettings() {
     hiddenHomeModules: defaultHomeModulePreferences().hiddenHomeModules,
     homeModuleCounts: normalizeHomeModuleCounts(),
     showHomeLimitBars: false,
-    homeLimitDisplayMode: 'text',
+    homeVendorColors: false,
+    homeLimitDisplayMode: 'default',
+    homeLimitDisplayModeDefaulted: true,
+    homeSessionDisplayMode: 'compact',
     showHomeLimitProviderNames: false,
     projectsEnabled: parseBoolean(process.env.TOKEN_MONITOR_PROJECTS_ENABLED, true),
     projectBreakdownMode: 'tool',
@@ -762,6 +778,7 @@ function defaultSettings() {
     limitsHistoryOpenMode: 'hover',
     claudePrepaidBalanceEnabled: parseBoolean(process.env.TOKEN_MONITOR_CLAUDE_PREPAID_BALANCE, true),
     claudeCliFallbackEnabled: true,
+    antigravityLocalLimitsEnabled: true,
     // The key OpenCode stores for itself needs no setup, so tracking it is the
     // default. This turns that off for a machine that is signed in to an account
     // the user does not want reported.
@@ -806,6 +823,34 @@ function defaultSettings() {
       lastKnownLatest: null,
       dismissedVersion: null
     }
+  };
+}
+
+function resettableSettingsDefaults() {
+  const defaults = defaultSettings();
+  const keys = [
+    'language', 'startAtLogin', 'automaticAppUpdates', 'discordRpcEnabled',
+    'periodMonthMode', 'currency', 'heatmapMetric', 'homeActiveDaysWindow', 'showExactHomeTrendTokens',
+    'homeModuleCounts', 'homeLimitDisplayMode', 'showHomeLimitBars', 'showHomeLimitProviderNames', 'homeLimitAccountCount',
+    'homeVendorColors', 'homeSessionDisplayMode',
+    'historyIntervalMs', 'sessionContextMetric', 'limitsHistoryOpenMode', 'modelRankingMetric', 'serviceStatusRefreshMs',
+    'windowBehavior', 'keepAboveTaskbar', 'floatingBubbleTrigger', 'floatingBubbleContent',
+    'hideAppIcon', 'trayContent', 'showTrayProviderBadge',
+    'edgeDockMode', 'edgeDockTriggerRange', 'edgeDockSide', 'edgeDockSize', 'edgeDockCustomScale',
+    'edgeDockBubbleSize', 'edgeDockBubbleCustomScale', 'edgeDockMacBackdrop', 'edgeDockWindowsBackdrop',
+    'edgeDockRunningIndicatorEnabled', 'edgeDockWarnColors', 'edgeDockHaptic',
+    'notchHoverAction', 'notchShape', 'notchSize', 'notchCustomScale',
+    'notchStyle', 'notchProgressiveBlur', 'notchSummaryEnabled', 'notchSummaryMode',
+    'notchHideSummaryInFullScreen', 'notchRunningIndicatorEnabled', 'notchWarnColors', 'notchHaptic', 'notchSwipeGestures',
+    'systemGlass', 'windowsBackdrop', 'macBackdrop', 'textSize', 'reduceMotion', 'tokenNumberAnimation',
+    'showCompactTotalTokens', 'compactTokenUnits', 'showLiveTokenRate', 'liveTokenRateScope',
+    'settingsInTitlebar', 'showLiveDot', 'showToolIcons', 'titleIconOnly',
+    'collectionMode', 'exportIntervalMs',
+    'showLimitSource', 'showLimitUsed', 'workbuddyQuotaTotalEnabled', 'syncUploadIntervalMs'
+  ];
+  return {
+    ...Object.fromEntries(keys.map(key => [key, defaults[key]])),
+    limitsRefresh: defaults.limitsRefreshMode === 'adaptive' ? 'adaptive' : String(defaults.limitsRefreshMs)
   };
 }
 
@@ -880,8 +925,21 @@ function syncUploadIntervalMs() {
   return normalizeSyncUploadIntervalMs(settings?.syncUploadIntervalMs);
 }
 
-function electronUsageConfig(errorPrefix) {
+// The collector composes the native Week range for this calendar week. The
+// renderer resolves the same locale and checks the range it receives.
+function collectorCalendarLocale() {
+  const preferred = typeof app.getPreferredSystemLanguages === 'function' ? app.getPreferredSystemLanguages() : [app.getLocale()];
+  return resolveRegionalLocale([...preferred, settings?.locale]);
+}
+
+function collectorWeekStartsOn() {
+  return fixedPeriodRangesApi.weekStartsOn(collectorCalendarLocale());
+}
+
+function electronUsageConfig(errorPrefix, { synced = false } = {}) {
   return usageConfigFromSettings(settings, {
+    nativeRangesEnabled: true,
+    dailySessionSyncEnabled: synced && settings?.hubMode !== 'icloud',
     agentVersion: appVersion(),
     agentRuntime: 'electron-widget',
     commandTimeoutMs: 120 * 1000,
@@ -893,16 +951,14 @@ function electronUsageConfig(errorPrefix) {
     // No watchUsePolling on purpose. The widget states no preference so the
     // shared default in resolveWatchUsePolling() governs and the widget cannot
     // drift from the headless agent, which has never passed one. That default
-    // is native events on every platform: chokidar 4 dropped the bundled
-    // fsevents backend, so every platform now watches through the same
-    // per-directory fs.watch path, and the earlier attempt that observed missed
-    // events ran on the chokidar 3 backend that no longer exists. Where the
-    // kernel cannot supply watch descriptors the collector degrades to polling
-    // by itself; TOKEN_MONITOR_WATCH_POLLING overrides in both directions.
+    // is native events on every platform. Where the kernel cannot supply watch
+    // descriptors the collector degrades to polling by itself;
+    // TOKEN_MONITOR_WATCH_POLLING overrides in both directions.
     watchTriggersCollection: collectorWatchTriggersCollection(),
     intervalRequiresActivity: collectorIntervalRequiresActivity(),
     watchDebounceMs: 1500,
     dailyHistoryArchiveWriteEnabled: () => !isExternalAgentActive(),
+    weekStartsOn: synced ? SYNC_WEEK_STARTS_ON : collectorWeekStartsOn(),
     onError: (error, reason) => console.log(`[${errorPrefix}] ${reason}: ${error.message}`),
     logger: (message) => console.log(`[${errorPrefix}] ${message}`)
   });
@@ -1483,40 +1539,49 @@ const MAIN_WINDOW_WAKE_FALLBACK_MS = 800;
 let mainWindowHibernateTimer = null;
 let mainWindowHibernated = false;
 let mainWindowPopoverReveal = null;
+let screenUiSuspended = false;
+
+function supportsMainWindowHibernate() {
+  // Windows keeps a WebContentsView across BaseWindow replacements. Its
+  // ownership and teardown differ from BrowserWindow.
+  return process.platform === 'darwin' || process.platform === 'linux';
+}
+
+function hasDependentAppWindow() {
+  return BaseWindow.getAllWindows().some(win => win !== mainWindow
+    && !edgeDockController?.owns(win) && !notchController?.owns(win)
+    && !limitsHistoryController?.isIdleWindow(win));
+}
 
 function cancelMainWindowHibernate() {
   clearTimeout(mainWindowHibernateTimer);
   mainWindowHibernateTimer = null;
 }
 
+function hibernateMainWindow() {
+  cancelMainWindowHibernate();
+  const win = mainWindow;
+  mainWindowHibernated = true;
+  mainWindowPopoverReveal = null;
+  mainWindow = null;
+  lastRendererStatsFingerprint = null;
+  if (win && !win.isDestroyed()) win.destroy();
+}
+
 function scheduleMainWindowHibernate(win) {
-  // Windows keeps a WebContentsView across BaseWindow replacements. Destroying
-  // that host has different ownership and teardown semantics from BrowserWindow.
   if (win !== mainWindow || mainWindowHibernateTimer || !settings?.trayMode || quitRequested
-    || (process.platform !== 'darwin' && process.platform !== 'linux')) return;
+    || screenUiSuspended || !supportsMainWindowHibernate()) return;
   const attempt = () => {
     mainWindowHibernateTimer = null;
     if (win !== mainWindow || win.isDestroyed() || win.isVisible() || quitRequested || !settings?.trayMode) return;
-    if (rendererHiddenStatsNeeded()) {
-      // A generated tray icon can turn itself off later; keep one bounded retry
+    if (rendererHiddenStatsNeeded() || hasDependentAppWindow()) {
+      // A generated tray icon or dependent window can clear later; keep retrying
       // instead of dropping the only hibernation attempt.
       mainWindowHibernateTimer = setTimeout(attempt, MAIN_WINDOW_HIBERNATE_RETRY_MS);
       mainWindowHibernateTimer.unref();
       return;
     }
-    if (BaseWindow.getAllWindows().some(other => other !== win
-      && !edgeDockController?.owns(other) && !notchController?.owns(other)
-      && !limitsHistoryController?.isIdleWindow(other))) {
-      // A dashboard or plugin window can close later; retry so hibernation is
-      // not permanently lost without another show/hide cycle.
-      mainWindowHibernateTimer = setTimeout(attempt, MAIN_WINDOW_HIBERNATE_RETRY_MS);
-      mainWindowHibernateTimer.unref();
-      return;
-    }
-    mainWindowHibernated = true;
-    mainWindow = null;
-    lastRendererStatsFingerprint = null;
-    win.destroy();
+    hibernateMainWindow();
   };
   mainWindowHibernateTimer = setTimeout(attempt, MAIN_WINDOW_HIBERNATE_MS);
   mainWindowHibernateTimer.unref();
@@ -1551,12 +1616,13 @@ function ensureSettingsLoaded() {
       settings.codexManagedAccounts = hydratedCodexAccounts;
     }
   }
-  // A seeded client identity split is an in-memory addition at this point.
-  // Persist it with the same retry-on-next-save tolerance as the migration
-  // above, so a read-only or failing settings file delays the write instead of
-  // losing the tracked client.
-  if (seededClientSplitsPending) {
+  // A seeded client identity split and the one-time Home limits layout reset are
+  // in-memory changes at this point. Persist them with the same
+  // retry-on-next-save tolerance as the migration above, so a read-only or
+  // failing settings file delays the write instead of losing the change.
+  if (seededClientSplitsPending || homeLimitDisplayModePending) {
     seededClientSplitsPending = false;
+    homeLimitDisplayModePending = false;
     saveSettings();
   }
   rendererViewState = normalizeInitialRendererViewState(settings.lastViewState, rendererViewState);
@@ -1752,7 +1818,7 @@ function collapseFloatingBubble(plan) {
   floatingBubbleState.collapsedBounds = collapsedBounds;
   floatingBubbleState.expandedBounds = expandedBounds;
   settings.floatingBubbleBounds = collapsedBounds;
-  applyNativeMaterial();
+  if (applyNativeMaterial()) pushSettingsToRenderer();
   if (process.platform === 'win32') {
     persistWindowBounds(expandedBounds);
     replaceMainWindow(collapsedBounds, {
@@ -1802,7 +1868,7 @@ function expandFloatingBubble(options = {}) {
   floatingBubbleState.side = null;
   floatingBubbleState.collapsedBounds = current;
   floatingBubbleState.expandedBounds = target;
-  applyNativeMaterial();
+  if (applyNativeMaterial()) pushSettingsToRenderer();
   if (target) {
     floatingBubbleState.suppressNextCollapse = true;
     if (process.platform === 'win32' && mainWindowChrome.collapsedFloatingBubble) {
@@ -2090,10 +2156,16 @@ function readSettings() {
       merged.hiddenHomeModules = normalizeHiddenHomeModules(saved.hiddenHomeModules, DEFAULT_HOME_MODULE_LIST);
     }
     merged.showHomeLimitBars = parseBoolean(merged.showHomeLimitBars, false);
+    merged.homeVendorColors = parseBoolean(merged.homeVendorColors, false);
     merged.homeModuleCounts = normalizeHomeModuleCounts(merged.homeModuleCounts);
-    merged.homeLimitDisplayMode = normalizeHomeLimitDisplayMode(merged.homeLimitDisplayMode);
+    merged.homeSessionDisplayMode = normalizeHomeSessionDisplayMode(merged.homeSessionDisplayMode);
+    const homeLimitDisplay = migrateHomeLimitDisplayMode(saved.homeLimitDisplayMode, saved.homeLimitDisplayModeDefaulted);
+    merged.homeLimitDisplayMode = homeLimitDisplay.mode;
+    merged.homeLimitDisplayModeDefaulted = true;
+    homeLimitDisplayModePending = homeLimitDisplay.changed;
     merged.showHomeLimitProviderNames = parseBoolean(merged.showHomeLimitProviderNames, false);
     merged.claudeCliFallbackEnabled = parseBoolean(merged.claudeCliFallbackEnabled, true);
+    merged.antigravityLocalLimitsEnabled = parseBoolean(merged.antigravityLocalLimitsEnabled, true);
     merged.codexResetForecastEnabled = parseBoolean(merged.codexResetForecastEnabled, false);
     merged.workbuddyQuotaTotalEnabled = parseBoolean(merged.workbuddyQuotaTotalEnabled, false);
     merged.limitsHistoryOpenMode = ['hover', 'click', 'off'].includes(merged.limitsHistoryOpenMode) ? merged.limitsHistoryOpenMode : 'hover';
@@ -2111,6 +2183,7 @@ function readSettings() {
     merged.limitProviderHiddenItems = normalizeLimitProviderHiddenItems(merged.limitProviderHiddenItems);
     merged.homeLimitAccountCount = normalizeHomeLimitAccountCount(merged.homeLimitAccountCount);
     merged.periodMonthMode = normalizePeriodMonthMode(merged.periodMonthMode);
+    merged.periodTabOrder = fixedPeriodRangesApi.normalizePeriodTabOrder(merged.periodTabOrder);
     if (saved.historyEnabled !== undefined) {
       merged.historyEnabled = parseBoolean(saved.historyEnabled, false);
     }
@@ -2215,6 +2288,7 @@ function readSettings() {
     merged.edgeDockOffset = normalizeEdgeDockOffset(merged.edgeDockOffset);
     merged.edgeDockDisplayId = normalizeEdgeDockDisplayId(merged.edgeDockDisplayId);
     merged.edgeDockMode = normalizeEdgeDockMode(merged.edgeDockMode);
+    merged.edgeDockTriggerRange = normalizeEdgeDockTriggerRange(merged.edgeDockTriggerRange);
     merged.edgeDockHaptic = parseBoolean(merged.edgeDockHaptic, true);
     merged.edgeDockWarnColors = parseBoolean(merged.edgeDockWarnColors, false);
     merged.edgeDockMacBackdrop = normalizeEdgeDockBackdropMode(merged.edgeDockMacBackdrop);
@@ -2558,9 +2632,12 @@ function nativeMaterialOptions(source = settings, dashboard = false) {
 function applyNativeMaterial(source = settings) {
   syncNativeMaterialVisibility(mainWindow, nativeMaterialOptions(source));
   syncNativeMaterialVisibility(dashboardWindow, nativeMaterialOptions(source, true));
-  syncWindowsBackdrop(mainWindow, { enabled: nativeBlurEnabled(source), mode: source.windowsBackdrop });
-  syncWindowsBackdrop(dashboardWindow, { enabled: nativeBlurEnabled(source) });
+  const windowsMaterial = { enabled: nativeBlurEnabled(source), mode: source.windowsBackdrop };
+  const hadAccent = windowsAccentActive(mainWindow);
+  syncWindowsBackdrop(mainWindow, windowsMaterial);
+  syncWindowsBackdrop(dashboardWindow, windowsMaterial);
   limitsHistoryController?.syncMaterial();
+  return hadAccent !== windowsAccentActive(mainWindow);
 }
 
 function withHistoryPreview(stats, devices) {
@@ -2715,7 +2792,8 @@ function electronPresentationStats(stats) {
   const limitOptions = {
     localDeviceId: settings?.deviceId,
     syncActive: syncProvenanceActive(),
-    opencodeLocalLimitsEnabled: settings?.opencodeLocalLimitsEnabled === true
+    opencodeLocalLimitsEnabled: settings?.opencodeLocalLimitsEnabled === true,
+    antigravityLocalLimitsEnabled: settings?.antigravityLocalLimitsEnabled !== false
   };
   const aliases = settings?.modelAliases;
   const grouping = settings?.modelAliasGrouping;
@@ -2731,6 +2809,7 @@ function electronPresentationStats(stats) {
 }
 
 const allTimeSessionsCache = createStatsPresentationCache();
+const fixedRangeReads = createFixedRangeReadCache();
 const rendererSnapshots = createRendererSnapshots({ source: () => hubModeGeneration });
 // The local record each Hub snapshot was shown with, captured where the
 // snapshot was built. The collector replaces the live one between publishes.
@@ -2756,7 +2835,16 @@ function rendererAllTimeSessions(stats) {
       ? [...(complete.devices || []).filter(device => device.deviceId !== hubSnapshot.localDevice.deviceId), hubSnapshot.localDevice]
       : complete.devices;
     const sourced = projectSessionDeviceSessions(sessions, devices, ['month', 'allTime']);
-    return projectModelAliasSessions(stats, settings?.sessionTitlesEnabled === false ? withoutSessionTitles(sourced) : sourced, aliases, { grouping });
+    const inline = projectModelAliasSessions(stats, settings?.sessionTitlesEnabled === false ? withoutSessionTitles(sourced) : sourced, aliases, { grouping });
+    if (!stats.sessionDetailsOmitted?.month || !Object.keys(stats.fixedRangeRevisions || {}).length) return inline;
+    return resolveSyncedPeriodForStats(stats, hubModeGeneration, 'month').then(paged => {
+      if (!paged?.period?.sessions) return inline;
+      const local = hubSnapshot?.localDevice?.allTime?.sessions || {};
+      return {
+        ...inline,
+        ...Object.fromEntries(Object.entries(paged.period.sessions).filter(([id]) => !Object.hasOwn(local, id)))
+      };
+    });
   });
 }
 
@@ -4112,7 +4200,7 @@ async function startIcloudCollector() {
       flush: () => runtime.flush(),
       stop: () => runtime.stop()
     };
-    const usageOptions = electronUsageConfig('icloud-collector');
+    const usageOptions = electronUsageConfig('icloud-collector', { synced: true });
     createdDeviceRuntime = createDeviceRuntime({
       envelope: electronDeviceEnvelope(),
       initialLimits: lastCollectedDevice?.limits,
@@ -4194,7 +4282,7 @@ function startSyncCollector() {
     flush: () => syncUploadScheduler.flush(),
     stop: () => syncUploadScheduler.stop()
   };
-  const usageOptions = electronUsageConfig('sync-collector');
+  const usageOptions = electronUsageConfig('sync-collector', { synced: true });
   deviceRuntimeHandle = createDeviceRuntime({
     envelope: electronDeviceEnvelope(),
     initialLimits: lastCollectedDevice?.limits,
@@ -4242,7 +4330,32 @@ function startHostCollector() {
         if (payload.allTimeProjectsOmitted === true) {
           console.log('[host-ingest] all-time project breakdown omitted to reduce the sync snapshot size');
         }
-        embeddedHub.hub.ingest(payload);
+        const accepted = embeddedHub.hub.ingest(payload);
+        const fixedRangeAt = JSON.stringify([visibleSummary.updatedAt, options.sessionTitleSyncGeneration, visibleSummary.projectsEnabled !== false, visibleSummary.nativeRangeWindows, Boolean(visibleSummary.dailySessionPeriods)]);
+        if (visibleSummary.nativeRanges && handle.fixedRangeAt !== fixedRangeAt) {
+          try {
+            const publish = record => {
+              try {
+                for (const page of fixedRangeUploadPages(record, options)) {
+                  const accepted = handle.hub.acceptFixedRange(record.deviceId, page);
+                  if (accepted.status !== 200) return false;
+                  if (accepted.complete) return true;
+                }
+              } catch (error) {
+                if (!record.dailySessionPeriods || !(error instanceof RangeError)) throw error;
+              }
+              return false;
+            };
+            if (publish(visibleSummary)) handle.fixedRangeAt = fixedRangeAt;
+            else if (visibleSummary.dailySessionPeriods) publish({ ...visibleSummary, dailySessionPeriods: undefined });
+          } catch (error) {
+            console.log(`[host-ingest] fixed range upload deferred: ${error.message}`);
+          }
+        }
+        if (visibleSummary.dailySessionPeriods && handle.fixedRangeAt === fixedRangeAt
+          && payload.history?.dailyTotalsOmitted > 0 && accepted.history?.summary?.activeDaysComplete !== true) {
+          embeddedHub.hub.restoreHistory(syncPayload(visibleSummary, { ...options, pagedSessions: true }));
+        }
         if (settings.lastPostedDeviceId !== visibleSummary.deviceId) {
           settings.lastPostedDeviceId = visibleSummary.deviceId;
           saveSettings();
@@ -4252,7 +4365,7 @@ function startHostCollector() {
       });
     }
   };
-  const usageOptions = electronUsageConfig('host-collector');
+  const usageOptions = electronUsageConfig('host-collector', { synced: true });
   deviceRuntimeHandle = createDeviceRuntime({
     envelope: electronDeviceEnvelope(),
     initialLimits: lastCollectedDevice?.limits,
@@ -4327,7 +4440,15 @@ function injectLocalDeviceStatus(stats) {
   for (const device of stats.devices) if (device.limits) device.limits = { ...device.limits, providers: device.limits.providers.map(row => ({
     ...row, stale: isProviderStale(row, device.limits, device, stats.staleAfterMs, now)
   })) };
-  if (mode !== 'local') snapshotLocalDevices.set(stats, { localDevice: lastCollectedDevice });
+  if (mode !== 'local') {
+    snapshotLocalDevices.set(stats, { localDevice: lastCollectedDevice });
+    delete stats.localFixedRangeRevision;
+    if (settings?.hubMode === 'client' && ownsUsageRuntime() && lastCollectedDevice?.nativeRanges
+      && stats.devices.some(device => device.deviceId === lastCollectedDevice.deviceId
+        && device.updatedAt === lastCollectedDevice.updatedAt)) {
+      stats.localFixedRangeRevision = JSON.stringify([lastCollectedDevice.deviceId, lastCollectedDevice.updatedAt]);
+    }
+  }
   return stats;
 }
 
@@ -4783,10 +4904,11 @@ function pluginQuotaChanged() {
   });
 }
 
-function updateTrayDisplay() {
+function updateTrayDisplay({ wakeRenderer = true } = {}) {
   if (!tray || tray.isDestroyed()) return;
   // A tray menu can switch to a live bitmap while the main renderer is asleep.
-  if (mainWindowHibernated && settings?.trayMode && !quitRequested && rendererHiddenStatsNeeded()) {
+  if (wakeRenderer && !screenUiSuspended && mainWindowHibernated && settings?.trayMode
+    && !quitRequested && rendererHiddenStatsNeeded()) {
     createWindow(undefined, { popoverReveal: { requested: false } });
   }
   // Keep the exported D-Bus menu in sync (radio checks, refresh state, Codex
@@ -4884,6 +5006,9 @@ function primeLocalStatsFromAnchor(usageOptions, widgetProducerOwner) {
       projectsEnabled: usageOptions.projectsEnabled,
       customScanPaths: usageOptions.customScanPaths,
       wslScanEnabled: usageOptions.wslScanEnabled,
+      nativeRangesEnabled: usageOptions.nativeRangesEnabled,
+      weekStartsOn: usageOptions.weekStartsOn,
+      codexDotsVisible: usageOptions.codexDotsVisible,
       wslSupported: process.platform === 'win32',
       historyEnabled: usageOptions.historyEnabled,
       dailyHistoryArchiveEnabled: usageOptions.dailyHistoryArchiveEnabled,
@@ -4910,7 +5035,7 @@ function primeLocalStatsFromAnchor(usageOptions, widgetProducerOwner) {
   }
   anchorSeedDevice = visible;
   localDevice = visible;
-  localStats = withHistoryPreview(aggregateDevices([visible], 0), [visible]);
+  localStats = coldLocalStats(visible);
   // Through the normal publisher, not straight to the renderer: the tray reads
   // what sendPush sets, and in tray mode the window is hidden, so a seed that
   // only reached the renderer would leave the one visible surface on zero.
@@ -4924,6 +5049,12 @@ function primeLocalStatsFromAnchor(usageOptions, widgetProducerOwner) {
   }, { skipExport: true, deferToRenderer: true, widgetProducerOwner });
 }
 
+function coldLocalStats(device) {
+  const stats = withHistoryPreview(aggregateDevices([device], 0), [device]);
+  stats.nativeRangesPending = true;
+  return attachLocalNativeRanges(stats, device);
+}
+
 // The first scan holds its record back until all-time is in, which on a long
 // history is minutes after Today was ready. Show each window as it lands, over
 // the seed's last known values when there is one. Display only: nothing here is
@@ -4932,7 +5063,7 @@ function publishColdPreview(preview, reason, widgetProducerOwner) {
   if (lastCollectedDevice) return;
   const device = seedWithColdPreview(anchorSeedDevice || preview, preview);
   localDevice = device;
-  localStats = withHistoryPreview(aggregateDevices([device], 0), [device]);
+  localStats = coldLocalStats(device);
   sendPush({
     event: 'stats',
     data: { type: 'stats', reason, stats: localStats, at: new Date().toISOString() }
@@ -4967,6 +5098,7 @@ function startLocalCollector() {
       localStats = composeLocalOnlySummary(localDevice, (stats) => {
         withHistoryPreview(stats, [localDevice]);
         attachLocalNativeViews(stats, localDevice);
+        attachLocalNativeRanges(stats, localDevice);
         return stats;
       });
       updateDiscordRpcDisplay(localStats);
@@ -5088,7 +5220,7 @@ async function startStatsStream(options = {}) {
 }
 
 function showPopover(clickPoint = null, summon = false) {
-  if (!tray || quitRequested) return;
+  if (!tray || quitRequested || screenUiSuspended) return;
   if (!mainWindow || mainWindow.isDestroyed()) {
     applyMacActivationPolicy();
     createWindow(undefined, { popoverReveal: { requested: true, clickPoint, summon } });
@@ -5142,7 +5274,7 @@ function togglePopover(clickPoint = null, wasVisibleAtMouseDown = null, blurMatc
 }
 
 function focusExistingWindow() {
-  if (quitRequested) return;
+  if (quitRequested || screenUiSuspended) return;
   applyMacActivationPolicy({ mainWindowVisible: true });
   if (settings?.trayMode && (!mainWindow || mainWindow.isDestroyed() || mainWindowPopoverReveal)) {
     showPopover();
@@ -5226,9 +5358,12 @@ function settingsForRenderer() {
   const locale = trayMenuLocale();
   return {
     ...rendererSettings,
+    windowsAccentActive: windowsAccentActive(mainWindow),
     windowsBackdropFallback: windowsBackdropFallback(mainWindow),
     syncContentStatus: getSyncContentRuntime().status(),
     locale,
+    calendarLocale: collectorCalendarLocale(),
+    syncWeekStartsOn: SYNC_WEEK_STARTS_ON,
     fontContext: windowsFontContext(locale),
     deviceIconScope: currentHubIdentity() || 'local',
     ...redactedCredentials,
@@ -5509,7 +5644,10 @@ function syncNotch(rendererSettings) {
 // allowlisted appearance projection instead of the full renderer settings.
 function edgeDockAppearance(rendererSettings = settingsForRenderer()) {
   const source = rendererSettings || {};
+  const deviceIconScope = source.deviceIconScope || 'local';
   return {
+    deviceIconScope,
+    deviceIconOverrides: { [deviceIconScope]: source.deviceIconOverrides?.[deviceIconScope] },
     language: source.language,
     currency: source.currency,
     currencyRatesEffective: source.currencyRatesEffective,
@@ -5926,7 +6064,7 @@ function ensureEdgeDockController() {
 
 function syncDockSurfaces(rendererSettings) {
   dockAppearancePreview = null;
-  if (!settings) return;
+  if (!settings || screenUiSuspended) return;
   syncNotch(rendererSettings);
   if (!canUseEdgeDock(settings)) {
     edgeDockController?.stop();
@@ -6377,6 +6515,7 @@ function startMode() {
   hubModeGeneration += 1;
   advanceMacWidgetProducerAndSourceEpoch();
   clearLatestHubStatsCache();
+  fixedRangeReads.clear();
   edgeDockManualStats = null;
   const icloudStop = stopIcloudRuntime();
   // Tear down collectors synchronously so they can't double-run while the
@@ -6487,7 +6626,7 @@ function usageCollectorNameForMode() {
 }
 
 function usageConfigForMode() {
-  return electronUsageConfig(usageCollectorNameForMode());
+  return electronUsageConfig(usageCollectorNameForMode(), { synced: mode !== 'local' });
 }
 
 function applyUsageRuntimeForMode() {
@@ -7252,7 +7391,7 @@ function revealWindow(target = mainWindow, options = {}) {
 function loadWindowFile(target, options = {}) {
   let revealed = false;
   const reveal = () => {
-    if (revealed) return;
+    if (revealed || target.isDestroyed()) return;
     revealed = true;
     if (options.onAppearanceReady) {
       cleanup();
@@ -7290,6 +7429,7 @@ function loadWindowFile(target, options = {}) {
   const filePath = path.join(__dirname, 'renderer', 'index.html');
   const load = options.query ? target.webContents.loadFile(filePath, { query: options.query }) : target.webContents.loadFile(filePath);
   load.catch((error) => {
+    if (target.isDestroyed()) return;
     console.log(`[window] renderer load failed: ${error.message}`);
     reveal();
   });
@@ -7431,6 +7571,10 @@ function createWindow(boundsOverride, options = {}) {
     win.on(event, () => { if (win === mainWindow) cancelMainWindowHibernate(); });
   }
   if (!options.previousWindow) win.webContents.on('did-finish-load', () => {
+    // A window rebuilt after hibernation can share a renderer with the dock or
+    // notch, which leaves an opaque canvas over the native material (as with
+    // the Dashboard). Restore transparency on every completed load.
+    if (process.platform === 'darwin') win.setBackgroundColor('#00000000');
     if (win === mainWindow) lastRendererStatsFingerprint = null;
     sendFloatingBubbleState();
     // Only report a window that is already on screen. A window still awaiting its
@@ -7490,7 +7634,7 @@ function handleZoomShortcut(event, input) {
 function replaceMainWindow(bounds, options = {}) {
   const epoch = ++mainWindowReplacementEpoch;
   mainWindowReplacementTask = mainWindowReplacementTask.then(async () => {
-    if (epoch !== mainWindowReplacementEpoch) return;
+    if (epoch !== mainWindowReplacementEpoch || screenUiSuspended) return;
     const old = mainWindow;
     if (process.platform === 'win32') {
       if (!mainWindowChrome.collapsedFloatingBubble) {
@@ -7521,7 +7665,8 @@ function replaceMainWindow(bounds, options = {}) {
     });
     const next = mainWindow;
     if (process.platform === 'win32') {
-      if (windowsBackdropFallback(old) !== windowsBackdropFallback(next)) pushSettingsToRenderer();
+      if (windowsBackdropFallback(old) !== windowsBackdropFallback(next)
+        || windowsAccentActive(old) !== windowsAccentActive(next)) pushSettingsToRenderer();
       sendFloatingBubbleState();
       if (old?.isMinimized()) next.minimize();
       else if (old?.isVisible()) {
@@ -7586,7 +7731,7 @@ function createDashboardWindow() {
   dashboardWindowReady = false;
   applyWindowsChrome(win, { round: true });
   suppressLinuxSystemContextMenu(win);
-  syncWindowsBackdrop(win, { enabled: nativeBlurEnabled() });
+  syncWindowsBackdrop(win, { enabled: nativeBlurEnabled(), mode: settings.windowsBackdrop });
   attachNativeMaterialVisibility(win, () => nativeMaterialOptions(settings, true));
   syncNativeMaterialVisibility(win, nativeMaterialOptions(settings, true));
   win.webContents.setWindowOpenHandler(({ url }) => {
@@ -7617,6 +7762,63 @@ function createDashboardWindow() {
   win.loadFile(path.join(__dirname, 'renderer', 'dashboard.html'))
     .catch((error) => discardFailedDashboardWindow(win, `load failed: ${error.message}`));
   return win;
+}
+
+async function getSyncedFixedPeriod(snapshotId, source, selection) {
+  return resolveSyncedPeriodForStats(rendererSnapshots.get(snapshotId, source), source, selection);
+}
+
+async function resolveSyncedPeriodForStats(stats, source, selection) {
+  const revisions = stats?.fixedRangeRevisions || {};
+  const legacyPeriod = selection === 'today' || selection === 'month';
+  if (mode !== 'sync' || source !== hubModeGeneration || (!legacyPeriod && !fixedPeriodRangesApi.isDerived(selection))
+    || (!stats?.localFixedRangeRevision && !Object.keys(revisions).length)) return null;
+  const config = historyResolverOptions();
+  const localDevice = stats.localFixedRangeRevision ? snapshotLocalDevices.get(stats)?.localDevice : null;
+  const options = { weekStartsOn: SYNC_WEEK_STARTS_ON, now: Date.now() };
+  const { sessionTitlesEnabled, modelAliases, modelAliasGrouping } = settings || {};
+  const headers = config.secret ? { authorization: `Bearer ${config.secret}` } : {};
+  const read = (deviceId, name, window, revision) => {
+    if (config.hubMode === 'icloud') return config.icloudSync?.readFixedRange(deviceId, name, window, revision);
+    if (config.hubMode === 'host') return config.embeddedHub?.hub.readFixedRange(deviceId, name, window, revision);
+    if (!config.hubUrl) return null;
+    const key = JSON.stringify([source, currentHubStatsIdentity(config.hubMode), deviceId, name, window.start, window.end, revision]);
+    return fixedRangeReads.read(key, async (abort) => {
+      const signal = AbortSignal.any([abort, AbortSignal.timeout(15_000)]);
+      return fetchFixedRange(
+        (url, init) => fetch(url, { ...init, signal, redirect: 'error' }),
+        config.hubUrl, deviceId, name, window, headers, revision
+      );
+    });
+  };
+  const history = async (devices) => {
+    if (!config.historyEnabled) return null;
+    try {
+      const resolved = await resolveCompleteHistoryWithDevices(config);
+      return historyFallbackForDevices(selection, devices, resolved.deviceHistories, options);
+    } catch (_) { return null; }
+  };
+  const fixed = legacyPeriod
+    ? await resolveSyncedSessionPeriod(selection, stats.devices || [], revisions, { ...options, read })
+    : await resolveSyncedFixedPeriod(selection, stats.devices || [], revisions, { ...options, localDevice, read, history });
+  if (!fixed || source !== hubModeGeneration) return null;
+  const current = config.hubMode === 'icloud'
+    ? config.icloudSync?.getStats() : currentHubStatsCache();
+  if (current && Object.entries(revisions).some(([id, revision]) => (
+    id !== localDevice?.deviceId && current.fixedRangeRevisions?.[id] !== revision
+  ))) return null;
+  const input = {
+    periods: { [selection]: fixed.period },
+    devices: fixed.devices.map(({ period, ...device }) => ({ ...device, periods: { [selection]: period } }))
+  };
+  const visible = sessionTitlesEnabled === false || settings?.sessionTitlesEnabled === false
+    ? withoutSessionTitleStats(input) : input;
+  const projected = projectModelAliasStats(visible, modelAliases, { grouping: modelAliasGrouping });
+  return {
+    ...fixed,
+    period: projected.periods[selection],
+    devices: projected.devices.map(({ periods, ...device }) => ({ ...device, period: periods[selection] }))
+  };
 }
 
 async function getDashboardHistory(options = {}) {
@@ -7656,16 +7858,44 @@ function appIsIdleForHeapCollection() {
   return !quitRequested && focusedAppWindow() === null;
 }
 
+function suspendScreenUi() {
+  notchController?.setLocked(true);
+  // Electron emits powerMonitor lock-screen/unlock-screen only on macOS and
+  // Windows. Windows keeps its retained BaseWindow path, so suspension is
+  // macOS-only; Linux keeps the quiet-period hibernate timer.
+  if (screenUiSuspended || quitRequested || !settings?.trayMode
+    || process.platform !== 'darwin' || hasDependentAppWindow()) return;
+  screenUiSuspended = true;
+  edgeDockController?.stop();
+  notchController?.stop({ preserveSummary: true });
+  hidePopover();
+  hibernateMainWindow();
+  // A parked history card has no owner and can be rebuilt on the next open.
+  limitsHistoryController?.dispose();
+}
+
+function resumeScreenUi() {
+  const wasSuspended = screenUiSuspended;
+  screenUiSuspended = false;
+  notchController?.setLocked(false);
+  if (!wasSuspended || quitRequested) return;
+  syncDockSurfaces();
+  // Use cached artwork for this refresh. The normal tray update can wake the
+  // main renderer later if its selected artwork requires a fresh bitmap.
+  updateTrayDisplay({ wakeRenderer: false });
+  if (!settings?.trayMode) focusExistingWindow();
+}
+
 app.whenReady().then(() => {
   ensureSettingsLoaded();
-  powerMonitor.on('lock-screen', () => notchController?.setLocked(true));
-  powerMonitor.on('unlock-screen', () => notchController?.setLocked(false));
+  powerMonitor.on('lock-screen', suspendScreenUi);
+  powerMonitor.on('unlock-screen', resumeScreenUi);
   void sessionProxy.apply();
   // Switching the OS between light and dark repaints the taskbar underneath an
   // icon we have already handed to the shell, so the renderer has to recompose
   // it — nothing else in the app would notice the change.
   nativeTheme.on('updated', () => {
-    applyNativeMaterial();
+    if (applyNativeMaterial()) pushSettingsToRenderer();
     // Rebuilds the dock only when Reduce Transparency moved its material.
     if (edgeDockController?.isRunning()) edgeDockController.sync();
     if (notchController?.isRunning()) notchController.sync();
@@ -7977,6 +8207,7 @@ app.whenReady().then(() => {
     const previousFloatingBubbleCustomLayout = JSON.stringify(settings.floatingBubbleCustomLayout || {});
     const previousShowTrayProviderBadge = settings.showTrayProviderBadge;
     const previousOpenCodeLocalLimitsEnabled = settings.opencodeLocalLimitsEnabled === true;
+    const previousAntigravityLocalLimitsEnabled = settings.antigravityLocalLimitsEnabled !== false;
     const previousCurrency = settings.currency;
     const previousCompactTokenUnits = settings.compactTokenUnits;
     const previousLanguage = settings.language;
@@ -8127,6 +8358,7 @@ app.whenReady().then(() => {
       edgeDockOffset: normalizeEdgeDockOffset(patch.edgeDockOffset ?? settings.edgeDockOffset),
       edgeDockDisplayId: normalizeEdgeDockDisplayId(patch.edgeDockDisplayId ?? settings.edgeDockDisplayId),
       edgeDockMode: normalizeEdgeDockMode(patch.edgeDockMode ?? settings.edgeDockMode),
+      edgeDockTriggerRange: normalizeEdgeDockTriggerRange(patch.edgeDockTriggerRange ?? settings.edgeDockTriggerRange),
       edgeDockHaptic: parseBoolean(patch.edgeDockHaptic ?? settings.edgeDockHaptic, true),
       edgeDockWarnColors: parseBoolean(patch.edgeDockWarnColors ?? settings.edgeDockWarnColors, false),
       edgeDockMacBackdrop: normalizeEdgeDockBackdropMode(patch.edgeDockMacBackdrop ?? settings.edgeDockMacBackdrop),
@@ -8170,13 +8402,17 @@ app.whenReady().then(() => {
       homeModuleCounts: normalizeHomeModuleCounts(patch.homeModuleCounts, settings.homeModuleCounts),
       showHomeLimitBars: parseBoolean(patch.showHomeLimitBars ?? settings.showHomeLimitBars, false),
       showExactHomeTrendTokens: parseBoolean(patch.showExactHomeTrendTokens ?? settings.showExactHomeTrendTokens, false),
+      homeVendorColors: parseBoolean(patch.homeVendorColors ?? settings.homeVendorColors, false),
       homeLimitDisplayMode: normalizeHomeLimitDisplayMode(patch.homeLimitDisplayMode ?? settings.homeLimitDisplayMode),
+      homeSessionDisplayMode: normalizeHomeSessionDisplayMode(patch.homeSessionDisplayMode ?? settings.homeSessionDisplayMode),
       showHomeLimitProviderNames: parseBoolean(patch.showHomeLimitProviderNames ?? settings.showHomeLimitProviderNames, false),
       homeLimitProviderOrder: patch.homeLimitProviderOrder !== undefined ? migrateHomeLimitProviderOrder(patch.homeLimitProviderOrder) : (settings.homeLimitProviderOrder || ''),
       hiddenHomeLimitProviders: patch.hiddenHomeLimitProviders !== undefined ? normalizeHiddenLimitProviders(patch.hiddenHomeLimitProviders) : normalizeHiddenLimitProviders(settings.hiddenHomeLimitProviders),
       limitProviderHiddenItems: normalizeLimitProviderHiddenItems(patch.limitProviderHiddenItems ?? settings.limitProviderHiddenItems),
       homeLimitAccountCount: normalizeHomeLimitAccountCount(patch.homeLimitAccountCount ?? settings.homeLimitAccountCount),
       periodMonthMode: normalizePeriodMonthMode(patch.periodMonthMode ?? settings.periodMonthMode),
+      periodTabOrder: patch.periodTabOrder === undefined ? settings.periodTabOrder
+        : fixedPeriodRangesApi.normalizePeriodTabOrder(patch.periodTabOrder),
       modelRankingMetric: normalizeRankingMetric(patch.modelRankingMetric ?? settings.modelRankingMetric),
       sessionTitlesEnabled: parseBoolean(patch.sessionTitlesEnabled ?? settings.sessionTitlesEnabled, true),
       sessionContextMetric: normalizeSessionContextMetric(patch.sessionContextMetric ?? settings.sessionContextMetric),
@@ -8199,6 +8435,7 @@ app.whenReady().then(() => {
       limitsHistoryOpenMode: ['hover', 'click', 'off'].includes(patch.limitsHistoryOpenMode ?? settings.limitsHistoryOpenMode) ? (patch.limitsHistoryOpenMode ?? settings.limitsHistoryOpenMode) : 'hover',
       claudePrepaidBalanceEnabled: parseBoolean(patch.claudePrepaidBalanceEnabled ?? settings.claudePrepaidBalanceEnabled, true),
       claudeCliFallbackEnabled: parseBoolean(patch.claudeCliFallbackEnabled ?? settings.claudeCliFallbackEnabled, true),
+      antigravityLocalLimitsEnabled: parseBoolean(patch.antigravityLocalLimitsEnabled ?? settings.antigravityLocalLimitsEnabled, true),
       codexResetForecastEnabled: parseBoolean(patch.codexResetForecastEnabled ?? settings.codexResetForecastEnabled, false),
       workbuddyQuotaTotalEnabled: parseBoolean(patch.workbuddyQuotaTotalEnabled ?? settings.workbuddyQuotaTotalEnabled, false),
       showCodexAdditionalLimits: parseBoolean(patch.showCodexAdditionalLimits ?? settings.showCodexAdditionalLimits, true),
@@ -8369,7 +8606,8 @@ app.whenReady().then(() => {
       if (settings.discordRpcEnabled && latestStats) updateDiscordRpcDisplay(latestStats);
       refreshExchangeRates();              // async: fetch if stale, then re-push
     }
-    if ((settings.opencodeLocalLimitsEnabled === true) !== previousOpenCodeLocalLimitsEnabled) {
+    if ((settings.opencodeLocalLimitsEnabled === true) !== previousOpenCodeLocalLimitsEnabled
+      || (settings.antigravityLocalLimitsEnabled !== false) !== previousAntigravityLocalLimitsEnabled) {
       // Re-project the cached aggregate immediately. The Hub can be offline and
       // therefore may not send another frame after this local-only setting changes.
       refreshLimitStatsPresentation();
@@ -8384,6 +8622,9 @@ app.whenReady().then(() => {
         try { dashboardWindow.webContents.send('dashboard:historyChanged'); } catch (_) {}
       }
     }
+    if (settings.sessionTitlesEnabled !== previousSettingsState.sessionTitlesEnabled
+      || settings.hubSyncSessionTitles !== previousSettingsState.hubSyncSessionTitles
+      || settings.projectsEnabled !== previousSettingsState.projectsEnabled) fixedRangeReads.clear();
     pushSettingsToRenderer();
     if (settings.sessionTitlesEnabled !== previousSettingsState.sessionTitlesEnabled) {
       refreshLimitStatsPresentation();
@@ -8619,6 +8860,7 @@ app.whenReady().then(() => {
     return repositoryStars.get();
   });
   ipcMain.handle('app:getInfo', () => ({
+    resettableSettingsDefaults: resettableSettingsDefaults(),
     notchCapabilities: notchController?.getCapabilities() || null,
     version: app.getVersion(),
     platform: process.platform,
@@ -8895,8 +9137,13 @@ app.whenReady().then(() => {
     }
     actionWindowForEvent(BrowserWindow, event, mainWindow)?.close();
   });
-  ipcMain.handle('dashboard:open', () => { createDashboardWindow(); return true; });
+  ipcMain.handle('dashboard:open', () => {
+    if (screenUiSuspended) return false;
+    createDashboardWindow();
+    return true;
+  });
   ipcMain.handle('dashboard:getHistory', (_event, options) => getDashboardHistory(options));
+  ipcMain.handle('stats:fixedPeriod', (_event, ...args) => getSyncedFixedPeriod(...args));
   ipcMain.on('dashboard:ready', (event) => {
     const win = BrowserWindow.fromWebContents(event.sender);
     if (!win || win !== dashboardWindow || win.isDestroyed()) return;
@@ -8909,6 +9156,7 @@ app.whenReady().then(() => {
   ipcMain.on('dashboard:minimize', (event) => { BrowserWindow.fromWebContents(event.sender)?.minimize(); });
   ipcMain.on('dashboard:close', (event) => { BrowserWindow.fromWebContents(event.sender)?.close(); });
   app.on('activate', () => {
+    if (screenUiSuspended) return;
     // A parked history window is not owned by the dock or notch, so the normal
     // activation filter would return 'none' and never reach the wake path.
     if (mainWindowHibernated) {
@@ -9016,7 +9264,11 @@ app.whenReady().then(() => {
   startAppUpdateBackgroundChecks();
 });
 
-app.on('second-instance', focusExistingWindow);
+app.on('second-instance', () => {
+  // Windows can dispatch this inside the native window constructor, before
+  // createWindow assigns mainWindow. Wait for that construction to return.
+  setImmediate(focusExistingWindow);
+});
 app.on('window-all-closed', () => {
   if (process.platform !== 'darwin' && !mainWindowHibernated) app.quit();
 });

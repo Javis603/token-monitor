@@ -5,6 +5,7 @@ const os = require('node:os');
 const path = require('node:path');
 const { simpleHostSourceRoots } = require('./clientSourceRegistration');
 const { normalizeCustomScanPaths } = require('./customScanPaths');
+const { ANTIGRAVITY_ACP_SOURCE_ID, discoverAntigravityAcpPaths } = require('./providers/antigravity/acpPaths');
 const { tokscaleConfigDir, tokscaleHomeDir } = require('./tokscaleConfig');
 const { claudeSessionRoots } = require('./providers/claude/paths');
 const { hermesProfileWatchDirs, resolveHermesHome } = require('./providers/hermes/profiles');
@@ -304,6 +305,10 @@ function clientSourceRoots(clientsCsv, options = {}) {
   add('antigravity',
     ['tokscale-antigravity-cache', path.join(tokscaleConfigRoot, 'antigravity-cache')],
     ['antigravity-extension-data', path.join(home, '.gemini', 'antigravity', 'conversations')]);
+  if (byClient.antigravity) {
+    const dirs = options.antigravityAcpPaths ?? discoverAntigravityAcpPaths({ homeDir: home, env });
+    byClient.antigravity.push(...dirs.map(dir => ({ id: ANTIGRAVITY_ACP_SOURCE_ID, dir, optional: true })));
+  }
   // Antigravity keeps its own roots under this home; do not watch `.gemini` itself.
   const geminiHome = nonBlankEnvPath('GEMINI_CLI_HOME', path.join(tokscaleHome, '.gemini'), env);
   add('gemini', ['gemini-sessions', path.join(geminiHome, 'tmp')]);

@@ -17,8 +17,12 @@ function fixture(platform = 'linux') {
   const timers = new Set();
   const windows = new Set();
   const summons = [];
+  const surfaceEvents = [];
   const app = new EventEmitter();
+  const powerMonitor = new EventEmitter();
   let quits = 0;
+  let trayPaints = 0;
+  let mainWindowsCreated = 0;
   app.quit = () => { quits += 1; };
   class Window extends EventEmitter {
     constructor(options) {
@@ -42,26 +46,62 @@ function fixture(platform = 'linux') {
     show() { this.visible = true; if (!this.silentVisibility) this.emit('show'); }
     hide() { this.visible = false; if (!this.silentVisibility) this.emit('hide'); }
     isMinimized() { return false; }
+    setBackgroundColor(color) { this.backgroundColors = [...(this.backgroundColors || []), color]; }
     destroy() {
       windows.delete(this);
       this.emit('closed');
       if (!windows.size) app.emit('window-all-closed');
     }
   }
+  const controller = kind => ({
+    owns: win => win.kind === kind,
+    setAppearance() {},
+    stop(options = {}) {
+      surfaceEvents.push(`${kind}:stop${options.preserveSummary ? ':preserveSummary' : ''}`);
+      for (const win of windows) if (this.owns(win)) win.destroy();
+    },
+    sync() {
+      surfaceEvents.push(`${kind}:sync`);
+      const win = new Window({});
+      win.kind = kind;
+    }
+  });
+  const edgeDockController = controller('dock');
+  const notchController = {
+    ...controller('notch'),
+    setLocked: value => surfaceEvents.push(`notch:locked:${value}`)
+  };
   const context = vm.createContext({
-    app, path, console, __dirname: electronDir, process: { platform },
+    app, powerMonitor, path, console, __dirname: electronDir, process: { platform },
     mainWindow: null, quitRequested: false, lastRendererStatsFingerprint: 'old',
-    settings: { trayMode: true, showTrayIcon: true, zoomFactor: 1.25 },
-    BrowserWindow: Window, BaseWindow: { getAllWindows: () => [...windows] },
-    edgeDockController: { owns: win => win.kind === 'dock' },
-    notchController: { owns: win => win.kind === 'notch' },
-    limitsHistoryController: { isIdleWindow: win => win.kind === 'parked-history', hide() {} },
+    settings: { trayMode: true, showTrayIcon: true, notchEnabled: true, zoomFactor: 1.25 },
+    BrowserWindow: class extends Window {
+      constructor(options) { super(options); mainWindowsCreated += 1; }
+    },
+    BaseWindow: { getAllWindows: () => [...windows] },
+    edgeDockController, notchController,
+    limitsHistoryController: {
+      isIdleWindow: win => win.kind === 'parked-history',
+      hide() {},
+      dispose() {
+        for (const win of windows) if (this.isIdleWindow(win)) win.destroy();
+      }
+    },
     ensureTray: () => true, updateTrayDisplay() {},
     suspendWindowMaximized() {}, setWindowMaximizable() {},
+    ensureEdgeDockController: () => edgeDockController,
+    ensureNotchController: () => notchController,
+    canUseEdgeDock: () => true, edgeDockAppearance() {}, edgeDockStats() {}, scheduleSessionExpiry() {},
+    syncPluginQuotaSurfaceDemand() {}, dockAppearancePreview: null,
     ipcMain: new EventEmitter(),
     DEFAULT_WINDOW: { width: 340, height: 650 }, WINDOW_LIMITS: {},
     floatingBubbleState: { collapsed: false }, mainWindowChrome: {}, rendererViewState: { breakdown: 'limits' },
-    tray: {}, recentPopoverBlur: null, suppressNextBlurHide: false,
+    tray: { isDestroyed: () => false, setTitle() {}, setToolTip() {}, setImage() { trayPaints += 1; } },
+    recentPopoverBlur: null, suppressNextBlurHide: false,
+    refreshTrayContextMenu() {}, desktopQuotaStats() {}, electronPresentationStats() {}, latestStats: null,
+    normalizeCurrency() {}, compactTokenDisplayOptions() {}, formatTrayText: () => '0',
+    isBarsTrayIconMode: () => false, providerTrayIcons: {}, trayShowsTitle: () => platform === 'darwin',
+    pickUsageTrayIconId() {}, getDefaultTrayIcon() {},
     pluginWindowActions: { hide: win => win.hide() }, popoverToggleAction, trayToggleAction, windowToggleShortcutAction,
     activateWindowAction: () => 'none',
     rendererHiddenStatsNeeded: () => false, popoverBounds: (_tray, width, height, { clickPoint }) => ({ width, height, x: clickPoint?.x }),
@@ -82,21 +122,34 @@ function fixture(platform = 'linux') {
       timers.add(timer);
       return timer;
     },
-    clearTimeout: timer => timers.delete(timer)
+    clearTimeout: timer => timers.delete(timer),
+    setImmediate(callback) { timers.add({ callback, ms: 0 }); }
   });
   vm.runInContext([
     section('const MAIN_WINDOW_HIBERNATE_MS', 'function stopPersistBoundsTimer('),
+    section('function updateTrayDisplay(', 'function recordDiagnosticEvent('),
     section('function showPopover(', 'function currentWindowToggleShortcutStatus('),
+    section('function syncNotch(', '// The dock renderer'),
+    section('function syncDockSurfaces(', 'function sendStatsPresentationToRenderer('),
     section('function handleWindowToggleShortcut(', 'function trayMenuLocale('),
     section('function enterTrayMode(', 'function exitTrayMode()'),
     section('function loadWindowFile(', 'function handleZoomShortcut('),
-    section("app.on('activate'", 'startPluginRuntime();'),
-    section("app.on('window-all-closed'", '// Every window shares')
+    section("app.on('activate',", '  startPluginRuntime();'),
+    section('function suspendScreenUi(', 'app.whenReady().then('),
+    section("powerMonitor.on('lock-screen', suspendScreenUi)", 'void sessionProxy.apply()'),
+    section("app.on('second-instance'", '// Every window shares')
   ].join('\n'), context);
   context.createWindow();
   const original = context.mainWindow;
   return {
-    context, original, windows, summons, quits: () => quits,
+    context, original, windows, summons, app, powerMonitor, surfaceEvents, quits: () => quits,
+    trayPaints: () => trayPaints, mainWindowsCreated: () => mainWindowsCreated,
+    suspended: () => vm.runInContext('screenUiSuspended', context),
+    addWindow(kind) {
+      const win = new Window({});
+      win.kind = kind;
+      return win;
+    },
     timer: ms => [...timers].find(timer => timer.ms === ms),
     fire(ms) {
       const timer = this.timer(ms);
@@ -109,6 +162,105 @@ function fixture(platform = 'linux') {
 
 const HIBERNATE_MS = 600_000;
 const RETRY_MS = 60_000;
+
+test('screen lock destroys the tray UI and unlock rebuilds the dock and notch while keeping main hibernated', () => {
+  const run = fixture('darwin');
+  const { context, original, powerMonitor } = run;
+  for (const kind of ['dock', 'notch', 'parked-history']) run.addWindow(kind);
+  original.hide();
+  assert.ok(run.timer(HIBERNATE_MS));
+  context.rendererHiddenStatsNeeded = () => true;
+  powerMonitor.emit('lock-screen');
+  assert.equal(run.suspended(), true);
+  assert.equal(run.timer(HIBERNATE_MS), undefined);
+  assert.equal(original.isDestroyed(), true);
+  assert.equal(context.mainWindow, null);
+  assert.equal(run.windows.size, 0);
+  assert.deepEqual(run.surfaceEvents, ['notch:locked:true', 'dock:stop', 'notch:stop:preserveSummary']);
+
+  powerMonitor.emit('unlock-screen');
+  assert.equal(run.suspended(), false);
+  assert.equal(context.mainWindow, null);
+  assert.equal(run.trayPaints(), 1);
+  assert.deepEqual(run.surfaceEvents.slice(3), ['notch:locked:false', 'notch:sync', 'dock:sync']);
+  assert.deepEqual([...run.windows].map(win => win.kind), ['notch', 'dock']);
+  context.updateTrayDisplay();
+  assert.ok(context.mainWindow, 'live artwork can resume on the next ordinary tray update');
+  assert.equal(context.mainWindow.isVisible(), false);
+});
+
+test('a macOS main window rebuilt after screen lock restores its transparent canvas before reveal', () => {
+  const run = fixture('darwin');
+  const { context, powerMonitor } = run;
+  for (const kind of ['dock', 'notch']) run.addWindow(kind);
+  powerMonitor.emit('lock-screen');
+  powerMonitor.emit('unlock-screen');
+  context.handleTrayToggle(null, { x: 35 }, false, false, true);
+  const next = context.mainWindow;
+  assert.equal(next.backgroundColors, undefined);
+  next.webContents.emit('did-finish-load');
+  assert.deepEqual(next.backgroundColors, ['#00000000']);
+  assert.equal(next.visible, false);
+  context.ipcMain.emit('window:appearanceReady', { sender: next.webContents });
+  assert.equal(next.visible, true);
+  next.webContents.emit('did-finish-load');
+  assert.deepEqual(next.backgroundColors, ['#00000000', '#00000000'], 'a reload restores it again');
+});
+
+test('a dependent window preserves the UI and keeps the existing Notch lock behavior', () => {
+  for (const kind of ['dashboard', 'limits-history', 'plugin-page']) {
+    const run = fixture('darwin');
+    run.addWindow(kind);
+    run.powerMonitor.emit('lock-screen');
+    assert.equal(run.suspended(), false, kind);
+    assert.equal(run.context.mainWindow, run.original, kind);
+    run.powerMonitor.emit('unlock-screen');
+    assert.deepEqual(run.surfaceEvents, ['notch:locked:true', 'notch:locked:false'], kind);
+    assert.equal(run.trayPaints(), 0, kind);
+  }
+});
+
+test('tray updates, settings sync and show entry points do not recreate pages while suspended', () => {
+  const run = fixture('darwin');
+  const { context } = run;
+  run.original.show();
+  run.powerMonitor.emit('lock-screen');
+  assert.equal(run.original.isVisible(), false);
+  context.rendererHiddenStatsNeeded = () => true;
+  context.updateTrayDisplay();
+  context.syncDockSurfaces();
+  context.showPopover();
+  context.focusExistingWindow();
+  context.handleTrayToggle();
+  context.handleWindowToggleShortcut();
+  run.app.emit('activate');
+  run.app.emit('second-instance');
+  run.fire(0);
+  assert.equal(run.mainWindowsCreated(), 1);
+  assert.equal(run.windows.size, 0);
+  assert.equal(context.mainWindow, null);
+
+  run.powerMonitor.emit('unlock-screen');
+  context.handleTrayToggle();
+  assert.equal(run.mainWindowsCreated(), 2);
+  const next = context.mainWindow;
+  context.ipcMain.emit('window:appearanceReady', { sender: next.webContents });
+  assert.equal(next.isVisible(), true);
+});
+
+test('screen lock skips Windows and Linux tray mode and macOS non-tray mode', () => {
+  for (const [platform, trayMode] of [['win32', true], ['linux', true], ['darwin', false]]) {
+    const run = fixture(platform);
+    run.context.settings.trayMode = trayMode;
+    run.original.show();
+    run.powerMonitor.emit('lock-screen');
+    run.powerMonitor.emit('unlock-screen');
+    assert.equal(run.suspended(), false, platform);
+    assert.equal(run.context.mainWindow, run.original, platform);
+    assert.equal(run.original.isVisible(), true, platform);
+    assert.deepEqual(run.surfaceEvents, ['notch:locked:true', 'notch:locked:false'], platform);
+  }
+});
 
 test('explicit popover hide and show manage the timer without native visibility events', () => {
   const run = fixture('darwin');

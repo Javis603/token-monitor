@@ -28,6 +28,8 @@
       getExpanded = () => '',
       setExpanded = () => {},
       applyOrder = () => {},
+      onDropOutside = () => false,
+      previewOrderAt,
       preserveScroll = (callback) => callback(),
       mirrorOrder = () => {},
       persistOrder = () => {},
@@ -180,11 +182,12 @@
       const offset = wrapped ? { x: point.x - drag.snapshot.originX, y: point.y - drag.snapshot.originY }
         : contentPosition(drag.lastClientPosition) - drag.snapshot.originY;
       const resolved = wrapped ? dragSort.resolveWrappedDrag(drag.snapshot, offset) : dragSort.resolveVerticalDrag(drag.snapshot, offset);
+      const previewOrder = previewOrderAt?.(drag.lastClientX, drag.lastClientPosition) !== false;
       drag.order = resolved.order;
       drag.changed = resolved.targetIndex !== drag.snapshot.sourceIndex;
       for (const [index, { el }] of drag.rows.entries()) {
         if (wrapped) {
-          const shift = index === drag.snapshot.sourceIndex ? offset : resolved.shifts[index];
+          const shift = index === drag.snapshot.sourceIndex ? offset : previewOrder ? resolved.shifts[index] : { x: 0, y: 0 };
           el.style.setProperty(index === drag.snapshot.sourceIndex ? '--drag-x' : '--drag-shift-x', `${shift.x}px`);
           el.style.setProperty(index === drag.snapshot.sourceIndex ? '--drag-y' : '--drag-shift-y', `${shift.y}px`);
         } else if (index === drag.snapshot.sourceIndex) el.style.setProperty(dragProperty, `${offset}px`);
@@ -236,6 +239,10 @@
     function onPointerUp(event) {
       if (!drag || drag.pointerId !== event.pointerId) return;
       const { id, started, changed, order } = drag;
+      if (started && onDropOutside(event, id)) {
+        finishRowDrag(false);
+        return;
+      }
       if (!started || !changed || !order?.length) {
         finishRowDrag(true);
         return;
@@ -313,6 +320,7 @@
           list?.classList.remove('drag-active');
           list?.classList.remove('is-reordering');
           if (current.expandedBefore) setExpanded(current.expandedBefore);
+          previewOrderAt?.();
           suppressNextClick();
           if (landing) releaseLandingStyleAfterPaint(list);
         }

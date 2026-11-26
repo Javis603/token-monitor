@@ -24,6 +24,7 @@ const {
   edgeDockScale,
   edgeDockBubbleScale,
   edgeDockTriggerBounds,
+  edgeDockOvershootBounds,
   normalizeEdgeDockCustomScale,
   normalizeEdgeDockDisplayId,
   normalizeEdgeDockFloatingX,
@@ -327,12 +328,13 @@ function createEdgeDockController(deps) {
     const handle = edgeDockHandleBounds({ side, peekBounds: peek, handle: handleSize(), metrics: m });
     const restingHandle = edgeDockHandleBounds({ side, peekBounds: peek, metrics: m });
     const trigger = edgeDockTriggerBounds({ workArea, displayBounds: current.bounds, side, railBounds: rail, metrics: m });
+    const overshoot = edgeDockOvershootBounds({ side, triggerBounds: trigger, metrics: m });
     const zones = edgeDockHandleZones({ side, peekBounds: peek, metrics: m });
     const bubble = bubbleCell !== null
       ? edgeDockBubbleBounds({ railBounds: rail, cellIndex: bubbleCell, height: Math.round(Math.min(bubbleHeight, maxCardHeight() ?? Infinity) * bubbleScale()), workArea, side, metrics: { ...bm, bubbleWidth } })
       : null;
     const refresh = edgeDockRefreshBounds({ workArea, displayBounds: current.bounds, railBounds: rail, metrics: m });
-    return { side, workArea, rail, peek, handle, restingHandle, trigger: floatingX === null ? trigger : null, wake: floatingX === null ? zones?.wake || null : null, approach: floatingX === null ? zones?.approach || null : null, bubble, bubbleWidth, refresh };
+    return { side, workArea, rail, peek, handle, restingHandle, trigger: floatingX === null ? trigger : null, overshoot: floatingX === null ? overshoot : null, wake: floatingX === null ? zones?.wake || null : null, approach: floatingX === null ? zones?.approach || null : null, bubble, bubbleWidth, refresh };
   }
 
   function alive(win) {
@@ -1232,7 +1234,8 @@ function createEdgeDockController(deps) {
           showPeek();
           render('rail');
         }
-        const revealed = intent.snapshot().revealed;
+        const { revealed, always, pinned } = intent.snapshot();
+        const trigger = revealed ? current.overshoot : current.trigger;
         const bubbleRect = bubbleVisible ? bubbleFrame : null;
         const inRefresh = refreshVisible && rectContains(current.refresh, point);
         const inRefreshCorridor = refreshVisible && rectContains(edgeDockRefreshCorridor(current.rail, current.refresh), point);
@@ -1244,7 +1247,11 @@ function createEdgeDockController(deps) {
           hideBubble();
         }
         const input = {
-          inTrigger: rectContains(current.trigger, point),
+          // A fixed rail stays open on its own. Its card can dismiss even
+          // when the pointer leaves through the system-reserved edge strip.
+          inTrigger: !always && !pinned
+            && (revealed || settings().edgeDockTriggerRange !== 'handle')
+            && rectContains(trigger, point),
           inPeek: !revealed && rectContains(current.restingHandle, point),
           // Only with the button known to be up: a held one is a scrollbar or a
           // selection being dragged past the handle, not a reach for it, and an

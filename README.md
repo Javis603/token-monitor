@@ -165,15 +165,19 @@ Launch the app to start tracking this device locally, with no hub setup required
 - **Live token tracking** — Claude Code, Codex, Cursor, GitHub Copilot, Antigravity, OpenCode, and 44+ AI tools, with the UI updating within seconds of each turn (full list in the table above)
 - **Live token rate** — an optional live readout of generation speed in `tok/s` or total burn in `tok/min`
 - **Per-session detail** — open a session to see tokens per prompt, expandable to each reply's exact token split and tools used (read on-demand from local transcripts or databases, never synced)
+- **Session search & filters** — search sessions by title, tool, model, or ID, filter them by tool, and see which device a synced session came from
 - **Cache hit statistics** — click any tool or model to expand a detailed breakdown of input tokens (cache hit vs miss), output tokens, and hit-rate percentages
 - **Cost & currency** — cost alongside token counts, shown in USD, CNY, TWD, HKD, KRW, JPY, BRL and other supported currencies; exchange rates auto-update daily and can be manually overridden in Settings
+- **Model aliases & custom pricing** — show different names for the same model as one row, and override the price of any model
 - **Custom scan paths** — point a tool at extra session folders when yours live outside the defaults
-- **WSL usage (Windows)** — file-based usage from running WSL distros is merged about every 5 minutes; SQLite-backed tools such as OpenCode and Hermes may require a [headless agent inside WSL](docs/wsl-sqlite-setup.md)
+- **WSL usage (Windows)** — off by default; file-based usage from running WSL distros is merged about every 5 minutes; SQLite-backed tools such as OpenCode and Hermes may require a [headless agent inside WSL](docs/wsl-sqlite-setup.md)
 
 ### Limits, trends & export
 
 - **AI Tool Limits detection** — provider-specific session, daily, weekly, billing, and credits windows for Claude Code, Codex, Cursor, OpenRouter, third-party APIs, GLM, Kimi, and 34+ providers, including multiple OpenRouter/third-party profiles and balance-style accounts (Claude credits, DeepSeek prepaid balance and spend history, third-party balances)
 - **Multiple accounts & Codex switching** — track several accounts per provider, each with its own limits; a tracked Codex account can be switched as the active local account in one click, without re-authenticating
+- **Quota history** — hover or click an account in the Limits view for its current-cycle trend and the last 14 days of measured usage; history is recorded locally and never uploaded
+- **Network proxy** — route AI Tool Limits and account requests through a proxy set in Settings → General
 - **Codex reset forecast** — an optional third-party forecast below Codex limits, showing the expected reset time, the reset type (Regular or Banked), and when the window last reset
 - **Preserve deleted session usage** — many tools prune old sessions (Claude Code drops transcripts after 30 days by default), losing that history. When enabled, Token Monitor archives observed daily tool/model usage locally so the heatmap and trends survive even after the source files are gone (see [Session data retention](#session-data-retention) below)
 - **Usage Trends & Dashboard** — a home-screen activity heatmap and trend chart, plus a dedicated dashboard window with streaks and stacked per-tool/per-model history (bar and K-line views) across all your devices
@@ -200,7 +204,7 @@ Launch the app to start tracking this device locally, with no hub setup required
 - **Floating Bubble mode** — collapses the widget into a draggable mini-window with click or hover preview and tray-style content
 - **Native macOS Widgets** — View token usage and cost, trends, AI tool quota remaining and reset times, activity heatmaps, and breakdowns by tool or model in Small, Medium, and Large layouts on macOS 14+
 - **Breakdown views** — grouped by tool, device, model, session, project, or account limits
-- **Appearance controls** — interface theme switching (incl. a light mode), per-tool vendor colours, glass opacity, blur, transparent window mode, and custom fonts
+- **Appearance controls** — interface themes (incl. a light mode) with custom colours, per-tool vendor colours, native glass styles on macOS and Windows, a background image, and text size and fonts
 - **Customizable tool list** — hide, pin, and reorder tools in the main dashboard without changing what gets tracked
 - **Recordable global shortcut** — show or hide the window from anywhere
 - **Discord Rich Presence** — broadcast today's tokens, cost, and top client (opt-in)
@@ -312,8 +316,8 @@ Token Monitor supports token usage, account-limit checks, and session details se
 | Output speed/token consumption rate | Claude Code, Codex, OpenCode, Antigravity, Kimi, GitHub Copilot, Pi, Oh My Pi, OmO Native, Kilo CLI, MiMo Code/MiMo Desktop, Muse Code, ZCode CLI, Kiro, DeepSeek Harness, Devin CLI | Output speed in `tok/s`, total token consumption in `tok/min`; timing can include waiting. |
 | Session model and reasoning effort | Claude Code, Codex | Only models and reasoning effort explicitly recorded in the session are shown. |
 | Reasoning token counts | Codex, OpenCode, Pi, Oh My Pi, OmO Native, CodeBuddy, WorkBuddy, Reasonix, DeepSeek Harness | — |
-| Turn start/completion detection | Claude Code, Codex, OpenCode, Cursor, CodeBuddy, WorkBuddy, DeepSeek Harness | Uses turn signals recorded by the tool. For other tools or without valid signals, running is estimated for about 10 minutes after the last activity. |
-| Native running/waiting-for-input status | Claude Code, Codex | — |
+| Turn start/completion detection | Claude Code, Codex, OpenCode, Cursor, Antigravity, CodeBuddy, WorkBuddy, DeepSeek Harness | Uses turn signals recorded by the tool. For other tools or without valid signals, running is estimated for about 10 minutes after the last activity. |
+| Native running/waiting-for-input status | Claude Code, Codex, Antigravity | Antigravity ACP in T3 Code reports running and idle only. |
 | Parent/subagent grouping | Codex, Antigravity, Oh My Pi, ZCode; T3 Code sessions with verifiable parent links | Claude Code grouping is available through T3 Code. |
 | Continuation-record grouping for the same conversation | Codex; T3 Code sessions with verified thread links | — |
 | Switch local accounts | Codex | Switches between accounts added in Token Monitor. |
@@ -383,7 +387,7 @@ On each Mac signed into the same Apple ID, choose **iCloud Drive** in Settings �
 
 ### Headless agent
 
-Run the headless agent on servers, SSH hosts, or inside WSL — anywhere you use AI tools without the desktop widget. It collects usage on that machine and posts it to your hub (Option A, B, or C). Requires Node.js 22.15+ and git.
+Run the headless agent on servers, SSH hosts, or inside WSL — anywhere you use AI tools without the desktop widget. It collects usage on that machine and posts it to your hub (Option A, B, or C). Requires Node.js 22.22+ and git.
 
 ```bash
 git clone https://github.com/Javis603/token-monitor.git
@@ -407,7 +411,7 @@ App state lives in the OS user-data dir — delete it along with the app to full
 
 ## Build from source
 
-To build your own installer, use Node.js 22.15+ on the **target** OS (electron-builder can't cross-build a macOS `.dmg` on Windows, or vice-versa).
+To build your own installer, use Node.js 22.22+ on the **target** OS (electron-builder can't cross-build a macOS `.dmg` on Windows, or vice-versa).
 
 ```bash
 npm install
@@ -465,7 +469,7 @@ This archive only covers days Token Monitor has already observed; data deleted b
 
 There are two places to configure Token Monitor; day-to-day use only needs the first:
 
-- **Widget (GUI)** — click the `⚙` button in the bottom-right corner. Sections, in order: General (language, launch at login, updates), Main (Home modules and display currency), Window (window behavior, menu bar and floating-bubble layout, tray mode, shortcut), Appearance (theme and vendor colours), Collection (tracked tools, collection cadence, Preserve deleted session usage, data export), AI Tool Limits (provider selection, limits, and credentials), Subscriptions (what you pay per account), and Multi-device Sync. The `⇧` button in the title bar cycles the window behavior.
+- **Widget (GUI)** — click the `⚙` button in the bottom-right corner. Sections, in order: General (language, launch at login, updates, network proxy), Main (view order, Home modules, default usage range, and display currency), Window (window behavior, menu bar and floating-bubble layout, tray mode, Edge Dock and Notch Panel, shortcut), Appearance (theme, glass, text size, and colours), Collection (tracked tools, collection cadence, Preserve deleted session usage, WSL scanning, data export, model aliases and pricing), AI Tool Limits (provider selection, limits, and credentials), Subscriptions (what you pay per account), Multi-device Sync (sync method and saved Hubs), and Plugins (experimental). The `⇧` button in the title bar cycles the window behavior.
 - **Headless agent & hub** — no UI; configured with a `.env` file at the project root (copy from `.env.example`), precedence CLI flag → env var → built-in default. See [docs/configuration.md](docs/configuration.md#headless-agent--hub-env).
 
 See the [configuration reference](docs/configuration.md) for every setting and all environment variables.

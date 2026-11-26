@@ -111,16 +111,17 @@ test('scrolling settles offscreen rolls and a new update keeps active work bound
   assert.equal(h.motions.size, 5, 'old offscreen motions must be settled before adding new ones');
 });
 
-test('unavailable token data stays a label and reduced motion skips capture entirely', () => {
+test('unavailable token data shows zero without a tween and reduced motion skips capture entirely', () => {
   const h = harness();
+  const snapshot = h.captureBreakdownMotion();
   const row = h.rows[0];
   row.dataset.tokenDataUnavailable = 'true';
-  row.querySelector('.row-value').textContent = 'Unavailable';
-  const snapshot = h.captureBreakdownMotion();
-  for (const current of h.rows) current.dataset.motionValue = String(Number(current.dataset.motionValue) + 1);
+  row.dataset.motionValue = '0';
+  row.querySelector('.row-value').textContent = '0';
+  for (const current of h.rows.slice(1)) current.dataset.motionValue = String(Number(current.dataset.motionValue) + 1);
   h.animateBreakdownFrom(snapshot);
   assert.equal(h.calls.length, 4);
-  assert.equal(row.querySelector('.row-value').textContent, 'Unavailable');
+  assert.equal(row.querySelector('.row-value').textContent, '0');
   h.reduce(true);
   assert.equal(h.captureBreakdownMotion(), null);
   h.animateBreakdownFrom(new Map());

@@ -180,7 +180,7 @@ test('a third native-only adapter reuses bounded SQLite watches without discover
     if (id === './sessionActivityRegistry') return { sessionActivityProvidersFor: () => [{
       id: 'fixture', watchTargets: () => [{ target, floor, kind: 'sqlite' }]
     }] };
-    if (id === './t3SessionMetadata') return { discoverT3DbPaths: () => { t3Discovery += 1; return []; } };
+    if (id === './t3/sessionMetadata') return { discoverT3DbPaths: () => { t3Discovery += 1; return []; } };
     return require(id);
   } };
   vm.runInNewContext(source('sessionActivityWatch.js'), context);

@@ -1,7 +1,7 @@
 {
   "name": "token-monitor",
   "productName": "Token Monitor",
-  "version": "0.95.1",
+  "version": "0.99.0",
   "description": "Live token & cost widget for Claude Code, Codex & Hermes — local-first, optional multi-device sync.",
   "main": "src/electron/launch.js",
   "scripts": {
@@ -163,14 +163,15 @@
   },
   "dependencies": {
     "@xhayper/discord-rpc": "^1.5.1",
-    "chokidar": "^4.0.3",
+    "chokidar": "6.0.0",
+    "chokidar-macos": "npm:chokidar@4.0.3",
     "dotenv": "^17.4.2",
     "electron-updater": "6.8.12",
     "image-size": "^2.0.4",
     "koffi": "^3.3.5",
     "markdown-it": "^15.0.3",
     "semver": "^7.8.5",
-    "tokscale": "^4.23.0",
+    "tokscale": "^4.23.1",
     "undici": "^7.30.2"
   },
   "devDependencies": {
@@ -187,6 +188,6 @@
     "typescript": "^7.0.2"
   },
   "engines": {
-    "node": ">=22.15.0"
+    "node": ">=22.22.0"
   }
 }

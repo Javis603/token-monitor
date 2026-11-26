@@ -7,6 +7,8 @@ const { UPLOAD_HEADER, UPLOAD_VERSION } = require('./uploadDelta');
 const { MAX_JSON_BODY_BYTES } = require('./http');
 const { syncLimits } = require('./limits/core');
 const { stripSessionTextFromDeviceRecord } = require('./usage');
+const { uploadFixedRangeVersion } = require('./fixedRangeClient');
+const { FIXED_RANGE_HEADER, FIXED_RANGE_VERSION } = require('./fixedRangeSync');
 const { isReasonixSyntheticSession } = require('./providers/reasonix/sessionGuard');
 
 const SYNC_PAYLOAD_MARGIN_BYTES = 16 * 1024;
@@ -74,6 +76,16 @@ function historyWithoutTokenComponents(history) {
       return stripped;
     })
   };
+}
+
+function historyForUpload(summary) {
+  const history = historyForSync(summary.history, summary.periodWindows);
+  if (!Array.isArray(history?.dailyTotals)) return history;
+  const { dailyTotalsOmitted: _omitted, ...complete } = history;
+  if (summary.dailySessionPeriods && complete.summary?.activeDaysComplete === true) {
+    complete.dailyTotalsRevision = historyKey(complete.dailyTotals);
+  }
+  return complete;
 }
 
 function projectEntries(period) {
@@ -184,6 +196,7 @@ function sessionsWithoutReasonix(sessions) {
 }
 
 function buildSyncPayload(summary, {
+  pagedSessions = false,
   omitHistory = false,
   omitDailyTotals = false,
   omitAllTimeProjects = false,
@@ -214,7 +227,7 @@ function buildSyncPayload(summary, {
     payload.sessionTitleSyncGeneration = sessionTitleSyncGeneration;
   }
   if (!omitHistory && summary.history && typeof summary.history === 'object') {
-    payload.history = historyForSync(summary.history, summary.periodWindows);
+    payload.history = historyForUpload(summary);
     if (omitHistoryTokenComponents) {
       payload.history = historyWithoutTokenComponents(payload.history);
     }
@@ -225,16 +238,18 @@ function buildSyncPayload(summary, {
   // a hub concern. Tokscale remains the only aggregate/session authority.
   delete payload.nativeSessions;
   delete payload.nativeProjects;
+  // Native ranges are a local presentation of this machine's scan; the wire
+  // shape and every Hub keep deriving ranges from History.
+  delete payload.nativeRanges;
+  delete payload.nativeRangeWindows;
+  delete payload.nativeRangeDays;
+  delete payload.dailySessionPeriods;
   const projectsEnabled = summary.projectsEnabled !== false;
   delete payload.allTimeProjectsOmitted;
   delete payload.allTimeProjectsIncomplete;
   delete payload.sessionDetailsOmitted;
   delete payload.periodProjectsOmitted;
   delete payload.codexLocalSessionKeys;
-  if (Array.isArray(payload.history?.dailyTotals)) {
-    payload.history = { ...payload.history };
-    delete payload.history.dailyTotalsOmitted;
-  }
 
   for (const periodName of ['today', 'month']) {
     const period = payload[periodName];
@@ -257,6 +272,15 @@ function buildSyncPayload(summary, {
   if (omitModelThroughput) {
     for (const period of ['today', 'month', 'allTime']) {
       if (payload[period]) delete payload[period].modelThroughput;
+    }
+  }
+  if (pagedSessions) {
+    for (const name of ['today', 'month']) {
+      const period = payload[name];
+      const count = Object.keys(period?.sessions || {}).length;
+      if (!count) continue;
+      delete period.sessions;
+      setSessionOmission(payload, name, count);
     }
   }
   if (omitDailyTotals) omitHistoryDailyTotals(payload);
@@ -335,10 +359,10 @@ function syncPayload(summary, options = {}) {
   return serializeSyncPayload(summary, options).payload;
 }
 
-async function postSyncPayload(fetchFn, url, { headers = {}, summary, logger, syncSessionTitles = false, sessionTitleSyncGeneration, acknowledgedHistoryKey } = {}) {
-  const syncOptions = { syncSessionTitles, sessionTitleSyncGeneration };
+async function postSyncPayload(fetchFn, url, { headers = {}, summary, logger, syncSessionTitles = false, sessionTitleSyncGeneration, acknowledgedHistoryKey, pagedSessions = false } = {}) {
+  const syncOptions = { syncSessionTitles, sessionTitleSyncGeneration, pagedSessions };
   if (acknowledgedHistoryKey && summary?.history !== undefined
-    && historyKey(historyForSync(summary.history, summary.periodWindows)) === acknowledgedHistoryKey) {
+    && historyKey(historyForUpload(summary)) === acknowledgedHistoryKey) {
     // Omit before cloning and sizing: the freed budget belongs to live detail.
     syncOptions.omitHistory = true;
   }
@@ -365,6 +389,7 @@ async function postSyncPayload(fetchFn, url, { headers = {}, summary, logger, sy
   const retrySerialized = response.status === 413
     ? serializeSyncPayload(summary, {
         ...syncOptions,
+        pagedSessions: false,
         maxBytes: LEGACY_SYNC_PAYLOAD_BUDGET_BYTES,
         omitHistoryTokenComponents: true,
         omitAllTimeProjects: true,
@@ -396,11 +421,18 @@ function createSyncPayloadUploader({ now = Date.now } = {}) {
   let identity = null;
   let acknowledged = null;
   let deltaBaseline = null;
+  let acknowledgedFixedRangeAt = null;
+  /** @type {Record<string, any>[] | null} */
+  let fixedRangeBaseline = null;
   let generation = 0;
 
   function resetHistory({ preserveDelta = false } = {}) {
     acknowledged = null;
-    if (!preserveDelta) deltaBaseline = null;
+    acknowledgedFixedRangeAt = null;
+    if (!preserveDelta) {
+      deltaBaseline = null;
+      fixedRangeBaseline = null;
+    }
     generation += 1;
   }
 
@@ -422,6 +454,7 @@ function createSyncPayloadUploader({ now = Date.now } = {}) {
       const send = async (target, request) => {
         const fullHeaders = new Headers(request.headers);
         fullHeaders.set(UPLOAD_HEADER, UPLOAD_VERSION);
+        if (options.summary?.nativeRanges) fullHeaders.set(FIXED_RANGE_HEADER, FIXED_RANGE_VERSION);
         if (deltaBaseline) {
           const body = JSON.stringify({ deviceId: options.summary.deviceId || options.summary.id,
             baseRevision: deltaBaseline.revision, patch: statsPatch(deltaBaseline.payload, JSON.parse(request.body)) });
@@ -436,23 +469,75 @@ function createSyncPayloadUploader({ now = Date.now } = {}) {
         }
         return fetchFn(target, { ...request, headers: Object.fromEntries(fullHeaders) });
       };
-      const result = await postSyncPayload(send, url, { ...options,
-        acknowledgedHistoryKey: deltaBaseline ? undefined : baseline });
-      // Read a clone so existing callers still consume the legacy/minimal ACK.
-      const ack = result.response.ok ? await result.response.clone().json().catch(() => null) : null;
-      if (requestGeneration === generation) {
+      const readAck = async (upload) => upload.response.ok ? upload.response.clone().json().catch(() => null) : null;
+      const remember = (upload, ack) => {
+        if (requestGeneration !== generation) return;
         if (!ack?.ok || ack.deviceId !== (options.summary?.deviceId || options.summary?.id)) {
           acknowledged = null;
           deltaBaseline = null;
-        } else {
-          deltaBaseline = ack.upload?.version === 1 && typeof ack.upload.revision === 'string'
-            && ack.upload.revision.length > 0 && ack.upload.revision.length <= 128
-            ? { revision: ack.upload.revision, payload: JSON.parse(JSON.stringify(result.payload)) } : null;
-          if (hasOwn(result.payload, 'history')) {
-            // A 413 retry may have sent reduced history. Remember exactly what
-            // was accepted, so omitted detail can be restored on a later upload.
-            acknowledged = { key: historyKey(result.payload.history), at: startedAt };
+          return;
+        }
+        deltaBaseline = ack.upload?.version === 1 && typeof ack.upload.revision === 'string'
+          && ack.upload.revision.length > 0 && ack.upload.revision.length <= 128
+          ? { revision: ack.upload.revision, payload: JSON.parse(JSON.stringify(upload.payload)) } : null;
+        if (hasOwn(upload.payload, 'history')) acknowledged = { key: historyKey(upload.payload.history), at: startedAt };
+      };
+      const result = await postSyncPayload(send, url, { ...options,
+        acknowledgedHistoryKey: deltaBaseline ? undefined : baseline });
+      const ack = await readAck(result);
+      remember(result, ack);
+      const summary = options.summary;
+      const daily = ack?.dailySessionRanges === 1 && summary?.dailySessionPeriods;
+      const fixedRangeRecord = daily ? summary : { ...summary, dailySessionPeriods: undefined };
+      const fixedRangeAt = JSON.stringify([summary?.updatedAt, options.sessionTitleSyncGeneration, summary?.projectsEnabled !== false, summary?.nativeRangeWindows, Boolean(daily)]);
+      const fixedRangeConfirmed = fixedRangeAt === acknowledgedFixedRangeAt
+        && (!hasOwn(ack, 'fixedRangeRevision') || ack.fixedRangeRevision === fixedRangeBaseline?.[0]?.revision);
+      let ready = fixedRangeConfirmed;
+      if (requestGeneration === generation && ack?.ok && ack.fixedRanges === 1
+        && ack.deviceId === summary?.deviceId && summary.nativeRanges && !fixedRangeConfirmed) {
+        try {
+          const target = url.replace(/\/api\/ingest$/, '');
+          let committed = await uploadFixedRangeVersion(fetchFn, target, fixedRangeRecord, headers, options,
+            ack.fixedRangeDelta === 1 ? fixedRangeBaseline ?? [] : [], ack.fixedRangeBatch === 1, ack.fixedRangeIndexDelta === 1);
+          if (!committed && daily) {
+            ready = false;
+            committed = await uploadFixedRangeVersion(fetchFn, target, { ...summary, dailySessionPeriods: undefined }, headers, options);
+          } else if (committed) {
+            ready = true;
           }
+          if (committed && requestGeneration === generation) {
+            acknowledgedFixedRangeAt = daily && !ready ? null : fixedRangeAt;
+            fixedRangeBaseline = ack.fixedRangeDelta === 1 ? committed : null;
+          }
+        } catch (error) {
+          options.logger?.(`fixed range upload deferred: ${error.message}`);
+        }
+      }
+      if (daily && ready && deltaBaseline && ack?.historyCalendarRetained !== true
+        && result.payload?.history?.dailyTotalsOmitted > 0
+        && requestGeneration === generation) {
+        try {
+          const original = historyForSync(summary.history, summary.periodWindows);
+          if (!original?.summary?.activeDaysComplete || !Array.isArray(original.dailyTotals)) return result;
+          const compact = { ...result.payload,
+            today: { ...result.payload.today, sessions: undefined },
+            month: { ...result.payload.month, sessions: undefined },
+            history: {
+              ...result.payload.history, dailyTotalsOmitted: undefined, dailyTotals: original.dailyTotals,
+              summary: { ...result.payload.history.summary, activeDaysComplete: true }
+            }
+          };
+          const body = JSON.stringify({ deviceId: summary.deviceId, baseRevision: deltaBaseline.revision,
+            patch: statsPatch(deltaBaseline.payload, compact) });
+          if (Buffer.byteLength(body) <= MAX_JSON_BODY_BYTES) {
+            const compactHeaders = new Headers(headers);
+            compactHeaders.set(FIXED_RANGE_HEADER, FIXED_RANGE_VERSION);
+            const response = await fetchFn(`${url}/compact`, { method: 'POST', headers: compactHeaders, body });
+            if (response.ok) return { ...result, response };
+            await response.arrayBuffer();
+          }
+        } catch (error) {
+          options.logger?.(`compact ingest deferred: ${error.message}`);
         }
       }
       return result;

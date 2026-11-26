@@ -244,6 +244,7 @@ const CLIENT_SOURCE_CHECK_IDS = Object.freeze([
   'senpi-sessions',
   'senpi-task-children',
   'tokscale-antigravity-cache',
+  't3-antigravity-acp',
   'tokscale-cursor-cache',
   'unsloth-db',
   'vscode-empty-window-sessions',

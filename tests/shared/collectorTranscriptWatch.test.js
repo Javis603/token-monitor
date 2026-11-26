@@ -233,7 +233,7 @@ test('a Copilot exporter already on disk is attributed when unlink is its first 
   process.env.COPILOT_OTEL_FILE_EXPORTER_PATH = configured;
   process.env.TOKEN_MONITOR_SHARED_DIR = home;
   let onEvent;
-  t.mock.method(require('chokidar'), 'watch', () => {
+  t.mock.method(require('../../src/shared/fileWatcher'), 'watch', () => {
     const watcher = { on(event, handler) { if (event === 'all') onEvent = handler; return watcher; }, close() {} };
     return watcher;
   });
@@ -279,7 +279,7 @@ for (const entry of [
     fs.writeFileSync(sidecar, JSON.stringify({ [entry.field]: entry.before }));
     const sourceStat = fs.statSync(source);
     let onEvent, watchIgnored;
-    t.mock.method(require('chokidar'), 'watch', (_dirs, config) => {
+    t.mock.method(require('../../src/shared/fileWatcher'), 'watch', (_dirs, config) => {
       watchIgnored = config.ignored;
       const watcher = { on(event, handler) { if (event === 'all') onEvent = handler; return watcher; }, close() {} };
       return watcher;

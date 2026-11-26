@@ -31,6 +31,7 @@ const {
 
 const { emptyPeriod } = require('../../src/shared/usage');
 const { installInProcessWatchHost } = require('../helpers/watchHost');
+const { withoutWindowedScan } = require('../helpers/tokscaleWithoutWindows');
 
 installInProcessWatchHost(test);
 
@@ -403,7 +404,7 @@ test('restart reuse: anchor file on disk enables todayOnly on first interval tic
   const childProcess = require('node:child_process');
   const originalSpawn = childProcess.spawn;
   const calls = [];
-  childProcess.spawn = () => {
+  childProcess.spawn = withoutWindowedScan(() => {
     calls.push('spawn');
     const { EventEmitter } = require('node:events');
     const child = new EventEmitter();
@@ -416,7 +417,7 @@ test('restart reuse: anchor file on disk enables todayOnly on first interval tic
       child.emit('close', 0);
     });
     return child;
-  };
+  });
 
   const originalSharedDir = process.env.TOKEN_MONITOR_SHARED_DIR;
   process.env.TOKEN_MONITOR_SHARED_DIR = tmpShared;
@@ -464,7 +465,7 @@ test('future fullScanAt forces a full scan on first interval tick', async () => 
   const childProcess = require('node:child_process');
   const originalSpawn = childProcess.spawn;
   const calls = [];
-  childProcess.spawn = () => {
+  childProcess.spawn = withoutWindowedScan(() => {
     calls.push('spawn');
     const { EventEmitter } = require('node:events');
     const child = new EventEmitter();
@@ -477,7 +478,7 @@ test('future fullScanAt forces a full scan on first interval tick', async () => 
       child.emit('close', 0);
     });
     return child;
-  };
+  });
 
   const originalSharedDir = process.env.TOKEN_MONITOR_SHARED_DIR;
   process.env.TOKEN_MONITOR_SHARED_DIR = tmpShared;
@@ -525,7 +526,7 @@ test('missing fullScanAt forces a full scan on first interval tick', async () =>
   const childProcess = require('node:child_process');
   const originalSpawn = childProcess.spawn;
   const calls = [];
-  childProcess.spawn = () => {
+  childProcess.spawn = withoutWindowedScan(() => {
     calls.push('spawn');
     const { EventEmitter } = require('node:events');
     const child = new EventEmitter();
@@ -538,7 +539,7 @@ test('missing fullScanAt forces a full scan on first interval tick', async () =>
       child.emit('close', 0);
     });
     return child;
-  };
+  });
 
   const originalSharedDir = process.env.TOKEN_MONITOR_SHARED_DIR;
   process.env.TOKEN_MONITOR_SHARED_DIR = tmpShared;
@@ -587,7 +588,7 @@ test('unparseable fullScanAt forces a full scan on first interval tick', async (
   const childProcess = require('node:child_process');
   const originalSpawn = childProcess.spawn;
   const calls = [];
-  childProcess.spawn = () => {
+  childProcess.spawn = withoutWindowedScan(() => {
     calls.push('spawn');
     const { EventEmitter } = require('node:events');
     const child = new EventEmitter();
@@ -600,7 +601,7 @@ test('unparseable fullScanAt forces a full scan on first interval tick', async (
       child.emit('close', 0);
     });
     return child;
-  };
+  });
 
   const originalSharedDir = process.env.TOKEN_MONITOR_SHARED_DIR;
   process.env.TOKEN_MONITOR_SHARED_DIR = tmpShared;
@@ -653,7 +654,7 @@ test('WSL toggle off: persisted wslAnchor is not merged into warm previews', asy
   // bundle leaks into a preview it shows totalTokens 999 instead of 0.
   const childProcess = require('node:child_process');
   const originalSpawn = childProcess.spawn;
-  childProcess.spawn = () => {
+  childProcess.spawn = withoutWindowedScan(() => {
     const { EventEmitter } = require('node:events');
     const child = new EventEmitter();
     child.stdout = new EventEmitter();
@@ -665,7 +666,7 @@ test('WSL toggle off: persisted wslAnchor is not merged into warm previews', asy
       child.emit('close', 0);
     });
     return child;
-  };
+  });
 
   const originalSharedDir = process.env.TOKEN_MONITOR_SHARED_DIR;
   process.env.TOKEN_MONITOR_SHARED_DIR = tmpShared;
@@ -705,7 +706,7 @@ test('cross-day anchor invalidation: stale dateKey triggers full scan', async ()
   const childProcess = require('node:child_process');
   const originalSpawn = childProcess.spawn;
   const calls = [];
-  childProcess.spawn = () => {
+  childProcess.spawn = withoutWindowedScan(() => {
     calls.push('spawn');
     const { EventEmitter } = require('node:events');
     const child = new EventEmitter();
@@ -718,7 +719,7 @@ test('cross-day anchor invalidation: stale dateKey triggers full scan', async ()
       child.emit('close', 0);
     });
     return child;
-  };
+  });
 
   try {
     const { collectUsageOnce } = freshCollector();
@@ -820,8 +821,10 @@ test('flat catalog project provenance requires a full scan instead of guessing p
   assert.ok(collectorAnchorTrust({ ...anchor, catalogProjects: { today: { 'antigravity:session': 'project-a' }, month: {}, allTime: {} } }, options));
 });
 
-for (const scenario of ['cross-client', 'native', 'locked', 'partial', 'missing', 'empty', 'unsupported', 'corrupt']) test(`old persisted anchors retain identity migration through refresh and restart: ${scenario}`, async t => {
+for (const scenario of ['cross-client', 'antigravity', 'antigravity-disabled-ranges', 'native', 'locked', 'partial', 'missing', 'empty', 'unsupported', 'corrupt']) test(`old persisted anchors retain identity migration through refresh and restart: ${scenario}`, async t => {
   const nativeChild = scenario === 'native';
+  const antigravityChild = scenario.startsWith('antigravity');
+  const disabledRanges = scenario === 'antigravity-disabled-ranges';
   const retryable = ['locked', 'partial'].includes(scenario);
   const unavailable = ['missing', 'empty', 'unsupported', 'corrupt'].includes(scenario);
   const { DatabaseSync } = require('node:sqlite');
@@ -840,8 +843,9 @@ for (const scenario of ['cross-client', 'native', 'locked', 'partial', 'missing'
     fs.rmSync(home, { recursive: true, force: true });
   });
   const native = 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa';
-  const childNative = nativeChild ? 'cccccccc-cccc-cccc-cccc-cccccccccccc' : 'opaque-devin';
-  const childClient = nativeChild ? 'codex' : 'devin';
+  const childNative = nativeChild || antigravityChild ? 'cccccccc-cccc-cccc-cccc-cccccccccccc' : 'opaque-devin';
+  const childClient = nativeChild ? 'codex' : (antigravityChild ? 'antigravity' : 'devin');
+  const childDriver = nativeChild || antigravityChild ? childClient : 'acpRegistry';
   const childId = nativeChild ? 'historical-child' : childNative;
   const childKey = `${childClient}:${childId}`;
   const historyDir = path.join(home, '.codex', 'sessions');
@@ -860,8 +864,8 @@ for (const scenario of ['cross-client', 'native', 'locked', 'partial', 'missing'
     lineage: { parentThreadId: 'app-thread', relationshipToParent: 'subagent' },
     forkedFrom: { type: 'node', nodeId: 'task' }
   }));
-  db.prepare('INSERT INTO orchestration_v2_projection_provider_threads VALUES (?, ?, ?, ?)').run('devin-provider', 'devin-app', nativeChild ? 'codex' : 'acpRegistry',
-    JSON.stringify({ providerInstanceId: 'configured-devin', nativeThreadRef: { nativeId: childNative, driver: nativeChild ? 'codex' : 'acpRegistry', strength: 'strong' } }));
+  db.prepare('INSERT INTO orchestration_v2_projection_provider_threads VALUES (?, ?, ?, ?)').run('devin-provider', 'devin-app', childDriver,
+    JSON.stringify({ providerInstanceId: 'configured-devin', nativeThreadRef: { nativeId: childNative, driver: childDriver, strength: 'strong' } }));
   db.prepare('INSERT INTO orchestration_v2_projection_nodes VALUES (?, ?, ?, ?, ?)').run('root', 'app-thread', 'root', 'root_turn', 'provider');
   db.prepare('INSERT INTO orchestration_v2_projection_nodes VALUES (?, ?, ?, ?, ?)').run('task', 'app-thread', 'root', 'subagent', 'devin-provider');
   fs.writeFileSync(path.join(home, 'settings.json'), JSON.stringify({ providerInstances: { 'configured-devin': { driver: 'acpRegistry', config: { agentId: 'devin' } } } }));
@@ -885,9 +889,24 @@ for (const scenario of ['cross-client', 'native', 'locked', 'partial', 'missing'
   const capturedAt = new Date().toISOString();
   const anchorPeriods = { today: period(), month: period(true), allTime: period(true) };
   if (nativeChild) for (const period of ['month', 'allTime']) anchorPeriods[period].sessions[childKey].parentClient = 'codex';
+  const todayKey = localTodayKey();
+  const todayDate = new Date(todayKey);
+  const daysAgo = days => new Date(todayDate.getTime() - days * 86400000).toISOString().slice(0, 10);
+  const weekStartsOn = disabledRanges ? 0 : 1;
+  const starts = { yesterday: daysAgo(1), week: daysAgo((todayDate.getUTCDay() + 7 - weekStartsOn) % 7), last7: daysAgo(6), last30: daysAgo(29) };
+  const nativePastRanges = { todayKey, weekStartsOn, starts,
+    periods: Object.fromEntries(Object.keys(starts).map(name => [name, period(true)])) };
+  if (antigravityChild) {
+    const rangeSessions = nativePastRanges.periods.yesterday.sessions;
+    rangeSessions['codex:range-parent'] = { ...rangeSessions['codex:today'], sessionId: 'range-parent' };
+    delete rangeSessions['codex:today'];
+    rangeSessions[childKey].parentSessionId = 'range-parent';
+    rangeSessions[childKey].parentClient = 'codex';
+  }
   fs.writeFileSync(file, JSON.stringify({ dateKey: localTodayKey(), ...anchorPeriods,
     calendarKey: collectionCalendarKey(),
-    configFingerprint: configFingerprint('codex', '2024-01-01', false), fullScanAt: capturedAt, sessionIdentityVersion: 1 }));
+    configFingerprint: configFingerprint('codex', '2024-01-01', false), fullScanAt: capturedAt,
+    sessionIdentityVersion: antigravityChild ? 2 : 1, ...(antigravityChild ? { nativePastRanges } : {}) }));
   const scans = [], resolved = [], updates = [];
   let relationReads = 0;
   let failLater = scenario === 'partial';
@@ -906,6 +925,7 @@ for (const scenario of ['cross-client', 'native', 'locked', 'partial', 'missing'
     }
   }
   const options = { ...baseOptions, clients: 'codex', homeDir: home, projectsEnabled: false,
+    nativeRangesEnabled: antigravityChild && !disabledRanges,
     intervalMs: 3600000, watchEnabled: false, wslScanEnabled: false, sessionActivityPolling: false,
     runTokscale: async ({ flags }) => {
       scans.push(flags);
@@ -938,7 +958,7 @@ for (const scenario of ['cross-client', 'native', 'locked', 'partial', 'missing'
     assert.equal(updates[0].month.sessions[childKey].parentSessionId, undefined);
     assert.equal(updates[0].month.sessions[childKey].t3ThreadId, undefined, 'no partial T3 identity is applied');
     const failed = JSON.parse(fs.readFileSync(file, 'utf8'));
-    assert.equal(failed.sessionIdentityVersion, retryable ? 1 : 2);
+    assert.equal(failed.sessionIdentityVersion, retryable ? 1 : 3);
     assert.equal(failed.month.sessions[childKey].parentSessionId, undefined);
     assert.equal(failed.month.totalTokens, 40);
     assert.equal(failed.fullScanAt, capturedAt);
@@ -967,13 +987,22 @@ for (const scenario of ['cross-client', 'native', 'locked', 'partial', 'missing'
   assert.equal(relationReads, unavailable ? 0 : scenario === 'locked' ? 1 : scenario === 'partial' ? 3 : 2, 'one lookup per eligible tick');
   assert.equal(resolved.includes('historical'), false, 'migration only reads identity headers, never full historical metadata');
   const saved = JSON.parse(fs.readFileSync(file, 'utf8'));
-  assert.equal(saved.sessionIdentityVersion, 2);
+  assert.equal(saved.sessionIdentityVersion, 3);
   assert.equal(saved.fullScanAt, capturedAt, 'metadata migration does not pretend to be a new full scan');
   assert.equal(saved.today.totalTokens, 10, 'frozen delta baseline is retained');
   assert.equal(saved.month.totalTokens, 40);
   assert.equal(saved.month.sessions['codex:historical'].nativeSessionId, native);
   assert.equal(saved.month.sessions['codex:historical'].t3ThreadId, unavailable ? undefined : 'app-thread');
   assert.equal(saved.month.sessions[childKey].t3ThreadId, unavailable ? undefined : 'devin-app', 'version-one anchors receive the child app identity');
+  if (antigravityChild) {
+    assert.equal(saved.nativePastRanges.periods.yesterday.sessions[childKey].parentSessionId, 'range-parent');
+    for (const name of ['yesterday', 'last7']) {
+      assert.equal(saved.nativePastRanges.periods[name].sessions[childKey].t3ThreadId, 'devin-app');
+      if (disabledRanges) assert.equal(updates[0].nativeRanges, undefined);
+      else assert.equal(updates[0].nativeRanges[name].sessions[childKey].t3ThreadId, 'devin-app');
+      assert.equal(saved.nativePastRanges.periods[name].totalTokens, 40);
+    }
+  }
   for (const period of ['month', 'allTime']) {
     assert.equal(saved[period].sessions[childKey].parentSessionId, updates.at(-1)[period].sessions[childKey].parentSessionId);
     assert.equal(saved[period].sessions[childKey].parentClient, nativeChild || unavailable ? undefined : 'codex', 'same-client links remove the redundant old namespace');

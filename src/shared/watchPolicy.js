@@ -19,9 +19,11 @@ const {
 } = require('./clientSources');
 const { dirExists } = require('./clientSourceObservations');
 const { normalizeCustomScanPaths } = require('./customScanPaths');
+const { ANTIGRAVITY_ACP_SOURCE_ID, discoverAntigravityAcpPaths } = require('./providers/antigravity/acpPaths');
 const { activityWatchIgnored } = require('./sessionActivityWatch');
 const { antigravityDataRoots } = require('./providers/antigravity/selfSync');
 const { antigravityConversationSummaryCandidates } = require('./providers/antigravity/sessionMetadata');
+const { cliContextPath } = require('./providers/antigravity/cliContext');
 const { cursorDesktopWatchRoots, isCursorDesktopStateWrite } = require('./providers/cursor/desktopState');
 const { catpawDatabaseName } = require('./providers/catpaw/paths');
 const { isDshSessionLogName } = require('./providers/dsh/sessionFiles');
@@ -91,17 +93,25 @@ function selfSyncSourceRootsForClients(clientsCsv, options = {}) {
   return rootsByClient;
 }
 
-function antigravitySummaryWatchSources(options = {}) {
-  return antigravityConversationSummaryCandidates({
+function antigravityMetadataWatchSources(options = {}) {
+  const catalogs = antigravityConversationSummaryCandidates({
     home: options.homeDir || os.homedir(),
-    env: options.env || process.env
-  }).map((candidate) => {
+    env: options.env || process.env,
+    useEnvRoot: options.useEnvRoot !== false,
+    antigravityAcpPaths: options.antigravityAcpPaths
+  });
+  return [...catalogs, cliContextPath(options)].map((candidate) => {
     const file = canonicalWatchFilePath(candidate);
     return { file, dir: path.dirname(file) };
   });
 }
 
 function watchClientRootsForClients(clientsCsv, options = {}) {
+  const enabled = new Set(String(clientsCsv || '').split(',').map((value) => value.trim().toLowerCase()).filter(Boolean));
+  const acpDirs = enabled.has('antigravity')
+    ? options.antigravityAcpPaths ?? discoverAntigravityAcpPaths(options)
+    : [];
+  options = { ...options, antigravityAcpPaths: acpDirs };
   const rootsByClient = {};
   const customScanPaths = normalizeCustomScanPaths(options.customScanPaths, {
     platform: options.platform || process.platform
@@ -121,7 +131,6 @@ function watchClientRootsForClients(clientsCsv, options = {}) {
   // The Antigravity CLI writes parse-local SQLite that tokscale reads directly,
   // so it is also safe to watch and shares the umbrella client id. The filter
   // expands that id to antigravity-cli when the targeted scan runs.
-  const enabled = new Set(String(clientsCsv || '').split(',').map((value) => value.trim().toLowerCase()).filter(Boolean));
   const antigravityCliDir = antigravityCliDataDir(options);
   if (enabled.has('antigravity') && dirExists(antigravityCliDir)) {
     rootsByClient.antigravity = [...new Set([...(rootsByClient.antigravity || []), antigravityCliDir])];
@@ -129,9 +138,9 @@ function watchClientRootsForClients(clientsCsv, options = {}) {
   if (enabled.has('antigravity')) {
     // Watch the parent so a summary DB or WAL created after startup is seen.
     // Its policy below admits only those exact files, never the surrounding tree.
-    const summaryDirs = antigravitySummaryWatchSources(options).map(({ dir }) => dir).filter(dirExists);
-    if (summaryDirs.length > 0) {
-      rootsByClient.antigravity = [...new Set([...(rootsByClient.antigravity || []), ...summaryDirs])];
+    const summaryDirs = antigravityMetadataWatchSources(options).map(({ dir }) => dir).filter(dirExists);
+    if (acpDirs.length > 0 || summaryDirs.length > 0) {
+      rootsByClient.antigravity = [...new Set([...(rootsByClient.antigravity || []), ...acpDirs, ...summaryDirs])];
     }
   }
   if (enabled.has('reasonix')) {
@@ -184,9 +193,10 @@ function watchAttributionRootsForClients(clientsCsv, watchRoots = null, options 
     const canonicalRoot = (dir) => path.resolve(canonicalWatchPath(dir));
     const usageRoots = new Set([
       ...antigravityDataRoots(options.homeDir || os.homedir()), antigravityCliDataDir(options),
+      ...(options.antigravityAcpPaths ?? discoverAntigravityAcpPaths(options)),
       ...(normalizeCustomScanPaths(options.customScanPaths, options).antigravity || [])
     ].map(canonicalRoot));
-    const summaries = antigravitySummaryWatchSources(options);
+    const summaries = antigravityMetadataWatchSources(options);
     const summaryDirs = new Set(summaries.map(({ dir }) => dir));
     const watched = new Set(rootsByClient.antigravity.map(canonicalRoot));
     const antigravity = rootsByClient.antigravity.filter((dir) => !summaryDirs.has(canonicalRoot(dir)) || usageRoots.has(canonicalRoot(dir)));
@@ -469,6 +479,13 @@ function watchPolicyEntries(clientsCsv, options = {}) {
   // Claude's parser and source fingerprint also read same-stem agent metadata.
   bound('claude', sourceRoots('claude', 'claude-projects', 'claude-transcripts'),
     recursiveSourceFiles((name) => name.endsWith('.jsonl') || name.endsWith('.meta.json')));
+  // Codex compresses a finished rollout to `.jsonl.zst` beside it. chokidar
+  // holds a native watcher per discovered file, so an archive that can never
+  // grow again keeps a descriptor for the rest of the session — 5.8k of them on
+  // a real profile. Scans still read archives, and compressing a live rollout
+  // removes its watched `.jsonl`, whose unlink event already triggers the scan.
+  bound('codex', sourceRoots('codex', 'codex-sessions'),
+    (_parts, resolved) => path.basename(resolved).endsWith('.jsonl.zst'));
   bound('gemini', candidates.gemini || [],
     recursiveSourceFiles((name) => name.endsWith('.json') || name.endsWith('.jsonl')));
   bound('kilo', sourceRoots('kilo', 'kilo-db'), directChildOnly((name) => KILO_DB_WATCH_PATTERN.test(name)));
@@ -593,7 +610,7 @@ function watchPolicyEntries(clientsCsv, options = {}) {
     return false;
   });
   if (antigravityEnabled) {
-    for (const { file, dir } of antigravitySummaryWatchSources(options)) {
+    for (const { file, dir } of antigravityMetadataWatchSources(options)) {
       const name = path.basename(file);
       bound('antigravity', [dir], directChildOnly((child) => child === name || child === `${name}-wal`));
     }
@@ -704,12 +721,15 @@ function watchPolicyEntries(clientsCsv, options = {}) {
   ]));
   const isCustomOnly = (client, root) => Boolean(customRoots.get(client)?.has(root))
     && !builtInBySource.get(client)?.has(root);
+  const acpDirs = new Set(rootsByClient.antigravity
+    ?.filter(root => root.id === ANTIGRAVITY_ACP_SOURCE_ID).map(root => root.dir));
   const recursive = [
     ...Object.entries(candidates)
       .flatMap(([client, dirs]) => dirs
         .filter((dir) => (
           (client !== 'copilot' || customRoots.get(client)?.has(canonicalRoot(dir)))
-          && (!SELF_SYNCED_CLIENTS.has(client) || customScanPaths[client]?.includes(dir))
+          && (!SELF_SYNCED_CLIENTS.has(client) || customScanPaths[client]?.includes(dir)
+            || (client === 'antigravity' && acpDirs.has(dir)))
           && !(claimed.get(client) || EMPTY_SET).has(dir)
         ))
         .map((dir) => ({ client, root: canonicalRoot(dir), custom: isCustomOnly(client, canonicalRoot(dir)) }))),
@@ -788,7 +808,7 @@ function watchIgnoreMatcher(clientsCsv, options = {}) {
 // entry point so the widget and the headless agent cannot drift apart.
 // Tri-state on purpose: unset must fall through to the caller's value, which
 // is why parseBoolean's fallback semantics don't fit. The default is native on
-// every platform — chokidar 4 has no per-platform backend left to differ on,
+// every platform, with a backend selected by the platform watcher,
 // and the failure cases it cannot cover are handled by the watch-descriptor
 // fallback below rather than by pre-emptively polling everywhere.
 //
@@ -892,7 +912,7 @@ function watchEntriesExceed(dirs, ignored, limit) {
 
 // chokidar reads CHOKIDAR_USEPOLLING after the options it is handed and lets it
 // win, so the polling mode it actually runs can differ from the one we asked
-// for. Parsed exactly as chokidar 4 parses it; undefined when unset.
+// for. Parsed as Chokidar parses it; undefined when unset.
 function chokidarPollingEnv(env = process.env) {
   const raw = env.CHOKIDAR_USEPOLLING;
   if (raw === undefined) return undefined;
@@ -918,6 +938,7 @@ function openWatch(chokidar, config = {}, onEvent) {
   const copilotExporter = copilotEnabled ? copilotExporterWatch(os.homedir()) : null;
   const ignored = activityWatchIgnored(watchIgnoreMatcher(config.clients, {
     customScanPaths: config.customScanPaths,
+    antigravityAcpPaths: config.antigravityAcpPaths,
     cursorDesktopRoots: config.cursorDesktopRoots,
     homeDir: config.homeDir,
     env: config.env,
@@ -946,7 +967,16 @@ function openWatch(chokidar, config = {}, onEvent) {
     error.code = WATCH_POLLING_LIMIT_CODE;
     throw error;
   }
-  const watcher = chokidar.watch(config.dirs, watcherOptions(usePolling, ignored));
+  // Chokidar 4 treats an empty override as unset. Chokidar 6 reads the
+  // environment synchronously and rejects the zero it gets from an empty string.
+  const emptyInterval = process.env.CHOKIDAR_INTERVAL === '';
+  if (emptyInterval) delete process.env.CHOKIDAR_INTERVAL;
+  let watcher;
+  try {
+    watcher = chokidar.watch(config.dirs, watcherOptions(usePolling, ignored));
+  } finally {
+    if (emptyInterval) process.env.CHOKIDAR_INTERVAL = '';
+  }
   if (onEvent) watcher.on('all', (event, filePath) => {
     // Reuse the matcher that saw initial discovery. Keep the reported path so
     // the collector can still apply every other client's own source policy.
@@ -991,11 +1021,12 @@ function watcherOptions(usePolling, ignored) {
 // it on the first read before their source cache is warm. A read-only SQLite
 // connection can write its wal-index; it is not evidence of new token usage.
 // Adding a client to this list asserts a measurement rather than a hunch.
+// MiniMax Code rewrites runtime-state.sqlite-shm on every read-only metadata scan of a watched data directory (measured on darwin with the pinned 4.23 scanner, first and repeat scans).
 // Cherry Studio, CatPaw and Goose also rewrite their wal-index on repeated read-only WAL scans.
 // Cursor's read-only desktop credential/title queries change state.vscdb-shm too.
 const SELF_WATCHED_SQLITE_SIDECAR_CLIENTS = Object.freeze([
   'antigravity', 'catpaw', 'cherrystudio', 'copilot', 'cursor', 'devin', 'goose',
-  'hermes', 'kilo', 'kiro', 'mimo', 'opencode', 'openclaw', 'unsloth', 'zcode', 'zed'
+  'hermes', 'kilo', 'kiro', 'mimo', 'mcode', 'opencode', 'openclaw', 'unsloth', 'zcode', 'zed'
 ]);
 
 function isSelfWatchSqliteSidecarEvent(filePath, rootsByClient = {}) {
@@ -1014,7 +1045,7 @@ function isSelfWatchSqliteSidecarEvent(filePath, rootsByClient = {}) {
 module.exports = {
   clientWatchCandidates,
   selfSyncSourceRootsForClients,
-  antigravitySummaryWatchSources,
+  antigravityMetadataWatchSources,
   watchClientRootsForClients,
   watchPathsForClients,
   watchAttributionRootsForClients,

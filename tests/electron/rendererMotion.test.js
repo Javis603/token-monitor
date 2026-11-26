@@ -24,7 +24,8 @@ test('period tabs use one sliding selection indicator', () => {
   const css = read('styles.css');
   const app = read('app.js');
 
-  assert.match(html, /<nav class="tabs"[\s\S]*?<span class="tab-indicator" aria-hidden="true"><\/span>[\s\S]*?data-period="today"[\s\S]*?data-period="month"[\s\S]*?data-period="allTime"/);
+  assert.match(html, /<nav id="periodTabs" class="tabs"[\s\S]*?<span class="tab-indicator" aria-hidden="true"><\/span>[\s\S]*?data-period="today"[\s\S]*?data-period="month"[\s\S]*?data-period="allTime"/);
+  assert.match(css, /grid-template-columns:\s*repeat\(var\(--period-count\), minmax\(0, 1fr\)\)/);
   assert.match(css, /\.tab-indicator\s*\{[^}]*transform:\s*translate3d\(calc\(var\(--period-index\)/s);
   assert.match(css, /\.tab-indicator\s*\{[^}]*transition:\s*transform 220ms cubic-bezier\(0\.22, 1, 0\.36, 1\)/s);
   assert.match(app, /style\.setProperty\('--period-index', String\(activeIndex\)\)/);
@@ -72,9 +73,10 @@ test('cached Limits bars replay their entrance motion when the view is revisited
 
 test('period changes preserve row identity, animate rank changes, and count from the previous total', () => {
   const app = read('app.js');
+  const start = app.indexOf("periodTabs.addEventListener('click'");
   const handler = app.slice(
-    app.indexOf("for (const tab of document.querySelectorAll('.tab'))"),
-    app.indexOf("els.breakdown.addEventListener('click'", app.indexOf("for (const tab of document.querySelectorAll('.tab'))"))
+    start,
+    app.indexOf("els.breakdown.addEventListener('click'", start)
   );
 
   assert.match(handler, /const snapshot = captureBreakdownMotion\(\)/);
@@ -194,9 +196,10 @@ test('Home history visuals reveal left to right only when entering the view', ()
   assert.match(app, /delay: \(column - firstVisibleColumn\) \* heatColumnDelay/);
   assert.match(app, /duration: HOME_HEAT_CELL_MOTION_MS/);
   assert.match(app, /duration: HOME_HEAT_CELL_MOTION_MS,[\s\S]*?easing: 'cubic-bezier\(0\.22, 1, 0\.36, 1\)'/);
-  assert.match(app, /strokeDasharray: `\$\{length\} \$\{length\}`[\s\S]*?strokeDashoffset: length[\s\S]*?strokeDashoffset: 0/);
-  assert.equal((app.match(/duration: HOME_HISTORY_MOTION_MS/g) || []).length, 2);
-  assert.match(app, /clipPath: 'inset\(0 100% 0 0\)'[\s\S]*?clipPath: 'inset\(0 0 0 0\)'/);
+  // The trend stroke is non-scaling, so a dash-offset draw-in would leave gaps on
+  // a wide window; the line and fill wipe in together through one clip.
+  assert.equal((app.match(/duration: HOME_HISTORY_MOTION_MS/g) || []).length, 1);
+  assert.match(app, /querySelector\('\.area-line'\)\?\.animate\(\[\s*\{ clipPath: 'inset\(0 100% 0 0\)' \},\s*\{ clipPath: 'inset\(0 0 0 0\)' \}/);
   assert.match(app, /if \(prefersReducedMotion\(\)\) return/);
   assert.match(app, /new ResizeObserver\(applySettledLayout\)/);
   assert.match(

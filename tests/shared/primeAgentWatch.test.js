@@ -7,7 +7,7 @@ const path = require('node:path');
 const test = require('node:test');
 const { clientSourceRoots } = require('../../src/shared/clientSources');
 const { watchIgnoreMatcher, openWatch, watchAttributionRootsForClients, clientsForWatchPath } = require('../../src/shared/collector');
-const chokidar = require('chokidar');
+const chokidar = require('../../src/shared/fileWatcher');
 
 function fixture(t) {
   const home = fs.mkdtempSync(path.join(fs.realpathSync.native(os.tmpdir()), 'tm-prime-watch-'));

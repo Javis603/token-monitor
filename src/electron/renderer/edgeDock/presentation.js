@@ -222,7 +222,10 @@
     for (const periodKey of ['month', 'today']) {
       for (const [key, session] of Object.entries(stats?.periods?.[periodKey]?.sessions || {})) {
         const previous = byKey.get(key);
-        if (previous && (!sessionLive.isArchivedSession(previous.session) || sessionLive.isArchivedSession(session))) continue;
+        const replacesZeroUsage = session?.client === 'antigravity'
+          && session.totalTokens > 0 && !(previous?.session.totalTokens > 0);
+        if (previous && (sessionLive.isArchivedSession(session)
+          || (!replacesZeroUsage && !sessionLive.isArchivedSession(previous.session)))) continue;
         if (session?.sessionKind === 'background-review') continue;
         const lastUsedMs = Date.parse(session?.lastUsedAt || session?.startedAt || '');
         if (!Number.isFinite(lastUsedMs)) continue;
@@ -239,16 +242,16 @@
     for (const periodKey of ['month', 'today']) for (const [key, session] of Object.entries(stats?.nativeSessions?.[periodKey] || {})) {
       if (native.has(key) || !activityProviders.isSessionActivityClient(session.client) || session.sessionKind === 'background-review') continue;
       const accounted = base.byKey.get(key);
-      if (accounted) {
-        if (!sessionLive.isArchivedSession(accounted.session) || !['running', 'waiting'].includes(sessionLive.sessionActivityState(session))) continue;
-      }
+      const zeroUsage = accounted && session.client === 'antigravity' && !(accounted.session.totalTokens > 0);
+      if (accounted && ((!zeroUsage && !sessionLive.isArchivedSession(accounted.session))
+        || !['running', 'waiting'].includes(sessionLive.sessionActivityState(session)))) continue;
       const lastUsedMs = Date.parse(session.lastUsedAt || session.startedAt || '');
       if (Number.isFinite(lastUsedMs)) native.set(key, { key, session: accounted
         ? { ...session, totalTokens: accounted.session.totalTokens, costUsd: accounted.session.costUsd,
           unpricedTokens: accounted.session.unpricedTokens, models: accounted.session.models,
           inputTokens: accounted.session.inputTokens, cacheReadTokens: accounted.session.cacheReadTokens,
           cacheWriteTokens: accounted.session.cacheWriteTokens, cacheReported: accounted.session.cacheReported,
-          tokenDataUnavailable: accounted.session.tokenDataUnavailable === true,
+          tokenDataUnavailable: zeroUsage || accounted.session.tokenDataUnavailable === true,
           nativeSessionId: session.nativeSessionId || accounted.session.nativeSessionId,
           t3ThreadId: session.t3ThreadId || accounted.session.t3ThreadId,
           parentSessionId: session.parentSessionId || accounted.session.parentSessionId,
@@ -271,9 +274,11 @@
   // One row shape for both callers. `client` rides the row because the Sessions
   // item is a mixed list: it is what the row's mark is drawn from, and without
   // it the card could not say which tool a row belongs to.
-  function sessionRowsFor(entries, stateByKey) {
+  function sessionRowsFor(entries, stateByKey, localDeviceId) {
     return entries.map(({ key, session }) => {
+      const remoteDevice = sessionRowsApi.remoteSessionDevice(session.sourceDevice, localDeviceId);
       return {
+        ...(remoteDevice ? { remoteDevice } : {}),
         parentClient: normalizedId(session.parentClient || session.client),
         parentSessionId: String(session.parentSessionId || ''),
         grokBotSession: session.grokBotSession,
@@ -319,6 +324,7 @@
         deleted: session.deleted === true,
         sourceDeleted: session.sourceDeleted === true,
         running: stateByKey.get(key) === 'running',
+        ...(session.native === true ? { native: true } : {}),
         tokenDataUnavailable: session.tokenDataUnavailable === true,
         // The same gate the Sessions list uses, so one surface cannot show a
         // gauge for a session the other has already dropped it from.
@@ -387,7 +393,7 @@
     };
     const projected = new Map();
     const projectMember = key => {
-      if (!projected.has(key)) projected.set(key, sessionRowsFor([entriesByKey.get(key)], states)[0]);
+      if (!projected.has(key)) projected.set(key, sessionRowsFor([entriesByKey.get(key)], states, options.localDeviceId)[0]);
       return projected.get(key);
     };
     const project = summary => {
@@ -418,6 +424,11 @@
         activityState: sessionActivityState({ groupRows: members }),
         groupRows: members
       };
+      // A subagent group names its main conversation. A synthetic group has
+      // a source only when every member came from the same remote device.
+      if (!summary.subagentGroup && members.some(member => member.remoteDevice?.deviceId !== parent.remoteDevice?.deviceId)) {
+        delete result.remoteDevice;
+      }
       projected.set(summary.key, result);
       return result;
     };
@@ -888,7 +899,7 @@
     // push/expiry; a stats-key cache would freeze time-dependent selection.
     const groupedSessions = items.some(item => item.metric === dockItems.SESSIONS_METRIC
       || (item.type === 'limit' && options.limitsEnabled !== false))
-      ? groupedSessionRows(stats) : { rows: [], project: row => row, stateFor: sessionActivityState };
+      ? groupedSessionRows(stats, { localDeviceId: options.localDeviceId }) : { rows: [], project: row => row, stateFor: sessionActivityState };
     const pluginRefs = Array.isArray(options.availablePluginRefs) ? new Set(options.availablePluginRefs) : null;
     const cells = [];
     for (const item of items) {

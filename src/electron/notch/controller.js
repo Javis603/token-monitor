@@ -881,8 +881,12 @@ function createNotchController({ BrowserWindow, ipcMain, screen, getSettings,
     if (restoreSummary) refreshLayout();
     if (!pollTimer) schedulePoll();
   }
-  function stop() {
-    running = expanded = peeked = hoverTicked = nearTop = fullScreen = summaryDismissed = pointerInside = capturing = false; fullScreenCheckedAt = -Infinity; fullScreenDisplayId = null; enterAt = leaveAt = null;
+  function stop({ preserveSummary = false } = {}) {
+    // Screen lock tears the surface down and rebuilds it on unlock. Keep the
+    // user's dismissed-summary choice across that cycle; an ordinary stop (for
+    // example disabling the notch) still resets it.
+    if (!preserveSummary) summaryDismissed = false;
+    running = expanded = peeked = hoverTicked = nearTop = fullScreen = pointerInside = capturing = false; fullScreenCheckedAt = -Infinity; fullScreenDisplayId = null; enterAt = leaveAt = null;
     clearTimeout(pollTimer); pollTimer = null;
     if (screenListeners) { for (const event of ['display-added', 'display-removed', 'display-metrics-changed']) screen.removeListener(event, invalidateGeometry); screenListeners = false; }
     destroyWindows();
