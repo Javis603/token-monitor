@@ -3091,7 +3091,9 @@ function startCollector(options) {
         // Entry attribution the anchored windows confirmed this tick joins the
         // saved anchor, so an unavailable read cannot erase it from the served
         // broader periods; copying is fill-only, and revocations have already
-        // removed the value from the captured rows above.
+        // removed the value from the captured rows above. A fill counts as an
+        // anchor change, so a restart cannot lose the confirmed value.
+        let entriesFilled = false;
         for (const [capturedPeriod, anchorPeriod] of [
           [captured.windowsPeriods.today, anchor.today],
           [captured.windowsPeriods.month, anchor.month],
@@ -3101,6 +3103,7 @@ function startCollector(options) {
             const anchorRow = anchorPeriod?.sessions?.[key];
             if (anchorRow && !anchorRow.sessionEntry && capturedRow.sessionEntry) {
               anchorRow.sessionEntry = capturedRow.sessionEntry;
+              entriesFilled = true;
             }
           }
         }
@@ -3180,7 +3183,7 @@ function startCollector(options) {
           wslAnchor = captured.wslBundle;
           wslStatusAnchor = captured.wslStatus || null;
         }
-        if (titlesChanged || projectsChanged || sourcesChanged || identitiesUpgraded || revokedLinks.length || changedLinks.length) {
+        if (titlesChanged || projectsChanged || sourcesChanged || identitiesUpgraded || revokedLinks.length || changedLinks.length || entriesFilled) {
           persistAnchor(tickPricingRevision, tickSourceRevision);
         }
       }
