@@ -55,6 +55,7 @@ const { isLimitWindowHidden: historyWindowHidden } = require('../shared/limits/u
 const { maskEmailAddress: historyMaskEmail } = require('./renderer/accountIdentity');
 const { vendorColors: historyVendorColors } = require('../shared/vendorPresentation');
 const {
+  createDesktopHubFetch,
   createSessionProxyApplier,
   createProxyReadyFetch,
   networkProxySource,
@@ -114,6 +115,7 @@ const sessionProxy = createSessionProxyApplier({
   getConfig: () => sessionProxyConfig(settings || {}),
   log: (message) => console.log(message)
 });
+const fetchFromHub = createDesktopHubFetch(electronLimitsFetch());
 
 // Lazy because `session.defaultSession` only exists once the app is ready, and
 // process-wide because the transport caches one proxy agent per proxy URL.
@@ -305,7 +307,7 @@ const { MIMO_PLATFORM_CONSOLE_URL } = require('../shared/providers/mimo/limits')
 const { deviceHistoryRevision, historyPreview, historyRevision } = require('../shared/history');
 const { completeHistorySource, resolveCompleteHistory, resolveCompleteHistoryWithDevices } = require('./historySource');
 const { fixedPeriodHistoryMeta } = require('./fixedPeriodHistory');
-const { readSessionDetailForPlatform } = require('../shared/sessionDetailResolver');
+const { readSessionDetailForPlatform, runSessionDetailWorker } = require('../shared/sessionDetailResolver');
 const { startDiscordRpc, stopDiscordRpc, updateDiscordRpc } = require('./discordRpc');
 const {
   commitMacWidgetSnapshot,
@@ -944,7 +946,6 @@ function electronUsageConfig(errorPrefix, { synced = false } = {}) {
     defaultDeviceId: defaultDeviceId(),
     intervalMs: collectorIntervalMs(),
     historyIntervalMs: normalizeHistoryIntervalMs(settings.historyIntervalMs),
-    reasonixNativeSessionsEnabled: true,
     watchEnabled: collectorWatchEnabled(),
     // No watchUsePolling on purpose. The widget states no preference so the
     // shared default in resolveWatchUsePolling() governs and the widget cannot
@@ -3143,7 +3144,7 @@ function getHubInfo() {
 async function getHubBuildStatus() {
   if (settings?.hubMode !== 'client') return { status: 'notConfigured', runtime: '', hubUrl: '' };
   const hubUrl = String(settings.hubUrl || '').trim();
-  return probeHubBuild(hubUrl);
+  return probeHubBuild(hubUrl, { fetchImpl: fetchFromHub });
 }
 
 async function startEmbeddedHub() {
@@ -3211,7 +3212,7 @@ async function deleteDeviceFromHub(deviceId) {
   const { url: hubUrl, secret } = effectiveHubConfig();
   if (!hubUrl) return;
   const base = hubUrl.replace(/\/$/, '');
-  const response = await fetch(`${base}/api/devices/${encodeURIComponent(deviceId)}`, {
+  const response = await fetchFromHub(`${base}/api/devices/${encodeURIComponent(deviceId)}`, {
     method: 'DELETE',
     headers: secret ? { authorization: `Bearer ${secret}` } : {}
   });
@@ -3277,7 +3278,7 @@ async function postToHub(summary) {
     || syncOptions.identity !== getSyncContentRuntime().status().identity
     || !sameDestination(uploadContext, syncContentContext())
     || summary.deviceId !== syncContentContext().deviceId) throw new Error('hub_changed');
-  const fetchForUpload = (target, options) => fetch(target, { ...options, redirect: 'error',
+  const fetchForUpload = (target, options) => fetchFromHub(target, { ...options, redirect: 'error',
     signal: AbortSignal.any([syncOptions.signal, AbortSignal.timeout(15_000)]) });
   const { response } = await postSyncPayload(fetchForUpload, url, {
     syncSessionTitles: syncOptions.syncSessionTitles,
@@ -3330,7 +3331,7 @@ async function requestSyncContent(context, pathname, method, body) {
         body: error.current || null };
     }
   }
-  const response = await fetch(`${context.url.replace(/\/$/, '')}${pathname}`, {
+  const response = await fetchFromHub(`${context.url.replace(/\/$/, '')}${pathname}`, {
     method, redirect: 'error',
     headers: { 'content-type': 'application/json', ...(context.secret ? { authorization: `Bearer ${context.secret}` } : {}) },
     ...(body !== undefined ? { body: JSON.stringify(body) } : {}),
@@ -3585,7 +3586,7 @@ async function fetchSharedSubscriptions() {
   // lane open for the rest of the session, and every later read and save for that
   // hub behind it. fetch() has no deadline of its own, so it gets the same 15s
   // the other hub requests use.
-  const response = await fetch(endpoint.url, { headers: endpoint.headers, signal: AbortSignal.timeout(15_000) });
+  const response = await fetchFromHub(endpoint.url, { headers: endpoint.headers, signal: AbortSignal.timeout(15_000) });
   if (!response.ok) throw new Error(`Hub ${response.status}: ${(await response.text()).slice(0, 200)}`);
   return response.json();
 }
@@ -3640,7 +3641,7 @@ async function writeSharedSubscriptionsNow(list, hub, baseUpdatedAt) {
   }
   const endpoint = subscriptionsEndpoint();
   if (!endpoint) throw new Error('hub not configured');
-  const response = await fetch(endpoint.url, {
+  const response = await fetchFromHub(endpoint.url, {
     method: 'PUT',
     headers: { 'content-type': 'application/json', ...endpoint.headers },
     body: JSON.stringify({ subscriptions: list, baseUpdatedAt }),
@@ -4501,6 +4502,7 @@ function historyResolverOptions() {
   return {
     aggregateHistory,
     embeddedHub,
+    fetchImpl: fetchFromHub,
     historyEnabled: settings?.historyEnabled !== false,
     hubMode: settings?.hubMode,
     hubUrl,
@@ -5156,7 +5158,7 @@ async function startStatsStream(options = {}) {
   controller.signal.addEventListener('abort', () => clearTimeout(activityTimer), { once: true });
   try {
     armActivityTimeout(15_000);
-    const response = await fetch(url, {
+    const response = await fetchFromHub(url, {
       headers: {
         accept: 'text/event-stream',
         [HUB_STREAM_HEADER]: HUB_STREAM_VERSION,
@@ -6872,7 +6874,7 @@ async function fetchStats(options = {}) {
     }
   }
   const url = `${hubUrl.replace(/\/$/, '')}/api/stats`;
-  const response = await fetch(url, { headers: secret ? { authorization: `Bearer ${secret}` } : {} });
+  const response = await fetchFromHub(url, { headers: secret ? { authorization: `Bearer ${secret}` } : {} });
   if (!response.ok) throw new Error(`Hub ${response.status}: ${(await response.text()).slice(0, 200)}`);
   const stats = await response.json();
   if (!hubModeRequestIsCurrent(requestGeneration, 'client', requestHubIdentity)) {
@@ -7783,7 +7785,7 @@ async function resolveSyncedPeriodForStats(stats, source, selection) {
     return fixedRangeReads.read(key, async (abort) => {
       const signal = AbortSignal.any([abort, AbortSignal.timeout(15_000)]);
       return fetchFixedRange(
-        (url, init) => fetch(url, { ...init, signal, redirect: 'error' }),
+        (url, init) => fetchFromHub(url, { ...init, signal, redirect: 'error' }),
         config.hubUrl, deviceId, name, window, headers, revision
       );
     });
@@ -8571,6 +8573,9 @@ app.whenReady().then(() => {
         });
       }
     }
+    if (proxySettingChanged && !runtimeChange.modeStructural && settings.hubMode === 'client') {
+      void startStatsStream();
+    }
     if (settings.showTrayIcon !== previousShowTrayIcon) {
       if (settings.showTrayIcon) ensureTray();
       else destroyTray();
@@ -8821,9 +8826,29 @@ app.whenReady().then(() => {
     if (result.canceled || !result.filePaths[0]) return { ok: false, canceled: true };
     return { ok: true, dir: result.filePaths[0] };
   });
+  let reasonixSessionRead;
+  ipcMain.handle('session:listReasonix', async (event) => {
+    if (event.sender !== mainWindow?.webContents || !trackedClientSet(clientsCsvForSetting(settings?.clients)).has('reasonix')) return {};
+    const allTimeSince = settings.allTimeSince;
+    const todayKey = fixedPeriodRangesApi.localDayKey();
+    if (!reasonixSessionRead || reasonixSessionRead.allTimeSince !== allTimeSince || reasonixSessionRead.todayKey !== todayKey) {
+      const request = { allTimeSince, todayKey, promise: null };
+      request.promise = runSessionDetailWorker({ action: 'listReasonixSessions', allTimeSince }).finally(() => {
+        if (reasonixSessionRead === request) reasonixSessionRead = null;
+      });
+      reasonixSessionRead = request;
+    }
+    const sessions = await reasonixSessionRead.promise;
+    const { modelAliases, modelAliasGrouping, sessionTitlesEnabled } = settings;
+    return Object.fromEntries(Object.entries(sessions).map(([period, rows]) => [
+      period,
+      projectModelAliasSessions(latestStats || {}, sessionTitlesEnabled === false ? withoutSessionTitles(rows) : rows,
+        modelAliases, { grouping: modelAliasGrouping })
+    ]));
+  });
   ipcMain.handle('session:getDetail', (_event, args) => {
-    const { client, sessionId, period, sessionCost } = args || {};
-    return readSessionDetailForPlatform({ client, sessionId, period, sessionCost }, {
+    const { client, sessionId, period, sessionCost, reasonixSessionRef } = args || {};
+    return readSessionDetailForPlatform({ client, sessionId, period, sessionCost, reasonixSessionRef }, {
       lookupModelPricing, getPricingRevision: () => pricingFingerprint({ pricingPath: customPricingPath() })
     });
   });

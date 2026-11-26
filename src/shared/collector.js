@@ -43,7 +43,7 @@ const {
   watchIgnoreMatcher,
   clientWatchCandidates,
   selfSyncSourceRootsForClients,
-  antigravitySummaryWatchSources,
+  antigravityMetadataWatchSources,
   watchClientRootsForClients,
   watchPathsForClients,
   watchAttributionRootsForClients,
@@ -60,7 +60,8 @@ const {
   WATCH_REFUSAL_CODES
 } = require('./watchPolicy');
 const { createSessionActivityScheduler } = require('./sessionActivityScheduler');
-const { activityWatchSources, activityClientsForPath } = require('./sessionActivityWatch');
+const { activityWatchSources, activityClientsForPath, comparablePath } = require('./sessionActivityWatch');
+const { readT3AntigravityContextStamp } = require('./t3/sessionMetadata');
 const { localDayKey, parseGraphResult, normalizeHistory, mergeHistories, mergeDailyMaps } = require('./history');
 const {
   graphFromDailyHistoryArchive, readDailyHistoryArchive, retainDailyHistory, retainLiveDailyHistory
@@ -101,13 +102,6 @@ const {
   buildGcmpPeriods,
   collectGcmpRows
 } = require('./providers/gcmp/usage');
-const {
-  createReasonixNativeSessionCache,
-  isReasonixNativeSessionPath,
-  isReasonixNativeSessionSidecar,
-  reasonixNativeSessionWatchRoots,
-  emptyNativeView
-} = require('./providers/reasonix/sessions');
 const { hostOsInfo, normalizeOsInfo } = require('./osVersion');
 const { hostDeviceKind } = require('./deviceHardware');
 const {
@@ -1968,25 +1962,6 @@ async function collectUsageOnce(options) {
   // The request ledger is this source's archive. A second per-session archive
   // would resurrect its contribution after a native rollout takes precedence.
   if (codexLocalView) summary.codexLocalSessionKeys = codexLocalView.sessionKeys;
-  if (options.reasonixNativeSessionsEnabled === true && trackedClientSet.has('reasonix')) {
-    try {
-      const nativeCache = options.reasonixNativeSessionCache || createReasonixNativeSessionCache({
-        env: options.env || process.env,
-        homeDir: options.homeDir || os.homedir(),
-        platform: platformValue,
-        cwdDir: options.cwdDir || process.cwd(),
-        projectIdentity
-      });
-      const nativeView = nativeCache.getView({ now: collectedAt, projectsEnabled, allTimeSince });
-      summary.nativeSessions = nativeView.sessions;
-      summary.nativeProjects = nativeView.projects;
-    } catch (error) {
-      if (typeof options.logger === 'function') options.logger(`reasonix native session scan failed: ${error.message}`);
-      const empty = emptyNativeView();
-      summary.nativeSessions = empty.sessions;
-      summary.nativeProjects = empty.projects;
-    }
-  }
   if (typeof options.onAnchorComputed === 'function') {
     // Reuse the existing catalog-title ledger (historically named t3Titles)
     // for summary overrides too. Provenance never enters published rows.
@@ -2466,16 +2441,6 @@ function startCollector(options) {
   let startBarrier = options.startBarrier ? Promise.resolve(options.startBarrier) : null;
   let cursorRestartRead = null;
   const trackedClients = new Set(normalizeClientsCsv(clients).split(',').filter(Boolean));
-  const reasonixNativeSessionsEnabled = options.reasonixNativeSessionsEnabled === true;
-  const reasonixNativeSessionCache = reasonixNativeSessionsEnabled && trackedClients.has('reasonix')
-    ? options.reasonixNativeSessionCache || createReasonixNativeSessionCache({
-      env: options.env || process.env,
-      homeDir: options.homeDir || os.homedir(),
-      platform: options.platform || process.platform,
-      cwdDir: options.cwdDir || process.cwd(),
-      projectIdentity
-    })
-    : null;
   const deviceOsInfo = options.osInfo === undefined
     ? hostOsInfo()
     : normalizeOsInfo(options.osInfo);
@@ -2952,8 +2917,6 @@ function startCollector(options) {
         } : null,
         forceSelfSync: tickOptions.forceSelfSync ?? null,
         sourceSelfSync: tickOptions.sourceSelfSync ?? null,
-        reasonixNativeSessionsEnabled,
-        reasonixNativeSessionCache,
         codexLocalUsageStore: codexLocalSource?.store || options.codexLocalUsageStore,
         onCodexLocalUsageComputed: (view) => {
           if (visibilityRevision !== codexVisibilityRevision) return;
@@ -3580,7 +3543,7 @@ function startCollector(options) {
       Object.entries(selfSyncSourceRootsForClients(clients, sourceOptions))
         .map(([client, dirs]) => [client, dirs.map(canonicalWatchPath)])
     );
-    const summaryFiles = new Set(antigravitySummaryWatchSources(sourceOptions)
+    const antigravityMetadataFiles = new Set(antigravityMetadataWatchSources(sourceOptions)
       .flatMap(({ file }) => [file, `${file}-wal`]));
     const usageDirs = [...new Set(Object.values(rootsByClient).flat())];
     const activitySources = options.sessionActivityPolling === false ? [] : activityWatchSources(trackedClients, {
@@ -3592,6 +3555,14 @@ function startCollector(options) {
     watchedCodexHomes = JSON.stringify(watchOptions.codexHomes);
     const directoryKey = JSON.stringify([dirs, activitySources, watchOptions.senpiSources, watchedCodexHomes]);
     if (directoryKey === watchedDirectoryKey) return;
+    const t3ContextFiles = new Map();
+    const t3ContextStamps = new Map();
+    for (const source of activitySources) {
+      if (path.basename(source.target) !== 'statev2.sqlite' || !source.clients.includes('antigravity')) continue;
+      t3ContextFiles.set(comparablePath(source.target), source.target);
+      t3ContextFiles.set(comparablePath(`${source.target}-wal`), source.target);
+      t3ContextStamps.set(source.target, readT3AntigravityContextStamp(source.target, options.sessionMetadataDeps));
+    }
     // Initial adds are suppressed, so remember an existing exporter name
     // before the first event arrives. It may be an unlink.
     copilotExporter?.rememberExistingAlias();
@@ -3616,6 +3587,16 @@ function startCollector(options) {
       if (activityClients.length || eventClients.some(isSessionActivityClient)) {
         activityScheduler?.request();
       }
+      // T3 also writes activity and other providers to this database. Refresh
+      // Antigravity usage metadata only when its context projection changes.
+      const contextFile = t3ContextFiles.get(comparablePath(path.resolve(filePath || '.')));
+      if (contextFile) {
+        const stamp = readT3AntigravityContextStamp(contextFile, options.sessionMetadataDeps);
+        if (stamp !== undefined && stamp !== t3ContextStamps.get(contextFile)) {
+          t3ContextStamps.set(contextFile, stamp);
+          if (!eventClients.includes('antigravity')) eventClients.push('antigravity');
+        }
+      }
       // The read-only T3 reader can recreate -shm itself. Neither it nor other
       // activity-only writes are token usage, so they cannot request a scan.
       if (eventClients.length === 0 && activitySources.some((source) => {
@@ -3628,21 +3609,9 @@ function startCollector(options) {
           ? activityRevision
           : Math.max(pendingActivityRevision, activityRevision);
       }
-      if (
-        reasonixNativeSessionCache
-        && isReasonixNativeSessionSidecar(filePath)
-        && isReasonixNativeSessionPath(
-          filePath,
-          typeof reasonixNativeSessionCache.sessionRoots === 'function'
-            ? reasonixNativeSessionCache.sessionRoots()
-            : reasonixNativeSessionWatchRoots(watchOptions)
-        )
-      ) {
-        reasonixNativeSessionCache.invalidate(filePath);
-      }
       for (const client of clientsForWatchPath(filePath, sourceSyncRootsByClient, attributionIgnores)) {
-        // Catalog changes refresh labels and turn state, not the RPC usage cache.
-        if (client === 'antigravity' && summaryFiles.has(path.resolve(filePath))) continue;
+        // Catalog and context changes only refresh session metadata.
+        if (client === 'antigravity' && antigravityMetadataFiles.has(path.resolve(filePath))) continue;
         // Another client's scan root may overlap the desktop store. Its unrelated
         // files can request a local scan, but only database/WAL writes earn a
         // Cursor cloud sync.

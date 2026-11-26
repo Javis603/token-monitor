@@ -68,6 +68,24 @@ The database and its WAL are watched, including under the environment overrides 
 
 Token Monitor matches the Antigravity ACP conversation ID to T3 Code's active run. The activity watcher follows T3's state database and validates the owning server process before renewing the running observation. This keeps a quiet run visible beyond the usage-based timeout. Before the first tokens arrive, a verified running session appears locally in Sessions, Home and Edge Dock. Its usage row takes over as soon as tokens are recorded. Completion or loss of verified live evidence removes the temporary row and returns existing usage rows to the shared idle or turn-based display rules. Desktop and standalone CLI use the catalog's turn readings.
 
+For a recent ACP usage row, Context Window uses the occupied tokens and model capacity reported by ACP and saved by T3 Code for that native conversation. Resumed or historical runs with a different native ID do not inherit the current conversation's reading. The automatic compaction threshold in Antigravity's own database is separate from the model capacity.
+
+### Context Window in standalone CLI
+
+The interactive CLI can share its Context Window through its [status-line command](https://antigravity.google/docs/cli/statusline/). Set the following in Antigravity CLI settings, using the absolute path to the script in a Token Monitor checkout and a Node.js 22.22+ executable available to the CLI. `stack_with_default` preserves the built-in status line.
+
+```json
+{
+  "statusLine": {
+    "type": "command",
+    "command": "node --disable-warning=ExperimentalWarning \"/absolute/path/to/Token Monitor/src/shared/providers/antigravity/cliContext.js\"",
+    "stack_with_default": true
+  }
+}
+```
+
+If you use a custom status line, have that script pass the same stdin JSON to `cliContext.js` while continuing to render its usual output. The hook stores only the conversation ID, the window capacity, occupancy derived from the CLI's reported percentage, and the observation time. The token count can differ by rounding. Context appears on recent usage rows and follows their existing visibility rules.
+
 ### Boundary with quota collection
 
 Token/session totals are machine-local activity. They are not deduplicated by Google email and do not use the standalone OAuth credentials described below. Changes to quota identity or account aggregation must not alter usage attribution.

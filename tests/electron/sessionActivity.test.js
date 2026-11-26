@@ -127,7 +127,7 @@ function mainActivityHarness(hubMode, externalAgent = false) {
     embeddedHub: { hub: { getStats: aggregate } }, icloudRuntimeHandle: { getStats: aggregate },
     currentHubStatsCache: () => null, currentHubStatsIdentity: () => hubMode,
     effectiveHubConfig: () => ({ url: 'https://fixture.invalid' }),
-    fetch: async () => ({ ok: true, json: async () => aggregate() }),
+    fetchFromHub: async () => ({ ok: true, json: async () => aggregate() }),
     modeQueue: Promise.resolve(), setLatestHubStatsCache() {},
     getAccountPresentationSync: () => ({ notifyStats() {}, refresh: async () => {} }),
     getSyncContentRuntime: () => ({ notifyStats() {} }), electronPresentationStats: stats => stats,
@@ -188,7 +188,7 @@ test('full aggregates and reads preserve local waiting and unknown clears withou
 test('a full push arriving during a stats read supersedes the old response', async () => {
   const f = mainActivityHarness('client');
   let resolve;
-  f.context.fetch = () => new Promise(done => { resolve = done; });
+  f.context.fetchFromHub = () => new Promise(done => { resolve = done; });
   const pending = f.get(null, {});
   const newer = f.aggregate(); newer.periods.month.totalTokens = 200;
   f.context.sendPush({ event: 'stats', data: { stats: newer } });
@@ -215,7 +215,7 @@ test('a retried stats read adopts the new Hub even after the old Hub pushed', as
     const f = mainActivityHarness('client');
     let hub = 'A'; let resolve;
     f.context.currentHubStatsIdentity = () => hub;
-    f.context.fetch = () => hub === 'A' ? new Promise(done => { resolve = done; })
+    f.context.fetchFromHub = () => hub === 'A' ? new Promise(done => { resolve = done; })
       : Promise.resolve({ ok: true, json: async () => ({ ...f.aggregate(), hub: 'B' }) });
     const pending = f.get(null, {});
     f.context.sendPush({ event: 'stats', data: { stats: { ...f.aggregate(), hub: 'A' } } });
@@ -235,7 +235,7 @@ test('a push from the new Hub still supersedes its pending retried read', async 
   const f = mainActivityHarness('client');
   let hub = 'A'; let resolveA; let resolveB;
   f.context.currentHubStatsIdentity = () => hub;
-  f.context.fetch = () => new Promise(done => { if (hub === 'A') resolveA = done; else resolveB = done; });
+  f.context.fetchFromHub = () => new Promise(done => { if (hub === 'A') resolveA = done; else resolveB = done; });
   const pending = f.get(null, {});
   f.context.sendPush({ event: 'stats', data: { stats: { ...f.aggregate(), hub: 'A' } } });
   hub = 'B'; f.context.hubModeGeneration++;
@@ -255,7 +255,7 @@ test('a new Hub local collector batch cannot attribute the old Hub push revision
       latestHubStats: null,
       currentHubStatsIdentity: () => hub,
       setLatestHubStatsCache: stats => { f.context.latestHubStats = stats; },
-      fetch: () => new Promise(done => { if (hub === 'A') resolveA = done; else resolveB = done; }),
+      fetchFromHub: () => new Promise(done => { if (hub === 'A') resolveA = done; else resolveB = done; }),
       createStatsPublicationBatcher: options => {
         batch = publisher.createStatsPublicationBatcher({ ...options, setTimeout: () => 1, clearTimeout() {} });
         return batch;

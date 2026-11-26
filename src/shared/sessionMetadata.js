@@ -6,7 +6,7 @@ const { isCompressedCodexTranscript, readCompressedCodexTranscript } = require('
 const os = require('node:os');
 const { hashKey } = require('./hashKey');
 const { resolveProjectRoot } = require('./projectRoot');
-const { normalizeSessionContext } = require('./sessionContext');
+const { normalizeSessionContext, shouldReadSessionContext } = require('./sessionContext');
 const { normalizeReasoningEffort, isSessionReasoningEffortClient } = require('./sessionLive');
 const claudeSessionMetadata = require('./providers/claude/sessionMetadata');
 const antigravitySessionMetadata = require('./providers/antigravity/sessionMetadata');
@@ -535,6 +535,13 @@ function applySessionMetadata(periods, home, deps = {}) {
       // A catalog title is not evidence about transcript state or activity.
       if (meta.titleOnly === true) continue;
       if (meta.lastUsedAt && (!session.lastUsedAt || Date.parse(meta.lastUsedAt) > Date.parse(session.lastUsedAt))) session.lastUsedAt = meta.lastUsedAt;
+      // A catalog can report the current context independently of its title.
+      // An explicit empty reading clears an earlier reading after compaction.
+      if (Object.hasOwn(meta, 'contextWindow')) {
+        const sessionContext = !meta.catalogOnly || shouldReadSessionContext(session.lastUsedAt, deps.now)
+          ? normalizeSessionContext(meta) : null;
+        Object.assign(session, sessionContext || { contextTokens: 0, contextWindow: 0 });
+      }
       if (meta.catalogOnly === true) {
         // Antigravity supplies a turn reading independently of its title and
         // workspace fields. Older catalogs may supply only the latter.
@@ -583,21 +590,6 @@ function applySessionMetadata(periods, home, deps = {}) {
         session.turnEnded = meta.turnEnded;
       } else {
         delete session.turnEnded;
-      }
-      // Occupancy is cleared rather than merely left alone when this tick read
-      // no valid pair, but only when the provider actually stated one. The two
-      // halves describe the transcript right now, so a pair the collector just
-      // watched go stale must not keep drawing a gauge: a DSH model switch
-      // zeroes the occupancy until the next usage chunk measures against the
-      // new window. A session the collector did not read at all (outside the
-      // read window) states nothing, and that must leave the record as it is —
-      // it is not a reading of zero.
-      const sessionContext = normalizeSessionContext(meta);
-      if (sessionContext) {
-        Object.assign(session, sessionContext);
-      } else if (Object.prototype.hasOwnProperty.call(meta, 'contextWindow')) {
-        session.contextTokens = 0;
-        session.contextWindow = 0;
       }
     }
   }
