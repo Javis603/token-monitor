@@ -691,6 +691,17 @@ test('T3 Antigravity ACP shows pre-token sessions locally and replaces them when
   assert.equal(mixedRow.totalTokens, 7);
   assert.equal(mixedRow.tokenDataUnavailable, false);
 
+  const archived = { ...used.today, sessions: { [key]: { ...used.today.sessions[key], archived: true } } };
+  const resumedArchive = presentation.recentSessionRows({
+    periods: { today: archived }, nativeSessions: active.nativeSessions
+  });
+  assert.equal(resumedArchive[0].totalTokens, 7);
+  assert.equal(resumedArchive[0].costUsd, 0.25);
+  assert.equal(resumedArchive[0].tokenDataUnavailable, false);
+  assert.equal(presentation.runningSessionSummary(resumedArchive, expiry - 1).count, 1);
+  assert.equal(presentation.runningSessionSummary(resumedArchive, expiry).count, 0);
+  assert.equal(presentation.nextRunningExpiryAt(resumedArchive, expiry), 0);
+
   const doneAt = new Date(now + 2000).toISOString();
   f.db.prepare("UPDATE orchestration_v2_projection_runs SET status = 'completed', completed_at = ?").run(doneAt);
   const completed = await refresh(active, now + 2000);
