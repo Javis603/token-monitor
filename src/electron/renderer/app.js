@@ -3755,6 +3755,7 @@ function modelRowsForPeriod(period, rankingMetric = state.settings?.modelRanking
 }
 
 function sessionPresentationOptions() {
+  const formatReviewTokens = state.settings?.detailTokensUseCompactUnits === true ? formatDetailTokens : formatCompact;
   const localDevice = state.stats?.devices?.find(device => device.deviceId === state.settings?.deviceId);
   return {
     localDeviceId: state.settings?.deviceId,
@@ -3785,7 +3786,7 @@ function sessionPresentationOptions() {
       countLabel: (count) => t('sessions.backgroundReviewCount', { count }),
       summaryLabel: ({ latestTime, latestValue }) => [
         latestTime ? t('sessions.backgroundReviewLatest', { time: latestTime }) : '',
-        latestValue > 0 ? formatCompact(latestValue, effectiveCompactTokenUnits(), currentLocale()) : ''
+        latestValue > 0 ? formatReviewTokens(latestValue) : ''
       ].filter(Boolean).join(' · ')
     },
     grokBot: {
