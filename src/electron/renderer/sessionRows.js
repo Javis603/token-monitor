@@ -165,17 +165,8 @@
     return Number.isFinite(n) ? n : 0;
   }
 
-  const detailTokenDisplay = root?.TokenMonitorDetailTokenDisplay || null;
-
   function formatNumber(value) {
     return Math.round(finiteNumber(value)).toLocaleString('en-US');
-  }
-
-  function formatDetailTokenNumber(value) {
-    if (typeof detailTokenDisplay?.formatDetailTokens === 'function') {
-      return detailTokenDisplay.formatDetailTokens(value);
-    }
-    return formatNumber(value);
   }
 
   function stableColor(value, colors = fallbackColors) {
@@ -265,7 +256,7 @@
     const total = finiteNumber(session?.totalTokens);
     const attributed = entries.reduce((sum, entry) => sum + entry.tokens, 0);
     const denominator = Math.max(total, attributed);
-    const formatTokens = typeof options.formatTokens === 'function' ? options.formatTokens : formatDetailTokenNumber;
+    const formatTokens = typeof options.formatTokens === 'function' ? options.formatTokens : formatNumber;
     // The same share label the tool-detail accordion prints for model rows: a
     // real sliver reads "<1%" rather than rounding to a misleading 0.
     const percentLabel = (percent) => (
@@ -601,7 +592,7 @@
       session.title, session.totalTokens, session.messageCount, session.cacheReadTokens,
       session.cacheWriteTokens, session.cacheReported, session.inputTokens, session.outputTokens,
       session.timedOutputTokens, session.timedDurationMs, options.unattributedLabel, options.latestModelLabel,
-      options.formatTokensKey || (typeof detailTokenDisplay?.stateSignature === 'function' ? detailTokenDisplay.stateSignature() : '')
+      options.formatTokensKey ?? ''
     ]);
     const cached = previous?.get(key);
     if (cached && cached.signature === signature) {

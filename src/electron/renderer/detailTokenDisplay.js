@@ -116,8 +116,9 @@
 
   function decorateTokenElement(el, exactText, options = {}) {
     if (!el) return;
-    const enabled = isEnabled(options);
-    if (!enabled) {
+    // Reconciliation retains the original element and its listeners when settings change.
+    bindElementOnce(el);
+    if (!isEnabled(options)) {
       el.classList?.remove('detail-token-toggle');
       if (el.dataset) delete el.dataset.detailTokenToggle;
       el.removeAttribute?.('role');
@@ -127,7 +128,6 @@
       el.removeAttribute?.('aria-label');
       return;
     }
-    bindElementOnce(el);
     const compact = !transientExact;
     el.classList?.add('detail-token-toggle');
     if (el.dataset) el.dataset.detailTokenToggle = 'true';
