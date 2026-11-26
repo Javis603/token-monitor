@@ -178,6 +178,9 @@ const {
   projectModelAliasHistory
 } = require('./modelAliasPresentation');
 const { createHub } = require('../hub/server');
+const { fetchFixedRange, fixedRangeUploadPages } = require('../shared/fixedRangeClient');
+const { SYNC_WEEK_STARTS_ON } = require('../shared/fixedRangeSync');
+const { createFixedRangeReadCache, resolveSyncedFixedPeriod, resolveSyncedSessionPeriod, historyFallbackForDevices } = require('./syncedFixedPeriod');
 const { probeHubBuild } = require('./hubBuildStatus');
 const { normalizeLimitsRefreshMode, normalizeLimitsRefreshMs, parseBoolean, parseLimitProviders } = require('../shared/limits/collector');
 const { createCursorUsageEventIndex } = require('../shared/providers/cursor/usageEvents');
@@ -484,7 +487,7 @@ const {
   normalizeWindowsBackdropMode,
   normalizeWindowsDockBackdropMode
 } = require('./windowsBackdropMode');
-const { refreshWindowsBackdrop, syncWindowsBackdrop, windowsBackdropFallback } = require('./windowsBackdrop');
+const { refreshWindowsBackdrop, syncWindowsBackdrop, windowsAccentActive, windowsBackdropFallback } = require('./windowsBackdrop');
 const {
   isLiquidGlassBackdrop,
   liquidGlassStyle,
@@ -651,6 +654,7 @@ function defaultSettings() {
     sessionContextMetric: 'used',
     sessionTitlesEnabled: true,
     periodMonthMode: 'month',
+    periodTabOrder: [],
     themeColors: {},
     vendorColors: {},
     textSize: 'standard',
@@ -924,16 +928,19 @@ function syncUploadIntervalMs() {
 
 // The collector composes the native Week range for this calendar week. The
 // renderer resolves the same locale and checks the range it receives.
-function collectorWeekStartsOn() {
+function collectorCalendarLocale() {
   const preferred = typeof app.getPreferredSystemLanguages === 'function' ? app.getPreferredSystemLanguages() : [app.getLocale()];
-  return fixedPeriodRangesApi.weekStartsOn(resolveRegionalLocale([...preferred, settings?.locale]));
+  return resolveRegionalLocale([...preferred, settings?.locale]);
 }
 
-function electronUsageConfig(errorPrefix, { nativeRangesEnabled = false } = {}) {
+function collectorWeekStartsOn() {
+  return fixedPeriodRangesApi.weekStartsOn(collectorCalendarLocale());
+}
+
+function electronUsageConfig(errorPrefix, { synced = false } = {}) {
   return usageConfigFromSettings(settings, {
-    // Only standalone stats show native ranges; Hub and sync views keep the
-    // History-derived ones, so their collectors skip the extra day windows.
-    nativeRangesEnabled,
+    nativeRangesEnabled: true,
+    dailySessionSyncEnabled: synced && settings?.hubMode !== 'icloud',
     agentVersion: appVersion(),
     agentRuntime: 'electron-widget',
     commandTimeoutMs: 120 * 1000,
@@ -952,7 +959,7 @@ function electronUsageConfig(errorPrefix, { nativeRangesEnabled = false } = {}) 
     intervalRequiresActivity: collectorIntervalRequiresActivity(),
     watchDebounceMs: 1500,
     dailyHistoryArchiveWriteEnabled: () => !isExternalAgentActive(),
-    weekStartsOn: collectorWeekStartsOn(),
+    weekStartsOn: synced ? SYNC_WEEK_STARTS_ON : collectorWeekStartsOn(),
     onError: (error, reason) => console.log(`[${errorPrefix}] ${reason}: ${error.message}`),
     logger: (message) => console.log(`[${errorPrefix}] ${message}`)
   });
@@ -1812,7 +1819,7 @@ function collapseFloatingBubble(plan) {
   floatingBubbleState.collapsedBounds = collapsedBounds;
   floatingBubbleState.expandedBounds = expandedBounds;
   settings.floatingBubbleBounds = collapsedBounds;
-  applyNativeMaterial();
+  if (applyNativeMaterial()) pushSettingsToRenderer();
   if (process.platform === 'win32') {
     persistWindowBounds(expandedBounds);
     replaceMainWindow(collapsedBounds, {
@@ -1862,7 +1869,7 @@ function expandFloatingBubble(options = {}) {
   floatingBubbleState.side = null;
   floatingBubbleState.collapsedBounds = current;
   floatingBubbleState.expandedBounds = target;
-  applyNativeMaterial();
+  if (applyNativeMaterial()) pushSettingsToRenderer();
   if (target) {
     floatingBubbleState.suppressNextCollapse = true;
     if (process.platform === 'win32' && mainWindowChrome.collapsedFloatingBubble) {
@@ -2177,6 +2184,7 @@ function readSettings() {
     merged.limitProviderHiddenItems = normalizeLimitProviderHiddenItems(merged.limitProviderHiddenItems);
     merged.homeLimitAccountCount = normalizeHomeLimitAccountCount(merged.homeLimitAccountCount);
     merged.periodMonthMode = normalizePeriodMonthMode(merged.periodMonthMode);
+    merged.periodTabOrder = fixedPeriodRangesApi.normalizePeriodTabOrder(merged.periodTabOrder);
     if (saved.historyEnabled !== undefined) {
       merged.historyEnabled = parseBoolean(saved.historyEnabled, false);
     }
@@ -2626,9 +2634,11 @@ function applyNativeMaterial(source = settings) {
   syncNativeMaterialVisibility(mainWindow, nativeMaterialOptions(source));
   syncNativeMaterialVisibility(dashboardWindow, nativeMaterialOptions(source, true));
   const windowsMaterial = { enabled: nativeBlurEnabled(source), mode: source.windowsBackdrop };
+  const hadAccent = windowsAccentActive(mainWindow);
   syncWindowsBackdrop(mainWindow, windowsMaterial);
   syncWindowsBackdrop(dashboardWindow, windowsMaterial);
   limitsHistoryController?.syncMaterial();
+  return hadAccent !== windowsAccentActive(mainWindow);
 }
 
 function withHistoryPreview(stats, devices) {
@@ -2800,6 +2810,7 @@ function electronPresentationStats(stats) {
 }
 
 const allTimeSessionsCache = createStatsPresentationCache();
+const fixedRangeReads = createFixedRangeReadCache();
 const rendererSnapshots = createRendererSnapshots({ source: () => hubModeGeneration });
 // The local record each Hub snapshot was shown with, captured where the
 // snapshot was built. The collector replaces the live one between publishes.
@@ -2825,7 +2836,16 @@ function rendererAllTimeSessions(stats) {
       ? [...(complete.devices || []).filter(device => device.deviceId !== hubSnapshot.localDevice.deviceId), hubSnapshot.localDevice]
       : complete.devices;
     const sourced = projectSessionDeviceSessions(sessions, devices, ['month', 'allTime']);
-    return projectModelAliasSessions(stats, settings?.sessionTitlesEnabled === false ? withoutSessionTitles(sourced) : sourced, aliases, { grouping });
+    const inline = projectModelAliasSessions(stats, settings?.sessionTitlesEnabled === false ? withoutSessionTitles(sourced) : sourced, aliases, { grouping });
+    if (!stats.sessionDetailsOmitted?.month || !Object.keys(stats.fixedRangeRevisions || {}).length) return inline;
+    return resolveSyncedPeriodForStats(stats, hubModeGeneration, 'month').then(paged => {
+      if (!paged?.period?.sessions) return inline;
+      const local = hubSnapshot?.localDevice?.allTime?.sessions || {};
+      return {
+        ...inline,
+        ...Object.fromEntries(Object.entries(paged.period.sessions).filter(([id]) => !Object.hasOwn(local, id)))
+      };
+    });
   });
 }
 
@@ -4181,7 +4201,7 @@ async function startIcloudCollector() {
       flush: () => runtime.flush(),
       stop: () => runtime.stop()
     };
-    const usageOptions = electronUsageConfig('icloud-collector');
+    const usageOptions = electronUsageConfig('icloud-collector', { synced: true });
     createdDeviceRuntime = createDeviceRuntime({
       envelope: electronDeviceEnvelope(),
       initialLimits: lastCollectedDevice?.limits,
@@ -4263,7 +4283,7 @@ function startSyncCollector() {
     flush: () => syncUploadScheduler.flush(),
     stop: () => syncUploadScheduler.stop()
   };
-  const usageOptions = electronUsageConfig('sync-collector');
+  const usageOptions = electronUsageConfig('sync-collector', { synced: true });
   deviceRuntimeHandle = createDeviceRuntime({
     envelope: electronDeviceEnvelope(),
     initialLimits: lastCollectedDevice?.limits,
@@ -4311,7 +4331,32 @@ function startHostCollector() {
         if (payload.allTimeProjectsOmitted === true) {
           console.log('[host-ingest] all-time project breakdown omitted to reduce the sync snapshot size');
         }
-        embeddedHub.hub.ingest(payload);
+        const accepted = embeddedHub.hub.ingest(payload);
+        const fixedRangeAt = JSON.stringify([visibleSummary.updatedAt, options.sessionTitleSyncGeneration, visibleSummary.projectsEnabled !== false, visibleSummary.nativeRangeWindows, Boolean(visibleSummary.dailySessionPeriods)]);
+        if (visibleSummary.nativeRanges && handle.fixedRangeAt !== fixedRangeAt) {
+          try {
+            const publish = record => {
+              try {
+                for (const page of fixedRangeUploadPages(record, options)) {
+                  const accepted = handle.hub.acceptFixedRange(record.deviceId, page);
+                  if (accepted.status !== 200) return false;
+                  if (accepted.complete) return true;
+                }
+              } catch (error) {
+                if (!record.dailySessionPeriods || !(error instanceof RangeError)) throw error;
+              }
+              return false;
+            };
+            if (publish(visibleSummary)) handle.fixedRangeAt = fixedRangeAt;
+            else if (visibleSummary.dailySessionPeriods) publish({ ...visibleSummary, dailySessionPeriods: undefined });
+          } catch (error) {
+            console.log(`[host-ingest] fixed range upload deferred: ${error.message}`);
+          }
+        }
+        if (visibleSummary.dailySessionPeriods && handle.fixedRangeAt === fixedRangeAt
+          && payload.history?.dailyTotalsOmitted > 0 && accepted.history?.summary?.activeDaysComplete !== true) {
+          embeddedHub.hub.restoreHistory(syncPayload(visibleSummary, { ...options, pagedSessions: true }));
+        }
         if (settings.lastPostedDeviceId !== visibleSummary.deviceId) {
           settings.lastPostedDeviceId = visibleSummary.deviceId;
           saveSettings();
@@ -4321,7 +4366,7 @@ function startHostCollector() {
       });
     }
   };
-  const usageOptions = electronUsageConfig('host-collector');
+  const usageOptions = electronUsageConfig('host-collector', { synced: true });
   deviceRuntimeHandle = createDeviceRuntime({
     envelope: electronDeviceEnvelope(),
     initialLimits: lastCollectedDevice?.limits,
@@ -4396,7 +4441,15 @@ function injectLocalDeviceStatus(stats) {
   for (const device of stats.devices) if (device.limits) device.limits = { ...device.limits, providers: device.limits.providers.map(row => ({
     ...row, stale: isProviderStale(row, device.limits, device, stats.staleAfterMs, now)
   })) };
-  if (mode !== 'local') snapshotLocalDevices.set(stats, { localDevice: lastCollectedDevice });
+  if (mode !== 'local') {
+    snapshotLocalDevices.set(stats, { localDevice: lastCollectedDevice });
+    delete stats.localFixedRangeRevision;
+    if (settings?.hubMode === 'client' && ownsUsageRuntime() && lastCollectedDevice?.nativeRanges
+      && stats.devices.some(device => device.deviceId === lastCollectedDevice.deviceId
+        && device.updatedAt === lastCollectedDevice.updatedAt)) {
+      stats.localFixedRangeRevision = JSON.stringify([lastCollectedDevice.deviceId, lastCollectedDevice.updatedAt]);
+    }
+  }
   return stats;
 }
 
@@ -5024,7 +5077,7 @@ function startLocalCollector() {
   sendStatus(false, { reason: 'collecting' });
   // One config object for both, so the fingerprint the seed validates against
   // cannot drift from the one the collector will compute.
-  const usageOptions = electronUsageConfig('collector', { nativeRangesEnabled: true });
+  const usageOptions = electronUsageConfig('collector');
   primeLocalStatsFromAnchor(usageOptions, widgetProducerOwner);
   deviceRuntimeHandle = createDeviceRuntime({
     envelope: electronDeviceEnvelope(),
@@ -5305,9 +5358,12 @@ function settingsForRenderer() {
   const locale = trayMenuLocale();
   return {
     ...rendererSettings,
+    windowsAccentActive: windowsAccentActive(mainWindow),
     windowsBackdropFallback: windowsBackdropFallback(mainWindow),
     syncContentStatus: getSyncContentRuntime().status(),
     locale,
+    calendarLocale: collectorCalendarLocale(),
+    syncWeekStartsOn: SYNC_WEEK_STARTS_ON,
     fontContext: windowsFontContext(locale),
     deviceIconScope: currentHubIdentity() || 'local',
     ...redactedCredentials,
@@ -6459,6 +6515,7 @@ function startMode() {
   hubModeGeneration += 1;
   advanceMacWidgetProducerAndSourceEpoch();
   clearLatestHubStatsCache();
+  fixedRangeReads.clear();
   edgeDockManualStats = null;
   const icloudStop = stopIcloudRuntime();
   // Tear down collectors synchronously so they can't double-run while the
@@ -6569,7 +6626,7 @@ function usageCollectorNameForMode() {
 }
 
 function usageConfigForMode() {
-  return electronUsageConfig(usageCollectorNameForMode(), { nativeRangesEnabled: mode === 'local' });
+  return electronUsageConfig(usageCollectorNameForMode(), { synced: mode !== 'local' });
 }
 
 function applyUsageRuntimeForMode() {
@@ -7608,7 +7665,8 @@ function replaceMainWindow(bounds, options = {}) {
     });
     const next = mainWindow;
     if (process.platform === 'win32') {
-      if (windowsBackdropFallback(old) !== windowsBackdropFallback(next)) pushSettingsToRenderer();
+      if (windowsBackdropFallback(old) !== windowsBackdropFallback(next)
+        || windowsAccentActive(old) !== windowsAccentActive(next)) pushSettingsToRenderer();
       sendFloatingBubbleState();
       if (old?.isMinimized()) next.minimize();
       else if (old?.isVisible()) {
@@ -7706,6 +7764,63 @@ function createDashboardWindow() {
   return win;
 }
 
+async function getSyncedFixedPeriod(snapshotId, source, selection) {
+  return resolveSyncedPeriodForStats(rendererSnapshots.get(snapshotId, source), source, selection);
+}
+
+async function resolveSyncedPeriodForStats(stats, source, selection) {
+  const revisions = stats?.fixedRangeRevisions || {};
+  const legacyPeriod = selection === 'today' || selection === 'month';
+  if (mode !== 'sync' || source !== hubModeGeneration || (!legacyPeriod && !fixedPeriodRangesApi.isDerived(selection))
+    || (!stats?.localFixedRangeRevision && !Object.keys(revisions).length)) return null;
+  const config = historyResolverOptions();
+  const localDevice = stats.localFixedRangeRevision ? snapshotLocalDevices.get(stats)?.localDevice : null;
+  const options = { weekStartsOn: SYNC_WEEK_STARTS_ON, now: Date.now() };
+  const { sessionTitlesEnabled, modelAliases, modelAliasGrouping } = settings || {};
+  const headers = config.secret ? { authorization: `Bearer ${config.secret}` } : {};
+  const read = (deviceId, name, window, revision) => {
+    if (config.hubMode === 'icloud') return config.icloudSync?.readFixedRange(deviceId, name, window, revision);
+    if (config.hubMode === 'host') return config.embeddedHub?.hub.readFixedRange(deviceId, name, window, revision);
+    if (!config.hubUrl) return null;
+    const key = JSON.stringify([source, currentHubStatsIdentity(config.hubMode), deviceId, name, window.start, window.end, revision]);
+    return fixedRangeReads.read(key, async (abort) => {
+      const signal = AbortSignal.any([abort, AbortSignal.timeout(15_000)]);
+      return fetchFixedRange(
+        (url, init) => fetch(url, { ...init, signal, redirect: 'error' }),
+        config.hubUrl, deviceId, name, window, headers, revision
+      );
+    });
+  };
+  const history = async (devices) => {
+    if (!config.historyEnabled) return null;
+    try {
+      const resolved = await resolveCompleteHistoryWithDevices(config);
+      return historyFallbackForDevices(selection, devices, resolved.deviceHistories, options);
+    } catch (_) { return null; }
+  };
+  const fixed = legacyPeriod
+    ? await resolveSyncedSessionPeriod(selection, stats.devices || [], revisions, { ...options, read })
+    : await resolveSyncedFixedPeriod(selection, stats.devices || [], revisions, { ...options, localDevice, read, history });
+  if (!fixed || source !== hubModeGeneration) return null;
+  const current = config.hubMode === 'icloud'
+    ? config.icloudSync?.getStats() : currentHubStatsCache();
+  if (current && Object.entries(revisions).some(([id, revision]) => (
+    id !== localDevice?.deviceId && current.fixedRangeRevisions?.[id] !== revision
+  ))) return null;
+  const input = {
+    periods: { [selection]: fixed.period },
+    devices: fixed.devices.map(({ period, ...device }) => ({ ...device, periods: { [selection]: period } }))
+  };
+  const visible = sessionTitlesEnabled === false || settings?.sessionTitlesEnabled === false
+    ? withoutSessionTitleStats(input) : input;
+  const projected = projectModelAliasStats(visible, modelAliases, { grouping: modelAliasGrouping });
+  return {
+    ...fixed,
+    period: projected.periods[selection],
+    devices: projected.devices.map(({ periods, ...device }) => ({ ...device, period: periods[selection] }))
+  };
+}
+
 async function getDashboardHistory(options = {}) {
   const includeDevices = options?.includeDevices === true;
   const resolved = includeDevices
@@ -7780,7 +7895,7 @@ app.whenReady().then(() => {
   // icon we have already handed to the shell, so the renderer has to recompose
   // it — nothing else in the app would notice the change.
   nativeTheme.on('updated', () => {
-    applyNativeMaterial();
+    if (applyNativeMaterial()) pushSettingsToRenderer();
     // Rebuilds the dock only when Reduce Transparency moved its material.
     if (edgeDockController?.isRunning()) edgeDockController.sync();
     if (notchController?.isRunning()) notchController.sync();
@@ -8296,6 +8411,8 @@ app.whenReady().then(() => {
       limitProviderHiddenItems: normalizeLimitProviderHiddenItems(patch.limitProviderHiddenItems ?? settings.limitProviderHiddenItems),
       homeLimitAccountCount: normalizeHomeLimitAccountCount(patch.homeLimitAccountCount ?? settings.homeLimitAccountCount),
       periodMonthMode: normalizePeriodMonthMode(patch.periodMonthMode ?? settings.periodMonthMode),
+      periodTabOrder: patch.periodTabOrder === undefined ? settings.periodTabOrder
+        : fixedPeriodRangesApi.normalizePeriodTabOrder(patch.periodTabOrder),
       modelRankingMetric: normalizeRankingMetric(patch.modelRankingMetric ?? settings.modelRankingMetric),
       sessionTitlesEnabled: parseBoolean(patch.sessionTitlesEnabled ?? settings.sessionTitlesEnabled, true),
       sessionContextMetric: normalizeSessionContextMetric(patch.sessionContextMetric ?? settings.sessionContextMetric),
@@ -8502,6 +8619,9 @@ app.whenReady().then(() => {
         try { dashboardWindow.webContents.send('dashboard:historyChanged'); } catch (_) {}
       }
     }
+    if (settings.sessionTitlesEnabled !== previousSettingsState.sessionTitlesEnabled
+      || settings.hubSyncSessionTitles !== previousSettingsState.hubSyncSessionTitles
+      || settings.projectsEnabled !== previousSettingsState.projectsEnabled) fixedRangeReads.clear();
     pushSettingsToRenderer();
     if (settings.sessionTitlesEnabled !== previousSettingsState.sessionTitlesEnabled) {
       refreshLimitStatsPresentation();
@@ -9024,6 +9144,7 @@ app.whenReady().then(() => {
     return true;
   });
   ipcMain.handle('dashboard:getHistory', (_event, options) => getDashboardHistory(options));
+  ipcMain.handle('stats:fixedPeriod', (_event, ...args) => getSyncedFixedPeriod(...args));
   ipcMain.on('dashboard:ready', (event) => {
     const win = BrowserWindow.fromWebContents(event.sender);
     if (!win || win !== dashboardWindow || win.isDestroyed()) return;
@@ -9146,10 +9267,14 @@ app.whenReady().then(() => {
 });
 
 app.on('second-instance', (_event, argv) => {
-  // A second launch that names a view opens it; every other second launch just
-  // focuses the window that is already running.
-  if (argv?.includes('--cloud-usage') || argv?.includes('--sessions')) openViewFromTray('session');
-  else focusExistingWindow();
+  // Windows can dispatch this inside the native window constructor, before
+  // createWindow assigns mainWindow. Wait for that construction to return.
+  setImmediate(() => {
+    // A second launch that names a view opens it; every other second launch
+    // just focuses the window that is already running.
+    if (argv?.includes('--cloud-usage') || argv?.includes('--sessions')) openViewFromTray('session');
+    else focusExistingWindow();
+  });
 });
 app.on('window-all-closed', () => {
   if (process.platform !== 'darwin' && !mainWindowHibernated) app.quit();

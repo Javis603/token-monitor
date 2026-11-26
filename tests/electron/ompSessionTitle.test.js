@@ -48,7 +48,9 @@ test('OMP detail headings format current metadata and the captured title without
   const state = { settings: {}, period: 'today', openSession: {
     client: 'omp', sessionId: 's', title: '\u{F0093} OLD: Captured title'
   } };
-  const heading = Function('state', 'sessionRowsApi', `return (${source.slice(start, end)});`)(state, sessionRows);
+  const heading = Function('state', 'sessionRowsApi', 'displayedSessions', `return (${source.slice(start, end)});`)(
+    state, sessionRows, key => state.stats?.periods?.[key]?.sessions
+  );
   assert.equal(heading(), 'OLD: Captured title');
   const current = Object.freeze({ client: 'omp', title: '\u{F066E} NEW: 自訂標題 😀 \uE000' });
   state.stats = { periods: { today: { sessions: { 'omp:s': current } } } };

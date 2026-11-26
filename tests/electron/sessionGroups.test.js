@@ -38,24 +38,25 @@ test('period switches keep the same group and return to Sessions when that group
   const state = { period: 'today', stats: { periods: { today: period(20), month: period(50), allTime: period(0) } },
     openSession: { kind: 'session-group', summary: rowsForPeriod(period(20)).find(row => row.sessionGroup === 'cursor-grok-bot') } };
   let activate;
-  const tab = { dataset: { period: 'month', periodSlot: 'month' }, addEventListener(_type, callback) { activate = callback; } };
+  const tab = { dataset: { period: 'month' } };
+  const periodTabs = { addEventListener(_type, callback) { activate = callback; } };
   let renders = 0;
   const noop = () => {};
-  // The tab loop and the open-session follow-up it shares with the range menu.
+  // The tab handler and the open-session follow-up it shares with the range menu.
   const start = source.indexOf('function followOpenSessionToPeriod()');
   const end = source.indexOf('\nfor (const button of els.monthPeriodMenu', start);
-  vm.runInNewContext(source.slice(start, end), { state, document: { querySelectorAll: () => [tab] },
-    fixedPeriodRangesApi: { slotForSelection: value => value, normalizeMonthMode: () => 'month', supportsBreakdown: () => true },
+  vm.runInNewContext(source.slice(start, end), { state, periodTabs, els: { monthPeriodTab: tab },
+    fixedPeriodRangesApi: { slotForSelection: value => value, supportsBreakdown: () => true },
+    pagedSessionsPending: () => false,
     currentNativeRangeSnapshot: () => null,
     captureBreakdownMotion: noop, setPeriod: value => { state.period = value; return true; }, syncPeriodTabs: noop,
     setPeriodMenuOpen: noop, sessionRowsForPeriod: rowsForPeriod, render: () => { renders += 1; },
     periodBreakdownMotionDuration: () => 800, animateBreakdownFrom: noop });
-  activate({ stopPropagation: noop });
+  activate({ target: { closest: () => tab }, stopPropagation: noop });
   assert.equal(state.openSession.summary.key, 'session-group:cursor-grok-bot');
   assert.equal(state.openSession.summary.value, 50);
   assert.equal(state.openSession.period, 'month');
-  tab.dataset = { period: 'allTime', periodSlot: 'allTime' };
-  activate({ stopPropagation: noop });
+  activate({ target: { closest: () => ({ dataset: { period: 'allTime' } }) }, stopPropagation: noop });
   assert.equal(state.period, 'allTime');
   assert.equal(state.openSession, null, 'the remaining Codex group does not replace a missing Grok group');
   assert.equal(renders, 2);
@@ -66,10 +67,12 @@ test('stats repaint refreshes the open group by identity and retires a removed g
   const state = { openSession: { kind: 'session-group', summary: rowsForPeriod(period(20)).find(row => row.sessionGroup === 'cursor-grok-bot') } };
   let rendered;
   let closed = false;
+  let pending = false;
   const start = source.indexOf("    if (state.openSession.kind === 'session-group') {");
   const end = source.indexOf('    refreshSessionDetailHeading();', start);
   const repaint = Function('state', 'period', 'sessionRowsForPeriod', 'closeSessionDetail',
-    'sessionTooltipShouldHoldRender', 'renderSessionGroupDetail', source.slice(start, end));
+    'sessionTooltipShouldHoldRender', 'renderSessionGroupDetail', 'pagedSessionsPending',
+    source.slice(start, end));
   const close = () => { closed = true; state.openSession = null; };
   repaint(state, period(80), rowsForPeriod, close, () => false, request => { rendered = request; });
   assert.equal(rendered.summary.key, key);
@@ -77,7 +80,20 @@ test('stats repaint refreshes the open group by identity and retires a removed g
   repaint(state, period(100), rowsForPeriod, close, () => true, request => { rendered = request; });
   assert.equal(rendered.summary.value, 100, 'hover no longer postpones group updates');
   assert.equal(state.openSession.summary.value, 100);
-  repaint(state, period(0), rowsForPeriod, close, () => false, () => assert.fail('removed group must close'));
+  pending = true;
+  repaint(state, period(0), rowsForPeriod, close, () => false, request => { rendered = request; },
+    () => pending);
+  assert.equal(state.openSession.summary.value, 100, 'keep the open group while paging');
+  const previousGroup = state.openSession;
+  state.settings = { sessionTitlesEnabled: false };
+  repaint(state, period(0), rowsForPeriod, close, () => false, () => assert.fail('cached titles must close'),
+    () => pending);
+  assert.equal(state.openSession, null);
+  state.openSession = previousGroup;
+  state.settings = { sessionTitlesEnabled: true };
+  pending = false;
+  repaint(state, period(0), rowsForPeriod, close, () => false, () => assert.fail('removed group must close'),
+    () => pending);
   assert.equal(closed, true);
   assert.equal(state.openSession, null);
 });
@@ -174,10 +190,12 @@ test('an open session follows a period change with that period\'s row cost', () 
     openSession: { kind: 'session', client: 'claude', sessionId: 's1', sessionCost: 20, period: 'month' } };
   const opened = [];
   const start = source.indexOf('function followOpenSessionToPeriod()');
-  const end = source.indexOf("for (const tab of document.querySelectorAll('.tab'))", start);
+  const end = source.indexOf("periodTabs.addEventListener('click'", start);
   const sessionStart = source.indexOf('function sessionLiveStatsEntry(');
   const sessionEnd = source.indexOf('function sessionDetailLiveSignature(', sessionStart);
-  const context = { state, fixedPeriodRangesApi: { supportsBreakdown: () => true },
+  const context = { state, displayedSessions: key => state.stats?.periods?.[key]?.sessions,
+    fixedPeriodRangesApi: { supportsBreakdown: () => true },
+    pagedSessionsPending: () => false,
     currentNativeRangeSnapshot: () => ({ range: {} }), sessionRowsForPeriod: rowsForPeriod,
     openSessionDetail: request => opened.push(request) };
   vm.runInNewContext(`${source.slice(sessionStart, sessionEnd)}\n${source.slice(start, end)}\nglobalThis.follow = followOpenSessionToPeriod;`, context);
@@ -189,4 +207,74 @@ test('an open session follows a period change with that period\'s row cost', () 
   state.stats.periods.last7 = { sessions: {} };
   context.follow();
   assert.equal(opened[1].sessionCost, 0);
+});
+
+test('a group follows Today to Month while paged rows are unresolved', () => {
+  const summary = { key: 'session-group:example' };
+  const state = { period: 'month', stats: { periods: { month: { sessions: {} } } },
+    openSession: { kind: 'session-group', period: 'today', summary } };
+  const start = source.indexOf('function followOpenSessionToPeriod()');
+  const end = source.indexOf("periodTabs.addEventListener('click'", start);
+  const context = { state, fixedPeriodRangesApi: { supportsBreakdown: () => true },
+    currentNativeRangeSnapshot: () => null, sessionRowsForPeriod: () => [],
+    pagedSessionsPending: () => true };
+  vm.runInNewContext(source.slice(start, end), context);
+  context.followOpenSessionToPeriod();
+  assert.equal(state.openSession.period, 'month');
+  assert.equal(state.openSession.summary, summary);
+});
+
+test('paged groups can wait only for an available request or a scheduled retry', () => {
+  const start = source.indexOf('function pagedSessionsPending()');
+  const end = source.indexOf('\nfunction ', start + 1);
+  const state = {};
+  let key = '';
+  const context = {
+    state, needsPagedSessions: () => true, syncedFixedPeriodKey: () => key,
+    window: { tokenMonitor: { getSyncedFixedPeriod() {} } }
+  };
+  vm.runInNewContext(source.slice(start, end), context);
+  assert.equal(context.pagedSessionsPending(), false, 'a Hub with no revision cannot start paging');
+  key = 'month';
+  assert.equal(context.pagedSessionsPending(), true, 'the destination read can start');
+  state.syncedFixedPeriod = { key, pending: false, retryAt: Date.now() + 1000 };
+  assert.equal(context.pagedSessionsPending(), true, 'a scheduled retry can still resolve the group');
+  state.syncedFixedPeriod.retryAt = Infinity;
+  assert.equal(context.pagedSessionsPending(), false, 'an exhausted retry must close the missing group');
+});
+
+test('an unrelated range revision cannot keep a Today group open in Month', () => {
+  const state = {
+    breakdown: 'session', period: 'month',
+    stats: {
+      snapshot: { id: 1, source: 1 }, periods: { month: { sessions: {} } },
+      sessionDetailsOmitted: { month: 1 }, fixedRangeRevisions: { complete: 'rev-1' },
+      devices: [
+        { deviceId: 'legacy', sessionDetailsOmitted: { month: 1 }, periodWindows: { today: { key: '2026-11-25' } } },
+        { deviceId: 'complete', periodWindows: { today: { key: '2026-11-25' } } }
+      ]
+    }
+  };
+  const extract = name => source.match(new RegExp(`function ${name}\\([^)]*\\) \\{[\\s\\S]*?\\n\\}`))[0];
+  const context = {
+    state, currentNativeRangeSnapshot: () => null, sessionRowsForPeriod: () => [],
+    currentCalendarLocale: () => 'en-GB', fixedPeriodTodayKey: () => '2026-11-25',
+    fixedPeriodRangesApi: { isDerived: () => false, supportsBreakdown: () => true, deviceDayState: () => null },
+    window: { tokenMonitor: { getSyncedFixedPeriod() {} } }
+  };
+  vm.runInNewContext(['syncedFixedPeriodKey', 'syncedFixedPeriodScope', 'needsPagedSessions', 'pagedSessionsPending', 'followOpenSessionToPeriod']
+    .map(extract).join('\n'), context);
+  const todayGroup = { kind: 'session-group', period: 'today', summary: { key: 'session-group:example' } };
+  state.openSession = todayGroup;
+  assert.equal(context.syncedFixedPeriodKey(), '', 'the complete device has no missing rows to page');
+  context.followOpenSessionToPeriod();
+  assert.equal(state.openSession, null);
+  state.stats.fixedRangeRevisions.complete = 'rev-2';
+  assert.equal(context.pagedSessionsPending(), false);
+
+  state.stats.fixedRangeRevisions.legacy = 'rev-3';
+  state.openSession = todayGroup;
+  assert.equal(context.pagedSessionsPending(), true);
+  context.followOpenSessionToPeriod();
+  assert.equal(state.openSession.period, 'month');
 });

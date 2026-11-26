@@ -122,7 +122,8 @@ function fixture(platform = 'linux') {
       timers.add(timer);
       return timer;
     },
-    clearTimeout: timer => timers.delete(timer)
+    clearTimeout: timer => timers.delete(timer),
+    setImmediate(callback) { timers.add({ callback, ms: 0 }); }
   });
   vm.runInContext([
     section('const MAIN_WINDOW_HIBERNATE_MS', 'function stopPersistBoundsTimer('),
@@ -234,6 +235,7 @@ test('tray updates, settings sync and show entry points do not recreate pages wh
   context.handleWindowToggleShortcut();
   run.app.emit('activate');
   run.app.emit('second-instance');
+  run.fire(0);
   assert.equal(run.mainWindowsCreated(), 1);
   assert.equal(run.windows.size, 0);
   assert.equal(context.mainWindow, null);

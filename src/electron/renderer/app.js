@@ -276,7 +276,7 @@ const VIEW_DISPLAY_OPTIONS = [
   { id: 'trends', labelKey: 'views.trends' },
   { id: 'status', labelKey: 'views.status' }
 ];
-const viewPeriodValues = new Set(['today', 'month', 'yesterday', 'week', 'last7', 'last30', 'allTime']);
+const viewPeriodValues = new Set(fixedPeriodRangesApi.PERIOD_TAB_OPTIONS);
 const viewBreakdownValues = new Set(['home', ...baseBreakdownOrder, 'status', 'limits', 'trends']);
 const HOME_MODULE_OPTIONS = [
   { id: 'limits', labelKey: 'home.limits', viewId: 'limits' },
@@ -394,6 +394,9 @@ state.fixedPeriodHistoryRetryTimer = null;
 state.fixedPeriodHistoryPromise = null;
 state.fixedPeriodHistoryCoordinator = null;
 state.fixedPeriodSnapshot = null;
+state.syncedFixedPeriod = null;
+state.syncedFixedPeriodCache = new Map();
+state.syncedFixedPeriodWarmup = null;
 state.periodMenuOpen = false;
 state.sessionToolFilter = '';
 state.sessionPage = 0;
@@ -769,7 +772,7 @@ function currentLocale() {
 }
 
 function currentCalendarLocale() {
-  return i18n.resolveRegionalLocale([...preferredLanguages(), state.settings?.locale]);
+  return state.settings?.calendarLocale || i18n.resolveRegionalLocale([...preferredLanguages(), state.settings?.locale]);
 }
 
 function supportsLocalizedCompactTokenUnits(locale) {
@@ -2949,7 +2952,7 @@ function updateRowLive(row, activityState, activityAt) {
   dot.classList.add('pulse');
 }
 
-function updateRow(row, { name, subtitle, subtitleIdentity, subagentCountLabel, activity, detail, value, cost, unpricedTokens, barValue, max, color, barBackground, accordionRows, deviceDetail, stale, platform, local, client, clientLabel, sourceDevice, kind, modelSource, cacheReadTokens, outputTokens, unclassifiedTokens, modelRows, modelLabel, modelTooltipEntries, titleModelLabel, reasoningEffort, tokenDataUnavailable, sessionDetailAvailable, sessionGroup, reviewGroup, running, activityState, context, promptCache, contextSnapshot, sortTime, cloudThreadId, cloudOnly, costLabel: metricLabel }) {
+function updateRow(row, { name, subtitle, subtitleIdentity, subagentCountLabel, activity, detail, sessionDetailHeading, value, cost, unpricedTokens, barValue, max, color, barBackground, accordionRows, deviceDetail, stale, platform, local, client, clientLabel, sourceDevice, kind, modelSource, cacheReadTokens, outputTokens, unclassifiedTokens, modelRows, modelLabel, modelTooltipEntries, titleModelLabel, reasoningEffort, tokenDataUnavailable, sessionDetailAvailable, sessionGroup, reviewGroup, running, activityState, context, promptCache, contextSnapshot, sortTime, cloudThreadId, cloudOnly, costLabel: metricLabel }) {
   const width = rowWidth(barValue, max);
   const isExpanded = row.classList.contains('expanded');
   // `running` still drives the row class for layout, but the mark's own state
@@ -3060,7 +3063,7 @@ function updateRow(row, { name, subtitle, subtitleIdentity, subagentCountLabel, 
   // Local sessions keep their usual density; only a confirmed remote source
   // adds a separate line below the session's activity.
   const deviceEl = row.querySelector('.row-device');
-  if (kind === 'session') window.TokenMonitorDomReconcile.data(row, { sourceDevice });
+  if (kind === 'session') window.TokenMonitorDomReconcile.data(row, { sourceDevice, sessionDetailHeading });
   const remoteDevice = sessionRowsApi.remoteSessionDevice(sourceDevice, state.settings?.deviceId);
   setHoverMarqueeText(deviceEl, remoteDevice?.name || '');
   deviceEl.classList.toggle('hidden', !remoteDevice);
@@ -3074,10 +3077,9 @@ function updateRow(row, { name, subtitle, subtitleIdentity, subagentCountLabel, 
     if (!existingIcon) content.prepend(icon);
     overflowText.update(deviceEl);
   }
-  // A titled session already has name, client/model and activity lines. Move
-  // its ID into Details, but keep the ID when only two lines remain so untitled
-  // sessions can still be distinguished (including when titles are disabled).
-  const shownDetail = kind === 'session' && interactive && activity ? '' : detail;
+  // Move the ID into Details for named sessions. A project can label several
+  // untitled sessions, so keep their IDs visible to distinguish them.
+  const shownDetail = kind === 'session' && interactive && activity && !sessionDetailHeading ? '' : detail;
   const detailEl = row.querySelector('.row-detail');
   setHoverMarqueeText(detailEl, shownDetail);
   detailEl.classList.toggle('hidden', !shownDetail);
@@ -3331,7 +3333,7 @@ function updateSessionSearchQuery(value) {
   const cache = state.sessionRowsCache;
   if (state.breakdown === 'session' && cache?.stats === state.stats && cache?.period === state.period) {
     syncSessionSearchChrome();
-    const incompleteHint = sessionRowsApi.sessionBreakdownIncomplete(state.stats, state.period)
+    const incompleteHint = sessionBreakdownIncomplete()
       ? 'sessions.incomplete' : '';
     overflowText.batch(() => renderRows(cache.rows, { incompleteHint, fromSearch: true, reuseToolFilter: true }));
     return;
@@ -3565,7 +3567,8 @@ function buildFixedPeriodSourcesSnapshot() {
     historyEnabled: state.settings?.historyEnabled !== false,
     historyAvailable: meta.historyTransportAvailable === true,
     todayKey: fixedPeriodTodayKey(),
-    locale: currentCalendarLocale()
+    locale: currentCalendarLocale(),
+    weekStartsOn: state.mode === 'sync' ? state.settings?.syncWeekStartsOn : undefined
   });
 }
 
@@ -3708,8 +3711,13 @@ function sessionPresentationOptions() {
   };
 }
 
+function displayedSessions(periodKey, period = state.stats?.periods?.[periodKey]) {
+  const paged = periodKey === state.period ? syncedSessionPeriod() : null;
+  return paged?.period.sessions ?? period?.sessions;
+}
+
 function rawSessionRowsForPeriod(period, options = sessionPresentationOptions()) {
-  const localRows = sessionRowsApi.sessionRowsForPeriod(period, options);
+  const localRows = sessionRowsApi.sessionRowsForPeriod({ ...period, sessions: displayedSessions(state.period, period) }, options);
   return cloudSessionRowsApi.mergeRows(localRows, period, cloudSessionsSource.snapshot(), {
     period: state.period, locale: currentLocale(), color: clientColors.codex
   });
@@ -3721,7 +3729,9 @@ function sessionRowsForPeriod(period) {
   const options = sessionPresentationOptions();
   if (state.breakdown === 'session') options.rowLabelCache = sessionRowLabelCache;
   const rows = rawSessionRowsForPeriod(period, options);
-  if (rows.length > 0) return sessionRowsApi.groupSessionRows(rows, { ...options, sortBy: state.sessionSort });
+  if (rows.length > 0) return sessionRowsApi.sessionListRows(rows, {
+    ...options, sortBy: state.sessionSort, sessionTitlesEnabled: state.settings?.sessionTitlesEnabled
+  });
   if (Number(period?.totalTokens || 0) === 0) return [];
   return modelRowsForPeriod(period);
 }
@@ -5703,7 +5713,9 @@ function applySessionDetailResult(request, options) {
 
 // A native range's turns are its days; other periods keep their names.
 function sessionDetailPeriod() {
-  const range = currentNativeRangeSnapshot()?.range;
+  const range = currentNativeRangeSnapshot()?.range
+    || (state.fixedPeriodSnapshot?.selection === state.period && state.fixedPeriodSnapshot.detailsAvailable && state.fixedPeriodSnapshot.devices
+      .find(device => device.deviceId === state.settings?.deviceId)?.range);
   return range ? `range:${range.start}:${range.end}` : state.period;
 }
 
@@ -5714,7 +5726,7 @@ async function openSessionDetail({ client, sessionId, sessionCost, title, source
   const request = { kind: 'session', client, sessionId, sessionCost,
     title: state.settings?.sessionTitlesEnabled === false && !fixedGroupHeading ? '' : title,
     sourceDevice,
-    remote: Boolean(sourceDevice && sessionRowsApi.remoteSessionDevice(sourceDevice, state.settings?.deviceId)),
+    remote: sourceDevice?.ambiguous === true || Boolean(sourceDevice?.deviceId && sourceDevice.deviceId !== state.settings?.deviceId),
     period: state.period, detailPeriod: sessionDetailPeriod(), detail: null, returnTo, titleFollowsSession: titleFollowsSession === true,
     cloudThreadId, cloudOnly };
   state.openSession = request;
@@ -5754,7 +5766,7 @@ function sessionLiveStatsEntry(request) {
   const periodKey = request.period || state.period;
   return request.client === 'reasonix'
     ? state.stats?.nativeSessions?.[periodKey]?.[request.sessionId] || null
-    : state.stats?.periods?.[periodKey]?.sessions?.[`${request.client}:${request.sessionId}`] || null;
+    : displayedSessions(periodKey)?.[`${request.client}:${request.sessionId}`] || null;
 }
 
 function sessionLiveCost(entry, client) {
@@ -5982,9 +5994,10 @@ function sessionDetailTitle() {
   const period = request?.period || state.period;
   const session = request?.client === 'reasonix'
     ? state.stats?.nativeSessions?.[period]?.[request.sessionId]
-    : state.stats?.periods?.[period]?.sessions?.[`${request?.client}:${request?.sessionId}`];
+    : displayedSessions(period)?.[`${request?.client}:${request?.sessionId}`];
+  const syncedRange = state.mode === 'sync' && fixedPeriodRangesApi.isDerived(period);
   return sessionRowsApi.sessionTitleForDisplay({
-    client: request?.client, title: session?.title || request?.title
+    client: request?.client, title: session?.title || (syncedRange ? '' : request?.title)
   });
 }
 
@@ -6012,7 +6025,11 @@ function refreshSessionDetailHeading() {
       // would keep quoting titles the current stats no longer carry, so return
       // to whichever group holds this session now, or to Sessions when none does.
       const holder = rows.find(holds);
-      state.openSession.returnTo = holder ? { kind: 'session-group', period: group.period, summary: holder } : null;
+      if (holder) {
+        state.openSession.returnTo = { kind: 'session-group', period: group.period, summary: holder };
+      } else if (state.settings?.sessionTitlesEnabled === false || !pagedSessionsPending()) {
+        state.openSession.returnTo = null;
+      }
     }
   }
   const head = els.sessionDetailHead;
@@ -6700,8 +6717,207 @@ function canRenderNativeDevices() {
   return state.breakdown === 'device' && Boolean(currentNativeRangeSnapshot());
 }
 
+function syncedFixedPeriodKey(period = state.period) {
+  const stats = state.stats;
+  const revisionMap = stats?.fixedRangeRevisions || {};
+  const revisions = Object.entries(revisionMap).sort();
+  if (state.settings?.hubMode === 'local' || (!revisions.length && !stats?.localFixedRangeRevision) || !stats?.snapshot) return '';
+  if (!fixedPeriodRangesApi.isDerived(period)) {
+    if (!needsPagedSessions()) return '';
+    const canReadPages = stats.devices?.some(device => device.sessionDetailsOmitted?.[state.period] > 0
+      && device.periodWindows?.today?.key && Object.hasOwn(revisionMap, device.deviceId) && revisionMap[device.deviceId]);
+    if (!canReadPages) return '';
+  }
+  // A fallback device can update live Today without a range or History revision.
+  const deviceObservations = (stats.devices || []).map(device => [
+    device.deviceId, device.updatedAt, fixedPeriodRangesApi.deviceDayState(device)?.currentKey || ''
+  ]);
+  return JSON.stringify([
+    syncedFixedPeriodScope(), period, deviceObservations, revisions, stats.localFixedRangeRevision, stats.deviceHistoryRevision
+  ]);
+}
+
+function syncedFixedPeriodScope() {
+  const settings = state.settings;
+  return JSON.stringify([
+    state.stats?.snapshot?.source, settings?.hubMode, settings?.deviceId, currentCalendarLocale(), fixedPeriodTodayKey(),
+    settings?.syncWeekStartsOn, settings?.historyEnabled, settings?.projectsEnabled, settings?.sessionTitlesEnabled,
+    settings?.modelAliases, settings?.modelAliasGrouping,
+    (state.stats?.devices || []).map(device => [device.deviceId, device.projectsEnabled, device.trackedClients,
+      device.periodWindows?.timeZone, fixedPeriodRangesApi.deviceDayState(device)?.currentKey])
+  ]);
+}
+
+function readSyncedFixedPeriod(period, key) {
+  const { id, source } = state.stats.snapshot;
+  if (!fixedPeriodRangesApi.isDerived(period)) return window.tokenMonitor.getSyncedFixedPeriod(id, source, period);
+  const scope = syncedFixedPeriodScope();
+  const cache = state.syncedFixedPeriodCache;
+  const previous = cache.get(period);
+  if (previous?.scope === scope && previous.key === key && previous.promise) return previous.promise;
+  if (previous?.scope === scope && previous.snapshotKey === key) return Promise.resolve(previous.snapshot);
+  const revisions = state.stats.fixedRangeRevisions || {};
+  let snapshot = previous?.scope === scope ? previous.snapshot : null;
+  if (snapshot && (Object.keys(previous.revisions).length !== Object.keys(revisions).length
+    || Object.entries(previous.revisions).some(([id, revision]) => revisions[id] !== revision))) {
+    snapshot = retainVerifiedFixedRangeTitles(snapshot, previous.revisions, revisions);
+  }
+  const entry = { scope, key, revisions, snapshot, promise: null };
+  cache.set(period, entry);
+  entry.promise = window.tokenMonitor.getSyncedFixedPeriod(id, source, period).then(result => {
+    if (cache.get(period) !== entry || syncedFixedPeriodKey(period) !== key) return null;
+    if (result?.detailsAvailable) {
+      entry.snapshot = result;
+      entry.snapshotKey = key;
+    } else if (result?.status === 'ready') {
+      entry.snapshot = null;
+    }
+    return result;
+  }).finally(() => { entry.promise = null; });
+  return entry.promise;
+}
+
+function retainVerifiedFixedRangeTitles(snapshot, previous, current) {
+  const stats = state.stats;
+  const localId = state.settings?.deviceId;
+  const sessions = snapshot.period.sessions;
+  const uncertain = Object.fromEntries(Object.entries(sessions || {}).filter(([key, row]) => {
+    const id = row.sourceDevice?.deviceId;
+    // A local scan owns its own titles. Remote titles are confirmed by the
+    // same accepted range revision or by an inline row from the same device.
+    if (id && id === localId && stats.localFixedRangeRevision) return false;
+    if (id && Object.hasOwn(previous, id) && previous[id] === current[id]) return false;
+    return !id || !['today', 'month'].some(name => {
+      const inline = stats.periods?.[name]?.sessions?.[key];
+      return inline?.sourceDevice?.deviceId === id && inline.title && inline.title === row.title;
+    });
+  }));
+  const redacted = window.TokenMonitorSessionTitleDisplay.withoutSessionTitles(uncertain);
+  if (redacted === uncertain) return snapshot;
+  return { ...snapshot, period: { ...snapshot.period, sessions: { ...sessions, ...redacted } } };
+}
+
+function warmSyncedFixedPeriod() {
+  if (!['session', 'project'].includes(state.breakdown) || !window.tokenMonitor.getSyncedFixedPeriod
+    || state.settings?.hubMode === 'local' || !state.stats?.snapshot || isRendererWindowHidden()
+    || visibleStatsSurface() !== 'main' || state.syncedFixedPeriodWarmup || state.syncedFixedPeriod?.pending) return;
+  const scope = syncedFixedPeriodScope();
+  const period = shownPeriodOrder().find(candidate => {
+    if (candidate === state.period || !fixedPeriodRangesApi.isDerived(candidate)) return false;
+    const cached = state.syncedFixedPeriodCache.get(candidate);
+    return cached?.scope !== scope || (!cached.snapshot && cached.key !== syncedFixedPeriodKey(candidate));
+  });
+  const key = period && syncedFixedPeriodKey(period);
+  if (!key) return;
+  const request = readSyncedFixedPeriod(period, key);
+  state.syncedFixedPeriodWarmup = request;
+  const finish = () => {
+    state.syncedFixedPeriodWarmup = null;
+    warmSyncedFixedPeriod();
+  };
+  void request.then(finish, finish);
+}
+
+function needsPagedSessions() {
+  return state.breakdown === 'session' && (state.period === 'today' || state.period === 'month')
+    && state.stats?.sessionDetailsOmitted?.[state.period] > 0;
+}
+
+function syncedSessionPeriod() {
+  if (!needsPagedSessions()) return null;
+  const request = state.syncedFixedPeriod;
+  return request?.key === syncedFixedPeriodKey() ? request.snapshot : null;
+}
+
+function sessionBreakdownIncomplete() {
+  return sessionRowsApi.sessionBreakdownIncomplete(state.stats, state.period) && !syncedSessionPeriod()?.detailsAvailable;
+}
+
+function pagedSessionsPending() {
+  const key = needsPagedSessions() && syncedFixedPeriodKey();
+  if (!key || !window.tokenMonitor.getSyncedFixedPeriod) return false;
+  const request = state.syncedFixedPeriod;
+  return request?.key !== key || request.pending || Number.isFinite(request.retryAt);
+}
+
+function requestSyncedFixedPeriod() {
+  const key = syncedFixedPeriodKey();
+  if (!key || !window.tokenMonitor.getSyncedFixedPeriod) return;
+  const previous = state.syncedFixedPeriod;
+  if (previous?.key === key && (previous.pending || Date.now() < previous.retryAt)) return;
+  clearTimeout(previous?.retryTimer);
+  const sameKey = previous?.key === key;
+  const request = {
+    key, pending: true, snapshot: sameKey ? previous.snapshot : null,
+    retries: sameKey ? previous.retries : 0
+  };
+  state.syncedFixedPeriod = request;
+  const finish = (snapshot) => {
+    if (state.syncedFixedPeriod !== request) return;
+    if (key !== syncedFixedPeriodKey()) {
+      state.syncedFixedPeriod = null;
+      return;
+    }
+    request.snapshot = snapshot;
+    request.pending = false;
+    // Pages can arrive late, and a transient transport failure can also leave
+    // the selected revision without details until the next read.
+    const canRetry = !snapshot?.detailsAvailable && request.retries < FIXED_PERIOD_HISTORY_MAX_RETRIES;
+    request.retryAt = canRetry ? Date.now() + FIXED_PERIOD_HISTORY_RETRY_MS : Infinity;
+    if (canRetry) {
+      request.retryTimer = setTimeout(() => {
+        if (state.syncedFixedPeriod !== request || key !== syncedFixedPeriodKey()) return;
+        request.retries += 1;
+        request.retryAt = 0;
+        requestSyncedFixedPeriod();
+      }, FIXED_PERIOD_HISTORY_RETRY_MS);
+    }
+    state.sessionRowsCache = null;
+    statsRenderScheduler.request();
+  };
+  void readSyncedFixedPeriod(state.period, key)
+    .then(finish, () => finish(null));
+}
+
 function buildFixedPeriodSnapshot() {
   if (!fixedPeriodRangesApi.isDerived(state.period)) return { status: 'native', period: null };
+  const key = syncedFixedPeriodKey();
+  const request = state.syncedFixedPeriod?.key === key ? state.syncedFixedPeriod : null;
+  const cached = state.syncedFixedPeriodCache?.get(state.period);
+  if (key && cached?.publicationTimer != null) {
+    clearTimeout(cached.publicationTimer);
+    cached.publicationTimer = null;
+  }
+  const usableCache = cached?.snapshot && cached.scope === syncedFixedPeriodScope();
+  let synced = request?.snapshot;
+  if (!synced && usableCache) {
+    if (!key) {
+      // Usage can arrive before its detail pages. Give publication one retry
+      // interval while retaining the same range and checking title consent.
+      const period = state.period;
+      cached.publicationTimer ??= setTimeout(() => {
+        if (state.syncedFixedPeriodCache.get(period) !== cached) return;
+        cached.publicationTimer = null;
+        if (syncedFixedPeriodKey(period)) return;
+        const active = state.syncedFixedPeriod;
+        if (active && (active.key === cached.key || active.key === cached.snapshotKey)) {
+          clearTimeout(active.retryTimer);
+          state.syncedFixedPeriod = null;
+        }
+        cached.snapshot = null;
+        cached.snapshotKey = null;
+        if (state.period === period) statsRenderScheduler.request();
+      }, FIXED_PERIOD_HISTORY_RETRY_MS);
+      synced = retainVerifiedFixedRangeTitles(cached.snapshot, cached.revisions, {});
+    } else if (cached.snapshotKey === key || request?.pending || Number.isFinite(request?.retryAt)) {
+      synced = cached.snapshot;
+    }
+  }
+  if (synced) {
+    const history = state.settings?.historyEnabled !== false && !state.fixedPeriodHistoryFailed
+      ? buildFixedPeriodSourcesSnapshot() : null;
+    return { ...synced, synchronized: true, daily: history?.daily, summary: history?.summary };
+  }
   const native = currentNativeRangeSnapshot();
   if (native) {
     // While History refreshes, the last snapshot for this range still holds
@@ -6724,7 +6940,7 @@ function buildFixedPeriodSnapshot() {
       state.fixedPeriodSnapshot,
       state.period
     );
-    return ready
+    return ready && !ready.synchronized
       ? ready
       : { status: 'loading', reason: 'loading', period: null };
   }
@@ -6854,6 +7070,11 @@ async function warmFixedPeriodHistory(options = {}) {
 }
 
 function fixedPeriodMessage(snapshot, breakdown = '') {
+  if (state.syncedFixedPeriod?.pending && state.syncedFixedPeriod.key === syncedFixedPeriodKey()
+    && (snapshot?.status !== 'ready' || breakdown === 'session' || breakdown === 'project')) {
+    return t(breakdown === 'session' ? 'periodRange.sessionLoading'
+      : breakdown === 'project' ? 'periodRange.projectLoading' : 'periodRange.loading');
+  }
   if (state.stats?.nativeRangesPending && (breakdown === 'session' || breakdown === 'project')) {
     return t(breakdown === 'session' ? 'periodRange.sessionLoading' : 'periodRange.projectLoading');
   }
@@ -6910,10 +7131,14 @@ function setPeriodMenuOpen(open, { restoreFocus = false, focus = '' } = {}) {
   if (!state.periodMenuOpen && restoreFocus) els.monthPeriodTab?.focus();
 }
 
-function syncPeriodMenu() {
-  const mode = fixedPeriodRangesApi.slotForSelection(state.period) === 'month'
+function legacyMiddlePeriod() {
+  return fixedPeriodRangesApi.slotForSelection(state.period) === 'month'
     ? fixedPeriodRangesApi.normalizeMonthMode(state.period)
     : fixedPeriodRangesApi.normalizeMonthMode(state.settings?.periodMonthMode);
+}
+
+function syncPeriodMenu() {
+  const mode = legacyMiddlePeriod();
   for (const button of periodMenuButtons()) {
     const active = button.dataset.fixedPeriod === mode;
     button.classList.toggle('is-current', active);
@@ -7767,7 +7992,7 @@ function scheduleSessionStatusRepaint(period, incompleteHint = '') {
   stopSessionStatusRepaint();
   const now = Date.now();
   const sessions = [
-    ...Object.entries(period?.sessions || {}).map(([key, session]) => window.TokenMonitorSessionLive.sessionWithActivity(period, key, session)),
+    ...Object.entries(displayedSessions(state.period, period) || {}).map(([key, session]) => window.TokenMonitorSessionLive.sessionWithActivity(period, key, session)),
     ...Object.values(state.stats?.nativeSessions?.[state.period] || {})
   ];
   const next = window.TokenMonitorSessionLive.nextSessionStatusChangeAt(sessions, now);
@@ -8637,7 +8862,13 @@ function setRendererSettings(next) {
   const titlesChanged = (state.settings?.sessionTitlesEnabled !== false) !== (next.sessionTitlesEnabled !== false);
   const animationChanged = tokenNumberAnimationApi.normalize(state.settings?.tokenNumberAnimation)
     !== tokenNumberAnimationApi.normalize(next.tokenNumberAnimation);
+  const restoringPeriodTabs = state.settings?.periodTabOrder?.length && !next.periodTabOrder?.length;
   state.settings = next;
+  if (next.periodTabOrder?.length) ensureVisiblePeriod(next.periodTabOrder);
+  else if (restoringPeriodTabs && fixedPeriodRangesApi.slotForSelection(state.period) === 'month') {
+    const defaultPeriod = fixedPeriodRangesApi.normalizeMonthMode(next.periodMonthMode);
+    if (state.period !== defaultPeriod && setPeriod(defaultPeriod)) followOpenSessionToPeriod();
+  }
   if (animationChanged) {
     pluginViewHost?.refreshMotion();
     cancelNumberAnimation();
@@ -8663,7 +8894,7 @@ function periodContentAvailability() {
     detailUnavailable: derived && !fixedPeriodRangesApi.supportsBreakdown(state.period, state.breakdown, {
       deviceRowsAvailable: Array.isArray(state.fixedPeriodHistory?.deviceHistories)
         || (state.breakdown === 'device' && fixedPeriodDevices().length > 0),
-      native: state.fixedPeriodSnapshot?.native === true
+      native: state.fixedPeriodSnapshot?.native === true || state.fixedPeriodSnapshot?.detailsAvailable === true
     })
   };
 }
@@ -8730,11 +8961,14 @@ function renderAppContent({ fromSearch = false } = {}) {
       // visible repaint, so switching to a fixed range cannot remain on loading.
       void loadFixedPeriodHistory();
     }
+    requestSyncedFixedPeriod();
     state.fixedPeriodSnapshot = buildFixedPeriodSnapshot();
     showFixedPeriod(state.fixedPeriodSnapshot);
   } else {
     state.fixedPeriodSnapshot = null;
+    if (needsPagedSessions()) requestSyncedFixedPeriod();
   }
+  warmSyncedFixedPeriod();
   if (state.openSession && state.breakdown !== 'session') { state.openSession = null; els.sessionDetail.classList.add('hidden'); rendererDom.clear(els.sessionDetail); els.sessionDetailHead.classList.add('hidden'); rendererDom.clear(els.sessionDetailHead); }
   if (state.openSession) { els.sessionDetail.classList.remove('hidden'); els.sessionDetailHead.classList.remove('hidden'); } else { els.sessionDetail.classList.add('hidden'); els.sessionDetailHead.classList.add('hidden'); }
   const period = state.stats.periods?.[state.period] || { totalTokens: 0, costUsd: 0, clients: {} };
@@ -8840,8 +9074,11 @@ function renderAppContent({ fromSearch = false } = {}) {
     els.breakdown.classList.add('hidden');
     if (state.openSession.kind === 'session-group') {
       const latest = sessionRowsForPeriod(period).find((row) => row.key === state.openSession.summary.key);
-      if (!latest) { closeSessionDetail(); return; }
-      state.openSession.summary = latest;
+      if (!latest && (state.settings?.sessionTitlesEnabled === false || !pagedSessionsPending())) {
+        closeSessionDetail();
+        return;
+      }
+      if (latest) state.openSession.summary = latest;
       // Update group readings while retaining the controls being read.
       renderSessionGroupDetail(state.openSession);
     }
@@ -8866,7 +9103,7 @@ function renderAppContent({ fromSearch = false } = {}) {
     let incompleteHint = '';
     if (state.breakdown === 'project' && projectRowsApi.projectBreakdownIncomplete(state.stats, state.period)) {
       incompleteHint = 'projects.incomplete';
-    } else if (state.breakdown === 'session' && sessionRowsApi.sessionBreakdownIncomplete(state.stats, state.period)) {
+    } else if (state.breakdown === 'session' && sessionBreakdownIncomplete()) {
       incompleteHint = 'sessions.incomplete';
     }
     renderRows(rows, { incompleteHint, fromSearch });
@@ -9019,11 +9256,14 @@ async function refreshStats(options = {}) {
       state.homeHistoryRetrySignature = '';
       state.homeHistoryRetries = 0;
       state.homeHistorySignature = '';
+      clearTimeout(state.syncedFixedPeriod?.retryTimer);
+      state.syncedFixedPeriod = null;
+      state.syncedFixedPeriodCache.clear();
     }
     applyCodexActiveAccountFromStats();
     const forceFixedPeriodHistory = options.forceHistory === true;
     if (fixedPeriodRangesApi.isDerived(state.period)) {
-      if (canRenderNativeDevices()) statsRenderScheduler.request();
+      if (syncedFixedPeriodKey() || canRenderNativeDevices()) statsRenderScheduler.request();
       await warmFixedPeriodHistory({
         force: forceFixedPeriodHistory,
         retryFailed: forceFixedPeriodHistory,
@@ -9208,7 +9448,11 @@ function applyAppearanceSettings(settings) {
   const systemGlassDisabled = settings?.systemGlass === false;
   const isWindows = navigator.userAgent.toLowerCase().includes('windows');
   const isMac = navigator.userAgent.includes('Macintosh');
-  const windowsGlass = windowsGlassApi.appearanceState(settings, { isWindows });
+  const windowsGlass = windowsGlassApi.appearanceState(settings, {
+    isWindows,
+    osRelease: state.appInfo?.osRelease,
+    accentActive: (settings?.windowsAccentActive ?? state.settings?.windowsAccentActive) === true
+  });
   const macGlass = macBackdropApi.appearanceState(settings, {
     liquidGlassSupported: nativeMaterialState.liquidGlassSupported
   });
@@ -9281,6 +9525,7 @@ function applyAppearanceSettings(settings) {
   document.body.classList.remove('is-windows-glass');
   
   document.documentElement.classList.toggle('is-windows', isWindows);
+  document.documentElement.classList.toggle('windows-accent-square', windowsGlass.squareCorners);
   document.body.classList.toggle('is-windows', isWindows);
   
   document.documentElement.classList.toggle('is-mac-legacy', isMacLegacyRadius);
@@ -10702,24 +10947,242 @@ async function refreshHubBuildStatus() {
   renderHubBuildStatus();
 }
 
-function syncPeriodTabs() {
-  const tabs = Array.from(document.querySelectorAll('.tab'));
-  const activeSlot = fixedPeriodRangesApi.slotForSelection(state.period);
-  const activeIndex = Math.max(0, tabs.findIndex((tab) => tab.dataset.periodSlot === activeSlot));
-  document.querySelector('.tabs')?.style.setProperty('--period-index', String(activeIndex));
-  for (const tab of tabs) {
-    const active = tab.dataset.periodSlot === activeSlot;
-    tab.classList.toggle('active', active);
-    tab.setAttribute('aria-pressed', String(active));
+const periodTabs = document.getElementById('periodTabs');
+const legacyPeriodTabs = Array.from(periodTabs.querySelectorAll('.tab'));
+let periodTabSignature = '';
+const shownPeriodTabs = document.getElementById('shownPeriodTabs');
+const availablePeriodTabs = document.getElementById('availablePeriodTabs');
+const resetPeriodTabs = document.getElementById('resetPeriodTabs');
+const periodTabsError = document.getElementById('periodTabsError');
+let periodOrderSaving = false;
+
+let draggedPeriod = '';
+let periodDropMarker = null;
+
+function clearPeriodDropMarker() {
+  periodDropMarker?.removeAttribute('data-period-drop');
+  periodDropMarker = null;
+}
+
+const periodTabDrag = rowDragControllerApi.createRowDragController({
+  axis: 'grid',
+  dragSort: verticalDragSortApi,
+  getList: () => shownPeriodTabs,
+  getScrollPanel: () => els.settingsPanel,
+  rowSelector: '.period-tab-chip',
+  idKey: 'period',
+  preserveScroll: preserveSettingsPanelScroll,
+  applyOrder: order => placePeriodChips(shownPeriodTabs, order),
+  previewOrderAt(x, y) {
+    const target = x === undefined ? null : document.elementFromPoint(x, y);
+    const canRemove = availablePeriodTabs.contains(target)
+      && shownPeriodOrder().length > fixedPeriodRangesApi.MIN_PERIOD_TABS;
+    if (canRemove) availablePeriodTabs.dataset.periodDrop = 'list';
+    else availablePeriodTabs.removeAttribute('data-period-drop');
+    return shownPeriodTabs.contains(target);
+  },
+  onDropOutside(event, period) {
+    const target = document.elementFromPoint(event.clientX, event.clientY);
+    if (shownPeriodTabs.contains(target)) return false;
+    const order = shownPeriodOrder();
+    if (availablePeriodTabs.contains(target) && order.length > fixedPeriodRangesApi.MIN_PERIOD_TABS) {
+      void savePeriodTabOrder(order.filter(id => id !== period), period);
+    }
+    return true;
+  },
+  mirrorOrder: () => { periodOrderSaving = true; },
+  persistOrder: (order, period) => void savePeriodTabOrder(order, period),
+  requestRender: syncPeriodTabSettings
+});
+
+function periodInsertionTarget(event) {
+  const chip = event.target.closest('.period-tab-chip');
+  if (!chip) return { chip: shownPeriodTabs, edge: 'list' };
+  const rect = chip.getBoundingClientRect();
+  return { chip, edge: event.clientX < rect.left + rect.width / 2 ? 'before' : 'after' };
+}
+
+shownPeriodTabs.addEventListener('dragover', event => {
+  clearPeriodDropMarker();
+  if (!draggedPeriod || periodOrderSaving || shownPeriodOrder().length >= fixedPeriodRangesApi.MAX_PERIOD_TABS) return;
+  event.preventDefault();
+  event.dataTransfer.dropEffect = 'move';
+  const { chip, edge } = periodInsertionTarget(event);
+  periodDropMarker = chip;
+  chip.dataset.periodDrop = edge;
+});
+shownPeriodTabs.addEventListener('dragleave', event => {
+  if (!shownPeriodTabs.contains(event.relatedTarget)) clearPeriodDropMarker();
+});
+shownPeriodTabs.addEventListener('drop', event => {
+  clearPeriodDropMarker();
+  const order = [...shownPeriodOrder()];
+  if (!draggedPeriod || periodOrderSaving || order.length >= fixedPeriodRangesApi.MAX_PERIOD_TABS) return;
+  event.preventDefault();
+  const { chip, edge } = periodInsertionTarget(event);
+  const index = edge === 'list' ? order.length : order.indexOf(chip.dataset.period) + Number(edge === 'after');
+  order.splice(index, 0, draggedPeriod);
+  void savePeriodTabOrder(order, draggedPeriod);
+});
+
+function shownPeriodOrder() {
+  const custom = state.settings?.periodTabOrder;
+  if (custom?.length) return custom;
+  return ['today', legacyMiddlePeriod(), 'allTime'];
+}
+
+function periodLabelKey(period) {
+  return period === 'today' || period === 'allTime' ? `trayComposer.period.${period}` : `periodRange.${period}`;
+}
+
+function syncPeriodButtonName(button, period, { tooltip = false } = {}) {
+  const name = t(periodLabelKey(period));
+  if (button.getAttribute('aria-label') === name) return;
+  if (tooltip) limitWindowsView.setDetailTooltip(button, [{ full: name }], { centered: true });
+  else button.setAttribute('aria-label', name);
+}
+
+function placePeriodChips(list, order) {
+  if (Array.from(list.children).every((chip, index) => chip.dataset.period === order[index])
+    && list.children.length === order.length) return;
+  const focused = document.activeElement;
+  list.append(...order.map(period => periodChips.get(period)));
+  if (list.contains(focused) && document.activeElement !== focused) focused.focus({ preventScroll: true });
+}
+
+async function savePeriodTabOrder(order, focusPeriod) {
+  periodOrderSaving = true;
+  shownPeriodTabs.setAttribute('aria-busy', 'true');
+  periodTabsError.classList.add('hidden');
+  try {
+    await saveSettings({ periodTabOrder: order });
+  } catch (_) {
+    periodTabsError.textContent = t('periodRange.tabsSaveFailed');
+    periodTabsError.classList.remove('hidden');
+  } finally {
+    periodOrderSaving = false;
+    shownPeriodTabs.removeAttribute('aria-busy');
+    const restoreFocus = document.activeElement === resetPeriodTabs;
+    preserveSettingsPanelScroll(syncPeriodTabSettings);
+    if (restoreFocus && resetPeriodTabs.hidden) periodChips.get(focusPeriod)?.focus({ preventScroll: true });
   }
-  if (els.monthPeriodTab) {
-    const mode = activeSlot === 'month'
-      ? fixedPeriodRangesApi.normalizeMonthMode(state.period)
-      : fixedPeriodRangesApi.normalizeMonthMode(state.settings?.periodMonthMode);
+}
+
+const periodChips = new Map(fixedPeriodRangesApi.PERIOD_TAB_OPTIONS.map(period => {
+  const chip = document.createElement('button');
+  chip.type = 'button';
+  chip.className = 'tab period-tab-chip';
+  chip.dataset.period = period;
+  chip.append(document.createElement('span'));
+  chip.addEventListener('pointerdown', event => {
+    if (!periodOrderSaving && chip.parentElement === shownPeriodTabs) {
+      chip.querySelector('.limit-detail-tooltip:popover-open')?.hidePopover();
+      periodTabDrag.startRowDrag(event, period);
+    }
+  });
+  chip.addEventListener('dragstart', event => {
+    if (periodOrderSaving || chip.parentElement !== availablePeriodTabs || chip.getAttribute('aria-disabled') === 'true') {
+      event.preventDefault();
+      return;
+    }
+    draggedPeriod = period;
+    event.dataTransfer.effectAllowed = 'move';
+    event.dataTransfer.setData('text/plain', period);
+    chip.querySelector('.limit-detail-tooltip:popover-open')?.hidePopover();
+    chip.classList.add('dragging');
+  });
+  chip.addEventListener('dragend', () => {
+    chip.classList.remove('dragging');
+    draggedPeriod = '';
+    clearPeriodDropMarker();
+    syncPeriodTabSettings();
+  });
+  chip.addEventListener('click', () => {
+    if (periodOrderSaving || draggedPeriod || periodTabDrag.isDragging() || chip.getAttribute('aria-disabled') === 'true') return;
+    const order = shownPeriodOrder();
+    const next = order.includes(period) ? order.filter(id => id !== period) : [...order, period];
+    void savePeriodTabOrder(next, period);
+  });
+  chip.addEventListener('keydown', event => {
+    if (!event.altKey || periodOrderSaving || draggedPeriod || periodTabDrag.isDragging() || chip.parentElement !== shownPeriodTabs) return;
+    const offset = event.key === 'ArrowLeft' ? -1 : event.key === 'ArrowRight' ? 1 : 0;
+    if (!offset) return;
+    event.preventDefault();
+    const order = [...shownPeriodOrder()];
+    const index = order.indexOf(period);
+    const target = index + offset;
+    if (target < 0 || target >= order.length) return;
+    order.splice(target, 0, ...order.splice(index, 1));
+    void savePeriodTabOrder(order, period);
+  });
+  return [period, chip];
+}));
+
+function syncPeriodTabSettings() {
+  if (periodOrderSaving || draggedPeriod || periodTabDrag.deferRender()) return;
+  const order = shownPeriodOrder();
+  const available = fixedPeriodRangesApi.PERIOD_TAB_OPTIONS.filter(period => !order.includes(period));
+  placePeriodChips(shownPeriodTabs, order);
+  placePeriodChips(availablePeriodTabs, available);
+  resetPeriodTabs.hidden = !state.settings.periodTabOrder?.length;
+  for (const [period, chip] of periodChips) {
+    const shown = order.includes(period);
+    const countLimit = shown ? fixedPeriodRangesApi.MIN_PERIOD_TABS : fixedPeriodRangesApi.MAX_PERIOD_TABS;
+    chip.firstElementChild.textContent = fixedPeriodRangesApi.displayLabel(period);
+    syncPeriodButtonName(chip, period, { tooltip: true });
+    chip.draggable = !shown;
+    chip.setAttribute('aria-pressed', String(shown));
+    chip.setAttribute('aria-disabled', String(order.length === countLimit));
+    if (shown) chip.setAttribute('aria-keyshortcuts', 'Alt+ArrowLeft Alt+ArrowRight');
+    else chip.removeAttribute('aria-keyshortcuts');
+  }
+}
+
+resetPeriodTabs.addEventListener('click', () => {
+  if (!periodOrderSaving && !draggedPeriod && !periodTabDrag.isDragging()) void savePeriodTabOrder([], 'today');
+});
+
+function ensureVisiblePeriod(order) {
+  if (!order.includes(state.period) && setPeriod(order[0])) followOpenSessionToPeriod();
+}
+
+function syncPeriodTabs() {
+  const order = state.settings?.periodTabOrder || [];
+  const custom = order.length > 0;
+  const signature = order.join(',');
+  if (signature !== periodTabSignature) {
+    if (state.periodMenuOpen) setPeriodMenuOpen(false);
+    periodTabSignature = signature;
+    const buttons = custom ? order.map(period => {
+      const button = document.createElement('button');
+      button.type = 'button';
+      button.className = 'tab';
+      button.dataset.period = period;
+      button.textContent = fixedPeriodRangesApi.displayLabel(period);
+      return button;
+    }) : legacyPeriodTabs;
+    for (const tab of periodTabs.querySelectorAll('.tab')) tab.remove();
+    periodTabs.append(...buttons);
+    periodTabs.style.setProperty('--period-count', String(buttons.length));
+    periodTabs.parentElement.style.setProperty('--period-width', `${Math.max(148, buttons.length * 44)}px`);
+    periodTabs.classList.toggle('custom-period-tabs', custom);
+  }
+  const tabs = Array.from(periodTabs.querySelectorAll('.tab'));
+  const activeSlot = custom ? state.period : fixedPeriodRangesApi.slotForSelection(state.period);
+  const activeIndex = Math.max(0, tabs.findIndex(tab => (tab.dataset.periodSlot || tab.dataset.period) === activeSlot));
+  periodTabs.style.setProperty('--period-index', String(activeIndex));
+  if (!custom) {
+    const mode = legacyMiddlePeriod();
     els.monthPeriodTab.textContent = fixedPeriodRangesApi.displayLabel(mode);
     els.monthPeriodTab.dataset.period = mode;
+    syncPeriodMenu();
   }
-  syncPeriodMenu();
+  for (const tab of tabs) {
+    const active = (tab.dataset.periodSlot || tab.dataset.period) === activeSlot;
+    tab.classList.toggle('active', active);
+    tab.setAttribute('aria-pressed', String(active));
+    syncPeriodButtonName(tab, tab.dataset.period);
+  }
 }
 
 function applyInitialBreakdownPreference() {
@@ -11185,7 +11648,9 @@ function syncSettingsForm() {
   if (els.languageInput) els.languageInput.value = currentLanguage();
   if (els.periodMonthModeInput) {
     els.periodMonthModeInput.value = fixedPeriodRangesApi.normalizeMonthMode(state.settings?.periodMonthMode);
+    els.periodMonthModeInput.closest('.period-default-setting').classList.toggle('hidden', Boolean(state.settings.periodTabOrder?.length));
   }
+  syncPeriodTabSettings();
   if (els.currencyInput) els.currencyInput.value = currentCurrency();
   syncCurrencyRateControls();
   syncNetworkProxyControls();
@@ -15446,6 +15911,7 @@ async function init() {
   if (!systemUiThemeSeeded) state.systemDarkUi = state.appInfo?.systemDarkUi === true;
   if (els.aboutVersion) els.aboutVersion.textContent = state.appInfo?.version ? `v${state.appInfo.version}` : '—';
   state.settings = await window.tokenMonitor.getSettings();
+  if (state.settings.periodTabOrder?.length) ensureVisiblePeriod(state.settings.periodTabOrder);
   await refreshAccountSlotPanels();
   // Local appearance is sufficient for first reveal. Plugin discovery, sync,
   // updater and stats queries below must not hold the window off screen.
@@ -15524,8 +15990,8 @@ function followOpenSessionToPeriod() {
     if (state.openSession.kind === 'session-group') {
       const period = state.stats?.periods?.[state.period];
       const summary = sessionRowsForPeriod(period).find((row) => row.key === state.openSession.summary.key);
-      if (summary) {
-        state.openSession = { kind: 'session-group', period: state.period, summary };
+      if (summary || pagedSessionsPending()) {
+        state.openSession = { kind: 'session-group', period: state.period, summary: summary || state.openSession.summary };
       } else {
         state.openSession = null;
       }
@@ -15544,30 +16010,25 @@ function followOpenSessionToPeriod() {
   }
 }
 
-for (const tab of document.querySelectorAll('.tab')) {
-  tab.addEventListener('click', (event) => {
-    const slot = tab.dataset.periodSlot || tab.dataset.period;
-    const activeSlot = fixedPeriodRangesApi.slotForSelection(state.period);
-    if (slot === 'month' && activeSlot === 'month') {
-      event.stopPropagation();
-      setPeriodMenuOpen(!state.periodMenuOpen, { focus: state.periodMenuOpen ? '' : 'current' });
-      return;
-    }
-    setPeriodMenuOpen(false);
-    const targetPeriod = slot === 'month'
-      ? fixedPeriodRangesApi.normalizeMonthMode(state.settings?.periodMonthMode)
-      : tab.dataset.period;
-    const snapshot = captureBreakdownMotion();
-    if (!setPeriod(targetPeriod)) return;
-    syncPeriodTabs();
-    followOpenSessionToPeriod();
-    state.rowSignature = '';
-    state.periodMotionActive = true;
-    render();
-    state.periodMotionActive = false;
-    animateBreakdownFrom(snapshot, { duration: periodBreakdownMotionDuration(), synchronized: true });
-  });
-}
+periodTabs.addEventListener('click', (event) => {
+  const tab = event.target.closest('.tab');
+  if (!tab) return;
+  if (tab === els.monthPeriodTab && fixedPeriodRangesApi.slotForSelection(state.period) === 'month') {
+    event.stopPropagation();
+    setPeriodMenuOpen(!state.periodMenuOpen, { focus: state.periodMenuOpen ? '' : 'current' });
+    return;
+  }
+  setPeriodMenuOpen(false);
+  const snapshot = captureBreakdownMotion();
+  if (!setPeriod(tab.dataset.period)) return;
+  syncPeriodTabs();
+  followOpenSessionToPeriod();
+  state.rowSignature = '';
+  state.periodMotionActive = true;
+  render();
+  state.periodMotionActive = false;
+  animateBreakdownFrom(snapshot, { duration: periodBreakdownMotionDuration(), synchronized: true });
+});
 
 for (const button of els.monthPeriodMenu?.querySelectorAll('[data-fixed-period]') || []) {
   button.addEventListener('click', async (event) => {
@@ -15578,7 +16039,6 @@ for (const button of els.monthPeriodMenu?.querySelectorAll('[data-fixed-period]'
     const changed = setPeriod(selection);
     state.settings.periodMonthMode = selection;
     syncPeriodTabs();
-    syncPeriodMenu();
     if (changed) {
       followOpenSessionToPeriod();
       state.rowSignature = '';
@@ -15665,16 +16125,16 @@ els.breakdown.addEventListener('click', (event) => {
   const match = key.match(/^session:([^:]+):(.+)$/);
   if (!match) return;
   const sessionId = client === 'reasonix' ? `reasonix:${match[2]}` : match[2];
-  const period = state.stats?.periods?.[state.period];
   const session = client === 'reasonix'
     ? state.stats?.nativeSessions?.[state.period]?.[sessionId]
-    : period?.sessions?.[`${client}:${sessionId}`];
+    : displayedSessions(state.period)?.[`${client}:${sessionId}`];
+  const { sourceDevice, sessionDetailHeading } = window.TokenMonitorDomReconcile.data(rowEl) || {};
   openSessionDetail({
     client,
     sessionId,
     sessionCost: client === 'reasonix' ? Number(session?.reportedCostUsd || 0) : Number(session?.costUsd || 0),
-    sourceDevice: window.TokenMonitorDomReconcile.data(rowEl)?.sourceDevice,
-    title: rowEl.querySelector('.row-title')?.textContent || '',
+    sourceDevice,
+    title: sessionDetailHeading || rowEl.querySelector('.row-title')?.textContent || '',
     cloudThreadId: rowEl.dataset.cloudThreadId || null
   });
 });
@@ -17129,7 +17589,7 @@ window.tokenMonitor.onStatsPush?.((payload) => {
       // fetched; repaint once with the coherent snapshot instead of flashing an
       // intermediate loading layout.
       if (fixedPeriodHistoryNeedsWarmup()) {
-        if (canRenderNativeDevices()) statsRenderScheduler.request();
+        if (syncedFixedPeriodKey() || canRenderNativeDevices()) statsRenderScheduler.request();
         void warmFixedPeriodHistory({ renderOnComplete: true });
       } else {
         statsRenderScheduler.request();

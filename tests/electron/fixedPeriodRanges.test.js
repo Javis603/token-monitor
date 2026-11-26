@@ -7,6 +7,16 @@ const ranges = require('../../src/electron/renderer/fixedPeriodRanges');
 const { resolveRegionalLocale } = require('../../src/electron/renderer/i18n');
 const { aggregateHistory, extractUsageFromTokscale, normalizePeriod } = require('../../src/shared/usage');
 
+test('custom period tabs keep a unique supported order or fall back to the legacy layout', () => {
+  assert.deepEqual(ranges.normalizePeriodTabOrder(undefined), []);
+  assert.deepEqual(ranges.normalizePeriodTabOrder(['today', 'today', 'month', 'invalid']), []);
+  assert.deepEqual(ranges.normalizePeriodTabOrder(['week', 'week', 'invalid', 'last7', 'yesterday']),
+    ['week', 'last7', 'yesterday']);
+  assert.deepEqual(ranges.normalizePeriodTabOrder(['allTime', 'month', 'week', 'today', 'last30', 'last7', 'yesterday']),
+    ['allTime', 'month', 'week', 'today', 'last30', 'last7']);
+  assert.deepEqual(ranges.PERIOD_TAB_OPTIONS.map(ranges.displayLabel), ['DAY', 'YDAY', 'WEEK', '7D', 'MONTH', '30D', 'TOTAL']);
+});
+
 function day(date, tokens, client = 'claude', model = 'opus') {
   return {
     date,

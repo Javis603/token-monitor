@@ -52,6 +52,7 @@ contextBridge.exposeInMainWorld('tokenMonitor', {
     control: (action) => ipcRenderer.invoke('cloudUsage:control', action)
   },
   getDashboardHistory: (options) => ipcRenderer.invoke('dashboard:getHistory', options),
+  getSyncedFixedPeriod: (...args) => ipcRenderer.invoke('stats:fixedPeriod', ...args),
   onDashboardHistoryChanged: (callback) => {
     const listener = () => { try { callback(); } catch (_) {} };
     ipcRenderer.on('dashboard:historyChanged', listener);

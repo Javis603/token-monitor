@@ -77,13 +77,13 @@ test('an early stats push cannot announce readiness before initial settings are 
   assert.equal(signals, 0);
   vm.runInContext('initialSettingsApplied = true; signalContentReady(); signalContentReady();', context);
   assert.equal(signals, 1);
-  const init = app.slice(app.indexOf('async function init()'), app.indexOf("for (const tab of document.querySelectorAll('.tab'))"));
+  const init = app.slice(app.indexOf('async function init()'), app.indexOf('function followOpenSessionToPeriod()'));
   assert.match(init, /syncSettingsForm\(\);\s*initialSettingsApplied = true;/);
 });
 
 
 test('appearance readiness precedes plugin, sync, updater and stats waits', () => {
-  const init = app.slice(app.indexOf('async function init()'), app.indexOf("for (const tab of document.querySelectorAll('.tab'))"));
+  const init = app.slice(app.indexOf('async function init()'), app.indexOf('function followOpenSessionToPeriod()'));
   const signal = init.indexOf('window.tokenMonitor.signalAppearanceReady');
   assert.ok(init.indexOf('applyVisibleSettingsAppearance();') < signal);
   for (const wait of ['await pluginApi?.list()', 'await syncContentForm?.refresh(false)', 'await window.tokenMonitor.getAppUpdateState()', 'await refreshStats()']) {

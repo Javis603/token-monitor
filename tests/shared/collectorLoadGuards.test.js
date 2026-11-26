@@ -3483,7 +3483,7 @@ test('collector does not reuse a persisted anchor with a retired Qoder CN databa
   fs.writeFileSync(path.join(tmp, 'collector-anchor.json'), JSON.stringify({
     dateKey: initialCollector.localTodayKey(),
     calendarKey: initialCollector.collectionCalendarKey(),
-    sessionIdentityVersion: 2,
+    sessionIdentityVersion: 3,
     today: emptyPeriod(),
     month: oldQoderCnPeriod,
     allTime: oldQoderCnPeriod,

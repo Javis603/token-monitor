@@ -15,6 +15,10 @@ const { staleAfterMsForSyncUpload } = require('../shared/syncUploadInterval');
 const { normalizeDeviceRecord } = require('../shared/usage');
 const { syncPayload } = require('../shared/syncPayload');
 const {
+  FIXED_RANGE_PAGE_BYTES, encodeFixedRangeSnapshot, admitFixedRangeIndex,
+  admitFixedRangePage, decodeFixedRangePeriod, rangesMatchDeviceDay
+} = require('../shared/fixedRangeSync');
+const {
   normalizeSubscription,
   normalizeSubscriptions
 } = require('../shared/subscriptionDisplay');
@@ -118,6 +122,7 @@ function pathLayout({ platform = process.platform, home = os.homedir(), cloudDoc
     cloudDocsRoot: root,
     syncRoot,
     devicesRoot,
+    fixedRangesRoot: path.join(syncRoot, 'fixed-ranges'),
     subscriptionsRoot,
     deletionsRoot,
     displayRoot: safePathForDisplay(syncRoot, home)
@@ -365,6 +370,7 @@ function validDeviceDocument(document, expectedFilename) {
     deviceId,
     revision,
     updatedAt: String(document.updatedAt || record.updatedAt || ''),
+    fixedRanges: document.fixedRanges === true,
     record
   };
 }
@@ -909,6 +915,78 @@ function createIcloudSyncStore(options = {}) {
     return !Number.isSafeInteger(targetRevision) || revision > targetRevision;
   }
 
+  function rangeFile(paths, filename, revision, part) {
+    return path.join(paths.fixedRangesRoot, `${filename.slice(0, -5)}-${revision}-${part}.json`);
+  }
+
+  async function pruneFixedRanges(paths, filename, previousRevision, revision) {
+    const prefix = filename.slice(0, -5) + '-';
+    const { files } = await listFiles(paths.fixedRangesRoot, name => name.startsWith(prefix));
+    for (const name of files || []) {
+      const match = /^(\d+)-(?:index|\d+)\.json$/.exec(name.slice(prefix.length));
+      const prior = Number(match?.[1]);
+      if (prior < revision && prior !== previousRevision) {
+        await fsApi.unlink(path.join(paths.fixedRangesRoot, name)).catch(() => {});
+      }
+    }
+  }
+
+  function fixedRangeRevisions() {
+    return Object.fromEntries(visibleDeviceEntries().flatMap(({ document }) => (
+      document.fixedRanges ? [[document.deviceId, String(document.revision)]] : []
+    )));
+  }
+
+  async function readFixedRange(deviceId, name, window, revision) {
+    const filename = deviceFilenameForId(deviceId);
+    const document = deviceCache.get(filename)?.document;
+    if (!document?.fixedRanges || String(document.revision) !== revision
+      || !cachedDeviceIsVisible(deviceId, document.revision)) return null;
+    const available = await availablePaths();
+    if (available.error || !available.paths.available) return null;
+    const { paths } = available;
+    const bound = { deviceId, revision: document.revision };
+    const readPart = async (part, maxBytes) => {
+      const file = await readJsonFile(fsApi, rangeFile(paths, filename, document.revision, part), maxBytes, platform, hostPlatform);
+      return file.ok && file.value?.deviceId === bound.deviceId && file.value?.revision === bound.revision
+        ? file.value : null;
+    };
+    const index = await readPart('index', MAX_ICLOUD_DOCUMENT_BYTES);
+    const ranges = index && admitFixedRangeIndex(index.ranges, index.totalPages);
+    const range = ranges?.[name];
+    if (range?.start !== window.start || range.end !== window.end
+      || !rangesMatchDeviceDay(ranges, document.record.periodWindows?.today?.key)) return null;
+    const pages = [];
+    for (let page = range.firstPage; page < range.firstPage + range.pageCount; page += 1) {
+      const part = await readPart(page, FIXED_RANGE_PAGE_BYTES + 2048);
+      const rows = part && admitFixedRangePage(part.rows, { projectsEnabled: document.record.projectsEnabled !== false });
+      if (!rows) return null;
+      pages.push(rows);
+    }
+    if (String(deviceCache.get(filename)?.document.revision) !== revision
+      || !cachedDeviceIsVisible(deviceId, document.revision)) return null;
+    return decodeFixedRangePeriod(ranges, pages, name);
+  }
+
+  async function writeFixedRanges(paths, filename, deviceId, revision, encoded, writtenFiles) {
+    await ensureDirectory(fsApi, paths.fixedRangesRoot);
+    const { ranges, pages } = encoded;
+    const writePart = async (part, data, maxBytes) => {
+      const target = rangeFile(paths, filename, revision, part);
+      try {
+        await atomicWriteJson(fsApi, target, { deviceId, revision, ...data }, { platform, hostPlatform, maxBytes });
+        writtenFiles.push(target);
+      } catch (error) {
+        if (error.atomicWriteRenamed) writtenFiles.push(target);
+        throw error;
+      }
+    };
+    for (const [page, rows] of pages.entries()) {
+      await writePart(page, { rows }, FIXED_RANGE_PAGE_BYTES + 2048);
+    }
+    await writePart('index', { ranges, totalPages: pages.length }, MAX_ICLOUD_DOCUMENT_BYTES);
+  }
+
   async function writeDeviceNow(record) {
     const wire = toWireRecord(record);
     if (!wire) {
@@ -939,7 +1017,15 @@ function createIcloudSyncStore(options = {}) {
     );
     const deletionTargetRevision = cacheRecordsForDeletionTargets().get(deviceId);
     const observedRevision = Math.max(publishedRevision, deletionTargetRevision || 0);
-    const fingerprint = semanticDeviceFingerprint(wire);
+    let encoded;
+    if (record.nativeRanges) {
+      try {
+        const candidate = encodeFixedRangeSnapshot(record, { maxPageBytes: FIXED_RANGE_PAGE_BYTES });
+        if (admitFixedRangeIndex(candidate.ranges, candidate.pages.length)
+          && rangesMatchDeviceDay(candidate.ranges, wire.periodWindows?.today?.key)) encoded = candidate;
+      } catch (_) { /* optional range detail cannot block the ordinary publication */ }
+    }
+    const fingerprint = semanticDeviceFingerprint(encoded ? { ...wire, fixedRanges: encoded } : wire);
     const elapsedMs = lastDeviceWriteAt === null ? Number.POSITIVE_INFINITY : Math.max(0, now() - lastDeviceWriteAt);
     if (
       lastDeviceFingerprint === fingerprint
@@ -954,12 +1040,26 @@ function createIcloudSyncStore(options = {}) {
     }
 
     const revision = await nextDeviceRevision(deviceId, observedRevision);
+    const writtenRangeFiles = [];
+    const discardUnpublishedRanges = () => Promise.all(
+      writtenRangeFiles.splice(0).map(target => fsApi.unlink(target).catch(() => {}))
+    );
+    let fixedRanges = false;
+    if (encoded) {
+      try {
+        await writeFixedRanges(available.paths, filename, deviceId, revision, encoded, writtenRangeFiles);
+        fixedRanges = true;
+      } catch (_) {
+        await discardUnpublishedRanges();
+      }
+    }
     const document = {
       schemaVersion: ICLOUD_SCHEMA_VERSION,
       kind: 'device',
       deviceId,
       revision,
       updatedAt: String(wire.updatedAt || nowIso(now)),
+      ...(fixedRanges ? { fixedRanges } : {}),
       record: wire
     };
     try {
@@ -969,14 +1069,18 @@ function createIcloudSyncStore(options = {}) {
         maxBytes: MAX_ICLOUD_DOCUMENT_BYTES
       });
     } catch (error) {
+      if (!error.atomicWriteRenamed) await discardUnpublishedRanges();
       lastError = { category: error.code === 'document_too_large' ? 'document-too-large' : 'device-write-failed', error };
       error.code = error.code || lastError.category;
       throw error;
     }
     const normalized = validDeviceDocument(document, filename);
     deviceCache.set(filename, { document: normalized, record: normalized.record });
-    lastDeviceFingerprint = fingerprint;
+    lastDeviceFingerprint = encoded && !fixedRanges ? null : fingerprint;
     lastDeviceWriteAt = now();
+    if (fixedRanges || existingDocument?.fixedRanges) {
+      await pruneFixedRanges(available.paths, filename, publishedRevision, revision);
+    }
     return { ...normalized, skipped: false, visible: cachedDeviceIsVisible(deviceId, revision) };
   }
 
@@ -1280,6 +1384,8 @@ function createIcloudSyncStore(options = {}) {
     discoverDevices,
     discoverSubscriptions,
     getLastGoodDevices: () => visibleDeviceEntries().map((entry) => entry.record),
+    fixedRangeRevisions,
+    readFixedRange,
     isDeviceVisible: cachedDeviceIsVisible,
     whenIdle,
     paths,

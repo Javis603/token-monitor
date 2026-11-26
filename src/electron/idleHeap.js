@@ -7,22 +7,24 @@
 // once the objects die because nothing is asking for the space, so the main
 // process keeps hundreds of megabytes committed after the numbers on screen
 // have long settled. The usage worker does the same after a publish; main has
-// no such boundary, so it checks on a 30-second idle timer instead.
+// no such boundary, so it checks on a 15-second idle timer instead.
 //
 // A full collection blocks the main thread for tens of milliseconds. That is
 // why it only runs when no app window has focus, and why a collection that
 // reclaims little raises the next threshold instead of repeating every tick.
 //
 // Renderers keep their own committed heap and expose `gc` through the app's
-// js-flags switch. Theirs is independent of main's threshold; the app's callback
-// runs it on every idle pass, but that callback leaves a visible window alone.
-// Main itself only collects above its threshold.
+// js-flags switch. The scheduled renderer pass runs on every second recurring
+// tick, regardless of main's heap threshold. It leaves visible windows alone.
 
-const MIN_HEAP_TOTAL_BYTES = 64 * 1024 * 1024;
-const RETAINED_HEADROOM_BYTES = 32 * 1024 * 1024;
-const DEFAULT_INTERVAL_MS = 30 * 1000;
-// Keep a one-shot startup check at one minute alongside the recurring timer.
-const DEFAULT_INITIAL_DELAY_MS = 60 * 1000;
+// Main's live set is small: with the window open and live updates arriving it
+// holds about 35-50 MiB, so a 64 MiB floor with 32 MiB of headroom almost never
+// fired while the committed heap stayed well above what was in use.
+const MIN_HEAP_TOTAL_BYTES = 32 * 1024 * 1024;
+const RETAINED_HEADROOM_BYTES = 16 * 1024 * 1024;
+const DEFAULT_INTERVAL_MS = 15 * 1000;
+// Run an extra main-only check during startup.
+const DEFAULT_INITIAL_DELAY_MS = 20 * 1000;
 // A hung inspector session would otherwise leave `running` true forever and
 // stop every later pass. Main collection is cheap; ten seconds is already far
 // beyond a healthy collection.
@@ -77,16 +79,17 @@ function createIdleHeapCollector(options = {}) {
   let timer = null;
   let initialTimer = null;
   let running = false;
+  let rendererPassPending = false;
   let stopped = false;
   let thresholdBytes = MIN_HEAP_TOTAL_BYTES;
   let mainFailures = 0;
   let mainDisabled = false;
 
-  async function run() {
+  async function run({ includeRenderers = true } = {}) {
     if (stopped || running) return false;
     if (!isIdle()) return false;
     const collectMain = !mainDisabled && getHeap().heapTotal >= thresholdBytes;
-    if (!collectMain && !collectRenderers) return false;
+    if (!collectMain && !(includeRenderers && collectRenderers)) return false;
     running = true;
     let collected = false;
     try {
@@ -110,7 +113,7 @@ function createIdleHeapCollector(options = {}) {
         }
       }
       if (stopped) return collected;
-      if (collectRenderers && (!collectMain || isIdle())) {
+      if (collectRenderers && (includeRenderers || rendererPassPending) && (!collectMain || isIdle())) {
         try {
           await collectRenderers();
         } catch (_) {
@@ -120,6 +123,7 @@ function createIdleHeapCollector(options = {}) {
       }
       return collected;
     } finally {
+      rendererPassPending = false;
       running = false;
     }
   }
@@ -128,10 +132,16 @@ function createIdleHeapCollector(options = {}) {
     if (timer !== null || initialTimer !== null || stopped) return;
     initialTimer = setTimeoutFn(() => {
       initialTimer = null;
-      void run();
+      void run({ includeRenderers: false });
     }, initialDelayMs);
     initialTimer?.unref?.();
-    timer = setIntervalFn(() => { void run(); }, intervalMs);
+    let includeRenderers = false;
+    timer = setIntervalFn(() => {
+      // An in-flight check can serve a renderer tick without starting more main GC.
+      if (includeRenderers && running) rendererPassPending = true;
+      else void run({ includeRenderers });
+      includeRenderers = !includeRenderers;
+    }, intervalMs);
     timer?.unref?.();
   }
 

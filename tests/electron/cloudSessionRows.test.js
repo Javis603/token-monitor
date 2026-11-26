@@ -137,6 +137,7 @@ test('cloud-only detail routes into the ordinary detail surface without local tr
   const context = { state: { settings: {}, period: 'today' }, window: { tokenMonitor: { getSessionDetail: async () => { fetches++; return { found: true }; } } },
     sessionDetailPeriod: () => 'today',
     visibleStatsSurface: () => 'main',
+    displayedSessions: () => ({}),
     renderSessionDetail() { renders++; }, applySessionDetailResult() {} };
   const fn = new vm.Script(source + '\nopenSessionDetail;').runInNewContext(context);
   await fn({ client: 'codex', sessionId: a, cloudThreadId: a, cloudOnly: true }); assert.equal(fetches, 0); assert.equal(renders, 1);

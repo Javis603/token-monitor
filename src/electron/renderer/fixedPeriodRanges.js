@@ -4,6 +4,9 @@
   if (root) root.TokenMonitorFixedPeriodRanges = api;
 })(typeof window !== 'undefined' ? window : null, function createFixedPeriodRangesApi() {
   const MONTH_MODES = Object.freeze(['month', 'yesterday', 'week', 'last7', 'last30']);
+  const PERIOD_TAB_OPTIONS = Object.freeze(['today', 'yesterday', 'week', 'last7', 'month', 'last30', 'allTime']);
+  const MIN_PERIOD_TABS = 3;
+  const MAX_PERIOD_TABS = 6;
   const LABELS = Object.freeze({
     today: 'DAY',
     month: 'MONTH',
@@ -98,6 +101,13 @@
     return LABELS[value] || LABELS.today;
   }
 
+  function normalizePeriodTabOrder(value) {
+    if (!Array.isArray(value)) return [];
+    const order = [...new Set(value.filter(id => PERIOD_TAB_OPTIONS.includes(id)))];
+    // An empty order retains the legacy three-button layout and its range menu.
+    return order.length < MIN_PERIOD_TABS ? [] : order.slice(0, MAX_PERIOD_TABS);
+  }
+
   function rangeForSelection(selection, options = {}) {
     const todayKey = normalizeDateKey(options.todayKey) || localDayKey(options.now);
     if (!todayKey) return null;
@@ -107,7 +117,8 @@
     }
     if (selection === 'week') {
       const weekday = new Date(`${todayKey}T00:00:00Z`).getUTCDay();
-      const offset = (weekday - weekStartsOn(options.locale) + 7) % 7;
+      const firstDay = Number.isInteger(options.weekStartsOn) ? options.weekStartsOn : weekStartsOn(options.locale);
+      const offset = (weekday - firstDay + 7) % 7;
       return { start: dayKeyAddDays(todayKey, -offset), end: todayKey };
     }
     if (selection === 'last7') return { start: dayKeyAddDays(todayKey, -6), end: todayKey };
@@ -740,11 +751,15 @@
 
   return {
     MONTH_MODES,
+    PERIOD_TAB_OPTIONS,
+    MIN_PERIOD_TABS,
+    MAX_PERIOD_TABS,
     createLatestRequestCoordinator,
     dailyForRange,
     dayKeyAddDays,
     derivePeriod,
     deviceInventorySignature,
+    deviceDayState,
     devicesForReadySnapshot,
     displayLabel,
     fixedPeriodDeviceSnapshots,
@@ -757,6 +772,7 @@
     nativeRangeWithHistory,
     handlePeriodMenuNavigation,
     normalizeMonthMode,
+    normalizePeriodTabOrder,
     periodMenuTargetIndex,
     readySnapshotForSelection,
     rangeForSelection,

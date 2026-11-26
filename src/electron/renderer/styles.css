@@ -234,11 +234,17 @@ html.native-high-contrast {
   --line-strong-alpha: 0.48 !important;
 }
 html.native-high-contrast .shell { border: 1px solid var(--line-strong); }
+html.is-windows {
+  --windows-widget-radius: 8px;
+}
+html.is-windows.windows-accent-square {
+  --windows-widget-radius: 0px;
+}
 html.is-windows, html.is-windows body {
-  border-radius: 8px;
+  border-radius: var(--windows-widget-radius);
 }
 html.is-windows .shell {
-  border-radius: 8px;
+  border-radius: var(--windows-widget-radius);
   /* No clip-path on Windows: Chromium renders clip-path with a hard, non-AA
      edge on a transparent window, which made the bottom corners look truncated.
      border-radius + overflow:hidden round the corners (and clip the backdrop
@@ -337,7 +343,7 @@ html.is-windows.floating-bubble-collapsed-left body .floating-bubble-tab,
 html.is-windows.floating-bubble-collapsed-right body .floating-bubble-tab,
 body.is-windows.floating-bubble-collapsed-left .floating-bubble-tab,
 body.is-windows.floating-bubble-collapsed-right .floating-bubble-tab {
-  border-radius: 8px;
+  border-radius: var(--windows-widget-radius);
 }
 .floating-bubble-tab:hover {
   color: var(--text);
@@ -494,6 +500,10 @@ body.is-windows.floating-bubble-collapsed-right .floating-bubble-tab {
   min-width: 100px;
   width: 148px;
   height: 30px;
+}
+.title-controls:has(.custom-period-tabs) {
+  flex-basis: var(--period-width, 148px);
+  max-width: calc(100% - 44px);
 }
 /* Cover the whole top-right rounded corner without covering the period tabs:
    the top arm occupies the 12px shell padding and the right arm continues down
@@ -4244,10 +4254,11 @@ html.is-windows .settings-panel select option {
 }
 .tabs {
   --period-index: 0;
+  --period-count: 3;
   position: relative;
   z-index: 1;
   display: grid;
-  grid-template-columns: repeat(3, 1fr);
+  grid-template-columns: repeat(var(--period-count), minmax(0, 1fr));
   gap: 2px;
   padding: 3px;
   width: 100%;
@@ -4264,7 +4275,7 @@ html.is-windows .settings-panel select option {
   top: 3px;
   bottom: 3px;
   left: 3px;
-  width: calc((100% - 10px) / 3);
+  width: calc((100% - 6px - (var(--period-count) - 1) * 2px) / var(--period-count));
   border: 1px solid rgba(var(--line-rgb), 0.13);
   border-radius: 6px;
   background: rgba(var(--overlay-rgb), 0.06);
@@ -4290,6 +4301,53 @@ html.is-windows .settings-panel select option {
   color: var(--accent);
   background: transparent;
   box-shadow: none;
+}
+.custom-period-tabs { container-type: inline-size; }
+.custom-period-tabs > .tab {
+  min-width: 0;
+  padding-inline: 0;
+  white-space: nowrap;
+  /* Fit the five-character monospace labels in equal cells at any zoom. */
+  font-size: min(0.5625rem, calc((100cqw - (var(--period-count) - 1) * 2px) / var(--period-count) / 3.1));
+  border-inline-width: 0;
+}
+@media (max-width: 239px) and (height >= 134px) {
+  .shell:not(.settings-open, .plugin-page-mode) .titlebar:has(.custom-period-tabs) {
+    padding-bottom: 36px;
+  }
+  .shell:not(.settings-open, .plugin-page-mode) .titlebar:has(.custom-period-tabs > .tab:nth-of-type(4)) {
+    padding-bottom: 60px;
+  }
+  .shell:not(.settings-open, .plugin-page-mode) .title-controls:has(.custom-period-tabs) {
+    position: static;
+    flex-basis: 34px;
+    min-width: 34px;
+  }
+  .shell:not(.settings-open, .plugin-page-mode) .title-controls > .custom-period-tabs {
+    inset: auto 0 0;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+  .custom-period-tabs > .tab-indicator { display: none; }
+  .custom-period-tabs > .tab.active {
+    border: 1px solid rgba(var(--line-rgb), 0.13);
+    background: rgba(var(--overlay-rgb), 0.06);
+  }
+  .custom-period-tabs > .tab { font-size: 0.5625rem; }
+}
+@media (max-width: 239px) and (height < 134px) {
+  .shell:not(.settings-open, .plugin-page-mode):has(.custom-period-tabs) {
+    gap: 3px;
+    padding-block: 4px;
+  }
+  .shell:not(.settings-open, .plugin-page-mode) .titlebar:has(.custom-period-tabs) > div:first-child {
+    display: none;
+  }
+  .shell:not(.settings-open, .plugin-page-mode) .title-controls:has(.custom-period-tabs) {
+    /* Leave the leading edge of the frameless titlebar available for window dragging. */
+    flex-basis: calc(100% - 12px);
+    max-width: calc(100% - 12px);
+    margin-inline-start: auto;
+  }
 }
 .fixed-period-message {
   position: relative;
@@ -7071,7 +7129,7 @@ html.is-windows .limit-live-badge {
   right: auto;
   left: calc(anchor(left) - 1px);
 }
-.plugin-quota-info .limit-detail-tooltip {
+:is(.plugin-quota-info, .period-tab-chip) .limit-detail-tooltip {
   right: auto;
   left: anchor(center);
   translate: calc(-50% + var(--tooltip-shift, 0px)) 0;
@@ -7083,7 +7141,7 @@ html.is-windows .limit-live-badge {
   white-space: normal;
   overflow-wrap: anywhere;
 }
-.plugin-quota-info .limit-detail-tooltip::after {
+:is(.plugin-quota-info, .period-tab-chip) .limit-detail-tooltip::after {
   right: auto;
   left: calc(50% - 4px - var(--tooltip-shift, 0px));
 }
@@ -8913,6 +8971,55 @@ html.native-liquid-glass .view-switcher-menu-item { border-radius: 9px; }
 }
 .settings-section-details-inner > .main-numbers-group:last-child { padding-bottom: 8px; }
 .main-numbers-title + .settings-item { margin-top: 4px; }
+.period-tab-settings { display: grid; gap: 6px; margin-top: 8px; padding-bottom: 8px; }
+.period-tab-settings > .settings-note { margin: 0; }
+.period-tab-list { display: flex; flex-wrap: wrap; gap: 3px; }
+.period-tab-list-shown {
+  width: fit-content;
+  max-width: 100%;
+  padding: 3px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: rgba(var(--overlay-rgb), 0.026);
+}
+.tab.period-tab-chip {
+  min-width: 30px;
+  width: auto;
+  height: 24px;
+  flex: 0 0 auto;
+  padding-inline: 5px;
+  border-color: var(--line);
+  border-radius: 999px;
+  white-space: nowrap;
+}
+.period-tab-list-shown > .period-tab-chip {
+  cursor: grab;
+  touch-action: none;
+  color: var(--text);
+  background: rgba(var(--overlay-rgb), 0.08);
+}
+.period-tab-chip:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+.period-tab-list:not(.period-tab-list-shown) > .period-tab-chip[aria-disabled="true"] { cursor: default; }
+.period-tab-chip[draggable="true"]:not([aria-disabled="true"]) { cursor: grab; }
+.period-tab-list-shown.is-reordering { overflow-anchor: none; }
+.period-tab-list-shown.drag-active > .period-tab-chip {
+  transform: translate(var(--drag-shift-x, 0px), var(--drag-shift-y, 0px));
+  transition: transform 160ms var(--ease-out, ease);
+}
+.period-tab-list-shown.drag-active > .period-tab-chip.dragging {
+  z-index: 2;
+  pointer-events: none;
+  transform: translate(var(--drag-x, 0px), var(--drag-y, 0px));
+  transition: none;
+}
+@media (prefers-reduced-motion: reduce) {
+  :root:not([data-reduce-motion="off"]) .period-tab-list-shown.drag-active > .period-tab-chip { transition: none; }
+}
+:root[data-reduce-motion="on"] .period-tab-list-shown.drag-active > .period-tab-chip { transition: none; }
+.period-tab-list:not(.period-tab-list-shown) > .period-tab-chip.dragging { opacity: .5; }
+.period-tab-chip[data-period-drop="before"] { box-shadow: -2px 0 var(--accent); }
+.period-tab-chip[data-period-drop="after"] { box-shadow: 2px 0 var(--accent); }
+.period-tab-list[data-period-drop="list"] { outline: 1px solid var(--accent); outline-offset: 1px; }
 
 /* Main Screen starts pointer reordering from the six-dot handles, while the
    rows use the same transform choreography as Collection and AI Tool Limits. */
