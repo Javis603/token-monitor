@@ -893,6 +893,9 @@ function propagateTodayProjects(today, periods, titleMetadata = {}) {
       // deleted, say) yields to the fresh link when that one resolves.
       if (session.nativeSessionId) target.nativeSessionId = session.nativeSessionId;
       if (session.t3ThreadId && !target.t3ParentLink) target.t3ThreadId = session.t3ThreadId;
+      // Fresh entry evidence fills the anchor like the link above; an
+      // unavailable read leaves the anchor's attribution in place.
+      if (session.sessionEntry) target.sessionEntry = session.sessionEntry;
       const parentClient = session.parentClient || session.client;
       const targetParentClient = target.parentClient || target.client;
       if (session.parentSessionId && ((target.t3ParentLink && !session.t3ParentLink
@@ -976,7 +979,7 @@ function projectRetainedAntigravityTurns(today, periods, turns) {
 // Yesterday is a closed day: it takes a session's current title, project and
 // links, but its times, context and turn state stay those of that day.
 const PAST_DAY_IDENTITY_FIELDS = Object.freeze([
-  'title', 'projectId', 'projectLabel', 'sessionKind', 'nativeSessionId', 't3ThreadId', 'parentSessionId', 'parentClient', 't3ParentLink'
+  'title', 'projectId', 'projectLabel', 'sessionKind', 'nativeSessionId', 't3ThreadId', 'parentSessionId', 'parentClient', 't3ParentLink', 'sessionEntry'
 ]);
 
 function propagateIdentity(source, periods, titleMetadata) {
@@ -1000,7 +1003,7 @@ function propagateIdentity(source, periods, titleMetadata) {
 function copySessionLinks(source, target, { preserveRangeParents = false } = {}) {
   for (const [key, session] of Object.entries(target?.sessions || {})) {
     const resolved = source?.sessions?.[key];
-    for (const field of ['nativeSessionId', 't3ThreadId']) {
+    for (const field of ['nativeSessionId', 't3ThreadId', 'sessionEntry']) {
       if (resolved?.[field]) session[field] = resolved[field];
     }
     if (resolved?.parentSessionId) {

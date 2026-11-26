@@ -122,6 +122,7 @@
       if (!previous) return [key, row];
       const linked = { ...row };
       if (!linked.t3ThreadId && previous.t3ThreadId) linked.t3ThreadId = previous.t3ThreadId;
+      if (!linked.sessionEntry && previous.sessionEntry) linked.sessionEntry = previous.sessionEntry;
       if (!linked.parentSessionId && previous.parentSessionId) {
         linked.parentSessionId = previous.parentSessionId;
         if (previous.parentClient) linked.parentClient = previous.parentClient;

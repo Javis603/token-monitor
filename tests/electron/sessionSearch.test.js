@@ -363,6 +363,9 @@ test('search renders reuse matching rows without layout motion or rebuilding too
     sessionRowsApi: { filterSessionRows },
     sessionToolClients: row => [row.client, ...(row.groupRows || []).map(member => member.client)],
     renderSessionToolFilter: data => { calls.tools++; return data; },
+    sessionEntryValues: row => [row.sessionEntry, ...(row.groupRows || []).map(member => member.sessionEntry)]
+      .map(value => (typeof value === 'string' ? value : '')),
+    renderSessionEntryFilter: data => { calls.entries = (calls.entries || 0) + 1; return data; },
     renderSessionPager: noop,
     setSessionSearchStatus: (query, count) => statuses.push({ query, count }),
     currentCurrency: () => 'USD',

@@ -1,7 +1,9 @@
 'use strict';
 
 const fs = require('node:fs');
-const { normalizeLatestModel } = require('./usage');
+const {
+  SESSION_ENTRY_EVIDENCE, SESSION_ENTRY_T3, normalizeLatestModel, sessionEntryForEvidence
+} = require('./usage');
 const { isCompressedCodexTranscript, readCompressedCodexTranscript } = require('./providers/codex/transcript');
 const os = require('node:os');
 const { hashKey } = require('./hashKey');
@@ -378,6 +380,27 @@ function sessionMetadataMap(periods, home = os.homedir(), deps = {}) {
   return metadata;
 }
 
+// Launch-entry attribution rides the same pass that resolves T3 bindings: the
+// catalog this pass just read is what separates "read and unbound" (native)
+// from "could not be read" (unavailable, which leaves an attribution already
+// held in place rather than contradicting it). Directory evidence the provider
+// resolvers recorded in the metadata cache joins here and wins over catalog
+// absence, matching the binding's own evidence strength.
+function applySessionEntryEvidence(session, evidence) {
+  if (evidence === SESSION_ENTRY_EVIDENCE.verifiedT3) {
+    session.sessionEntry = sessionEntryForEvidence(evidence, session.client);
+    return;
+  }
+  if (evidence !== SESSION_ENTRY_EVIDENCE.native) return;
+  // A retained T3 attribution is not contradicted by an unbound catalog:
+  // Antigravity keeps its app link in the same situation, so the entry sticks
+  // until a verified conflict revokes it.
+  if (session.sessionEntry === SESSION_ENTRY_T3) return;
+  const mapped = sessionEntryForEvidence(evidence, session.client);
+  if (mapped) session.sessionEntry = mapped;
+  else delete session.sessionEntry;
+}
+
 function applyT3SessionParents(periods, home = os.homedir(), deps = {}, targets, evidencePeriods = periods) {
   const candidates = (session) => {
     if (session.client !== 'codex') return [nativeAccountingId(session.client, session.sessionId)].filter(Boolean);
@@ -399,7 +422,9 @@ function applyT3SessionParents(periods, home = os.homedir(), deps = {}, targets,
   if (!nativeIds.length) return true;
   const { facts: relations, status, ownershipComplete, ambiguous, incompleteNativeIds, incompleteParentThreads } = readT3SessionRelationResult(nativeIds, {
     ...deps, homeDir: home, useEnvRoot: deps.scopedHome !== true,
-    includeOwnershipStatus: Boolean(deps.completeT3ParentRows) || children.some(session => session.t3ThreadId || session.t3ParentLink)
+    // Entry attribution derives from the same read, so the ownership status it
+    // needs is always requested.
+    includeOwnershipStatus: true
   });
   const links = new Map();
   const ownershipIsComplete = session =>
@@ -415,6 +440,7 @@ function applyT3SessionParents(periods, home = os.homedir(), deps = {}, targets,
     if ((session.t3ThreadId || session.t3ParentLink)
       && (conflict || (session.client !== 'antigravity' && nativeKeys.length && !link && ownershipIsComplete(session)))) {
       revokeT3SessionLinks(session);
+      delete session.sessionEntry;
       deps.revokedT3ThreadKeys?.add(`${session.client}:${session.sessionId}`);
       continue;
     }
@@ -429,6 +455,18 @@ function applyT3SessionParents(periods, home = os.homedir(), deps = {}, targets,
       }
       session.t3ThreadId = link.threadId;
     }
+    const bound = link && matches.every(fact => fact.threadId === link.threadId);
+    const directoryEvidence = deps.metadataCache?.get(`${session.client}:${session.sessionId}`)?.sessionEntryEvidence;
+    applySessionEntryEvidence(session,
+      bound || directoryEvidence === SESSION_ENTRY_EVIDENCE.verifiedT3
+        ? SESSION_ENTRY_EVIDENCE.verifiedT3
+        // Directory evidence stands on its own: a row read from a native store
+        // does not need the T3 state catalog to be readable this tick.
+        : directoryEvidence === SESSION_ENTRY_EVIDENCE.native
+          ? SESSION_ENTRY_EVIDENCE.native
+          : (!nativeKeys.length || !ownershipIsComplete(session) || status === 'retryable'
+            ? SESSION_ENTRY_EVIDENCE.unavailable
+            : SESSION_ENTRY_EVIDENCE.native));
     // Native links, including Codex reviews, take precedence over app links.
     if ((!session.parentSessionId || session.t3ParentLink) && link?.parentThreadId
       && matches.every(fact => fact.parentThreadId === link.parentThreadId)) links.set(session, link);

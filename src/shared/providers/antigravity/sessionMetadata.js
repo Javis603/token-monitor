@@ -235,12 +235,20 @@ function resolveSessionMetadata(sessionIds, context = {}) {
 
   const home = context.home || os.homedir();
   const env = context.deps?.scopedHome ? {} : (context.deps?.env || process.env);
+  const acpDirs = Array.isArray(context.deps?.antigravityAcpPaths)
+    ? context.deps.antigravityAcpPaths
+    : discoverAntigravityAcpPaths({ homeDir: home, env, useEnvRoot: !context.deps?.scopedHome });
   const candidates = antigravityConversationSummaryCandidates({
     home,
     env,
     useEnvRoot: !context.deps?.scopedHome,
-    antigravityAcpPaths: context.deps?.antigravityAcpPaths
+    antigravityAcpPaths: acpDirs
   });
+  // T3's ACP provider keeps its own conversation catalog beside its transcript
+  // directories. A row selected from one of those stores is directory evidence
+  // that the conversation was launched through T3 Code; a row from any other
+  // store names the native CLI instead.
+  const acpSummaryDbs = new Set(acpDirs.map((dir) => path.join(path.dirname(dir), 'conversation_summaries.db')));
   const cache = context.deps?.antigravityTitleCache || titleCache;
   const unresolved = new Set();
   const unresolvedNativeSources = new Set();
@@ -250,6 +258,23 @@ function resolveSessionMetadata(sessionIds, context = {}) {
   const nativeSourceFor = key => {
     const source = sourceFor(key);
     return typeof source === 'string' ? source : source?.native;
+  };
+  // Directory evidence for the launch entry, from the store this pass selected
+  // the session's catalog row from. A T3 ACP store — or a title from T3's own
+  // thread store — is positive T3 evidence; a validated row from any other
+  // store names the native CLI. A session with no row anywhere, a stale read
+  // or an unresolved store claims nothing — only a real row is evidence. The
+  // values spell the evidence contract shared with `usage.js`
+  // (SESSION_ENTRY_EVIDENCE); this module stays out of the wire graph, so the
+  // watch policy can keep loading it.
+  const entryEvidenceFor = (sessionId, source) => {
+    if (source && typeof source === 'object') return source.t3 ? 'verified-t3' : '';
+    if (typeof source === 'string' && source) {
+      if (acpSummaryDbs.has(source)) return 'verified-t3';
+      const selected = cache.get(source);
+      return selected?.stamp && selected.validatedIds.has(sessionId) ? 'native' : '';
+    }
+    return '';
   };
 
   for (const dbPath of candidates) {
@@ -357,10 +382,10 @@ function resolveSessionMetadata(sessionIds, context = {}) {
       delete meta.projectId;
       delete meta.projectLabel;
     }
+    // A successful missing-row query can revoke a persisted override even
+    // on a cold cache. Check all candidate stores before deciding absence.
+    const confirmedMissing = !unresolved.has(sessionId) && candidates.some((dbPath) => cache.get(dbPath)?.misses.has(sessionId));
     if (!result.has(sessionId)) {
-      // A successful missing-row query can revoke a persisted override even
-      // on a cold cache. Check all candidate stores before deciding absence.
-      const confirmedMissing = !unresolved.has(sessionId) && candidates.some((dbPath) => cache.get(dbPath)?.misses.has(sessionId));
       const knownSummary = candidates.some((dbPath) => cache.get(dbPath)?.summaries.has(sessionId));
       if (confirmedMissing && (retained !== undefined || hasAnchoredProject || knownSummary)) {
         for (const dbPath of candidates) {
@@ -418,6 +443,12 @@ function resolveSessionMetadata(sessionIds, context = {}) {
       if (turn.inputAt) meta.lastUsedAt = new Date(turn.inputAt).toISOString();
     }
     if (meta && previous && Object.prototype.hasOwnProperty.call(previous, 'titleFallback')) meta.titleFallback = previous.titleFallback;
+    if (meta) {
+      const entrySource = Object.prototype.hasOwnProperty.call(meta, 'catalogTitleSource')
+        ? meta.catalogTitleSource : sourceFor(key);
+      const entryEvidence = entryEvidenceFor(sessionId, entrySource);
+      if (entryEvidence) meta.sessionEntryEvidence = entryEvidence;
+    }
     if (meta?.catalogTitle !== null) continue;
     context.deps?.invalidatedTitleKeys?.add(key);
     const oldTitle = previous?.catalogTitle || anchored;

@@ -678,7 +678,7 @@ function replayRetainedRows(retainedRows, forkParents) {
 
 // The decorated identity of a session: titles, projects and links resolved by
 // the full scan. Raw day rows carry only the transcript's own metadata.
-const RANGE_IDENTITY_FIELDS = Object.freeze(['title', 'sessionKind', 'nativeSessionId', 't3ThreadId', 'parentSessionId', 'parentClient']);
+const RANGE_IDENTITY_FIELDS = Object.freeze(['title', 'sessionKind', 'nativeSessionId', 't3ThreadId', 'parentSessionId', 'parentClient', 'sessionEntry']);
 const RANGE_PROJECT_FIELDS = Object.freeze(['projectId', 'projectLabel']);
 
 // An archived session's usage in a native range is the sum of its retained

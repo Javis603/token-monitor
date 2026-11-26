@@ -427,6 +427,38 @@
     return result;
   }
 
+  // Trend points filtered by launch entry, derived from the collector's
+  // per-day session detail instead of the daily rows themselves: those carry
+  // no session identity. A day the session detail covers splits by the
+  // sessions' own attribution; a day it does not cover counts entirely as
+  // unknown, so every entry split adds back up to the untouched total curve
+  // and a total that predates attribution never moves because of it. Session
+  // detail is wire-normalized upstream, so an entry there is a bounded value
+  // or absent, and absent is the unknown bucket.
+  function entryTrendPoints(points, daySessions, entry, { labelKey = 'date', metric = 'tokens' } = {}) {
+    if (!Array.isArray(points)) return [];
+    const selected = typeof entry === 'string' ? entry : '';
+    if (!selected) return points;
+    const days = daySessions && typeof daySessions === 'object' ? daySessions : {};
+    return points.map((point) => {
+      const key = String(point?.[labelKey] || '').slice(0, 10);
+      const period = /^\d{4}-\d{2}-\d{2}$/.test(key) ? days[key] : null;
+      const sessions = period?.sessions && typeof period.sessions === 'object' ? period.sessions : null;
+      const value = { ...point };
+      if (!sessions) {
+        value[metric] = selected === 'unknown' ? Math.max(0, n(point?.[metric])) : 0;
+        return value;
+      }
+      let sum = 0;
+      for (const session of Object.values(sessions)) {
+        const attributed = typeof session?.sessionEntry === 'string' ? session.sessionEntry : '';
+        if (selected === 'unknown' ? !attributed : attributed === selected) sum += Math.max(0, n(session?.totalTokens));
+      }
+      value[metric] = sum;
+      return value;
+    });
+  }
+
   // Brand colours come from the vendor presentation table. One shared, mutable
   // object: the renderers apply the user's vendor-colour overrides onto it.
   const modelColors = vendorPresentation.vendorColors();
@@ -741,7 +773,7 @@
   return {
     localDayKey, weekStartKey, dailyBarsChart, candleChart, computeHeatmapIntensities, contribHeatmap, rollingYearHeatmap, statsCards, sparklinePreview,
     areaLineChart, areaLineSvg,
-    selectPreviewSeries, patchTodayBar, sparklineSvg,
+    selectPreviewSeries, patchTodayBar, entryTrendPoints, sparklineSvg,
     applyVendorColors, modelColors, clientColors, fallbackModelColors, modelVendorFor, modelColor, clampDaily, dailyWindow,
     barsChartSvg, candleChartSvg, heatmapSvg, statsCardsHtml, statCardColumnWidths
   };

@@ -288,6 +288,19 @@
     return date ? date.getTime() : 0;
   }
 
+  // Entry attribution rides every presentation row so filtering and grouping
+  // can read it, but its label joins the activity line only while an entry
+  // filter is active: an unfiltered list must render exactly as before, and
+  // the label then explains why each row survived the filter.
+  function sessionEntryForRow(session, options) {
+    const sessionEntry = textValue(session?.sessionEntry);
+    const labels = options?.entryLabels;
+    return {
+      sessionEntry,
+      entryLabel: labels ? (labels[sessionEntry] || labels.unknown || '') : ''
+    };
+  }
+
   function sessionActivityLabel(session, now) {
     return compactSessionTime(session?.lastUsedAt || session?.startedAt, now);
   }
@@ -520,12 +533,14 @@
         : session
     );
     const activityTime = sessionActivityLabel(session, now);
+    const { sessionEntry, entryLabel } = sessionEntryForRow(session, options);
     const subtitleParts = [
       activityTime,
       messageLabel(session),
       cacheLabel,
       tokenRateLabel(session)
     ].filter(Boolean);
+    if (entryLabel) subtitleParts.push(entryLabel);
     // One derivation, not two: the boolean is a projection of the three-state
     // value, so a row can never be marked running by one reading and idle by the
     // other. `isRunningSession` itself delegates to `sessionActivityState` for the
@@ -572,6 +587,7 @@
       sourceDevice: session.sourceDevice || options.localSourceDevice,
       nativeSessionId: textValue(session?.nativeSessionId),
       t3ThreadId: textValue(session?.t3ThreadId),
+      sessionEntry,
       modelTokens: session?.models || (session?.model ? { [session.model]: value } : {}),
       parentKey: subagent ? `session:${parentClient}:${parentSessionId}` : undefined,
       subagent: subagent || undefined,
@@ -665,6 +681,7 @@
         const parentSessionId = textValue(session?.parentSessionId);
         const parentClient = textValue(session?.parentClient) || client;
         const subagent = Boolean(parentSessionId) && (parentClient !== client || parentSessionId !== sessionId) && !backgroundReview;
+        const { sessionEntry, entryLabel } = sessionEntryForRow(session, options);
         const activityTime = sessionActivityLabel(session, now);
         const activityParts = [
           archived ? archivedLabel : '',
@@ -673,6 +690,7 @@
           cacheHit,
           tokenRate
         ].filter(Boolean);
+        if (entryLabel) activityParts.push(entryLabel);
         const activitySummary = activityParts.join(' · ');
         if (subagent) activityParts.splice(archived ? 1 : 0, 0, subagentLabel);
         return {
@@ -709,6 +727,7 @@
           sourceDevice: session.sourceDevice,
           nativeSessionId: textValue(session?.nativeSessionId),
           t3ThreadId: textValue(session?.t3ThreadId),
+          sessionEntry,
           titled: Boolean(sessionTitle) || undefined,
           // Raw per-model tokens, so a group row can rebuild its model label and
           // tooltip from every member rather than from one of them.
