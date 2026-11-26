@@ -356,6 +356,7 @@
    *   liveRatesByDevice?: Record<string, number>,
    *   settings?: any,
    *   statsMode?: string,
+   *   fixedHistorySnapshot?: { devices?: Array<{ deviceId: string, period: any }> } | null,
    *   nowMs?: number
    * }} options
    */
@@ -401,12 +402,15 @@
       if (scoped.length > 0) sessionsByDevice.set(deviceId, scoped);
     }
 
+    const fixedHistoryById = new Map((options.fixedHistorySnapshot?.devices || []).map(device => [device.deviceId, device.period]));
     const machinesRaw = Array.from(ids).map((deviceId) => {
       const device = deviceMap.get(deviceId) || {};
       const devHistory = historyMap.get(deviceId) || null;
       const mergedDevice = { ...devHistory, ...device, deviceId };
       const devDaily = devHistory?.history?.daily || [];
-      const resolvedPeriod = resolvePeriodData(mergedDevice, devDaily, periodKey, { locale: settings?.locale });
+      const resolvedPeriod = options.fixedHistorySnapshot
+        ? mergedDevice.periods?.[periodKey] || fixedHistoryById.get(deviceId) || null
+        : resolvePeriodData(mergedDevice, devDaily, periodKey, { locale: settings?.locale });
       const todayPeriod = resolvePeriodData(mergedDevice, devDaily, 'today', { locale: settings?.locale });
       const tokens = Math.max(0, n(resolvedPeriod?.totalTokens));
       const cost = Math.max(0, n(resolvedPeriod?.costUsd ?? resolvedPeriod?.totalCost));
@@ -2350,7 +2354,20 @@
     const statsMode = String(options.statsMode || '');
     const nowMs = Number.isFinite(Number(options.nowMs)) ? Number(options.nowMs) : Date.now();
 
+    const syncedDerived = fixedPeriodRanges?.isDerived(periodKey) && isSyncedStatsContext(stats, settings, statsMode);
+    const fixedHistorySnapshot = syncedDerived && !stats?.periods?.[periodKey]
+      ? fixedPeriodRanges.fixedPeriodSnapshotFromDevices(periodKey, fixedPeriodRanges.joinDeviceHistorySources(
+        history?.deviceHistories || [], stats?.devices || []
+      ), {
+        historyAvailable: history?.fixedPeriods?.historyTransportAvailable === true,
+        historyEnabled: settings.historyEnabled !== false,
+        now: nowMs,
+        locale: settings.locale,
+        weekStartsOn: settings.syncWeekStartsOn ?? 1
+      })
+      : null;
     const fleet = buildFleetModel({
+      fixedHistorySnapshot,
       stats,
       history,
       periodKey,
@@ -2369,9 +2386,12 @@
       ? { periods: { [periodKey]: activeMachine.periodData } }
       : stats;
 
-    const periodData = activeMachine
-      ? activeMachine.periodData
-      : resolvePeriodData(periodSource, scopedHistory.daily, periodKey, { locale: settings?.locale });
+    const periodData = fixedHistorySnapshot
+      ? (activeMachine ? activeMachine.periodData : fixedHistorySnapshot.period)
+        || fixedPeriodRanges.derivePeriod([], { start: '', end: '' })
+      : activeMachine
+        ? activeMachine.periodData
+        : resolvePeriodData(periodSource, scopedHistory.daily, periodKey, { locale: settings?.locale });
 
     const anatomy = computeTokenAnatomy(periodData, scopedHistory.daily);
     const totalTokens = periodData ? Math.max(0, n(periodData.totalTokens)) : n(scopedHistory.summary.totalTokens);
@@ -2381,7 +2401,7 @@
     const tools = buildToolRows(periodData, scopedHistory.daily, totalTokens);
     const models = buildModelRows(periodData, scopedHistory.daily, totalTokens);
     const derivedIncomplete = Boolean(
-      stats?.syncedFixedPeriodDetailsAvailable?.[periodKey] === false
+      fixedHistorySnapshot || stats?.syncedFixedPeriodDetailsAvailable?.[periodKey] === false
     );
     const sessions = derivedIncomplete ? [] : buildSessionList({
       stats,

@@ -1352,3 +1352,23 @@ test('a confirmed zero-token device retains a zero Live Flow edge when its sessi
   assert.equal(graph.devToHub.find(edge => edge.from === 'a')?.tokens, 40);
   assert.equal(graph.devToHub.find(edge => edge.from === 'b')?.tokens, 0);
 });
+
+
+test('synced Week History fallback uses the published Monday calendar in an en-US dashboard', () => {
+  const device = {
+    deviceId: 'mac',
+    periodWindows: { today: { key: '2026-11-23', endsAt: '2026-11-24T00:00:00Z' } },
+    periods: { today: { totalTokens: 60 } }
+  };
+  const daily = [{ date: '2026-11-22', tokens: 40 }, { date: '2026-11-23', tokens: 60 }];
+  const view = model.buildScopedOverview({
+    stats: { mode: 'sync', devices: [device], periods: { today: { totalTokens: 60 } } },
+    history: { daily, fixedPeriods: { historyTransportAvailable: true },
+      deviceHistories: [{ deviceId: device.deviceId, historyAvailable: true, history: { daily } }] },
+    periodKey: 'week', statsMode: 'sync', settings: { locale: 'en-US', syncWeekStartsOn: 1 },
+    nowMs: Date.parse('2026-11-23T12:00:00Z')
+  });
+  assert.equal(view.hero.tokens, 60);
+  assert.equal(view.fleet.machines[0].tokens, 60);
+  assert.equal(view.sessionsIncomplete, true);
+});

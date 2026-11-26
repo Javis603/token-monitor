@@ -2902,6 +2902,7 @@ function isSyncedStatsContext(stats = state.stats, settings = state.settings, st
 
 function hasPendingSyncedOwnership(stats = state.stats, periodKey = state.periodKey) {
   const derived = Boolean(typeof fixedPeriodRangesApi !== 'undefined' && fixedPeriodRangesApi?.isDerived?.(periodKey));
+  if (periodKey === 'allTime') return !allTimeSessions?.current();
   if (periodKey !== 'today' && periodKey !== 'month' && !derived) return false;
   if (!isSyncedStatsContext(stats, state.settings, state.statsMode)) return false;
   if (derived) {
@@ -3134,8 +3135,10 @@ function openDrawer(payload) {
       && typeof isSyncedDerivedPeriod === 'function'
       && isSyncedDerivedPeriod(ownershipPeriodKey)
       && Boolean(typeof syncedSessionPagesKeyFor === 'function' && syncedSessionPagesKeyFor(state.stats, ownershipPeriodKey));
-    const ownershipPending = (syncedPeriodNeedsPaging || syncedDerivedNeedsLoad)
-      && !isSyncedSessionPagesLoaded(state.stats, ownershipPeriodKey);
+    const allTimeOwnership = isSyncedPeriodSession && ownershipPeriodKey === 'allTime';
+    const ownershipPending = allTimeOwnership
+      ? !allTimeSessions?.current()
+      : (syncedPeriodNeedsPaging || syncedDerivedNeedsLoad) && !isSyncedSessionPagesLoaded(state.stats, ownershipPeriodKey);
     const snapshotMismatch = s.snapshotId != null && state.stats?.snapshot && (
       s.snapshotId !== state.stats.snapshot.id
       || s.snapshotSource !== state.stats.snapshot.source
@@ -3145,13 +3148,13 @@ function openDrawer(payload) {
       const sessionKey = s.key || `${s.client}:${s.sessionId}`;
       const pagedSession = resolvedSyncedPageSession(state.stats, ownershipPeriodKey, sessionKey);
       effectiveSession = reconcileSyncedSessionOwnership(s, pagedSession, { allowAdoptUnowned: true }).session;
-    } else if (isSyncedPeriodSession && !syncedPeriodNeedsPaging && !ownershipPending && (Boolean(payload.returnToGroup) || snapshotMismatch)) {
+    } else if (isSyncedPeriodSession && !syncedPeriodNeedsPaging && !ownershipPending && (allTimeOwnership || Boolean(payload.returnToGroup) || snapshotMismatch)) {
       const sessionKey = s.key || `${s.client}:${s.sessionId}`;
       const currentSessions = state.stats?.periods?.[ownershipPeriodKey]?.sessions;
       const currentSession = currentSessions && Object.hasOwn(currentSessions, sessionKey)
         ? currentSessions[sessionKey]
         : null;
-      effectiveSession = reconcileSyncedSessionOwnership(s, currentSession, { allowAdoptUnowned: syncedDerivedNeedsLoad }).session;
+      effectiveSession = reconcileSyncedSessionOwnership(s, currentSession, { allowAdoptUnowned: syncedDerivedNeedsLoad || allTimeOwnership }).session;
     } else if (!ownershipPending && (s.sourceDevice?.ambiguous === true || (s.sourceDevice && !s.sourceDevice.deviceId))) {
       effectiveSession = { ...s, deviceName: '' };
     }
@@ -3212,7 +3215,8 @@ function openDrawer(payload) {
           ...baseDrawer,
           pendingOwnershipDetail: true
         };
-        ensureSyncedSessionPages(ownershipPeriodKey);
+        if (allTimeOwnership) allTimeSessions?.ensure();
+        else ensureSyncedSessionPages(ownershipPeriodKey);
       } else {
         state.drawer = {
           ...baseDrawer,
@@ -3299,7 +3303,7 @@ function isSyncedDerivedPeriod(periodKey) {
 }
 
 function isSyncedSessionPeriodKey(periodKey) {
-  return periodKey === 'today' || periodKey === 'month' || isSyncedDerivedPeriod(periodKey);
+  return periodKey === 'today' || periodKey === 'month' || periodKey === 'allTime' || isSyncedDerivedPeriod(periodKey);
 }
 
 function syncedPeriodCalendarKey(stats, periodKey) {
@@ -3604,7 +3608,8 @@ const allTimeSessions = allTimeSessionsApi?.createAllTimeSessionsLoader
   ? allTimeSessionsApi.createAllTimeSessionsLoader({
       fetchSessions: (snapshotId) => window.tokenMonitor.getAllTimeSessions(snapshotId),
       currentSnapshot: () => state.stats?.snapshot,
-      needed: () => state.periodKey === 'allTime' && typeof window.tokenMonitor?.getAllTimeSessions === 'function',
+      needed: () => (state.periodKey === 'allTime' || state.drawer?.detailPeriodKey === 'allTime')
+        && typeof window.tokenMonitor?.getAllTimeSessions === 'function',
       projectSessions: (sessions) => (
         state.settings?.sessionTitlesEnabled === false && sessionTitleDisplayApi?.withoutSessionTitles
           ? sessionTitleDisplayApi.withoutSessionTitles(sessions)
@@ -3615,6 +3620,7 @@ const allTimeSessions = allTimeSessionsApi?.createAllTimeSessionsLoader
         if (!state.stats) return;
         const attached = allTimeSessions.attach(state.stats);
         state.stats = applyLocalSessionActivity(attachSyncedSessionPages(attached));
+        if (allTimeSessions.current()) syncOpenSessionDrawer('allTime', state.stats.periods?.allTime?.sessions, state.stats.snapshot);
         state.motion = 'update';
         render();
       },
@@ -4077,6 +4083,10 @@ function scheduleRateExpiry() {
   };
   collect(deviceRateTracker?.nextExpiryAt?.());
   collect(rateHistory?.nextExpiryAt?.());
+  if (typeof sessionLiveApi !== 'undefined' && sessionLiveApi?.nextSessionStatusChangeAt) {
+    const rows = state.overview?.sessions || [];
+    collect(sessionLiveApi.nextSessionStatusChangeAt(rows.flatMap(row => (row.groupRows || [row]).map(member => member.raw))));
+  }
   for (const devState of deviceRateTrackers.values()) {
     collect(devState.tracker?.nextExpiryAt?.());
     collect(devState.history?.nextExpiryAt?.());
@@ -4231,42 +4241,70 @@ function settleRefreshBtnState(status) {
   }, REFRESH_BUTTON_FEEDBACK_MS);
 }
 
-async function manualRefresh() {
-  if (manualRefreshBusy) return;
-  manualRefreshBusy = true;
-  clearRefreshBtnFeedbackTimer();
-  setRefreshBtnState('refreshing');
+let historyRequestSeq = 0;
+let appliedHistoryRequestSeq = 0;
+
+async function pullDashboardData({ manual = false } = {}) {
+  const seq = ++historyRequestSeq;
   const pullPushSeq = typeof statsPushSeq === 'number' ? statsPushSeq : null;
-  const pullSource = typeof latestAcceptedSnapshot !== 'undefined' && latestAcceptedSnapshot?.source != null
-    ? latestAcceptedSnapshot.source
-    : (state.stats?.snapshot?.source ?? null);
+  const pullSource = state.stats?.snapshot?.source ?? null;
   const pullSourceGen = typeof statsSourceGeneration === 'number' ? statsSourceGeneration : 0;
-  try {
-    state.motion = state.history ? 'update' : 'entry';
-    const stats = typeof window.tokenMonitor.getStats === 'function'
-      ? await window.tokenMonitor.getStats({ force: true, forceHistory: true, forceSelfSync: true, feedback: true })
-      : null;
-    const history = await window.tokenMonitor.getDashboardHistory({ includeDevices: true });
-    let statsAccepted = false;
-    if (stats) {
+  let stats = null;
+  let statsAccepted = false;
+  let statsError;
+  const readStats = async () => {
+    try {
+      if (typeof window.tokenMonitor.getStats !== 'function') return;
+      stats = await window.tokenMonitor.getStats(manual
+        ? { force: true, forceHistory: true, forceSelfSync: true, feedback: true }
+        : undefined);
+      if (!stats) return;
       if (typeof applyIncomingStats === 'function') {
-        statsAccepted = applyIncomingStats(stats, { expectedPushSeq: pullPushSeq });
+        if (statsSourceGeneration === pullSourceGen) {
+          statsAccepted = applyIncomingStats(stats, { expectedPushSeq: pullPushSeq });
+        }
       } else {
         state.stats = stats;
         observeStatsRates(stats);
         statsAccepted = true;
       }
+      if (statsAccepted) {
+        state.motion = state.overview ? 'update' : 'entry';
+        render();
+      }
+    } catch (error) {
+      statsError = error;
     }
-    const acceptHistory = typeof shouldAcceptPulledHistory === 'function'
-      ? shouldAcceptPulledHistory(stats, statsAccepted, { pullSource, pullSourceGen })
-      : true;
-    if (acceptHistory) {
-      state.history = history;
-    }
+  };
+
+  // A manual scan updates History in main. Read it after that scan settles.
+  const statsTask = readStats();
+  if (manual) await statsTask;
+  const [historyResult] = await Promise.allSettled([
+    Promise.resolve().then(() => window.tokenMonitor.getDashboardHistory({ includeDevices: true })),
+    statsTask
+  ]);
+  if (historyResult.status === 'rejected') throw historyResult.reason;
+  const acceptHistory = typeof shouldAcceptPulledHistory !== 'function'
+    || shouldAcceptPulledHistory(stats, statsAccepted, { pullSource, pullSourceGen });
+  if (seq > appliedHistoryRequestSeq && acceptHistory) {
+    appliedHistoryRequestSeq = seq;
+    state.history = historyResult.value;
+    state.motion = state.overview ? 'update' : 'entry';
     render();
+  }
+  if (manual && statsError) throw statsError;
+}
+
+async function manualRefresh() {
+  if (manualRefreshBusy) return;
+  manualRefreshBusy = true;
+  clearRefreshBtnFeedbackTimer();
+  setRefreshBtnState('refreshing');
+  try {
+    await pullDashboardData({ manual: true });
     settleRefreshBtnState('refreshed');
   } catch (error) {
-    state.motion = 'none';
     console.log(`[dashboard] manual refresh failed: ${error.message}`);
     settleRefreshBtnState('error');
   } finally {
@@ -4283,37 +4321,9 @@ async function refresh() {
     return;
   }
   refreshRunning = true;
-  const pullPushSeq = typeof statsPushSeq === 'number' ? statsPushSeq : null;
-  const pullSource = typeof latestAcceptedSnapshot !== 'undefined' && latestAcceptedSnapshot?.source != null
-    ? latestAcceptedSnapshot.source
-    : (state.stats?.snapshot?.source ?? null);
-  const pullSourceGen = typeof statsSourceGeneration === 'number' ? statsSourceGeneration : 0;
   try {
-    state.motion = state.history ? 'update' : 'entry';
-    const historyPromise = window.tokenMonitor.getDashboardHistory({ includeDevices: true });
-    const statsPromise = typeof window.tokenMonitor.getStats === 'function'
-      ? window.tokenMonitor.getStats().catch(() => null)
-      : Promise.resolve(null);
-    const [history, stats] = await Promise.all([historyPromise, statsPromise]);
-    let statsAccepted = false;
-    if (stats) {
-      if (typeof applyIncomingStats === 'function') {
-        statsAccepted = applyIncomingStats(stats, { expectedPushSeq: pullPushSeq });
-      } else {
-        state.stats = stats;
-        observeStatsRates(stats);
-        statsAccepted = true;
-      }
-    }
-    const acceptHistory = typeof shouldAcceptPulledHistory === 'function'
-      ? shouldAcceptPulledHistory(stats, statsAccepted, { pullSource, pullSourceGen })
-      : true;
-    if (acceptHistory) {
-      state.history = history;
-    }
-    render();
+    await pullDashboardData();
   } catch (error) {
-    state.motion = 'none';
     console.log(`[dashboard] history failed: ${error.message}`);
   } finally {
     refreshRunning = false;

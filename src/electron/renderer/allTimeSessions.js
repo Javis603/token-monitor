@@ -57,6 +57,11 @@
       return Boolean(pulled) && sameSource(pulled.snapshot, currentSnapshot());
     }
 
+    function current() {
+      const snapshot = currentSnapshot();
+      return sameSource(pulled?.snapshot, snapshot) && pulled.snapshot.id === snapshot.id;
+    }
+
     function ensure() {
       if (pending || !stale || !needed()) return;
       const snapshot = currentSnapshot();
@@ -79,7 +84,7 @@
         });
     }
 
-    return { attach, ensure, invalidate, loaded };
+    return { attach, ensure, invalidate, loaded, current };
   }
 
   return {

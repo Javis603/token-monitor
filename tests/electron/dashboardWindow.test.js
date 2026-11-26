@@ -557,6 +557,8 @@ test('an in-flight Dashboard refresh preserves a hidden invalidation for restore
     get refreshQueued() { return refreshQueued; },
     set refreshQueued(value) { refreshQueued = value; }
   };
+  const js = read('src', 'electron', 'renderer', 'dashboard.js');
+  vm.runInNewContext(js.slice(js.indexOf('let historyRequestSeq'), js.indexOf('async function manualRefresh(')), context);
   const refresh = dashboardFunction('refresh', '\nasync function boot(', context);
 
   await refresh();
@@ -834,8 +836,9 @@ test('dashboard refresh button reuses native stationary spinner markup and invok
   await context.manualRefresh();
   assert.deepEqual(JSON.parse(JSON.stringify(calls)), [
     ['getStats', { force: true, forceHistory: true, forceSelfSync: true, feedback: true }],
-    ['getDashboardHistory', { includeDevices: true }],
     ['rates', { periods: { today: { totalTokens: 12 } } }],
+    ['render'],
+    ['getDashboardHistory', { includeDevices: true }],
     ['render']
   ]);
   assert.equal(refreshBtn.disabled, false);
@@ -1905,7 +1908,7 @@ test('dashboard binds deferred drawer ownership to supplying period and invalida
     modelApi: dashboardModel,
     sessionTitleDisplayApi: require('../../src/electron/sessionTitleDisplay'),
     sessionActivityProjectionApi: null,
-    allTimeSessionsApi: null,
+    allTimeSessionsApi: require('../../src/electron/renderer/allTimeSessions'),
     tokenRateApi: null,
     charts: { clientColors: {} },
     deviceRateTracker: { getSample() { return null; }, reset() {}, observe() {} },
@@ -2564,6 +2567,35 @@ test('dashboard binds deferred drawer ownership to supplying period and invalida
   await Promise.resolve();
   assert.doesNotMatch(drawerSubtitle.textContent, /MacBook/);
   assert.doesNotMatch(drawerBody.innerHTML, /dash-drawer-section-title/, 'same-Hub collision must strip already-rendered local anatomy');
+  // All Time still renders its retained summaries, but a new snapshot fences detail until
+  // its own ownership arrives. An ambiguous result must never release the read.
+  context.state.periodKey = 'allTime';
+  const local = { client: 'codex', sessionId: 'total', title: 'Shared', totalTokens: 10, lastUsedAt: new Date().toISOString(),
+    sourceDevice: { deviceId: 'mac-local', name: 'Mac' } };
+  const pendingTotals = new Map();
+  context.window.tokenMonitor.getAllTimeSessions = id => new Promise(resolve => pendingTotals.set(id, resolve));
+  const totalStats = id => ({
+    localDeviceId: 'mac-local', snapshot: { id, source: 100 }, mode: 'sync',
+    periods: { allTime: { totalTokens: 10 } }
+  });
+  const callsBeforeAllTime = detailCalls.length;
+  context.applyIncomingStats(totalStats(100));
+  await Promise.resolve();
+  pendingTotals.get(100)({ 'codex:total': local });
+  await new Promise(setImmediate);
+  context.openDrawer({ kind: 'session', session: { ...local, key: 'codex:total', sourcePeriodKey: 'allTime' } });
+  assert.equal(detailCalls.length, callsBeforeAllTime + 1, 'current ownership can authorize a local read');
+  context.applyIncomingStats(totalStats(101));
+  assert.equal(context.state.drawer.detailRequested, false, 'new stats revoke the previous transcript read');
+  assert.equal(context.state.stats.periods.allTime.sessions['codex:total'].sourceDevice.deviceId, 'mac-local');
+  context.openDrawer({ kind: 'session', session: { ...local, key: 'codex:total', sourcePeriodKey: 'allTime' } });
+  assert.equal(detailCalls.length, callsBeforeAllTime + 1);
+  await Promise.resolve();
+  pendingTotals.get(101)({ 'codex:total': { ...local, sourceDevice: { ambiguous: true } } });
+  await new Promise(setImmediate);
+  assert.equal(detailCalls.length, callsBeforeAllTime + 1);
+  assert.equal(context.state.drawer.session.sourceDevice, null);
+
 });
 
 test('dashboard groups subagent hierarchies and review groups in Work Panel, Topology, and interactive group drawer', () => {
@@ -3597,4 +3629,60 @@ test('renderWorkPanel updates running group subagent badge in place and rebuilds
   context.renderWorkPanel(mkOverview(3));
   assert.equal(withBadgeRow.badgeEl.textContent, '2 subagents', '1-to-2 subagent growth must update badge text in place');
   assert.equal(withBadgeRow.subEl.innerHTML, '', 'in-place badge update preserves existing context meter DOM');
+});
+
+
+test('Dashboard applies Stats without History and fences older successful History responses', async () => {
+  const js = read('src', 'electron', 'renderer', 'dashboard.js');
+  const reads = [];
+  let snapshot = 0;
+  const context = {
+    state: { stats: null, history: null },
+    window: { tokenMonitor: {
+      getStats: async () => ({ snapshot: { id: ++snapshot, source: 1 } }),
+      getDashboardHistory: () => new Promise((resolve, reject) => reads.push({ resolve, reject }))
+    } },
+    observeStatsRates() {},
+    render() {}
+  };
+  vm.runInNewContext(js.slice(js.indexOf('let historyRequestSeq'), js.indexOf('async function manualRefresh(')), context);
+  const failed = context.pullDashboardData();
+  const rejected = assert.rejects(failed, /History offline/);
+  await new Promise(setImmediate);
+  assert.equal(context.state.stats.snapshot.id, 1);
+  reads[0].reject(new Error('History offline'));
+  await rejected;
+
+  const older = context.pullDashboardData();
+  await Promise.resolve();
+  const manual = context.pullDashboardData({ manual: true });
+  await new Promise(setImmediate);
+  reads[2].resolve({ revision: 'manual' });
+  await manual;
+  reads[1].resolve({ revision: 'older' });
+  await older;
+  assert.equal(context.state.history.revision, 'manual');
+});
+
+
+test('Dashboard schedules a repaint for session expiry without throughput samples', () => {
+  const now = Date.now();
+  const raw = { lastUsedAt: new Date(now - 1_000).toISOString() };
+  const sessionLiveApi = require('../../src/shared/sessionLive');
+  const expected = sessionLiveApi.nextSessionStatusChangeAt([raw], now);
+  assert.ok(expected > now);
+  let timer;
+  let rendered = 0;
+  const schedule = dashboardFunction('scheduleRateExpiry', '\nfunction observeStatsRates', {
+    state: { overview: { sessions: [{ groupRows: [{ raw }] }] } },
+    sessionLiveApi, document: { hidden: false }, Date: { now: () => now },
+    deviceRateTracker: null, rateHistory: null, deviceRateTrackers: new Map(),
+    rateExpiryTimer: null,
+    setTimeout(callback, delay) { timer = { callback, delay }; },
+    render() { rendered += 1; }
+  });
+  schedule();
+  assert.equal(timer.delay, expected - now + 20);
+  timer.callback();
+  assert.equal(rendered, 1);
 });
