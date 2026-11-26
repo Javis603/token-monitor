@@ -3088,6 +3088,22 @@ function startCollector(options) {
           if (captured.nativePastRanges) anchor.nativePastRanges = captured.nativePastRanges;
           anchor.sessionIdentityVersion = captured.sessionIdentityVersion;
         }
+        // Entry attribution the anchored windows confirmed this tick joins the
+        // saved anchor, so an unavailable read cannot erase it from the served
+        // broader periods; copying is fill-only, and revocations have already
+        // removed the value from the captured rows above.
+        for (const [capturedPeriod, anchorPeriod] of [
+          [captured.windowsPeriods.today, anchor.today],
+          [captured.windowsPeriods.month, anchor.month],
+          [captured.windowsPeriods.allTime, anchor.allTime]
+        ]) {
+          for (const [key, capturedRow] of Object.entries(capturedPeriod?.sessions || {})) {
+            const anchorRow = anchorPeriod?.sessions?.[key];
+            if (anchorRow && !anchorRow.sessionEntry && capturedRow.sessionEntry) {
+              anchorRow.sessionEntry = capturedRow.sessionEntry;
+            }
+          }
+        }
         const revokedLinks = captured.revokedT3ThreadKeys || [];
         const changedLinks = captured.changedT3ThreadKeys || [];
         if (revokedLinks.length || changedLinks.length) {
