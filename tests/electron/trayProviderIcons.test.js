@@ -4,6 +4,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
 const test = require('node:test');
+const vm = require('node:vm');
 
 const {
   createTrayProviderIconDeliveryGuard,
@@ -186,4 +187,70 @@ test('tray icon demand covers reported usage, limit providers and layout picks',
 test('tray icon demand stays empty without data or layouts', () => {
   assert.deepEqual([...trayProviderIconDemand()], []);
   assert.deepEqual([...trayProviderIconDemand({ stats: { periods: { today: null } }, layouts: [{ items: [{ type: 'text' }] }] })], []);
+});
+
+function trayMarkDeliveryFixture(loadImage) {
+  const app = fs.readFileSync(path.resolve(__dirname, '..', '..', 'src', 'electron', 'renderer', 'app.js'), 'utf8');
+  const start = app.indexOf('function trayProviderIconDemand() {');
+  const end = app.indexOf('\nfunction setAccountGroupExpanded(', start);
+  assert.ok(start >= 0 && end > start);
+  const context = {
+    state: { settings: {}, stats: null, pluginCatalog: { limits: { modules: [] } } },
+    window: { tokenMonitor: { setTrayIcons: async () => {} }, TokenMonitorTrayProviderIcons: require('../../src/electron/renderer/trayProviderIcons') },
+    trayIconProviderIds: new Set(['claude-brand', 'chatgpt']),
+    trayProviderImages: {},
+    trayProviderImageIds: new WeakMap(),
+    trayProviderImageOpticalSamples: new WeakMap(),
+    trayProviderIconsRequested: new Set(),
+    trayProviderIconsLoading: new Set(),
+    trayProviderIconDeliveryGuard: createTrayProviderIconDeliveryGuard(),
+    loadImage,
+    providerImageOpticalSample: () => ({ canvas: {} }),
+    providerImageToPngDataUrl: () => 'bitmap',
+    maybeUpdateBarsIcon() {},
+    renderFloatingBubbleContent() {}
+  };
+  vm.createContext(context);
+  vm.runInContext(app.slice(start, end), context);
+  const pick = (provider) => {
+    context.state.settings = { trayCustomLayout: { items: [{ type: 'icon', source: { provider } }] } };
+  };
+  return { context, pick };
+}
+
+test('a mark dropped by a superseded delivery is requested again when it returns to demand', async () => {
+  let finishBrand;
+  const loads = [];
+  const { context, pick } = trayMarkDeliveryFixture((source) => {
+    loads.push(source);
+    if (source.endsWith('/claude.svg') && !finishBrand) return new Promise((resolve) => { finishBrand = resolve; });
+    return Promise.resolve({});
+  });
+  pick('claude-brand');
+  const superseded = context.deliverTrayProviderIcons();
+  pick('chatgpt');
+  await context.deliverTrayProviderIcons();
+  finishBrand({});
+  await superseded;
+  assert.equal(context.trayProviderImages['claude-brand'], undefined);
+
+  pick('claude-brand');
+  context.syncTrayProviderIconDemand();
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.ok(context.trayProviderImages['claude-brand'], 'the dropped mark is delivered once it is wanted again');
+  assert.ok(context.trayProviderImages.chatgpt);
+});
+
+test('a mark that failed to load is not retried on every stats push', async () => {
+  let loads = 0;
+  const { context, pick } = trayMarkDeliveryFixture((source) => {
+    if (source.endsWith('/claude.svg')) { loads += 1; return Promise.reject(new Error('decode')); }
+    return Promise.resolve({});
+  });
+  pick('claude-brand');
+  await context.deliverTrayProviderIcons();
+  context.syncTrayProviderIconDemand();
+  context.syncTrayProviderIconDemand();
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(loads, 1);
 });
