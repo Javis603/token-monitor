@@ -64,6 +64,10 @@ For T3 Code Antigravity ACP, a strong native conversation reference in T3's V2 d
 
 The database and its WAL are watched, including under the environment overrides and the resolved CLI root. Metadata reads, discovery and watch policies share the collector's environment and configured home; the top-level environment takes precedence over an environment injected through metadata dependencies. Summary-only directories admit those exact files and attribute events to them rather than to the whole parent; unrelated runtime files and the reader's SHM writes do not trigger collection. Summary changes refresh labels without admitting an accelerated Antigravity RPC self-sync; conversation usage writes retain their source-sync behavior. Watch ticks refresh sessions present in today; month/all-time-only titles refresh on the next full scan.
 
+### Live activity in T3 Code
+
+For existing Antigravity ACP usage rows, Token Monitor matches the conversation ID to T3 Code's active run. The activity watcher follows T3's state database and validates the owning server process before renewing the running observation. This keeps a quiet run visible beyond the usage-based timeout. Completion or loss of verified live evidence returns the session to the shared idle or turn-based display rules. Desktop and standalone CLI continue to use the catalog's turn readings.
+
 ### Boundary with quota collection
 
 Token/session totals are machine-local activity. They are not deduplicated by Google email and do not use the standalone OAuth credentials described below. Changes to quota identity or account aggregation must not alter usage attribution.
