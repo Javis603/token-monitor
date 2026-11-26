@@ -6860,7 +6860,13 @@ function buildFixedPeriodSnapshot() {
         if (state.syncedFixedPeriodCache.get(period) !== cached) return;
         cached.publicationTimer = null;
         if (syncedFixedPeriodKey(period)) return;
+        const active = state.syncedFixedPeriod;
+        if (active && (active.key === cached.key || active.key === cached.snapshotKey)) {
+          clearTimeout(active.retryTimer);
+          state.syncedFixedPeriod = null;
+        }
         cached.snapshot = null;
+        cached.snapshotKey = null;
         if (state.period === period) statsRenderScheduler.request();
       }, FIXED_PERIOD_HISTORY_RETRY_MS);
       synced = retainVerifiedFixedRangeTitles(cached.snapshot, cached.revisions, {});

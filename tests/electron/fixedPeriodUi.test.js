@@ -465,8 +465,9 @@ test('a brief publication gap keeps usage visible without unverified titles and 
   assert.equal(context.buildFixedPeriodSnapshot().period.sessions.example.title, undefined);
   expire();
   assert.equal(context.buildFixedPeriodSnapshot().status, 'loading');
-  state.stats.fixedRangeRevisions = { remote: 'revision-2' };
+  state.stats.fixedRangeRevisions = { remote: 'revision-1' };
   context.requestSyncedFixedPeriod();
+  assert.equal(reads.length, 2, 'the expired revision must be fetched again');
   reads[1].finish(rangeDetails(25));
   await new Promise(setImmediate);
   assert.equal(context.buildFixedPeriodSnapshot().period.totalTokens, 25);
