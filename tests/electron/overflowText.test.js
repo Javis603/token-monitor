@@ -200,6 +200,7 @@ for (const className of ['detail-ex-title', 'detail-heading']) {
       const context = vm.createContext({
     rendererDom,
         document, state, els: { syncConnectionEndpoint: endpoint },
+        displayedSessions: key => state.stats?.periods?.[key]?.sessions,
         window: { ...h.window, TokenMonitorOverflowText: { create }, tokenMonitor: { getSessionDetail: async () => {
           reads += 1;
           if (defer) return new Promise(resolve => { finishRead = resolve; });

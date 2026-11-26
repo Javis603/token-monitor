@@ -193,3 +193,26 @@ test('all 17 devices contribute exact ranges when only 16 reads can run at once'
   assert.equal(snapshot.devices.length, 17);
   assert.equal(snapshot.detailsAvailable, true);
 });
+
+test('paged Month sessions keep accepted totals and retained inline rows', async () => {
+  const { resolveSyncedSessionPeriod } = require('../../src/electron/syncedFixedPeriod');
+  const device = {
+    deviceId: 'device',
+    periodWindows: { today: { key: '2026-10-31' }, month: { endsAt: '2026-11-01T00:00:00.000Z' } },
+    sessionDetailsOmitted: { month: 1 },
+    periods: { month: { totalTokens: 30, sessions: { 'codex:retained': {
+      client: 'codex', sessionId: 'retained', totalTokens: 20, title: 'Inline title'
+    } } } }
+  };
+  const result = await resolveSyncedSessionPeriod('month', [device], { device: 'revision' }, {
+    now: Date.parse('2026-10-31T12:00:00Z'),
+    read: () => ({ totalTokens: 10, sessions: { 'claude:paged': {
+      client: 'claude', sessionId: 'paged', totalTokens: 10
+    }, 'codex:retained': { client: 'codex', sessionId: 'retained', totalTokens: 20 } } })
+  });
+  assert.equal(result.period.totalTokens, 30);
+  assert.equal(result.period.sessions['codex:retained'].totalTokens, 20);
+  assert.equal(result.period.sessions['codex:retained'].title, 'Inline title');
+  assert.equal(result.period.sessions['claude:paged'].totalTokens, 10);
+  assert.equal(result.detailsAvailable, true);
+});

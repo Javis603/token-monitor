@@ -218,6 +218,7 @@ test('typing after a session-status repaint uses the refreshed projection cache'
   const stats = {};
   const staleRows = [{ key: 'session:1', running: true, context: { percentLeft: 50 } }];
   const freshRows = [{ key: 'session:1', running: false }];
+  const pagedSession = { running: true };
   const state = { stats, period: 'today', breakdown: 'session', sessionSearchQuery: '',
     sessionRowsCache: { stats, period: 'today', rows: staleRows } };
   let timer;
@@ -226,15 +227,20 @@ test('typing after a session-status repaint uses the refreshed projection cache'
     rendererDom,
     state, Date, els: { breakdown: { scrollTop: 120 } },
     window: { TokenMonitorSessionLive: {
-      nextSessionStatusChangeAt: () => timer ? 0 : Date.now() + 1000
+      sessionWithActivity: (_period, _key, session) => session,
+      nextSessionStatusChangeAt: (sessions) => {
+        assert.deepEqual(sessions, [pagedSession], 'the timer includes paged-only rows');
+        return timer ? 0 : Date.now() + 1000;
+      }
     } },
+    displayedSessions: () => ({ 'paged:1': pagedSession }),
     stopSessionStatusRepaint: () => {},
     visibleStatsSurface: () => 'main',
     setTimeout: callback => { timer = callback; return 1; },
     sessionRowsForPeriod: () => freshRows,
     renderRows: rows => rendered.push(rows),
     syncSessionSearchChrome: () => {},
-    sessionRowsApi: { sessionBreakdownIncomplete: () => false },
+    sessionBreakdownIncomplete: () => false,
     overflowText: { batch: callback => callback() },
     render: () => { assert.fail('the fresh cache should avoid a full render'); }
   };
@@ -264,10 +270,14 @@ test('typing filters the cached session rows instead of rebuilding the projectio
   };
   const els = { breakdown: { scrollTop: 240 } };
   const calls = [];
-  const update = Function('state', 'els', 'sessionRowsApi', 'syncSessionSearchChrome', 'renderRows', 'render', 'overflowText',
-    `${app.slice(start, end)}\nreturn updateSessionSearchQuery;`)(
+  const hintStart = app.indexOf('function sessionBreakdownIncomplete(');
+  const hintEnd = app.indexOf('\n}', hintStart) + 2;
+  let recovered = true;
+  const update = Function('state', 'els', 'sessionRowsApi', 'syncedSessionPeriod', 'syncSessionSearchChrome', 'renderRows', 'render', 'overflowText',
+    `${app.slice(start, end)}\n${app.slice(hintStart, hintEnd)}\nreturn updateSessionSearchQuery;`)(
     state, els,
-    { sessionBreakdownIncomplete: () => false },
+    { sessionBreakdownIncomplete: () => true },
+    () => ({ detailsAvailable: recovered }),
     () => calls.push('sync'),
     (nextRows, options) => calls.push(['rows', nextRows, options]),
     () => calls.push('render'),
@@ -280,6 +290,9 @@ test('typing filters the cached session rows instead of rebuilding the projectio
   assert.equal(state.sessionPage, 0);
   assert.equal(state.rowSignature, 'previous');
   assert.equal(els.breakdown.scrollTop, 0);
+  recovered = false;
+  update('review again');
+  assert.equal(calls.at(-1)[2].incompleteHint, 'sessions.incomplete');
 });
 
 test('typing without a valid projection forwards search intent through the full render', () => {

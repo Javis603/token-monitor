@@ -1,13 +1,13 @@
 import uploadDelta from './shared/uploadDelta.js';
 import fixedRangeUploads from './shared/fixedRangeUploads.js';
-import { FIXED_RANGE_HEADER, FIXED_RANGE_VERSION, rangesMatchDeviceDay } from './shared/fixedRangeSync.js';
+import { FIXED_RANGE_HEADER, FIXED_RANGE_VERSION, legacyFixedRangeView, rangesMatchDeviceDay, redactDailyRangeSnapshot, removedPagedClients, restorePagedClientSessions } from './shared/fixedRangeSync.js';
 import { publicLimits } from './shared/limits/core.js';
 import subscriptionDisplay from './shared/subscriptionDisplay.js';
 import currency from './shared/currency.js';
 import syncContent from './shared/syncContent.js';
 import {
   aggregateDevices,
-  mergeSyncDeviceRecord,
+  mergeSyncDeviceRecord, restoreDeviceHistory,
   aggregateHistory,
   stripSessionTextFromDeviceRecord
 } from './shared/usage.js';
@@ -149,10 +149,33 @@ export class HubDO {
   }
 
   async clearFixedRanges(storage, deviceId, index) {
+    if (this.legacyRangeView?.deviceId === deviceId) this.legacyRangeView = null;
     if (!index) return;
     for (let page = 0; page < index.pageCount; page++) {
       await storage.delete(fixedRangePageKey(deviceId, index.revision, page));
     }
+  }
+
+  async revokeFixedRangeTitles(storage, id, index, record) {
+    const key = `fixedRanges:${id}`;
+    const revisionKey = `fixedRangeRevision:${id}`;
+    const day = record?.periodWindows?.today?.key;
+    let safe;
+    if (day && Object.hasOwn(index.ranges || {}, day)) {
+      const pages = await Promise.all(Array.from({ length: index.pageCount }, (_, page) =>
+        storage.get(fixedRangePageKey(id, index.revision, page))));
+      if (pages.every(Array.isArray)) safe = redactDailyRangeSnapshot({ ...index, pages }, day);
+    }
+    await this.clearFixedRanges(storage, id, index);
+    if (!safe) {
+      await storage.put(key, fixedRangeUploads.retireFixedRangeSnapshot(index));
+      await storage.delete(revisionKey);
+      return;
+    }
+    const { pages, ...metadata } = safe;
+    for (const [page, rows] of pages.entries()) await storage.put(fixedRangePageKey(id, metadata.revision, page), rows);
+    await storage.put(key, metadata);
+    await storage.put(revisionKey, { observedAt: metadata.observedAt, revision: metadata.revision, day, daily: true });
   }
 
   async handleFixedRanges(request, url) {
@@ -196,7 +219,10 @@ export class HubDO {
             await storage.put(fixedRangePageKey(deviceId, index.revision, page), rows);
           }
           await storage.put(key, { ...index, pageCount: pages.length });
-          await storage.put(`fixedRangeRevision:${deviceId}`, { observedAt: index.observedAt, revision: index.revision, day: device.periodWindows.today.key });
+          const day = device.periodWindows.today.key;
+          await storage.put(`fixedRangeRevision:${deviceId}`, {
+            observedAt: index.observedAt, revision: index.revision, day, daily: Object.hasOwn(index.ranges, day)
+          });
           if (previous?.revision !== index.revision) await this.clearFixedRanges(storage, deviceId, previous);
         }
         return jsonResponse(200, { complete });
@@ -212,16 +238,31 @@ export class HubDO {
       || !rangesMatchDeviceDay(index.ranges, device.periodWindows?.today?.key)) {
       return jsonResponse(404, { error: 'not_found' });
     }
+    const day = device.periodWindows?.today?.key;
+    const legacy = url.searchParams.get('daily') !== '1' && Object.hasOwn(index.ranges, day);
+    let view = index;
+    let legacyPages;
+    if (legacy) {
+      const cacheKey = JSON.stringify([deviceId, index.revision]);
+      if (this.legacyRangeView?.key !== cacheKey) {
+        const pages = await Promise.all(Array.from({ length: index.pageCount }, (_, page) =>
+          this.state.storage.get(fixedRangePageKey(deviceId, index.revision, page))));
+        if (pages.some(page => !Array.isArray(page))) return jsonResponse(404, { error: 'not_found' });
+        this.legacyRangeView = { key: cacheKey, deviceId, ...legacyFixedRangeView(index.ranges, pages, day) };
+      }
+      legacyPages = this.legacyRangeView.pages;
+      view = { ...index, ranges: this.legacyRangeView.ranges, pageCount: legacyPages.length };
+    }
     if (!url.searchParams.has('page')) {
-      const { retiredRevisions: _retired, ...metadata } = index;
+      const { retiredRevisions: _retired, ...metadata } = view;
       return jsonResponse(200, metadata, {}, request);
     }
     if (url.searchParams.get('revision') !== index.revision) {
       return jsonResponse(409, { error: 'fixed_range_revision_mismatch' });
     }
     const page = url.searchParams.get('page');
-    const rows = /^(0|[1-9]\d*)$/.test(page) && Number(page) < index.pageCount
-      ? await this.state.storage.get(fixedRangePageKey(deviceId, index.revision, Number(page))) : null;
+    const rows = /^(0|[1-9]\d*)$/.test(page) && Number(page) < view.pageCount
+      ? legacyPages?.[Number(page)] ?? await this.state.storage.get(fixedRangePageKey(deviceId, index.revision, Number(page))) : null;
     return rows ? jsonResponse(200, { rows }, {}, request) : jsonResponse(404, { error: 'not_found' });
   }
 
@@ -268,9 +309,7 @@ export class HubDO {
         const id = key.slice('fixedRanges:'.length);
         const policy = policies.get(`${TITLE_POLICY_PREFIX}${id}`);
         if (index?.titleGeneration && !syncContent.acceptsSessionTitles(enabled, policy, index.titleGeneration)) {
-          await this.clearFixedRanges(storage, id, index);
-          await storage.put(key, fixedRangeUploads.retireFixedRangeSnapshot(index));
-          await storage.delete(`fixedRangeRevision:${id}`);
+          await this.revokeFixedRangeTitles(storage, id, index, await storage.get(`dev:${id}`));
         }
       }
       const devices = await storage.list({ prefix: 'dev:' });
@@ -338,9 +377,7 @@ export class HubDO {
         const rangeKey = `fixedRanges:${deviceId}`;
         const rangeIndex = await storage.get(rangeKey);
         if (rangeIndex?.titleGeneration) {
-          await this.clearFixedRanges(storage, deviceId, rangeIndex);
-          await storage.put(rangeKey, fixedRangeUploads.retireFixedRangeSnapshot(rangeIndex));
-          await storage.delete(`fixedRangeRevision:${deviceId}`);
+          await this.revokeFixedRangeTitles(storage, deviceId, rangeIndex, record);
         }
       }
       this.fixedRangeUploads.discard(deviceId);
@@ -688,8 +725,9 @@ export class HubDO {
       });
     }
 
-    if (request.method === 'POST' && ['/api/ingest', '/api/ingest/delta'].includes(url.pathname)) {
-      const delta = url.pathname === '/api/ingest/delta';
+    if (request.method === 'POST' && ['/api/ingest', '/api/ingest/delta', '/api/ingest/compact'].includes(url.pathname)) {
+      const compact = url.pathname === '/api/ingest/compact';
+      const delta = compact || url.pathname === '/api/ingest/delta';
       let payload;
       try { payload = await readIngestJson(request); }
       catch (error) {
@@ -697,7 +735,7 @@ export class HubDO {
           error: error.status === 413 ? 'payload_too_large' : 'bad_request', message: error.message
         });
       }
-      let record, upload, fixedRangeRevision = null;
+      let record, upload, fixedRangeRevision = null, historyCalendarRetained = false;
       try {
         record = await this.mutate(async () => {
           const incoming = delta ? this.uploadBaselines.prepare(payload) : payload;
@@ -705,8 +743,33 @@ export class HubDO {
           const deviceId = String(incoming.deviceId || incoming.id);
           const policy = await this.state.storage.get(`${TITLE_POLICY_PREFIX}${deviceId}`);
           const existing = await this.state.storage.get(`dev:${deviceId}`);
+          if (compact) {
+            const stamp = await this.state.storage.get(`fixedRangeRevision:${deviceId}`);
+            if (!fixedRangeUploads.hasCurrentFixedRangeObservation(existing) || existing.updatedAt !== incoming.updatedAt
+              || stamp?.daily !== true || stamp.observedAt !== incoming.updatedAt
+              || stamp.day !== incoming.periodWindows?.today?.key) {
+              throw Object.assign(new Error('fixed_range_revision_mismatch'), { status: 409, code: 'fixed_range_revision_mismatch' });
+            }
+          }
+          const removed = removedPagedClients(existing, incoming);
+          let previousWithSessions = existing;
+          if (removed.length && fixedRangeUploads.hasCurrentFixedRangeObservation(existing)) {
+            const index = await this.state.storage.get(`fixedRanges:${deviceId}`);
+            if (index?.revision && index.observedAt === existing.updatedAt
+              && Object.hasOwn(index.ranges, existing.periodWindows?.today?.key)) {
+              const pages = await Promise.all(Array.from({ length: index.pageCount }, (_, page) =>
+                this.state.storage.get(fixedRangePageKey(deviceId, index.revision, page))));
+              if (pages.every(Array.isArray)) previousWithSessions = restorePagedClientSessions(existing, index.ranges, pages, removed);
+            }
+          }
           const preserveSessionTitles = syncContent.acceptsSessionTitles(this.syncSessionTitles, policy, incoming.sessionTitleSyncGeneration);
-          const next = mergeSyncDeviceRecord(existing, { ...incoming, receivedAt: new Date().toISOString() }, { preserveSessionTitles });
+          const next = compact ? restoreDeviceHistory(existing, incoming) : mergeSyncDeviceRecord(previousWithSessions, {
+            ...incoming, receivedAt: new Date().toISOString()
+          }, { preserveSessionTitles });
+          historyCalendarRetained = !compact && incoming.history?.dailyTotalsOmitted > 0
+            && Boolean(incoming.history.dailyTotalsRevision)
+            && incoming.history.dailyTotalsRevision === next.history?.dailyTotalsRevision
+            && next.history.summary?.activeDaysComplete === true;
           const storageKey = `dev:${next.deviceId}`;
           const encoder = new TextEncoder();
           const storageBytes = encoder.encode(storageKey).byteLength
@@ -740,8 +803,8 @@ export class HubDO {
             const stamp = await this.state.storage.get(revisionKey);
             if (stamp?.observedAt === next.updatedAt && stamp.day === next.periodWindows?.today?.key) fixedRangeRevision = stamp.revision;
           }
-          this.uploadBaselines.forget(deviceId);
-          if (delta || request.headers.get(uploadDelta.UPLOAD_HEADER) === uploadDelta.UPLOAD_VERSION) {
+          if (!compact) this.uploadBaselines.forget(deviceId);
+          if (!compact && (delta || request.headers.get(uploadDelta.UPLOAD_HEADER) === uploadDelta.UPLOAD_VERSION)) {
             upload = this.uploadBaselines.commit(deviceId, stripSessionTextFromDeviceRecord(incoming, { preserveSessionTitles }));
           }
           return next;
@@ -753,8 +816,9 @@ export class HubDO {
       this.queueBroadcast();
       const response = {
         ok: true, deviceId: record.deviceId,
-        ...(request.headers.get(FIXED_RANGE_HEADER) === FIXED_RANGE_VERSION ? { fixedRanges: 1, fixedRangeDelta: 1, fixedRangeBatch: 1, fixedRangeIndexDelta: 1, fixedRangeRevision } : {}),
-        ...(upload ? { upload } : {})
+        ...(request.headers.get(FIXED_RANGE_HEADER) === FIXED_RANGE_VERSION ? { fixedRanges: 1, fixedRangeDelta: 1, fixedRangeBatch: 1, fixedRangeIndexDelta: 1, dailySessionRanges: 1, fixedRangeRevision } : {}),
+        ...(upload ? { upload } : {}),
+        ...(historyCalendarRetained ? { historyCalendarRetained: true } : {})
       };
       return jsonResponse(
         200,

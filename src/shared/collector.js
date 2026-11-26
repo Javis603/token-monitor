@@ -732,8 +732,8 @@ function composeNativeRanges(pastRanges, today, { allTimeSince, wslAllTime, code
   return { nativeRanges, nativeRangeWindows };
 }
 
-function nativeRangePastDays(todayKey) {
-  return Array.from({ length: NATIVE_RANGE_PAST_DAYS }, (_, index) => dayKeyAddDays(todayKey, -(index + 1)));
+function nativeRangePastDays(todayKey, includeMonth = false) {
+  return Array.from({ length: NATIVE_RANGE_PAST_DAYS + Number(includeMonth) }, (_, index) => dayKeyAddDays(todayKey, -(index + 1)));
 }
 
 function nativeDayWindow(key) {
@@ -742,12 +742,12 @@ function nativeDayWindow(key) {
 
 // Today, Month and All Time for one windowed scan, plus each native-range day
 // when the caller shows native ranges (standalone Electron only).
-function fullTickWindows(todayKey, allTimeSince, includeDays) {
+function fullTickWindows(todayKey, allTimeSince, includeDays, includeMonth = false) {
   return [
     { name: 'today', since: todayKey, until: todayKey },
     { name: 'month', since: `${todayKey.slice(0, 7)}-01`, until: todayKey },
     { name: 'allTime', since: String(allTimeSince), until: '' },
-    ...(includeDays ? nativeRangePastDays(todayKey).map((key) => ({ name: nativeDayWindow(key), since: key, until: key })) : [])
+    ...(includeDays ? nativeRangePastDays(todayKey, includeMonth).map((key) => ({ name: nativeDayWindow(key), since: key, until: key })) : [])
   ];
 }
 
@@ -1305,7 +1305,7 @@ async function collectUsageOnce(options) {
   const runFullWindowsFn = async (clientsCsv) => {
     const todayKey = localTodayKey(collectedAt);
     if (!runTokscaleWindowsScan || !isTokscaleWindowDay(allTimeSince)) return null;
-    const windows = fullTickWindows(todayKey, allTimeSince, options.nativeRangesEnabled === true);
+    const windows = fullTickWindows(todayKey, allTimeSince, options.nativeRangesEnabled === true, options.dailySessionSyncEnabled === true);
     const includesCursor = cursorSnapshot && normalizeClientsCsv(clientsCsv).split(',').includes('cursor');
     const scanClients = includesCursor ? withoutCursor(clientsCsv) : clientsCsv;
     const reports = scanClients
@@ -1324,11 +1324,12 @@ async function collectUsageOnce(options) {
     // The days only feed native ranges. A missing one (an older Cursor
     // snapshot, say) leaves those ranges on their History fallback instead of
     // failing the periods every surface shows.
-    for (const key of result.daysComplete ? nativeRangePastDays(todayKey) : []) {
+    for (const key of result.daysComplete ? nativeRangePastDays(todayKey, options.dailySessionSyncEnabled === true) : []) {
       const name = nativeDayWindow(key);
       const cursorDay = includesCursor ? cursorSnapshot.days?.[name] : undefined;
       if (!Array.isArray(reports[name]?.entries) || (includesCursor && !cursorDay)) {
-        result.daysComplete = false;
+        // The extra Month boundary is optional for the four legacy ranges.
+        if (key >= dayKeyAddDays(todayKey, -NATIVE_RANGE_PAST_DAYS)) result.daysComplete = false;
         continue;
       }
       result.days[key] = finishScanJson(reports[name], name, includesCursor, cursorDay);
@@ -1916,6 +1917,29 @@ async function collectUsageOnce(options) {
       ? { nativeRangeDays: Object.fromEntries(Object.entries(nativeDays).map(([key, period]) => [key, { sessions: period.sessions }])) }
       : {})
   };
+  if (options.dailySessionSyncEnabled === true && nativeRangeSnapshot) {
+    const past = nativeDays || anchor?.dailySessionPastDays;
+    const dayKeys = nativeRangePastDays(todayKey, true);
+    if (dayKeys.every(key => Number.isFinite(past?.[key]?.totalTokens)
+      && past[key].sessions && typeof past[key].sessions === 'object' && !Array.isArray(past[key].sessions))
+      && String(allTimeSince) <= dayKeys[dayKeys.length - 1]) {
+      const days = Object.fromEntries(dayKeys.map(key => [key, {
+        ...past[key],
+        sessions: Object.fromEntries(Object.entries(past[key].sessions).map(([id, row]) => [id, { ...row }]))
+      }]));
+      const { metadataCache, revokedT3ThreadKeys } = localSessionMetadataDeps;
+      for (const period of Object.values(days)) {
+        for (const [key, row] of Object.entries(period.sessions)) {
+          if (!(row.t3ThreadId || row.t3ParentLink)) continue;
+          if (!revokedT3ThreadKeys.has(key) && !metadataCache.get(key)?.t3ThreadRevoked) continue;
+          revokeT3SessionLinks(row);
+          revokedT3ThreadKeys.add(key);
+        }
+      }
+      propagateIdentity(allTime, days, { ...localSessionMetadataDeps, projectsFromToday: true });
+      summary.dailySessionPeriods = { ...days, [todayKey]: today };
+    }
+  }
   // The request ledger is this source's archive. A second per-session archive
   // would resurrect its contribution after a native rollout takes precedence.
   if (codexLocalView) summary.codexLocalSessionKeys = codexLocalView.sessionKeys;
@@ -1975,7 +1999,8 @@ async function collectUsageOnce(options) {
         nativePastRanges: { ...nativePastRanges, codexDotsUsage: codexLocalView ? codexDotsUsage : undefined }
       } : {}),
       ...(summary.nativeSessions ? { nativeSessions: summary.nativeSessions } : {}),
-      ...(summary.nativeProjects ? { nativeProjects: summary.nativeProjects } : {})
+      ...(summary.nativeProjects ? { nativeProjects: summary.nativeProjects } : {}),
+      ...(options.dailySessionSyncEnabled === true && nativeDays ? { dailySessionPastDays: nativeDays } : {})
     });
   }
   assertCollectionCalendar();
@@ -2561,15 +2586,14 @@ function startCollector(options) {
       // windowed scan also supplies the native-range days; an injected or
       // older scanner keeps the three serial scans and no days.
       const windows = !options.runTokscale && isTokscaleWindowDay(allTimeSince) && isTokscaleWindowDay(context.day)
-        ? fullTickWindows(context.day, allTimeSince, options.nativeRangesEnabled === true)
+        ? fullTickWindows(context.day, allTimeSince, options.nativeRangesEnabled === true, options.dailySessionSyncEnabled === true)
         : null;
       const reports = windows
         ? await runTokscaleWindows({ ...input, windows, commandTimeoutMs: allTimeScanTimeoutMs(options) })
         : null;
       throwIfAborted(signal);
       if (reports) {
-        // The days only feed native ranges. A missing one publishes the
-        // periods without days, which keeps those ranges on History.
+        // Keep available days. The collector checks each range's coverage.
         assertWindowReports(reports, windows.slice(0, 3));
         const days = {};
         for (const { name } of windows) {
@@ -2578,7 +2602,7 @@ function startCollector(options) {
           if (name === 'today' || name === 'month' || name === 'allTime') next[name] = reports[name];
           else days[name] = reports[name];
         }
-        if (windows.length > 3 && Object.keys(days).length === windows.length - 3) next.days = days;
+        if (Object.keys(days).length > 0) next.days = days;
       } else {
         for (const [period, flags] of [['today', ['--today']], ['month', ['--month']], ['allTime', ['--since', allTimeSince]]]) {
           next[period] = await scan({ ...input, flags, commandTimeoutMs: period === 'allTime' ? allTimeScanTimeoutMs(options) : commandTimeoutMs });
@@ -2716,6 +2740,9 @@ function startCollector(options) {
           catalogProjects: saved.catalogProjects,
           ...(typeof saved.cursorSnapshotKey === 'string' ? { cursorSnapshotKey: saved.cursorSnapshotKey } : {}),
           ...(saved.nativePastRanges && typeof saved.nativePastRanges === 'object' ? { nativePastRanges: saved.nativePastRanges } : {}),
+          ...(options.dailySessionSyncEnabled === true && saved.dailySessionPastDays
+            && typeof saved.dailySessionPastDays === 'object' && !Array.isArray(saved.dailySessionPastDays)
+            ? { dailySessionPastDays: saved.dailySessionPastDays } : {}),
           // Per-client partitions are deliberately rebuilt by the first
           // anchored all-client tick after restart. Persisted partitions
           // could be stale for clients that changed while the app was down.
@@ -2759,6 +2786,7 @@ function startCollector(options) {
         // Watch ticks after a restart reuse the anchor; without its past days
         // the native ranges would wait for the next full scan.
         ...(anchor.nativePastRanges ? { nativePastRanges: anchor.nativePastRanges } : {}),
+        ...(anchor.dailySessionPastDays ? { dailySessionPastDays: anchor.dailySessionPastDays } : {}),
         configFingerprint: configFingerprint(clients, allTimeSince, options.projectsEnabled, options.customScanPaths, tickPricingRevision, sourceOptions, tickSourceRevision),
         fullScanAt: new Date(lastFullScanAt).toISOString()
       }));
@@ -3035,6 +3063,7 @@ function startCollector(options) {
           ...(captured.nativeSessions ? { nativeSessions: captured.nativeSessions } : {}),
           ...(captured.nativeProjects ? { nativeProjects: captured.nativeProjects } : {}),
           ...(captured.nativePastRanges ? { nativePastRanges: captured.nativePastRanges } : {}),
+          ...(captured.dailySessionPastDays ? { dailySessionPastDays: captured.dailySessionPastDays } : {}),
           ...(cursorSnapshotKey ? { cursorSnapshotKey } : {})
         };
         wslAnchor = captured.wslBundle;
@@ -3053,6 +3082,12 @@ function startCollector(options) {
         const revokedLinks = captured.revokedT3ThreadKeys || [];
         const changedLinks = captured.changedT3ThreadKeys || [];
         if (revokedLinks.length || changedLinks.length) {
+          for (const period of Object.values(anchor.dailySessionPastDays || {})) {
+            for (const key of revokedLinks) {
+              const row = period?.sessions?.[key];
+              if (row) revokeT3SessionLinks(row);
+            }
+          }
           for (const period of ['today', 'month', 'allTime']) {
             for (const key of revokedLinks) {
               const row = anchor[period]?.sessions?.[key];

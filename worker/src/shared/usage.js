@@ -1425,6 +1425,15 @@ function normalizeRecordHistoryFields(record, nowIso = new Date().toISOString())
   return fields;
 }
 
+// History recovery follows an already accepted usage publication. It must
+// never reprocess that record's usage rows or their admitted titles.
+function restoreDeviceHistory(record, incoming) {
+  if (!record || !hasOwn(incoming, 'history') || record.historyAvailable === false) return record;
+  const { history } = normalizeRecordHistoryFields({ history: incoming.history });
+  if (!history?.summary?.activeDaysComplete || !Array.isArray(history.dailyTotals)) return record;
+  return { ...record, history };
+}
+
 // `options.normalizePeriod` lets a caller that sees the same period object in
 // several records reuse its normalization. It must return what normalizePeriod
 // would, and whatever it returns is read, never mutated.
@@ -1717,6 +1726,20 @@ function mergeDeviceRecord(existing, incoming) {
   if (!hasIncomingLimits) normalizedIncoming.limits = normalizedExisting.limits;
   else normalizedIncoming.limits = mergeDeviceLimits(normalizedExisting, normalizedIncoming);
   if (!hasIncomingHistory && hasOwn(normalizedExisting, 'history')) normalizedIncoming.history = normalizedExisting.history;
+  const incomingHistory = normalizedIncoming.history;
+  const previousHistory = normalizedExisting.history;
+  if (normalizedIncoming.historyAvailable !== false && incomingHistory?.dailyTotalsOmitted > 0
+    && !Array.isArray(incomingHistory.dailyTotals) && incomingHistory.dailyTotalsRevision
+    && incomingHistory.dailyTotalsRevision === previousHistory?.dailyTotalsRevision
+    && previousHistory.summary?.activeDaysComplete === true
+    && previousHistory.dailyTotals?.length === incomingHistory.dailyTotalsOmitted) {
+    const { dailyTotalsOmitted: _omitted, ...history } = incomingHistory;
+    normalizedIncoming.history = {
+      ...history,
+      dailyTotals: previousHistory.dailyTotals,
+      summary: { ...history.summary, activeDaysComplete: true }
+    };
+  }
   if (hasOwn(normalizedIncoming, 'history')) normalizedIncoming.history = historyWithAvailability(normalizedIncoming.history, normalizedIncoming.historyAvailable);
   if (hasIncomingTrackedClients) {
     preserveUntrackedClientUsage(normalizedExisting, normalizedIncoming, normalizedIncoming.trackedClients || []);
@@ -2440,6 +2463,7 @@ module.exports = {
   applyProjectRollups,
   canonicalProjectKey,
   carryDeviceHistory,
+  restoreDeviceHistory,
   emptyPeriod,
   extractUsageBundleFromTokscale,
   extractUsageFromTokscale,

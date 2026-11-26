@@ -871,6 +871,11 @@ for (const change of ['corrupt', 'locked', 'reassigned', 'parent removed', 'inco
   let captured;
   const options = { clients: 'antigravity', homeDir: s.home, env: {}, osInfo: {},
     historyEnabled: false, limitsEnabled: false, wslScanEnabled: false,
+    allTimeSince: '2024-01-01', nativeRangesEnabled: true, dailySessionSyncEnabled: true,
+    runTokscaleWindows: async ({ windows }) => {
+      const report = await options.runTokscale();
+      return Object.fromEntries(windows.map(({ name }) => [name, structuredClone(report)]));
+    },
     onAnchorComputed: value => { captured = value; },
     runTokscale: async () => ({ entries: [
       { client: 'antigravity', sessionId: 'acp-parent', model: 'm', input: 30 },
@@ -879,6 +884,8 @@ for (const change of ['corrupt', 'locked', 'reassigned', 'parent removed', 'inco
       { client: 'antigravity', sessionId: 'native-child', parentSessionId: 'acp-parent', model: 'm', input: 10 }
     ] }) };
   const full = await collectUsageOnce(options);
+  const closedDay = full.nativeRangeWindows.yesterday.start;
+  assert.equal(full.dailySessionPeriods[closedDay].sessions[key].parentSessionId, 'acp-parent');
   assert.equal(full.month.sessions[key].t3ThreadId, 'original');
   assert.equal(full.month.sessions[key].parentSessionId, 'acp-parent');
   assert.equal(full.month.sessions[nativeKey].parentSessionId, 'acp-parent');
@@ -914,7 +921,8 @@ for (const change of ['corrupt', 'locked', 'reassigned', 'parent removed', 'inco
     }
     next = await collectUsageOnce({ ...options, todayOnlyAnchor: { dateKey: localTodayKey(),
       today: full.today, month: full.month, allTime: full.allTime, todayPartitions: captured.todayPartitions,
-      sessionIdentityVersion: captured.sessionIdentityVersion } });
+      sessionIdentityVersion: captured.sessionIdentityVersion, nativePastRanges: captured.nativePastRanges,
+      dailySessionPastDays: captured.dailySessionPastDays } });
   } finally {
     legacy?.close();
   }
@@ -927,7 +935,13 @@ for (const change of ['corrupt', 'locked', 'reassigned', 'parent removed', 'inco
   if (reassigned) assert.deepEqual(new Set(captured.changedT3ThreadKeys), new Set([key, nativeKey, 'antigravity:new-parent']));
   else if (parentRemoved) assert.deepEqual(captured.changedT3ThreadKeys, [key]);
   else if (incomplete) assert.deepEqual(captured.changedT3ThreadKeys, []);
-  else assert.deepEqual(new Set(captured.revokedT3ThreadKeys), new Set([key, nativeKey]));
+  else {
+    assert.deepEqual(new Set(captured.revokedT3ThreadKeys), new Set([key, nativeKey]));
+    const closedSessions = next.dailySessionPeriods[closedDay].sessions;
+    assert.equal(closedSessions[key].t3ThreadId, undefined);
+    assert.equal(closedSessions[key].parentSessionId, undefined);
+    assert.equal(closedSessions[nativeKey].parentSessionId, 'acp-parent', 'native lineage survives T3 revocation');
+  }
 });
 
 for (const [client, driver, change] of [

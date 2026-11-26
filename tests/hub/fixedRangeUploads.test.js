@@ -435,3 +435,174 @@ test('fixed range batches split by UTF-8 body size including their envelope', ()
   const overflow = [...fixedRangeRequestBodies(pages, limit - 1)].map(body => JSON.parse(body));
   assert.deepEqual(overflow, pages);
 });
+
+for (const kind of ['Node', 'Worker']) test(`${kind} preserves the calendar and reconstructs Month from a 31-day upload`, async (t) => {
+  const { base, send } = await backend(kind, t, true);
+  const { dailyRangeKeys } = require('../../src/shared/fixedRangeSync');
+  const { resolveSyncedSessionPeriod } = require('../../src/electron/syncedFixedPeriod');
+  const headers = { authorization: 'Bearer fixture', 'content-type': 'application/json' };
+  const window = { start: '2026-10-01', end: '2026-10-31' };
+  const days = dailyRangeKeys(window);
+  const sessions = Object.fromEntries(Array.from({ length: 90 }, (_, index) => [`claude:${index}`, {
+    client: 'claude', sessionId: String(index), totalTokens: 10, projectLabel: 'Example', title: 'shared title',
+    models: Object.fromEntries(Array.from({ length: 10 }, (_, model) => [`fixture-model-${model}-${String(index).padStart(3, '0')}`, 1]))
+  }]));
+  const daily = Object.fromEntries(days.map(day => [day, { totalTokens: 900, clients: { claude: 900 }, sessions }]));
+  const month = mergePeriods(...Object.values(daily));
+  const summary = {
+    deviceId: 'calendar-first',
+    trackedClients: ['claude'],
+    updatedAt: '2026-10-31T12:00:00.000Z',
+    periodWindows: { today: { key: window.end, endsAt: '2026-11-01T00:00:00.000Z' },
+      month: { key: '2026-10', endsAt: '2026-11-01T00:00:00.000Z' }, timeZone: 'UTC' },
+    today: daily[window.end],
+    month,
+    allTime: { totalTokens: month.totalTokens },
+    nativeRangeWindows: { yesterday: { start: days[29], end: days[29] } },
+    nativeRanges: { yesterday: daily[days[29]] },
+    dailySessionPeriods: daily,
+    history: {
+      daily: [{ date: window.end, tokens: 900, cost: 0 }],
+      dailyTotals: days.map(date => ({ date, tokens: 900, cost: 0 })),
+      summary: { activeDays: 31, activeDaysComplete: true }
+    }
+  };
+  const titleUrl = base + '/api/sync/titles/calendar-first';
+  const titlePolicy = await send(titleUrl, { method: 'PUT', headers, body: JSON.stringify({ enabled: true }) });
+  assert.equal(titlePolicy.status, 200);
+  const { generation } = await titlePolicy.json();
+  const upload = createSyncPayloadUploader();
+  let sawUnpublishedPages = false;
+  const inspectUpload = async (url, init) => {
+    const response = await send(url, init);
+    if (!sawUnpublishedPages && init.method === 'PUT' && response.ok && !(await response.clone().json()).complete) {
+      const index = await send(base + '/api/fixed-ranges?deviceId=calendar-first&daily=1', { headers });
+      assert.equal(index.status, 404);
+      sawUnpublishedPages = true;
+    }
+    return response;
+  };
+  for (let i = 0; i < 2; i++) {
+    const result = await upload(inspectUpload, base + '/api/ingest', { summary, headers, syncSessionTitles: true, sessionTitleSyncGeneration: generation });
+    assert.equal(result.response.status, 200);
+    assert.equal((await result.response.json()).dailySessionRanges, 1);
+    assert.equal(Object.hasOwn(result.payload, 'dailySessionPeriods'), false);
+    if (i === 1) {
+      assert.equal(Object.keys(result.payload.month.sessions).length, 90);
+      assert.equal(result.payload.history.dailyTotals.length, 31);
+    }
+  }
+  assert.equal(sawUnpublishedPages, true);
+  const response = await send(base + '/api/stats', { headers });
+  assert.equal(response.status, 200);
+  const stats = await response.json();
+  assert.equal(Object.keys(stats.devices[0].periods.month.sessions).length, 90, 'older readers keep inline session detail');
+  assert.equal(stats.historyPreview.summary.activeDaysComplete, true);
+  assert.equal(stats.historyPreview.summary.activeDays, 31);
+  const revision = stats.fixedRangeRevisions[summary.deviceId];
+  assert.ok(revision);
+  const actual = await fetchFixedRange(send, base, summary.deviceId, 'month', window, headers, revision);
+  assert.equal(actual.totalTokens, 27_900);
+  assert.equal(actual.sessions['claude:0'].totalTokens, 310);
+  assert.equal(Object.keys(actual.sessions).length, 90);
+  assert.deepEqual(actual.projects, month.projects);
+  const legacyUrl = base + '/api/fixed-ranges?deviceId=calendar-first';
+  const legacyIndex = await (await send(legacyUrl, { headers })).json();
+  assert.deepEqual(Object.keys(legacyIndex.ranges), ['yesterday', 'week', 'last7', 'last30']);
+  const oldLast30 = legacyIndex.ranges.last30;
+  const legacyPage = await (await send(`${legacyUrl}&revision=${revision}&page=${oldLast30.firstPage}`, { headers })).json();
+  assert.equal(legacyPage.rows[0][0], 'last30');
+  const view = await resolveSyncedSessionPeriod('month', stats.devices, stats.fixedRangeRevisions, {
+    now: Date.parse(summary.updatedAt),
+    read: (id, name, bounds, current) => fetchFixedRange(send, base, id, name, bounds, headers, current)
+  });
+  assert.equal(view.detailsAvailable, true);
+  assert.equal(view.period.sessions['claude:0'].sourceDevice.deviceId, summary.deviceId);
+
+  assert.equal(actual.sessions['claude:0'].title, 'shared title');
+  const { serializeSyncPayload } = require('../../src/shared/syncPayload');
+  const legacyBody = serializeSyncPayload(summary, { syncSessionTitles: true, sessionTitleSyncGeneration: generation }).payload;
+  delete legacyBody.month.sessions['claude:89'];
+  legacyBody.sessionDetailsOmitted = { month: 1 };
+  const completeHistory = legacyBody.history;
+  legacyBody.history = { ...completeHistory, dailyTotalsOmitted: 31, summary: { ...completeHistory.summary, activeDaysComplete: false } };
+  delete legacyBody.history.dailyTotals;
+  const legacyIngest = await send(base + '/api/ingest', { method: 'POST',
+    headers: { ...headers, 'x-token-monitor-upload': '1' }, body: JSON.stringify(legacyBody) });
+  const { upload: baseline } = await legacyIngest.json();
+  const compact = await send(base + '/api/ingest/compact', { method: 'POST', headers, body: JSON.stringify({
+    deviceId: summary.deviceId, baseRevision: baseline.revision, patch: [
+      { op: 'replace', path: '/history', value: completeHistory },
+      { op: 'remove', path: '/today/sessions' },
+      { op: 'remove', path: '/month/sessions' }
+    ]
+  }) });
+  assert.equal(compact.status, 200);
+  const restoredStats = (await compact.json()).stats;
+  assert.equal(restoredStats.historyPreview.summary.activeDaysComplete, true);
+  assert.equal(restoredStats.devices[0].periods.month.sessions['claude:0'].title, 'shared title');
+  assert.equal(Object.keys(restoredStats.devices[0].periods.month.sessions).length, 89, 'the old reader keeps its accepted inline rows');
+  const ingestHistory = async (history) => {
+    const response = await send(base + '/api/ingest', { method: 'POST',
+      headers: { ...headers, 'x-token-monitor-upload': '1' }, body: JSON.stringify({ ...legacyBody, history }) });
+    assert.equal(response.status, 200);
+    return response.json();
+  };
+  const retainedCalendar = await ingestHistory(legacyBody.history);
+  assert.equal(retainedCalendar.historyCalendarRetained, true);
+  assert.equal(retainedCalendar.stats.historyPreview.summary.activeDaysComplete, true);
+
+  const changedHistory = { ...legacyBody.history, dailyTotalsRevision: 'a'.repeat(64) };
+  const changedCalendar = await ingestHistory(changedHistory);
+  assert.equal(changedCalendar.historyCalendarRetained, undefined);
+  assert.equal(changedCalendar.stats.historyPreview.summary.activeDaysComplete, false);
+  const revoked = await send(titleUrl, { method: 'PUT', headers, body: JSON.stringify({ enabled: false }) });
+  assert.equal(revoked.status, 200);
+  assert.equal(await fetchFixedRange(send, base, summary.deviceId, 'month', window, headers, revision), null);
+  const untitled = await fetchFixedRange(send, base, summary.deviceId, 'month', window, headers);
+  assert.equal(untitled.sessions['claude:0'].title, '');
+  assert.equal(untitled.sessions['claude:0'].totalTokens, 310);
+
+  const untracked = { ...summary, updatedAt: '2026-10-31T13:00:00.000Z', trackedClients: ['codex'],
+    today: { totalTokens: 0 }, month: { totalTokens: 0 }, allTime: { totalTokens: 0 },
+    nativeRanges: undefined, dailySessionPeriods: undefined };
+  const untrackedResult = await upload(send, base + '/api/ingest', { summary: untracked, headers });
+  assert.equal(untrackedResult.response.status, 200);
+  const retained = (await (await send(base + '/api/stats', { headers })).json()).devices[0].periods.month;
+  assert.equal(retained.totalTokens, 27_900);
+  assert.equal(retained.sessions['claude:0'].totalTokens, 310);
+  assert.equal(retained.sessions['claude:89'].totalTokens, 310, 'the Hub restores the omitted session before untracking');
+  assert.equal(Object.keys(retained.sessions).length, 90);
+
+  const legacyAck = async (url, init) => {
+    const response = await send(url, init);
+    if (init.method !== 'POST' || !response.ok) return response;
+    const ack = await response.json();
+    delete ack.dailySessionRanges;
+    return Response.json(ack);
+  };
+  const downgraded = await upload(legacyAck, base + '/api/ingest', {
+    summary: { ...summary, updatedAt: '2026-10-31T14:00:00.000Z' }, headers
+  });
+  assert.equal(downgraded.response.status, 200);
+  assert.equal(Object.keys(downgraded.payload.month.sessions).length, 90);
+  const downgradedIndex = await (await send(legacyUrl + '&daily=1', { headers })).json();
+  assert.deepEqual(Object.keys(downgradedIndex.ranges), ['yesterday']);
+  const rejectedDaily = async (url, init) => init.method === 'PUT' && Object.hasOwn(JSON.parse(init.body), 'firstPage')
+    ? Response.json({ error: 'payload_too_large' }, { status: 413 }) : send(url, init);
+  const recovered = await upload(rejectedDaily, base + '/api/ingest', {
+    summary: { ...summary, updatedAt: '2026-10-31T14:30:00.000Z' }, headers
+  });
+  assert.equal(recovered.response.status, 200);
+  const recoveredIndex = await (await send(legacyUrl + '&daily=1', { headers })).json();
+  assert.deepEqual(Object.keys(recoveredIndex.ranges), ['yesterday']);
+
+  const rejectedPages = async (url, init) => init.method === 'PUT'
+    ? Response.json({ error: 'payload_too_large' }, { status: 413 }) : send(url, init);
+  const incomplete = await upload(rejectedPages, base + '/api/ingest', {
+    summary: { ...summary, updatedAt: '2026-10-31T15:00:00.000Z' }, headers
+  });
+  assert.equal(incomplete.response.status, 200);
+  assert.equal(Object.keys(incomplete.payload.month.sessions).length, 90);
+  assert.equal((await send(legacyUrl + '&daily=1', { headers })).status, 404);
+});
