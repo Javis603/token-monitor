@@ -5220,7 +5220,7 @@ test('a rejection from the hub the user just left does not empty the one they ar
     // Hub A rejects the write as stale, and the user switches to hub B before the
     // rejection arrives. Its body is hub A's list; caching it would describe hub
     // B with hub A's records — or, as here, with an empty list hub B never had.
-    fetch: async () => {
+    fetchFromHub: async () => {
       context.hub = 'https://b.example';
       return { status: 409, ok: false, json: async () => ({ updatedAt: 'a-v2', subscriptions: [] }) };
     },
@@ -5238,7 +5238,7 @@ test('a rejection from the hub the user just left does not empty the one they ar
 
   // Staying put, the same rejection is worth caching: it is the hub's current list.
   context.hub = 'https://a.example';
-  context.fetch = async () => ({ status: 409, ok: false, json: async () => ({ updatedAt: 'a-v2', subscriptions: [{ id: 'theirs' }] }) });
+  context.fetchFromHub = async () => ({ status: 409, ok: false, json: async () => ({ updatedAt: 'a-v2', subscriptions: [{ id: 'theirs' }] }) });
   await assert.rejects(() => vm.runInContext("writeSharedSubscriptionsNow([{ id: 'x' }], 'https://a.example', 'v1');", context), /stale_write/);
   assert.deepEqual(plain(context.cached), { updatedAt: 'a-v2', subscriptions: [{ id: 'theirs' }] });
 });
@@ -5281,7 +5281,7 @@ test('hub reads and writes run one at a time, in the order they were asked for',
         context.log.push(`read:${context.server.updatedAt}`);
         return { ...context.server };
       },
-      fetch: async (_url, init) => {
+      fetchFromHub: async (_url, init) => {
         await new Promise((resolve) => setTimeout(resolve, 5));
         const body = JSON.parse(init.body);
         context.server = { updatedAt: body.subscriptions[0].id, subscriptions: body.subscriptions };
@@ -5373,7 +5373,7 @@ test('a hub that accepts the connection and stops answering does not wedge the l
     // that stays open: the first request ends only because the deadline ends it.
     AbortSignal: { timeout: (ms) => ({ ms }) },
     deadlines: [],
-    fetch: async (_url, init) => {
+    fetchFromHub: async (_url, init) => {
       context.deadlines.push(init?.signal?.ms);
       if (context.deadlines.length === 1) {
         await new Promise((resolve) => setTimeout(resolve, 1));
@@ -5415,7 +5415,7 @@ test('a save queued against one hub is not written to the one the user moved to'
     subscriptionsEndpoint: () => ({ url: `${context.hub}/api/subscriptions`, headers: {} }),
     AbortSignal: { timeout: () => null },
     written: [],
-    fetch: async (url) => {
+    fetchFromHub: async (url) => {
       context.written.push(url);
       return { ok: true, status: 200, json: async () => ({ updatedAt: 'v2', subscriptions: [] }) };
     },
@@ -5637,7 +5637,7 @@ test('coming back to a hub does not write against the other hub token', async ()
     subscriptionsEndpoint: () => ({ url: `${context.hub}/api/subscriptions`, headers: {} }),
     AbortSignal: { timeout: () => null },
     sent: [],
-    fetch: async (url, init) => {
+    fetchFromHub: async (url, init) => {
       context.sent.push({ url, base: JSON.parse(init.body).baseUpdatedAt });
       return { ok: true, status: 200, json: async () => ({ updatedAt: 'a-v2', subscriptions: [] }) };
     },
@@ -5862,7 +5862,7 @@ test('adopting set-aside records keeps whatever the hub gained while it waited',
     subscriptionsEndpoint: () => ({ url: 'https://a.example/api/subscriptions', headers: {} }),
     AbortSignal: { timeout: () => null },
     sent: [],
-    fetch: async (_url, init) => {
+    fetchFromHub: async (_url, init) => {
       const body = JSON.parse(init.body);
       context.sent.push({ base: body.baseUpdatedAt, ids: body.subscriptions.map((entry) => entry.id) });
       return { ok: true, status: 200, json: async () => ({ updatedAt: 'a-v3', subscriptions: body.subscriptions }) };

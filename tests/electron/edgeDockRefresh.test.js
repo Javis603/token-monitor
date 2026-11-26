@@ -171,7 +171,7 @@ test('Client manual refresh paints the fresh Hub response without a stats push o
   context.latestStats = old;
   context.dockStats = old;
   context.effectiveHubConfig = () => ({ url: 'https://hub.example', secret: 'test' });
-  context.fetch = async (url) => { requests.push(url); return { ok: true, json: async () => fresh }; };
+  context.fetchFromHub = async (url) => { requests.push(url); return { ok: true, json: async () => fresh }; };
   context.hubModeRequestIsCurrent = () => true;
   context.setLatestHubStatsCache = () => {};
   context.composeLocalSyncSummary = (stats) => stats;
@@ -193,7 +193,7 @@ test('a delayed derived-period repaint retains the manually refreshed snapshot u
     deviceRuntimeHandle: null,
     mode: 'client',
     effectiveHubConfig: () => ({ url: 'https://hub.example' }),
-    fetch: async () => ({ ok: true, json: async () => fresh }),
+    fetchFromHub: async () => ({ ok: true, json: async () => fresh }),
     hubModeRequestIsCurrent: () => true,
     setLatestHubStatsCache() {},
     composeLocalSyncSummary: (stats) => stats,
@@ -306,7 +306,7 @@ function clientFixture() {
     deviceRuntimeHandle: null,
     mode: 'client',
     effectiveHubConfig: () => ({ url: 'https://hub.example' }),
-    fetch: async () => ({ ok: true, json: () => response.promise }),
+    fetchFromHub: async () => ({ ok: true, json: () => response.promise }),
     hubModeRequestIsCurrent: () => true,
     setLatestHubStatsCache() {},
     composeLocalSyncSummary: (stats) => stats,
@@ -328,7 +328,7 @@ test('App-only Client refresh updates the dock and replaces its previous manual 
   assert.equal(context.dockStats, fresh);
   assert.equal(context.latestStats, old);
   const newer = { updatedAt: 'newer' };
-  context.fetch = async () => ({ ok: true, json: async () => newer });
+  context.fetchFromHub = async () => ({ ok: true, json: async () => newer });
   assert.equal(await context.refreshManualStats(), newer);
   context.repaintDockSurfaces();
   assert.equal(context.dockStats, newer);
