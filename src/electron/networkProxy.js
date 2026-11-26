@@ -101,7 +101,13 @@ function isPrivateNetworkHubOrigin(origin, platform) {
   return Boolean(host) && (!host.includes('.') || host.endsWith('.local') || host.endsWith('.ts.net'));
 }
 
-function createDesktopHubFetch(proxyFetch, directFetch = globalThis.fetch, platform = process.platform) {
+const directHubAgent = new Agent();
+
+function directHubFetch(url, init) {
+  return globalThis.fetch(url, { ...init, dispatcher: directHubAgent });
+}
+
+function createDesktopHubFetch(proxyFetch, directFetch = directHubFetch, platform = process.platform) {
   return (url, init) => isPrivateNetworkHubOrigin(url, platform) ? directFetch(url, init) : proxyFetch(url, init);
 }
 

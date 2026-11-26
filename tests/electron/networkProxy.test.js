@@ -1,7 +1,9 @@
 'use strict';
 
 const assert = require('node:assert/strict');
+const http = require('node:http');
 const test = require('node:test');
+const { MockAgent, getGlobalDispatcher, setGlobalDispatcher } = require('undici');
 
 const {
   AppProxyAgent,
@@ -55,6 +57,26 @@ test('desktop Hub requests to private and Tailscale networks stay direct', async
   ];
   for (const url of [...direct, ...proxied]) await fetchFromHub(url);
   assert.deepEqual(routes, [...direct.map((url) => ['direct', url]), ...proxied.map((url) => ['proxy', url])]);
+});
+
+test('the default direct Hub fetch bypasses the global dispatcher', async (t) => {
+  const server = http.createServer((_req, res) => res.end('direct'));
+  await new Promise((resolve, reject) => {
+    server.once('error', reject);
+    server.listen(0, '127.0.0.1', resolve);
+  });
+  t.after(() => server.close());
+  const previous = getGlobalDispatcher();
+  const blocked = new MockAgent();
+  blocked.disableNetConnect();
+  setGlobalDispatcher(blocked);
+  t.after(async () => {
+    setGlobalDispatcher(previous);
+    await blocked.close();
+  });
+  const fetchFromHub = createDesktopHubFetch(() => assert.fail('local Hub must bypass the proxy'));
+  const response = await fetchFromHub(`http://127.0.0.1:${server.address().port}/api/stats`);
+  assert.equal(await response.text(), 'direct');
 });
 
 test('proxy URLs normalize to scheme://host[:port]', () => {
