@@ -531,11 +531,18 @@ for (const [source, dir] of [
     options.runTokscale = async ({ flags }) => ({ entries: flags.includes('--today') ? [] : [
       { client: 'antigravity', sessionId: 'turn', input: 10, output: 2, cost: 0.5, lastUsedAt: beforeMidnight }
     ] });
-    write.run('CASCADE_RUN_STATUS_RUNNING', 1, oldPrompt, beforeMidnight);
+    write.run('CASCADE_RUN_STATUS_IDLE', 0, oldPrompt, oldPrompt);
     const overnight = await collectUsageOnce(options);
-    assert.equal(sessionActivityState(overnight.month.sessions[key], clock), 'running');
+    assert.equal(sessionActivityState(overnight.month.sessions[key], clock), 'ended');
     const overnightAnchor = { dateKey: localTodayKey(afterMidnight), today: overnight.today, month: overnight.month,
       allTime: overnight.allTime, todayPartitions: captured.todayPartitions };
+    // The provider may flip status before updating either timestamp.
+    write.run('CASCADE_RUN_STATUS_RUNNING', 1, oldPrompt, oldPrompt);
+    const restarted = await collectUsageOnce({ ...options, todayOnlyAnchor: overnightAnchor, targetClients: ['antigravity'] });
+    for (const period of ['month', 'allTime']) {
+      assert.equal(sessionActivityState(restarted[period].sessions[key], clock), 'running', period);
+      assert.equal(restarted[period].sessions[key].lastUsedAt, beforeMidnight);
+    }
     write.run('CASCADE_RUN_STATUS_IDLE', 0, oldPrompt, afterMidnight.toISOString());
     const finished = await collectUsageOnce({ ...options, todayOnlyAnchor: overnightAnchor, targetClients: ['antigravity'] });
     assert.equal(finished.today.sessions[key], undefined);

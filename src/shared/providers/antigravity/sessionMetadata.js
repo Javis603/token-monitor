@@ -124,7 +124,7 @@ function canReadTurns(dbPath) {
 }
 
 // Anchored scans only reload today's usage. A resumed conversation can still
-// have all its tokens in earlier days, so query recent prompts and idle updates
+// have all its tokens in earlier days, so query running rows and recent idle updates
 // instead of looking up every historical session on each watch tick.
 function readRecentTurns(home, deps, now) {
   const turns = new Map();
@@ -143,7 +143,8 @@ function readRecentTurns(home, deps, now) {
         const rows = db.prepare(`
           SELECT conversation_id, status, not_fully_idle, last_user_input_time, last_modified_time
           FROM conversation_summaries
-          WHERE julianday(last_user_input_time) >= julianday(?1)
+          WHERE status = 'CASCADE_RUN_STATUS_RUNNING'
+            OR julianday(last_user_input_time) >= julianday(?1)
             OR (status = 'CASCADE_RUN_STATUS_IDLE' AND not_fully_idle = 0
               AND julianday(last_modified_time) >= julianday(?1))
         `).all({ '?1': new Date(since).toISOString() });
@@ -158,9 +159,9 @@ function readRecentTurns(home, deps, now) {
     }
     for (const row of cached.rows) {
       const turn = readTurn(row);
-      // A recent catalog update makes an idle row worth checking even when its
-      // prompt is old. Only the prompt can advance a session's activity time.
-      if (turn && (turn.inputAt >= since || (turn.turnEnded && catalogTime(row.last_modified_time) >= since))) {
+      // RUNNING can reach the catalog before either timestamp updates. The
+      // displayed state still expires based on the session's activity time.
+      if (turn && (!turn.turnEnded || turn.inputAt >= since || catalogTime(row.last_modified_time) >= since)) {
         rememberTurn(turns, row.conversation_id, turn);
       }
     }
