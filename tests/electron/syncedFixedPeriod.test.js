@@ -121,6 +121,41 @@ test('an idle legacy device with empty History leaves the exact range and detail
   assert.deepEqual(result.devices.map(row => row.deviceId), ['a']);
 });
 
+test('a stale device with History usage only outside Week does not hide exact Week details', async () => {
+  const a = device('a');
+  const b = device('b', '2026-11-24');
+  b.periodWindows.today.endsAt = day + 'T00:00:00.000Z';
+  b.periods.today.totalTokens = 0;
+  const histories = [{
+    ...b, historyAvailable: true, history: { daily: [{ date: '2026-11-22', tokens: 120 }] }
+  }];
+  const result = await resolveSyncedFixedPeriod('week', [a, b], { a: 'rev-a', b: 'rev-b' }, {
+    ...options,
+    read: id => id === 'a' ? period('a', 20) : null,
+    history: devices => historyFallbackForDevices('week', devices, histories, options)
+  });
+  assert.equal(result.detailsAvailable, true);
+  assert.equal(result.period.totalTokens, 20);
+  assert.equal(result.period.sessions['claude:a'].totalTokens, 20);
+  assert.equal(result.period.projects.shared.tokens, 20);
+  assert.deepEqual(result.devices.map(row => [row.deviceId, row.period.totalTokens]), [['a', 20], ['b', 0]]);
+});
+
+test('a History-only device with cost but zero tokens still leaves Week details incomplete', async () => {
+  const [a, b] = [device('a'), device('b')];
+  b.periods.today.totalTokens = 0;
+  const histories = [{
+    ...b, historyAvailable: true, history: { daily: [{ date: '2026-11-24', tokens: 0, cost: 1 }] }
+  }];
+  const result = await resolveSyncedFixedPeriod('week', [a, b], { a: 'rev-a' }, {
+    ...options,
+    read: () => period('a', 20),
+    history: devices => historyFallbackForDevices('week', devices, histories, options)
+  });
+  assert.equal(result.detailsAvailable, false);
+  assert.equal(result.period.costUsd, 1);
+});
+
 test('mismatched History cannot make a missing device contribution look like zero', () => {
   const b = { ...device('b'), historyAvailable: true };
   const fetched = { ...b, updatedAt: day + 'T08:00:00.000Z',
