@@ -100,6 +100,32 @@
     return providerId === 'claude' ? 1 : TRAY_PROVIDER_OPTICAL_RATIO;
   }
 
+  // The provider marks the tray can draw right now. The tray, bubble and notch
+  // only pick from clients and limit providers that report data, plus providers
+  // a custom layout names, so the rest of the mark catalog never needs to be
+  // rasterized. A provider that first reports data while the window is
+  // hibernated shows the app icon until the window wakes, the same fallback a
+  // system theme change uses.
+  function trayProviderIconDemand({ stats, layouts = [] } = {}) {
+    const ids = new Set();
+    const add = (value) => {
+      const id = String(value || '').trim().toLowerCase();
+      if (id && id !== 'auto' && id !== 'app') ids.add(id);
+    };
+    for (const period of Object.values(stats?.periods || {})) {
+      for (const id of Object.keys(period?.clients || {})) add(id);
+      for (const id of Object.keys(period?.clientCosts || {})) add(id);
+    }
+    for (const provider of stats?.limits?.providers || []) add(provider?.provider);
+    for (const layout of layouts) {
+      for (const item of layout?.items || []) {
+        add(item?.source?.provider);
+        for (const row of item?.rows || []) add(row?.provider);
+      }
+    }
+    return ids;
+  }
+
   function createTrayProviderIconDeliveryGuard() {
     let latestDeliveryId = 0;
     return {
@@ -116,6 +142,7 @@
   return {
     createTrayProviderIconDeliveryGuard,
     isFlatInkPixels,
+    trayProviderIconDemand,
     trayProviderIconSources,
     trayProviderBadgeLayout,
     trayProviderOpticalLayout,

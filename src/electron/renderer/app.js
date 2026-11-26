@@ -17698,6 +17698,7 @@ function roundedRectPath(ctx, x, y, w, h, r) {
 const trayProviderImages = {};
 const trayProviderImageIds = new WeakMap();
 const trayProviderImageOpticalSamples = new WeakMap();
+const trayProviderIconsRequested = new Set();
 const trayProviderIconDeliveryGuard = window.TokenMonitorTrayProviderIcons.createTrayProviderIconDeliveryGuard();
 const trayComposers = {};
 let customTrayClockTimer = null;
@@ -18449,6 +18450,7 @@ function trayDataUrlForMode(mode, size = 44, colors, options = {}) {
 }
 
 async function maybeUpdateBarsIcon(options = {}) {
+  syncTrayProviderIconDemand();
   if (options.refreshComposers !== false && isSettingsSurfaceVisible()) {
     refreshTrayComposers();
     if (edgeDockAvailable() && state.settings?.edgeDockEnabled === true) edgeDockComposer?.render();
@@ -18863,10 +18865,39 @@ function providerImageToPngDataUrl(img, size, showBadge = false, options = {}) {
   return canvas.toDataURL('image/png');
 }
 
+function trayProviderIconDemand() {
+  const demand = window.TokenMonitorTrayProviderIcons.trayProviderIconDemand({
+    stats: state.stats,
+    layouts: ['trayCustomLayout', 'floatingBubbleCustomLayout', 'notchCustomLayout']
+      .map((key) => state.settings?.[key])
+  });
+  return [...demand].filter((id) => trayIconProviderIds.has(id));
+}
+
+// A provider that starts reporting usage after startup needs its mark delivered
+// before the tray can pick it. Ids already requested are not retried, so a mark
+// that failed to load cannot turn every stats push into another delivery.
+function syncTrayProviderIconDemand() {
+  if (!state.settings || !window.tokenMonitor.setTrayIcons) return;
+  if (trayProviderIconDemand().some((id) => !trayProviderIconsRequested.has(id))) {
+    void deliverTrayProviderIcons();
+  }
+}
+
+// Draws only ever read the 128 px optical sample, so keep that canvas as the
+// provider's image and let the decoded SVG go.
+async function loadTrayProviderMark(path) {
+  const sample = providerImageOpticalSample(await loadImage(path));
+  trayProviderImageOpticalSamples.set(sample.canvas, sample);
+  return sample.canvas;
+}
+
 async function deliverTrayProviderIcons(showBadge = state.settings?.showTrayProviderBadge === true) {
   if (!window.tokenMonitor.setTrayIcons) return;
   const deliveryId = trayProviderIconDeliveryGuard.begin();
-  const sources = window.TokenMonitorTrayProviderIcons.trayProviderIconSources(trayIconProviderIds);
+  const demand = trayProviderIconDemand();
+  for (const id of demand) trayProviderIconsRequested.add(id);
+  const sources = window.TokenMonitorTrayProviderIcons.trayProviderIconSources(demand);
   sources.app = '../../../assets/icons/tray-token-monitor.png';
   const modules = state.pluginCatalog?.limits?.modules || [];
   for (const module of modules) {
@@ -18878,7 +18909,11 @@ async function deliverTrayProviderIcons(showBadge = state.settings?.showTrayProv
   const icons = {};
   for (const [id, path] of Object.entries(sources)) {
     try {
-      const img = await loadImage(path);
+      // Built-in marks never change, so a redelivery for the badge or the system
+      // theme repaints from the kept sample. Plugin icons can, so reload those.
+      const img = id.startsWith('plugin:')
+        ? await loadImage(path)
+        : trayProviderImages[id] || await loadTrayProviderMark(path);
       if (!trayProviderIconDeliveryGuard.isCurrent(deliveryId)) return;
       trayProviderImages[id] = img;
       trayProviderImageIds.set(img, id);

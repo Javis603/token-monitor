@@ -8,6 +8,7 @@ const test = require('node:test');
 const {
   createTrayProviderIconDeliveryGuard,
   isFlatInkPixels,
+  trayProviderIconDemand,
   trayProviderIconSources,
   trayProviderBadgeLayout,
   trayProviderOpticalLayout,
@@ -162,4 +163,27 @@ test('the alpha floor and the tolerance are both adjustable for callers', () => 
   const twoTones = rgbaPixels([20, 20, 20, 255], [60, 60, 60, 255]);
   assert.equal(isFlatInkPixels(twoTones), false);
   assert.equal(isFlatInkPixels(twoTones, { tolerance: 64 }), true);
+});
+
+test('tray icon demand covers reported usage, limit providers and layout picks', () => {
+  const demand = trayProviderIconDemand({
+    stats: {
+      periods: {
+        today: { clients: { codex: 10, ' Claude ': 2 }, clientCosts: { hermes: 0.2 } },
+        allTime: { clients: { opencode: 4 } }
+      },
+      limits: { providers: [{ provider: 'cursor' }, {}] }
+    },
+    layouts: [
+      { items: [{ type: 'icon', source: { provider: 'claude-brand' } }, { type: 'icon', source: { provider: 'auto' } }] },
+      { items: [{ type: 'bars', rows: [{ provider: 'kimi' }, { provider: 'auto' }] }] },
+      null
+    ]
+  });
+  assert.deepEqual([...demand].sort(), ['claude', 'claude-brand', 'codex', 'cursor', 'hermes', 'kimi', 'opencode']);
+});
+
+test('tray icon demand stays empty without data or layouts', () => {
+  assert.deepEqual([...trayProviderIconDemand()], []);
+  assert.deepEqual([...trayProviderIconDemand({ stats: { periods: { today: null } }, layouts: [{ items: [{ type: 'text' }] }] })], []);
 });
