@@ -7,7 +7,7 @@
 // once the objects die because nothing is asking for the space, so the main
 // process keeps hundreds of megabytes committed after the numbers on screen
 // have long settled. The usage worker does the same after a publish; main has
-// no such boundary, so it checks on a 30-second idle timer instead.
+// no such boundary, so it checks on a 15-second idle timer instead.
 //
 // A full collection blocks the main thread for tens of milliseconds. That is
 // why it only runs when no app window has focus, and why a collection that
@@ -18,11 +18,15 @@
 // runs it on every idle pass, but that callback leaves a visible window alone.
 // Main itself only collects above its threshold.
 
-const MIN_HEAP_TOTAL_BYTES = 64 * 1024 * 1024;
-const RETAINED_HEADROOM_BYTES = 32 * 1024 * 1024;
-const DEFAULT_INTERVAL_MS = 30 * 1000;
-// Keep a one-shot startup check at one minute alongside the recurring timer.
-const DEFAULT_INITIAL_DELAY_MS = 60 * 1000;
+// Main's live set is small: with the window open and live updates arriving it
+// holds about 35-50 MiB, so a 64 MiB floor with 32 MiB of headroom almost never
+// fired while the committed heap stayed well above what was in use.
+const MIN_HEAP_TOTAL_BYTES = 32 * 1024 * 1024;
+const RETAINED_HEADROOM_BYTES = 16 * 1024 * 1024;
+const DEFAULT_INTERVAL_MS = 15 * 1000;
+// Keep a one-shot check shortly after startup, once the first scan has settled,
+// alongside the recurring timer.
+const DEFAULT_INITIAL_DELAY_MS = 20 * 1000;
 // A hung inspector session would otherwise leave `running` true forever and
 // stop every later pass. Main collection is cheap; ten seconds is already far
 // beyond a healthy collection.

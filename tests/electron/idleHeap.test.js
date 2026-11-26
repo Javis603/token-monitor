@@ -65,10 +65,10 @@ test('a large committed heap is collected and raises the next threshold', async 
   assert.equal(await harness.collector.run(), true);
   assert.equal(harness.collections(), 1);
 
-  // The retained set after collection sets a 72 MiB threshold (40 + 32).
-  harness.setHeap({ heapTotal: 70 * MiB, heapUsed: 60 * MiB });
+  // The retained set after collection sets a 56 MiB threshold (40 + 16).
+  harness.setHeap({ heapTotal: 54 * MiB, heapUsed: 46 * MiB });
   assert.equal(await harness.collector.run(), false, 'a heap near the retained set is not collected again');
-  harness.setHeap({ heapTotal: 80 * MiB, heapUsed: 70 * MiB });
+  harness.setHeap({ heapTotal: 64 * MiB, heapUsed: 52 * MiB });
   assert.equal(await harness.collector.run(), true, 'growth past the retained headroom is collected');
 });
 
@@ -167,8 +167,8 @@ test('start installs the one-shot check and recurring interval, and stop clears 
   });
   collector.start();
   collector.start();
-  assert.equal(installedInitial.ms, 60 * 1000);
-  assert.equal(installedInterval.ms, 30 * 1000);
+  assert.equal(installedInitial.ms, 20 * 1000);
+  assert.equal(installedInterval.ms, 15 * 1000);
   assert.equal(initialTimer.unrefCalled, true);
   assert.equal(intervalTimer.unrefCalled, true);
   installedInitial.fn();
