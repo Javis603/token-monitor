@@ -1646,6 +1646,17 @@ async function collectUsageOnce(options) {
             delete retained.sessionEntry;
             localSessionMetadataDeps.revokedT3ThreadKeys.add(key);
           }
+          // The activity projection keeps its own native view beside the
+          // periods; a stale entry there would be copied back onto the row by
+          // the projection's retention rules on the next heartbeat. The
+          // served summary takes this view from the anchor.
+          for (const rows of Object.values(anchor.nativeSessions || {})) {
+            const retained = rows?.[key];
+            if (retained) {
+              revokeT3SessionLinks(retained);
+              delete retained.sessionEntry;
+            }
+          }
         }
         const broader = [[anchor.month, month], [anchor.allTime, allTime]];
         // A period-local T3 alias can keep its place while it is verified.

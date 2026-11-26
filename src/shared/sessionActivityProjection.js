@@ -121,8 +121,16 @@
       const previous = summary.nativeSessions?.[name]?.[key];
       if (!previous) return [key, row];
       const linked = { ...row };
-      if (!linked.t3ThreadId && previous.t3ThreadId) linked.t3ThreadId = previous.t3ThreadId;
-      if (!linked.sessionEntry && previous.sessionEntry) linked.sessionEntry = previous.sessionEntry;
+      // The retained link and entry travel together: a fresh row without the
+      // link lost it to a verified revocation, and copying a previous entry
+      // back would resurrect the revoked attribution. A previous with no link
+      // never carried one, so its entry still fills the unbound row.
+      if (!linked.t3ThreadId && previous.t3ThreadId) {
+        linked.t3ThreadId = previous.t3ThreadId;
+        if (!linked.sessionEntry && previous.sessionEntry) linked.sessionEntry = previous.sessionEntry;
+      } else if (!linked.t3ThreadId && !previous.t3ThreadId && !linked.sessionEntry && previous.sessionEntry) {
+        linked.sessionEntry = previous.sessionEntry;
+      }
       if (!linked.parentSessionId && previous.parentSessionId) {
         linked.parentSessionId = previous.parentSessionId;
         if (previous.parentClient) linked.parentClient = previous.parentClient;
