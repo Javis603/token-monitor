@@ -1670,6 +1670,7 @@ html.native-liquid-glass .dash-skyline-reset-btn {
 
 /* Exact .heat.lvl-0..4 fill parity with styles.css (tested by tests/electron/homeOverview.test.js) */
 .heat { stroke: none; stroke-width: 0; cursor: pointer; transition: fill 260ms ease, stroke 140ms ease; }
+.heat[role="button"]:focus-visible { stroke: var(--accent); stroke-width: 2px; outline: none; }
 .heat.lvl-0 { fill: rgba(var(--overlay-rgb), 0.03); }
 .heat.lvl-1 { fill: rgba(var(--chart-heat-1-rgb), 0.18); }
 .heat.lvl-2 { fill: rgba(var(--chart-heat-2-rgb), 0.45); }

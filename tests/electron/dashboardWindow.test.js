@@ -1773,6 +1773,14 @@ test('dashboard guards synced ambiguous transcripts, native activity redaction, 
   // 5. Switching to Local Only while preserving saved hubUrl still reads local Last 7 Days session details
   settingsHandler({ hubMode: 'local' });
   assert.equal(context.state.settings.hubUrl, 'https://hub-a');
+  assert.equal(context.state.stats, null, 'old destination Stats disappear immediately');
+  assert.equal(context.state.history, null, 'old destination History disappears immediately');
+  let finishStats;
+  context.window.tokenMonitor.getStats = () => new Promise(resolve => { finishStats = resolve; });
+  await context.refresh();
+  assert.equal(context.state.stats, null, 'early destination History never shares a view with old Stats');
+  assert.equal(context.state.history.daily[0].tokens, 222);
+  finishStats(null);
   statsHandler({
     event: 'stats',
     data: {
@@ -3909,4 +3917,74 @@ test('Work Panel updates workspace tool attribution without replacing a retained
   assert.equal(rebuilds, 1);
   assert.equal(attributes.get('data-bg'), workspace.barBackground);
   assert.equal(fill.style.background, workspace.barBackground);
+});
+
+
+test('reduced motion reveals mounted heatmap cells and invalidates the pending frame', () => {
+  const js = read('src', 'electron', 'renderer', 'dashboard.js');
+  const cellAttributes = new Set(['data-motion-hidden', 'opacity', 'data-d']);
+  const classes = new Set(['is-motion-pending']);
+  const context = {
+    state: { motion: 'entry' }, heatmapMotionGeneration: 1, settleHeroNumber: null, homeLimitMotion: null,
+    motionPreferenceApi: { normalize: value => value }, prefersReducedMotion: () => true,
+    document: { documentElement: { dataset: {} } },
+    els: { heatmap: {
+      querySelectorAll: () => [{ removeAttribute: name => cellAttributes.delete(name) }],
+      classList: { remove: name => classes.delete(name) }
+    } }
+  };
+  vm.runInNewContext(js.slice(js.indexOf('function applyReduceMotionPreference('), js.indexOf('function captureGeometry('))
+    + js.slice(js.indexOf('function revealHeatmapEntry('), js.indexOf('function animateHeatmapEntry(')), context);
+  context.applyReduceMotionPreference('on');
+  assert.deepEqual([...cellAttributes], ['data-d']);
+  assert.equal(classes.has('is-motion-pending'), false);
+  assert.equal(context.heatmapMotionGeneration, 2);
+});
+
+test('Dashboard date labels format UTC calendar keys independently of the desktop timezone', () => {
+  const expected = [];
+  const context = {
+    state: { locale: 'en-US' },
+    Date: class {
+      static UTC(...args) { return Date.UTC(...args); }
+      constructor(epoch) { this.date = new Date(epoch); }
+      toLocaleString(locale, options) {
+        expected.push(options.timeZone);
+        return this.date.toLocaleString(locale, { timeZone: 'America/Los_Angeles', ...options });
+      }
+    }
+  };
+  const js = read('src', 'electron', 'renderer', 'dashboard.js');
+  vm.runInNewContext(js.slice(js.indexOf('function monthLabel('), js.indexOf('function chartSize(')), context);
+  assert.equal(context.monthLabel('2026-11'), 'Nov');
+  assert.equal(context.longDate('2026-11-26'), 'Nov 26');
+  assert.deepEqual(expected, ['UTC', 'UTC']);
+});
+
+
+test('2D heatmap assigns one tab stop across recorded dates and retains the selected day', () => {
+  const cell = date => {
+    const attributes = new Map([['data-d', date]]);
+    return {
+      getAttribute: name => attributes.get(name),
+      hasAttribute: name => attributes.has(name),
+      setAttribute: (name, value) => attributes.set(name, value),
+      removeAttribute: name => attributes.delete(name)
+    };
+  };
+  const [earlier, unrecorded, latest] = ['2026-11-24', '2026-11-25', '2026-11-26'].map(cell);
+  const js = read('src', 'electron', 'renderer', 'dashboard.js');
+  const state = { locale: 'en-US', dayMap: new Map([['2026-11-24', {}], ['2026-11-26', {}]]) };
+  const context = { state, els: { heatmap: { querySelectorAll: () => [earlier, unrecorded, latest] } } };
+  vm.runInNewContext(js.slice(js.indexOf('const HEATMAP_DAY_SELECTOR'), js.indexOf('function setHeatmapMarkup(')), context);
+  assert.equal(context.syncHeatmapKeyboard(), latest);
+  assert.equal(latest.getAttribute('tabindex'), '0');
+  assert.equal(latest.getAttribute('aria-label'), 'November 26, 2026');
+  assert.equal(earlier.getAttribute('tabindex'), '-1');
+  assert.equal(unrecorded.hasAttribute('tabindex'), false);
+  assert.equal(context.syncHeatmapKeyboard('2026-11-24'), earlier);
+  assert.equal(context.syncHeatmapKeyboard(), earlier);
+  state.dayMap.delete('2026-11-24');
+  assert.equal(context.syncHeatmapKeyboard(), latest);
+  assert.equal(earlier.hasAttribute('tabindex'), false);
 });

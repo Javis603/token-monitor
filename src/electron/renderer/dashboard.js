@@ -235,6 +235,7 @@ function applyReduceMotionPreference(value) {
   document.documentElement.dataset.reduceMotion = state.reduceMotion;
   if (!prefersReducedMotion()) return;
   heatmapMotionGeneration += 1;
+  revealHeatmapEntry();
   state.motion = 'none';
   settleHeroNumber?.();
   homeLimitMotion?.settle?.();
@@ -313,9 +314,17 @@ function animateCandles() {
   });
 }
 
+function revealHeatmapEntry() {
+  els.heatmap?.querySelectorAll('[data-motion-hidden]').forEach(cell => {
+    cell.removeAttribute('data-motion-hidden');
+    cell.removeAttribute('opacity');
+  });
+  els.heatmap?.classList.remove('is-motion-pending');
+}
+
 function animateHeatmapEntry() {
   if (prefersReducedMotion()) {
-    els.heatmap.classList.remove('is-motion-pending');
+    revealHeatmapEntry();
     return;
   }
   const continuingEntry = els.heatmap.classList.contains('is-motion-pending');
@@ -590,7 +599,7 @@ function daysBetween(a, b) {
 function monthLabel(ym) {
   const mo = Number(String(ym).slice(5));
   if (state.locale.startsWith('zh')) return `${mo}月`;
-  return new Date(Date.UTC(2000, mo - 1, 1)).toLocaleString('en-US', { month: 'short' });
+  return new Date(Date.UTC(2000, mo - 1, 1)).toLocaleString('en-US', { month: 'short', timeZone: 'UTC' });
 }
 
 function longDate(key) {
@@ -598,7 +607,7 @@ function longDate(key) {
   if (!m) return String(key);
   const mo = Number(m[2]), d = Number(m[3]);
   if (state.locale.startsWith('zh')) return `${mo}月${d}日`;
-  return new Date(Date.UTC(2000, mo - 1, d)).toLocaleString('en-US', { month: 'short', day: 'numeric' });
+  return new Date(Date.UTC(2000, mo - 1, d)).toLocaleString('en-US', { month: 'short', day: 'numeric', timeZone: 'UTC' });
 }
 
 function chartSize() {
@@ -2599,10 +2608,43 @@ function renderHeatLegend(visible) {
     + `<span class="dash-heat-legend-label">${escapeHtml(moreLabel)}</span>`;
 }
 
+const HEATMAP_DAY_SELECTOR = '.heat-base-layer .heat[data-d]';
+
+function syncHeatmapKeyboard(preferredDate) {
+  const cells = [...els.heatmap.querySelectorAll(HEATMAP_DAY_SELECTOR)];
+  const recorded = cells.filter(cell => state.dayMap.has(cell.getAttribute('data-d')));
+  const current = recorded.find(cell => cell.getAttribute('data-d') === preferredDate)
+    || recorded.find(cell => cell.getAttribute('tabindex') === '0')
+    || recorded.at(-1);
+  const available = new Set(recorded);
+  for (const cell of cells) {
+    if (!available.has(cell)) {
+      if (cell.hasAttribute('tabindex')) {
+        for (const attr of ['tabindex', 'role', 'aria-label']) cell.removeAttribute(attr);
+      }
+      continue;
+    }
+    const index = cell === current ? '0' : '-1';
+    if (cell.getAttribute('tabindex') !== index) cell.setAttribute('tabindex', index);
+    if (cell.hasAttribute('role')) continue;
+    cell.setAttribute('role', 'button');
+    const date = cell.getAttribute('data-d');
+    cell.setAttribute('aria-label', new Date(`${date}T00:00:00Z`).toLocaleDateString(state.locale, {
+      dateStyle: 'long', timeZone: 'UTC'
+    }));
+  }
+  return current;
+}
+
 function setHeatmapMarkup(markup) {
+  const active = document.activeElement;
+  const restoreFocus = active?.matches(HEATMAP_DAY_SELECTOR) && els.heatmap.contains(active);
+  const selected = els.heatmap.querySelector(`${HEATMAP_DAY_SELECTOR}[tabindex="0"]`)?.getAttribute('data-d');
   if (spotlightGradient) hideHeatmapHover();
   els.heatmap.innerHTML = markup;
   spotlightGradient = els.heatmap.querySelector('#dashActivitySpotlightGradient');
+  const current = syncHeatmapKeyboard(selected);
+  if (restoreFocus) current?.focus({ preventScroll: true });
 }
 
 function renderActivity(overview) {
@@ -2772,6 +2814,7 @@ function renderActivity(overview) {
             const brightEl = brightCells[idx];
             if (brightEl) setLevel(brightEl, c.intensity);
           });
+          syncHeatmapKeyboard();
         }
       } else if (heatGridSig !== lastHeatmapGridSig || heatValuesSig !== lastHeatmapValuesSig || hideHeatmapForEntry) {
         lastHeatmapGridSig = heatGridSig;
@@ -2896,13 +2939,17 @@ function drawerStatGrid(pairs) {
   ).join('')}</div>`;
 }
 
-function closeDrawer() {
+function closeDrawer({ restoreFocus = true } = {}) {
+  const focusDate = state.drawer?.returnHeatmapDate;
   drawerRequestToken += 1;
   state.drawer = null;
   if (typeof els.drawer?.hidePopover === 'function' && els.drawer.matches?.(':popover-open')) {
     try { els.drawer.hidePopover(); } catch (_) {}
   }
   els.drawerScrim?.classList.add('hidden');
+  if (restoreFocus && focusDate && state.tab === 'activity' && state.stageView === '2d') {
+    els.heatmap?.querySelector(`${HEATMAP_DAY_SELECTOR}[data-d="${focusDate}"][tabindex]`)?.focus({ preventScroll: true });
+  }
 }
 
 function isRemoteSession(session) {
@@ -3694,6 +3741,28 @@ function shouldAcceptPulledHistory(pulledStats, statsAccepted, { pullSource = nu
   return true;
 }
 
+function resetDashboardSource() {
+  statsSourceGeneration += 1;
+  state.overview = null;
+  state.history = null;
+  localSessionActivity = null;
+  syncedSessionPagesByPeriod.clear();
+  syncedSessionPagesRequests.clear();
+  if (state.drawer) closeDrawer({ restoreFocus: false });
+  deviceRateTracker?.reset?.();
+  rateHistory?.reset?.();
+  deviceRateTrackers.clear();
+  if (rateExpiryTimer) {
+    clearTimeout(rateExpiryTimer);
+    rateExpiryTimer = null;
+  }
+  if (typeof refreshQueued !== 'undefined') refreshQueued = true;
+  if (typeof dashboardReady !== 'undefined' && dashboardReady && !document.hidden
+    && (typeof refreshRunning === 'undefined' || !refreshRunning)) {
+    scheduleDashboardRefresh();
+  }
+}
+
 function applyIncomingStats(nextStats, { expectedPushSeq = null, fromPush = false, mode = '' } = {}) {
   if (!nextStats || isStaleStatsSnapshot(nextStats, expectedPushSeq, { fromPush })) {
     return false;
@@ -3702,25 +3771,8 @@ function applyIncomingStats(nextStats, { expectedPushSeq = null, fromPush = fals
   const nextSnap = nextStats?.snapshot || null;
   const sourceChanged = Boolean(prevSnap && nextSnap && prevSnap.source !== nextSnap.source);
   if (sourceChanged) {
-    statsSourceGeneration += 1;
+    resetDashboardSource();
     state.statsMode = mode || nextStats?.mode || '';
-    state.history = null;
-    localSessionActivity = null;
-    syncedSessionPagesByPeriod.clear();
-    syncedSessionPagesRequests.clear();
-    if (state.drawer) closeDrawer();
-    deviceRateTracker?.reset?.();
-    rateHistory?.reset?.();
-    deviceRateTrackers.clear();
-    if (rateExpiryTimer) {
-      clearTimeout(rateExpiryTimer);
-      rateExpiryTimer = null;
-    }
-    if (typeof refreshQueued !== 'undefined') refreshQueued = true;
-    if (typeof dashboardReady !== 'undefined' && dashboardReady && !document.hidden
-      && (typeof refreshRunning === 'undefined' || !refreshRunning)) {
-      scheduleDashboardRefresh();
-    }
   } else if (mode || nextStats?.mode) {
     state.statsMode = mode || nextStats.mode;
   }
@@ -4448,12 +4500,13 @@ window.tokenMonitor.onSettingsPush?.((next) => {
   const prevHubUrl = previousSettings?.hubUrl;
   state.settings = { ...(state.settings || {}), ...next };
   const destinationChanged = ('hubMode' in next && next.hubMode !== prevHubMode)
-    || ('hubUrl' in next && next.hubUrl !== prevHubUrl);
+    || (state.settings.hubMode === 'client' && 'hubUrl' in next && next.hubUrl !== prevHubUrl);
   if (destinationChanged) {
-    statsSourceGeneration += 1;
-    syncedSessionPagesByPeriod.clear();
-    syncedSessionPagesRequests.clear();
-    if (state.drawer) closeDrawer();
+    state.stats = null;
+    state.statsMode = state.settings.hubMode === 'local' ? 'local' : 'sync';
+    latestBaseStats = null;
+    allTimeSessions?.invalidate?.();
+    resetDashboardSource();
   }
   if ('dashboardFlat' in next) {
     state.flat = next.dashboardFlat === true;
@@ -4463,7 +4516,7 @@ window.tokenMonitor.onSettingsPush?.((next) => {
   // so a changed preference still repaints below.
   const previousReduceMotion = state.reduceMotion;
   applyAppearance(state.settings);
-  let needsRender = false;
+  let needsRender = destinationChanged;
   const nextLocale = i18n.resolveLocale(state.settings.locale || state.settings.language, navigator.languages);
   if (state.locale !== nextLocale) {
     state.locale = nextLocale;
@@ -5021,7 +5074,10 @@ els.drawerBody?.addEventListener?.('click', (ev) => {
 els.drawerBody?.addEventListener?.('keydown', handleKeyboardClick);
 window.addEventListener('keydown', (ev) => {
   if (ev.key === 'Escape') {
-    if (state.drawer) closeDrawer();
+    if (state.drawer) {
+      ev.preventDefault();
+      closeDrawer();
+    }
     if (state.deviceMenuOpen) {
       setDeviceMenuOpen(false);
       els.deviceTrigger.focus({ preventScroll: true });
@@ -5078,13 +5134,36 @@ els.heatmap.addEventListener('pointermove', (ev) => {
   showHeatTooltip(date, state.dayMap && state.dayMap.get(date), anchor);
 });
 els.heatmap.addEventListener('pointerleave', hideHeatmapHover);
-els.heatmap.addEventListener('click', (ev) => {
-  const hit = ev.target.closest('.heat[data-d], .iso-col[data-d]');
+function openHeatmapDay(hit, keyboard = false) {
   const rawDate = hit?.getAttribute('data-d');
   const date = /^\d{4}-\d{2}-\d{2}$/.test(String(rawDate || '')) ? rawDate : null;
   if (!date) return;
   const day = (state.overview?.dailyLedger || []).find((d) => d.date === date);
-  if (day) openDrawer({ kind: 'day', day });
+  if (day) openDrawer({ kind: 'day', day, returnHeatmapDate: keyboard ? date : null });
+}
+
+els.heatmap.addEventListener('click', (ev) => openHeatmapDay(ev.target.closest('.heat[data-d], .iso-col[data-d]')));
+els.heatmap.addEventListener('keydown', (ev) => {
+  const selector = `${HEATMAP_DAY_SELECTOR}[tabindex]`;
+  const hit = ev.target.closest(selector);
+  if (!hit || ev.altKey || ev.ctrlKey || ev.metaKey || ev.shiftKey) return;
+  if (ev.key === 'Enter' || ev.key === ' ') {
+    ev.preventDefault();
+    if (!ev.repeat) openHeatmapDay(hit, true);
+    return;
+  }
+  const delta = { ArrowLeft: -1, ArrowUp: -1, ArrowRight: 1, ArrowDown: 1 }[ev.key];
+  if (!delta && ev.key !== 'Home' && ev.key !== 'End') return;
+  ev.preventDefault();
+  const cells = [...els.heatmap.querySelectorAll(selector)];
+  const last = cells.length - 1;
+  const index = ev.key === 'Home' ? 0 : ev.key === 'End' ? last
+    : Math.max(0, Math.min(last, cells.indexOf(hit) + delta));
+  const next = cells[index];
+  if (next === hit) return;
+  els.heatmap.querySelector(`${selector}[tabindex="0"]`)?.setAttribute('tabindex', '-1');
+  next.setAttribute('tabindex', '0');
+  next.focus();
 });
 
 els.heroRibbon?.addEventListener('pointermove', (ev) => {
