@@ -8,6 +8,10 @@ const FIELDS = {
   reasoningOutputTokens: 'reasoning_output_tokens', totalTokens: 'total_tokens'
 };
 const OPTIONAL = new Set(['cachedInputTokens', 'cacheWriteInputTokens', 'reasoningOutputTokens']);
+// Every counter the engine reports is cumulative. A drop in any of them -
+// including the optional cached, cache-write and reasoning counters - is a
+// reset, not a smaller measurement.
+const MONOTONIC_FIELDS = ['inputTokens', 'outputTokens', 'totalTokens', 'cachedInputTokens', 'cacheWriteInputTokens', 'reasoningOutputTokens'];
 const MAX_THREADS = 50000;
 const MAX_REQUESTS = 500000;
 
@@ -134,7 +138,7 @@ class TaskUsageLedger {
     if (t.snapshots.has(key)) return;
     t.snapshots.add(key);
     if (t.snapshots.size > MAX_REQUESTS) throw new RangeError('snapshot-limit-exceeded');
-    if (t.snapshot && ['inputTokens', 'outputTokens', 'totalTokens'].some((k) => u[k] < t.snapshot[k])) {
+    if (t.snapshot && MONOTONIC_FIELDS.some((k) => u[k] !== null && t.snapshot[k] !== null && u[k] < t.snapshot[k])) {
       this.diagnose('nonmonotonic-snapshot', id);
     }
     if (!t.snapshot || u.totalTokens >= t.snapshot.totalTokens) t.snapshot = u;

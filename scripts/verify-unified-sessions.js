@@ -86,10 +86,12 @@ app.whenReady().then(async () => {
   const state = await evaluate(`({ rows:document.querySelectorAll('#breakdown .row').length, cloudRows:document.querySelectorAll('#breakdown [data-cloud-only="true"]').length, total:document.getElementById('totalTokens').textContent, separateCloudButton:!!document.getElementById('cloudUsageButton'), activeSession:document.querySelector('.shell').classList.contains('session-mode') })`);
   assert.equal(state.cloudRows, 2); assert.equal(state.total, '42,800'); assert.equal(state.separateCloudButton, false); assert.equal(state.activeSession, true);
   await waitFor(`document.querySelector('[data-cloud-thread-id="${ids[1]}"] .row-value')?.textContent === '18,300'`);
-  const dots = await evaluate(`(() => { const row = document.querySelector('[data-cloud-thread-id="${ids[1]}"]'); return { count: document.querySelectorAll('[data-cloud-thread-id="${ids[1]}"]').length, cloudOnly: row?.dataset.cloudOnly, value: row?.querySelector('.row-value').textContent, cost: row?.querySelector('.row-cost').textContent, costTitle: row?.querySelector('.row-cost').title }; })()`);
+  const dots = await evaluate(`(() => { const row = document.querySelector('[data-cloud-thread-id="${ids[1]}"]'); return { count: document.querySelectorAll('[data-cloud-thread-id="${ids[1]}"]').length, cloudOnly: row?.dataset.cloudOnly, value: row?.querySelector('.row-value').textContent, cost: row?.querySelector('.row-cost').textContent, costLabel: row?.querySelector('.row-cost').getAttribute('aria-label') }; })()`);
   assert.equal(dots.count, 1); assert.equal(dots.cloudOnly, 'false'); assert.equal(dots.value, '18,300');
-  assert.match(dots.cost, /\+ \?/); assert.doesNotMatch(dots.costTitle, /云端|cloud/i);
-  assert.equal(await evaluate(`document.querySelector('[data-cloud-only="true"] .row-cost').title`), '累计 · 云端');
+  assert.match(dots.cost, /\+ \?/); assert.doesNotMatch(dots.costLabel, /云端|cloud/i);
+  // The row label is the aria-label, and a cloud row prefers the cloud usage
+  // label over the local cost format.
+  assert.equal(await evaluate(`document.querySelector('[data-cloud-only="true"] .row-cost').getAttribute('aria-label')`), '累计 · 云端');
   await capture('unified-sessions.png');
   await evaluate(`document.querySelector('#breakdown [data-cloud-only="true"]').click()`);
   await waitFor(`document.querySelector('#session-detail .cloud-session-detail') !== null`);
@@ -161,7 +163,7 @@ app.whenReady().then(async () => {
   await waitFor(`document.getElementById('cloudSessionsSettingStatus').textContent === window.TokenMonitorCloudSessionRows.labels('zh-CN').error`);
   assert.equal(await evaluate(`document.getElementById('cloudSessionsEnabled').disabled`), true);
   assert.deepEqual(errors, []);
-  const result = { actualRenderer: true, actualPreload: true, syntheticData: true, rows: state.rows, cloudRows: state.cloudRows, totalUnchanged: 42800, dotsSameThreadSingleRow: true, dotsPeriodValuePreserved: true, dotsUnpricedCostPreserved: true, cloudCostTooltipIsLifetime: true, cloudDetailNoLocalRead: true, localDetailPreserved: true, pollingUpdatesRows: true, periodFilterByActivity: true, settingsControls: audit.controls, cloudReads: audit.cloudReads, noCloudTabOrButton: true, loginSwitchClearedRowsSynchronously: true, controlHeldStaleReadSuppressed: true };
+  const result = { actualRenderer: true, actualPreload: true, syntheticData: true, rows: state.rows, cloudRows: state.cloudRows, totalUnchanged: 42800, dotsSameThreadSingleRow: true, dotsPeriodValuePreserved: true, dotsUnpricedCostPreserved: true, cloudCostLabelIsLifetime: true, cloudDetailNoLocalRead: true, localDetailPreserved: true, pollingUpdatesRows: true, periodFilterByActivity: true, settingsControls: audit.controls, cloudReads: audit.cloudReads, noCloudTabOrButton: true, loginSwitchClearedRowsSynchronously: true, controlHeldStaleReadSuppressed: true };
   fs.writeFileSync(path.join(output, 'acceptance.json'), JSON.stringify(result, null, 2), { mode: 0o600 });
   console.log('UNIFIED_SESSIONS_PASS', JSON.stringify(result)); finish();
 }).catch(finish);

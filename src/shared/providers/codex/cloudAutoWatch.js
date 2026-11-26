@@ -1,7 +1,7 @@
 'use strict';
 
 // Automatic discovery + viewer attachment. This transport cannot create turns.
-const { CloudTransport, MAX_BYTES } = require('./cloudTransport');
+const { CloudTransport } = require('./cloudTransport');
 const { CloudLiveMeter } = require('./cloudLiveMeter');
 const { SOURCE_KINDS, page, identifier, error } = require('./cloudUsage');
 const { escapeHtml } = require('./usageView');
@@ -10,6 +10,10 @@ const EVENT_METHODS = new Set(['thread/tokenUsage/updated', 'thread/status/chang
 const safeCode = (e) => /^[A-Z_]{1,80}$/.test(e?.code || '') ? e.code : 'CLOUD_READ_FAILED';
 
 class AutoCloudConnection extends CloudTransport {
+  // The observer may attach to and detach from a thread it discovered. It
+  // still cannot start turns, read transcripts or change configuration.
+  sendMethods = ALLOWED;
+
   constructor(options = {}, deps = {}) {
     super({ ...options, budgetMs: 180000 }, deps);
     this.eventSink = null;
@@ -26,14 +30,12 @@ class AutoCloudConnection extends CloudTransport {
     this.timer = setTimeout(() => this.fail('HEARTBEAT_TIMEOUT'), 180000);
   }
   onMessage(data) {
-    super.onMessage(data);
-    if (this.closed || !this.eventSink) return;
-    const bytes = typeof data === 'string' ? Buffer.from(data) : data instanceof ArrayBuffer ? Buffer.from(data) : null;
-    if (!bytes || bytes.length > MAX_BYTES) return;
-    let event;
-    try { event = JSON.parse(bytes.toString('utf8')); } catch (_) { return; }
-    if (event.id !== undefined || !EVENT_METHODS.has(event.method)) return;
-    try { this.assertIdentity(); this.eventSink(event); }
+    // The base dispatcher already parsed and validated the frame; reusing that
+    // message keeps every observed frame decoded exactly once.
+    const message = super.onMessage(data);
+    if (this.closed || !this.eventSink || !message) return;
+    if (message.id !== undefined || !EVENT_METHODS.has(message.method)) return;
+    try { this.assertIdentity(); this.eventSink(message); }
     catch (e) { this.fail(safeCode(e)); }
   }
 }
@@ -83,10 +85,17 @@ class AutoCloudMonitor {
     const row = prior || { threadId: meta.threadId, detectedAt: new Date(this.now()).toISOString(), meter: new CloudLiveMeter(meta.threadId, { maxSamples: 16 }), lastActiveMs: 0, attachedAt: null, lastAttachedConnection: null, attachAttempts: 0, gapCount: 0, parentConflict: false };
     if (row.engineParentId && meta.engineParentId && row.engineParentId !== meta.engineParentId) row.parentConflict = true;
     const delegation = row.delegationParentId;
+    const isNew = !prior;
+    const previousStatus = prior ? prior.runtimeStatus : null;
     Object.assign(row, meta);
     row.delegationParentId ||= delegation || null;
     if (row.parentConflict) row.engineParentId = null;
+    // The tail grace starts when the thread stops being active. A thread that
+    // is first seen idle - or that discovery reports idle after an active
+    // period - must not keep the old active timestamp, or the next scan
+    // detaches it immediately instead of honoring the grace window.
     if (meta.runtimeStatus === 'active') row.lastActiveMs = this.now();
+    else if (isNew || previousStatus === 'active') row.lastActiveMs = this.now();
     row.lastSeenMs = this.now(); this.rows.set(meta.threadId, row); return row;
   }
   observe(event) {

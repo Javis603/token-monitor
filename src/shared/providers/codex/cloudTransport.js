@@ -12,6 +12,11 @@ const WS_URL = 'wss://codex-cloud-backend.chatgpt.com/';
 const USAGE_ORIGIN = 'https://chatgpt.com';
 const ROUTES = Object.freeze({ estimates: '/backend-api/wham/usage/thread-estimates/query', quotas: '/backend-api/wham/usage/thread_usage/query_v2' });
 const READ_METHODS = new Set(['thread/list', 'thread/read', 'thread/turns/list']);
+// The transport is read-only by construction. `request()` narrows this
+// further for transcript reads; `send()` must never be a wider door than the
+// transport's own boundary, so the allowed methods live here and subclasses
+// can only ever add the read-only lifecycle calls they need.
+const SEND_METHODS = new Set(['initialize', ...READ_METHODS]);
 function readJson(file, maxBytes) {
   let fd;
   try {
@@ -67,6 +72,10 @@ function cachedReferences(home, credential) {
   return out;
 }
 class CloudTransport {
+  // Prototype level, so every instance - including a subclass - inherits the
+  // same read-only boundary before it can send anything.
+  sendMethods = SEND_METHODS;
+
   constructor(options = {}, deps = {}) {
     this.home = path.resolve(options.home || process.env.CODEX_HOME || path.join(os.homedir(), '.codex'));
     this.timeoutMs = options.timeoutMs ?? 15000; const budgetMs = options.budgetMs ?? 90000;
@@ -119,22 +128,27 @@ class CloudTransport {
     this.socket.send(JSON.stringify({ method: 'initialized', params: {} })); this.initialized = true;
   }
   onMessage(data) {
-    if (this.closed) return;
+    if (this.closed) return null;
     const b = typeof data === 'string' ? Buffer.from(data) : data instanceof ArrayBuffer ? Buffer.from(data) : null;
-    if (!b || b.length > MAX_BYTES || (this.bytesRead += b.length) > 64 * MAX_BYTES) { this.fail('PAYLOAD_LIMIT'); return; }
-    let m; try { m = JSON.parse(b.toString('utf8')); } catch (_) { this.fail('INVALID_RPC_JSON'); return; }
-    if (!m || typeof m !== 'object' || Array.isArray(m)) { this.fail('INVALID_RPC_MESSAGE'); return; }
+    if (!b || b.length > MAX_BYTES || (this.bytesRead += b.length) > 64 * MAX_BYTES) { this.fail('PAYLOAD_LIMIT'); return null; }
+    let m; try { m = JSON.parse(b.toString('utf8')); } catch (_) { this.fail('INVALID_RPC_JSON'); return null; }
+    if (!m || typeof m !== 'object' || Array.isArray(m)) { this.fail('INVALID_RPC_MESSAGE'); return null; }
     if (m.method) {
       if (m.id !== undefined) this.socket.send(JSON.stringify({ id: m.id, error: { code: -32601, message: 'Read-only usage client' } }));
-      return;
+      return m;
     }
-    const p = this.pending.get(m.id); if (!p) return;
+    const p = this.pending.get(m.id); if (!p) return m;
     this.pending.delete(m.id); clearTimeout(p.timer);
     if (m.error) p.reject(error(m.error.code === -32601 ? 'UNSUPPORTED_METHOD' : m.error.code === -32602 ? 'INVALID_RPC_PARAMS' : 'CLOUD_RPC_ERROR'));
     else if (!m.result || typeof m.result !== 'object' || Array.isArray(m.result)) p.reject(error('INVALID_RPC_RESULT'));
     else p.resolve(m.result);
+    return m;
   }
   send(method, params) {
+    // A transport built without its constructor inherits the base boundary
+    // and fails closed rather than sending an unlisted method.
+    const allowed = this.sendMethods instanceof Set ? this.sendMethods : SEND_METHODS;
+    if (!allowed.has(method)) return Promise.reject(error('READ_ONLY_METHOD_DENIED'));
     this.assertIdentity(); if (this.pending.size >= 4) return Promise.reject(error('CONCURRENCY_LIMIT'));
     const id = this.nextId++; this.audit.rpcRequests += 1;
     return new Promise((resolve, reject) => {
@@ -170,7 +184,7 @@ class CloudTransport {
     }
     const chunks = []; let size = 0;
     try { for await (const chunk of response.body) { size += chunk.length; if (size > MAX_BYTES) { response.body.destroy(); throw error('PAYLOAD_LIMIT'); } chunks.push(chunk); } }
-    catch (e) { throw error(e.code === 'PAYLOAD_LIMIT' ? e.code : 'HTTP_BODY_FAILED'); }
+    catch (e) { throw error(e.code === 'PAYLOAD_LIMIT' ? e.code : (this.failure || 'HTTP_BODY_FAILED')); }
     this.assertIdentity();
     try { return JSON.parse(Buffer.concat(chunks).toString('utf8')); } catch (_) { throw error('INVALID_HTTP_JSON'); }
   }

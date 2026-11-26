@@ -39,6 +39,20 @@ test('default null-source catalog and source-filtered archive queries are unione
 test('same thread/turn repeated on later pages is counted once', async () => {
   const rpc = fake({ history: (p) => ({ data: [turn(11)], nextCursor: p.cursor ? null : 'next' }) });
   const r = await collectCloudUsage(rpc, { threadIds: [id(1)], now: NOW }); assert.equal(r.turns.length, 1); assert.equal(r.totals.observedSettledTokens, 100);
+  // The second page must really be requested, or this proves nothing about
+  // de-duplication.
+  assert.equal(rpc.calls.filter(([m]) => m === 'thread/turns/list').length, 2);
+});
+test('an empty discovered catalog is a complete reading, not an unavailable one', async () => {
+  const rpc = fake({ list: () => ({ data: [], nextCursor: null }) });
+  const r = await collectCloudUsage(rpc, { discover: true, now: NOW });
+  assert.equal(r.status, 'available'); assert.equal(r.threads.length, 0); assert.equal(r.scope, 'bounded-cloud-catalog');
+});
+test('the reported scope follows the work that was done, not only the requested ids', async () => {
+  const selected = await collectCloudUsage(fake(), { threadIds: [id(1)], now: NOW });
+  assert.equal(selected.scope, 'selected-threads');
+  const discovered = await collectCloudUsage(fake(), { threadIds: [id(1)], discover: true, now: NOW });
+  assert.equal(discovered.scope, 'bounded-cloud-catalog');
 });
 test('permission-denied per-turn ledger preserves history and never invents token zero', async () => {
   const rpc = fake({ estimates: () => { throw error('FORBIDDEN'); } });
@@ -146,6 +160,9 @@ test('cloud transport authenticates only fixed origins and rejects writes/conten
   const f = fixtureDeps(), rpc = new CloudTransport({ budgetMs: 1000, timeoutMs: 500 }, f.deps);
   try { await rpc.initialize();
     for (const method of ['turn/start', 'thread/resume', 'thread/subscribe', 'account/login/start']) await assert.rejects(rpc.request(method, {}), { code: 'READ_ONLY_METHOD_DENIED' });
+    // The raw send path carries the same boundary: it cannot be used to
+    // start a turn or attach to a thread behind the read-only checks.
+    for (const method of ['turn/start', 'thread/resume', 'thread/subscribe', 'account/login/start']) await assert.rejects(rpc.send(method, {}), { code: 'READ_ONLY_METHOD_DENIED' });
     await assert.rejects(rpc.request('thread/turns/list', { threadId: id(1), itemsView: 'full' }), { code: 'MESSAGE_CONTENT_DENIED' });
     await rpc.request('thread/turns/list', { threadId: id(1), itemsView: 'notLoaded' });
     await rpc.estimates({ threads: [{ thread_id: id(1), turn_ids: [id(11)] }], include_settled_response_ids: true });

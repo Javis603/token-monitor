@@ -184,7 +184,7 @@ test('process identity is stable for a live process and null once it is gone', {
 storageTest('an unavailable OS identity probe fails closed instead of guessing ownership', { timeout: 20000 }, async (t) => {
   if (OS_IDENTITY) { t.skip('OS identity probe is available here'); return; }
   const child = crashedOwner('setTimeout(() => {}, 8000);', 15000, t); const root = temp(t);
-  const record = { pid: child.pid, nonce: randomUUID(), identity: { method: 'darwin-ps-lstart-v1', value: 'Thu Jan  1 00:00:00 1970' } };
+  const record = { pid: child.pid, nonce: randomUUID(), identity: { method: 'darwin-ps-lstart-v1', value: 'Thu Jan 1 00:00:00 1970' } };
   writeLockRecord(root, record);
   assert.throws(() => lock(root), { code: 'AUTO_LOCK_NEEDS_REVIEW' });
   assert.deepEqual(readLockRecord(root), record);

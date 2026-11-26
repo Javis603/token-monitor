@@ -206,11 +206,15 @@ async function collectCloudUsage(rpc, options = {}) {
   else { try { check(); } catch (e) { if (code(e) !== 'DEADLINE') throw e; diagnostics.push({ stage: 'deadline', code: 'DEADLINE' }); } }
   const totals = summary(turns);
   // A selected scope may be complete, but not the full cloud account or future turns.
-  const status = histories.every((h) => h.historyStatus === 'unavailable') ? 'unavailable' :
+  // An empty catalog is a complete reading of an empty account, not a
+  // collection of unavailable histories: `every()` is true for no rows.
+  const status = histories.length > 0 && histories.every((h) => h.historyStatus === 'unavailable') ? 'unavailable' :
     !inventoryComplete || !historyComplete || diagnostics.length || totals.missingTokenTurns || totals.settlementUnverifiedTurns ? 'partial' : 'available';
   if (!inventoryComplete || !historyComplete) totals.fullTaskTokens = null;
   return { version: 1, kind: 'codex-cloud-turn-usage', observedAt: new Date(now).toISOString(), source: 'planmeter-compatible-cloud-read',
-    measurement: 'service-estimate-not-bill', status, scope: roots.length ? 'selected-threads' : 'bounded-cloud-catalog',
+    // The scope follows the work that was done: a discovery run always
+    // describes the bounded catalog, even when explicit ids were requested.
+    measurement: 'service-estimate-not-bill', status, scope: options.discover ? 'bounded-cloud-catalog' : 'selected-threads',
     accountCloudCoverage: 'unknown', canCombineWithLocal: false, scopeFingerprint: rpc.scopeFingerprint || null,
     inventoryComplete, historyComplete, usageAccess, quotaAccess, threads: histories, turns, quotas: quotaRows, totals, diagnostics,
     warnings: ['云端历史、token、费用估算及额度占比是不同数据，不互相换算。', '缺失值不为零；本报表不与账户累计或本地 Tokscale 总数相加。',

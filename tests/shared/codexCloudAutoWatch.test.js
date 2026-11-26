@@ -42,9 +42,12 @@ test('settled cumulative snapshots are replaced and exact duplicates are not per
   assert.equal(saved.length, 2); assert.equal(m.report().threads[0].total.totalTokens, 200); assert.equal(m.report().taskTotalTokens, null);
 });
 test('reconnection reattaches automatically while retaining counters without adding snapshots', async () => {
-  const m = new AutoCloudMonitor({ now: () => NOW }), a = rpc([row(1)]); m.connect(a); await m.cycle(); a.eventSink(event(ID(1), 100));
+  const saved = []; const m = new AutoCloudMonitor({ now: () => NOW, onSample: (s) => saved.push(s) }), a = rpc([row(1)]);
+  m.connect(a); await m.cycle(); a.eventSink(event(ID(1), 100));
   m.disconnect(); const b = rpc([row(1)]); m.connect(b); await m.cycle(); b.eventSink(event(ID(1), 100)); b.eventSink(event(ID(1), 200));
   const t = m.report().threads[0]; assert.equal(t.total.totalTokens, 200); assert.equal(t.gapCount, 1); assert.equal(t.attachAttempts, 2);
+  // The repeated snapshot after the reconnect must not be persisted twice.
+  assert.deepEqual(saved.map((s) => s.sample.total.totalTokens), [100, 200]); assert.equal(t.duplicateEvents, 1);
 });
 test('different account scope is refused rather than combined', () => {
   const m = new AutoCloudMonitor(); m.connect(rpc()); m.disconnect(); const b = rpc(); b.scopeFingerprint = 'b'.repeat(64);
@@ -87,9 +90,21 @@ test('listening capacity and retry delay are enforced', async () => {
 });
 test('idle grace retains tail usage then detaches the viewer only', async () => {
   let time = NOW; const m = new AutoCloudMonitor({ now: () => time, idleGraceMs: 1000 }), r = rpc([row(1)]);
-  m.connect(r); await m.cycle(); r.rows[0].status.type = 'idle'; time += 500; await m.cycle(); assert.equal(m.listening.size, 1);
+  m.connect(r); await m.cycle(); r.eventSink(event(ID(1), 100)); r.rows[0].status.type = 'idle'; time += 500; await m.cycle(); assert.equal(m.listening.size, 1);
   time += 1000; await m.cycle(); assert.equal(m.listening.size, 0); assert.ok(r.calls.some((c) => c.method === 'thread/unsubscribe'));
+  // The tail reading survives the detach; only the viewer is released.
+  assert.equal(m.report().threads[0].total.totalTokens, 100);
   assert.ok(!r.calls.some((c) => ['turn/start', 'turn/interrupt', 'thread/stop', 'thread/archive'].includes(c.method)));
+});
+test('an active thread that turns idle keeps the tail grace window before detaching', async () => {
+  let time = NOW; const m = new AutoCloudMonitor({ now: () => time, idleGraceMs: 1000 }), r = rpc([row(1)]);
+  m.connect(r); await m.cycle();
+  r.rows[0].status.type = 'idle'; time += 100; await m.cycle();
+  // The idle transition starts the grace clock instead of reusing the old
+  // active timestamp, which would detach the thread on the very next scan.
+  assert.equal(m.listening.size, 1);
+  time += 900; await m.cycle(); assert.equal(m.listening.size, 1);
+  time += 200; await m.cycle(); assert.equal(m.listening.size, 0);
 });
 test('unsupported unsubscribe requests connection recycle, not a task stop', async () => {
   let time = NOW; const r = rpc([row(1)]), m = new AutoCloudMonitor({ now: () => time, idleGraceMs: 0 }); m.connect(r); await m.cycle();
