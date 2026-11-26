@@ -34,6 +34,29 @@ test('desktop Hub requests keep local addresses direct and use the current route
   assert.deepEqual(calls, [['direct', local, init], ['system', remote, init], ['app', remote, init]]);
 });
 
+test('desktop Hub requests to private and Tailscale networks stay direct', async () => {
+  const routes = [];
+  const fetchFromHub = createDesktopHubFetch(
+    async (url) => routes.push(['proxy', url]),
+    async (url) => routes.push(['direct', url]),
+    'win32'
+  );
+  const direct = [
+    'http://10.0.0.5:17321', 'http://172.16.4.2:17321', 'http://172.31.255.1:17321',
+    'http://192.168.1.20:17321', 'http://100.64.0.1:17321', 'http://100.101.102.103:17321',
+    'http://[fd7a:115c:a1e0::1]:17321', 'http://[::ffff:192.168.1.20]:17321',
+    'http://desktop-pc:17321', 'http://hub.local:17321', 'https://desktop.tail1234.ts.net',
+    'http://localhost:17321', 'http://169.254.10.1:17321'
+  ];
+  const proxied = [
+    'https://hub.example', 'http://8.8.8.8:17321', 'http://172.32.0.1:17321',
+    'http://100.128.0.1:17321', 'http://[2001:db8::1]:17321', 'https://ts.net.example.com',
+    'https://localnet.example'
+  ];
+  for (const url of [...direct, ...proxied]) await fetchFromHub(url);
+  assert.deepEqual(routes, [...direct.map((url) => ['direct', url]), ...proxied.map((url) => ['proxy', url])]);
+});
+
 test('proxy URLs normalize to scheme://host[:port]', () => {
   assert.equal(normalizeProxyUrl('http://127.0.0.1:7897'), 'http://127.0.0.1:7897');
   assert.equal(normalizeProxyUrl('  http://127.0.0.1:7897/  '), 'http://127.0.0.1:7897');
