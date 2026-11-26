@@ -6347,7 +6347,7 @@ function exchangeNode(row, max, expanded = false) {
   exValueEl.textContent = tokensAvailable
     ? formatDetailTokens(row.value)
     : (t('detailTokenUnavailable') || 'Unavailable');
-  if (tokensAvailable) decorateDetailTokenElement(exValueEl, row.value);
+  decorateDetailTokenElement(exValueEl, row.value, { enabled: tokensAvailable && isDetailCompactEnabled() });
   wrap.querySelector('.detail-ex-cost').textContent = tokensAvailable ? formatCost(row.cost, row.unpricedTokens) : '';
   applyBarScale(wrap.querySelector('.bar-fill'), rowWidth(row.value, max) / 100);
 
@@ -6388,13 +6388,14 @@ function turnNode(turn) {
   splitEl.textContent = tokensAvailable
     ? split
     : (t('detailTokenUnavailable') || 'Unavailable');
-  if (tokensAvailable) decorateDetailTokenElement(splitEl, 0, { exactText: exactSplit });
+  const toggleEnabled = tokensAvailable && isDetailCompactEnabled();
+  decorateDetailTokenElement(splitEl, 0, { exactText: exactSplit, enabled: toggleEnabled });
   el.querySelector('.detail-turn-tools').textContent = turn.tools ? `⊢ ${turn.tools}` : '';
   const turnValueEl = el.querySelector('.detail-turn-value');
   turnValueEl.textContent = tokensAvailable
     ? formatDetailTokens(turn.value)
     : (t('detailTokenUnavailable') || 'Unavailable');
-  if (tokensAvailable) decorateDetailTokenElement(turnValueEl, turn.value);
+  decorateDetailTokenElement(turnValueEl, turn.value, { enabled: toggleEnabled });
   el.querySelector('.detail-turn-cost').textContent = tokensAvailable ? formatCost(turn.cost, turn.unpricedTokens) : '';
   return el;
 }
