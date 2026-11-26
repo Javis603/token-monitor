@@ -47,20 +47,44 @@ The native roots are watched so that a change there triggers an Antigravity-targ
 
 The generated `antigravity-cache` directory is deliberately not watched. Token Monitor's own sync writes it, so watching it would create a refresh loop.
 
-### Session titles and project resolution
+### Session titles, projects and turn state
 
-Antigravity session entries are joined against the local `conversation_summaries.db` SQLite database located under the Antigravity configuration roots (`~/.gemini/antigravity`, or paths specified via `ANTIGRAVITY_HOME`/`ANTIGRAVITY_DATA_DIR`) and the CLI root beside its `conversations` directory. The CLI root follows the collector's existing `GEMINI_CLI_HOME` path policy; IDE roots remain under the configured home's `.gemini` directory.
+Antigravity session entries are joined against the local `conversation_summaries.db` SQLite database located under the Antigravity configuration roots (`~/.gemini/antigravity`, or paths specified via `ANTIGRAVITY_HOME`/`ANTIGRAVITY_DATA_DIR`), the CLI root beside its `conversations` directory, and each discovered T3 Code `antigravity-acp` profile root beside its `conversations` directory. The CLI root follows the collector's existing `GEMINI_CLI_HOME` path policy, T3 ACP roots follow `T3CODE_HOME` (ignored for WSL lookups), and IDE roots remain under the configured home's `.gemini` directory.
 
 For each conversation ID:
 
 - The title is resolved from the `title` column (falling back to `preview` when the title is empty, and falling back to `agent_name` when both are empty). Titles are trimmed and limited to 96 code points.
 - Subagent relationships are resolved from `parent_conversation_id` when present, populating `parentSessionId` on the session row. This enables grouping of child subagent conversations under their parent in the Sessions and Edge Dock views.
 - A missing project association is resolved from `workspace_uris` (file URLs); later summary changes refresh or clear that association across today/month/all-time and the persisted anchor. Provenance is per period: a native historical project remains authoritative even when Today receives the same project ID from the summary. WSL workspace URLs are decoded as POSIX paths even though the reader runs on Windows.
-- Summary updates preserve transcript activity timestamps, turn state, context and cache observations. `last_modified_time` is not a generation timestamp: renaming a conversation must not make it appear running.
+- Desktop, CLI and discovered ACP stores can report the current turn through their conversation status. A running turn reopens an existing usage row, and a fully idle conversation with a recorded user prompt marks the turn as ended. The prompt timestamp can advance activity before the next token update. A rename can change `last_modified_time`, so that field never advances activity. Older schemas, backup stores and unavailable statuses have no turn reading and use the existing activity estimate.
 
 The reader opens the database read-only, queries only requested session IDs, and caches source rows and misses per database/WAL fingerprint. A changed fingerprint revalidates each requested row while preserving its last successful value on transient failures, including a temporarily missing or unstatable database; failed rows remain eligible for retry. Successfully clearing both title and preview, or confirming that a row is missing, removes only that catalog override, including on the first lookup after restart. Check all candidate stores before treating a missing row as deletion; an unreadable candidate is not proof of absence. Prefer usable titles over empty rows and fresh reads over stale rows. When only stale rows remain, retain the last selected source until an earlier candidate can be successfully revalidated. Each store's confirmed misses discard its old rows, even when the file becomes unavailable, without shadowing another store. The existing anchor also records the summary title source, so its temporary disappearance after restart cannot be mistaken for deletion in an unrelated store. Catalog title provenance uses the existing local metadata and anchor ledger, so watch renames and removals survive later read misses and restarts without changing usage baselines. Project identities are derived on each lookup so changing the Projects setting does not require a database write. WSL lookups ignore all host environment overrides, including `GEMINI_CLI_HOME`.
 
+For T3 Code Antigravity ACP, a strong native conversation reference in T3's V2 database lets the T3 thread title take precedence. The native catalog supplies the title when T3 has no usable title. Verified T3 thread IDs group runs of the same conversation, and verified T3 delegation links group subagents under their parent. Native parent links take precedence and each Antigravity conversation keeps its own accounting identity. T3 metadata is refreshed during usage collection. A confirmed ownership conflict revokes the T3 thread and delegation links while retaining any native parent link.
+
 The database and its WAL are watched, including under the environment overrides and the resolved CLI root. Metadata reads, discovery and watch policies share the collector's environment and configured home; the top-level environment takes precedence over an environment injected through metadata dependencies. Summary-only directories admit those exact files and attribute events to them rather than to the whole parent; unrelated runtime files and the reader's SHM writes do not trigger collection. Summary changes refresh labels without admitting an accelerated Antigravity RPC self-sync; conversation usage writes retain their source-sync behavior. Watch ticks refresh sessions present in today; month/all-time-only titles refresh on the next full scan.
+
+### Live activity in T3 Code
+
+Token Monitor matches the Antigravity ACP conversation ID to T3 Code's active run. The activity watcher follows T3's state database and validates the owning server process before renewing the running observation. This keeps a quiet run visible beyond the usage-based timeout. Before the first tokens arrive, a verified running session appears locally in Sessions, Home and Edge Dock. Its usage row takes over as soon as tokens are recorded. Completion or loss of verified live evidence removes the temporary row and returns existing usage rows to the shared idle or turn-based display rules. Desktop and standalone CLI use the catalog's turn readings.
+
+For a recent ACP usage row, Context Window uses the occupied tokens and model capacity reported by ACP and saved by T3 Code for that native conversation. Resumed or historical runs with a different native ID do not inherit the current conversation's reading. The automatic compaction threshold in Antigravity's own database is separate from the model capacity.
+
+### Context Window in standalone CLI
+
+The interactive CLI can share its Context Window through its [status-line command](https://antigravity.google/docs/cli/statusline/). Set the following in Antigravity CLI settings, using the absolute path to the script in a Token Monitor checkout and a Node.js 22.22+ executable available to the CLI. `stack_with_default` preserves the built-in status line.
+
+```json
+{
+  "statusLine": {
+    "type": "command",
+    "command": "node --disable-warning=ExperimentalWarning \"/absolute/path/to/Token Monitor/src/shared/providers/antigravity/cliContext.js\"",
+    "stack_with_default": true
+  }
+}
+```
+
+If you use a custom status line, have that script pass the same stdin JSON to `cliContext.js` while continuing to render its usual output. The hook stores only the conversation ID, the window capacity, occupancy derived from the CLI's reported percentage, and the observation time. The token count can differ by rounding. Context appears on recent usage rows and follows their existing visibility rules.
 
 ### Boundary with quota collection
 

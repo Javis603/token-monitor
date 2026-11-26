@@ -37,6 +37,7 @@ function fixture(state = {}) {
     mainWindowReplacementTask: Promise.resolve(),
     screenUiSuspended: false,
     captureRetainedWindowState: async () => {}, restoreRetainedWindowState: async () => {},
+    windowsAccentActive: () => false,
     windowsBackdropFallback: () => false,
     stopFloatingBubbleAutoCollapseTimer() {}, displayForBounds: () => null,
     applyNativeMaterial() {}, persistWindowBounds() {}, WINDOW_LIMITS: {},

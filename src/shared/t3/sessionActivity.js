@@ -2,11 +2,11 @@
 
 const fs = require('node:fs');
 const path = require('node:path');
-const { resolveSqlite, openDb } = require('./sqliteReadOnly');
-const { processStarts } = require('./processStarts');
-const { discoverT3DbPaths } = require('./t3SessionMetadata');
-const { SESSION_ACTIVITY_PROVIDERS } = require('./sessionActivityProviders');
-const { LIVE_ACTIVITY_TTL_MS } = require('./sessionLive');
+const { resolveSqlite, openDb } = require('../sqliteReadOnly');
+const { processStarts } = require('../processStarts');
+const { discoverT3DbPaths } = require('./sessionMetadata');
+const { SESSION_ACTIVITY_PROVIDERS } = require('../sessionActivityProviders');
+const { LIVE_ACTIVITY_TTL_MS } = require('../sessionLive');
 
 const MAX_SESSIONS = 256;
 const REQUEST_KINDS = ['command', 'file-read', 'file-change', 'permission', 'mcp-elicitation', 'user_input'];

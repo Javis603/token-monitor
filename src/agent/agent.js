@@ -9,6 +9,7 @@ const { appVersion } = require('../shared/appVersion');
 const { clientsCsvForSetting } = require('../shared/clientTracking');
 const { seedAgentClients } = require('./seedClients');
 const { normalizeHistoryIntervalMs } = require('../shared/collector');
+const { SYNC_WEEK_STARTS_ON } = require('../shared/fixedRangeSync');
 const {
   normalizeLimitsRefreshMode,
   normalizeLimitsRefreshMs,
@@ -104,6 +105,8 @@ const usageOptions = {
   agentRuntime: 'headless-agent',
   projectsEnabled,
   claudeDesktopSplitEnabled,
+  nativeRangesEnabled: true,
+  weekStartsOn: SYNC_WEEK_STARTS_ON,
   historyEnabled,
   historyIntervalMs: normalizeHistoryIntervalMs(process.env.TOKEN_MONITOR_HISTORY_INTERVAL_MS),
   dailyHistoryArchiveEnabled: sessionUsageArchiveEnabled,

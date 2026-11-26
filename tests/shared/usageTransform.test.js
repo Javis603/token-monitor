@@ -38,6 +38,26 @@ function fakeStore(overrides = {}) {
   };
 }
 
+test('daily session publication requires matching period and session costs', () => {
+  const transform = createUsageTransform({ getSettings: () => ({ sessionUsageArchiveEnabled: false }) });
+  const day = '2026-07-09';
+  const source = summary();
+  source.periodWindows = { today: { key: day } };
+  source.dailySessionPeriods = { [day]: structuredClone(source.today) };
+  source.month.costUsd = 0.3;
+  source.month.sessions['codex:c1'].costUsd = 0.3;
+  source.today.costUsd = 0.1 + 0.2;
+  source.today.sessions['codex:c1'].costUsd = 0.1 + 0.2;
+  source.dailySessionPeriods[day] = structuredClone(source.today);
+  assert.ok(transform.transform(source).dailySessionPeriods, 'floating point noise does not disable paging');
+
+  source.month.sessions['codex:c1'].costUsd = 0.31;
+  assert.equal(transform.transform(source).dailySessionPeriods, undefined, 'equal tokens do not hide a repriced session');
+  source.month.sessions['codex:c1'].costUsd = 0.3;
+  source.month.costUsd = 0.31;
+  assert.equal(transform.transform(source).dailySessionPeriods, undefined, 'period totals also have to match');
+});
+
 test('archive projection leaves collector rows read-only and publication detaches live and retained rows', () => {
   const freeze = value => {
     if (value && typeof value === 'object' && !Object.isFrozen(value)) {

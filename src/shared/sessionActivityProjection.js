@@ -107,7 +107,11 @@
   function hasKnownSession(summary, client, id, periodName, includeArchived = true) {
     const locations = locationsFor(summary, client, id);
     return locations.some((row) => (!periodName || row.name === periodName)
-      && (includeArchived || !live.isArchivedSession(periodNamed(summary, row.name).sessions[row.key])));
+      && (includeArchived || canProjectUsageActivity(periodNamed(summary, row.name).sessions[row.key])));
+  }
+  function canProjectUsageActivity(session) {
+    return session && !live.isArchivedSession(session)
+      && (session.client !== 'antigravity' || session.totalTokens > 0);
   }
   function nativeSessionsForPeriod(summary, client, sessions, name) {
     return Object.fromEntries(Object.entries(sessions).filter(([, row]) =>
@@ -121,9 +125,33 @@
       if (!linked.parentSessionId && previous.parentSessionId) {
         linked.parentSessionId = previous.parentSessionId;
         if (previous.parentClient) linked.parentClient = previous.parentClient;
+        if (previous.t3ParentLink) linked.t3ParentLink = true;
       }
       return [key, linked];
     }));
+  }
+  function projectNativeActivitySessions(summary, client, sessions, now, renewIntervalMs) {
+    const previous = summary.nativeSessions || {};
+    if (!summary.nativeSessions && !Object.keys(sessions).length) return null;
+    const withoutClock = (view) => JSON.stringify(view, (key, value) => key === 'observedAt' ? undefined : value);
+    const views = nativeSessionNames.map((name) => {
+      const entries = Object.entries(previous[name] || {});
+      const own = Object.fromEntries(entries.filter(([, row]) => row.client === client));
+      const view = nativeSessionsForPeriod(summary, client, sessions, name);
+      return { name, entries, own, view };
+    });
+    const changed = views.some(({ own, view }) => withoutClock(own) !== withoutClock(view)
+      || Object.values(own).some((row) => {
+        const elapsed = now - Date.parse(row.liveActivity?.observedAt);
+        return elapsed < 0 || elapsed >= renewIntervalMs;
+      }));
+    if (!changed) return null;
+    const next = { ...previous };
+    for (const { name, entries, view } of views) {
+      const other = Object.fromEntries(entries.filter(([, row]) => row.client !== client));
+      next[name] = { ...other, ...view };
+    }
+    return next;
   }
   function activityEntries(summary, client, ids, includeLeased = true) {
     const index = indexFor(summary);
@@ -132,7 +160,7 @@
     const result = [];
     for (const id of selected) for (const location of locationsFor(summary, client, id)) {
       const session = live.sessionWithActivity(periodNamed(summary, location.name), location.key);
-      if (session && !live.isArchivedSession(session)) result.push({ ...location, session });
+      if (canProjectUsageActivity(session)) result.push({ ...location, session });
     }
     return result;
   }
@@ -283,6 +311,6 @@
     return updates.length ? withPeriods(summary, updates) : summary;
   }
   function invalidateActivityIndex(summary) { if (summary) indexes.delete(summary); }
-  return { hasKnownSession, nativeSessionsForPeriod, activityEntries, codexActivityCandidates, rememberProjection, activityPatch, applyActivityPatch,
+  return { hasKnownSession, nativeSessionsForPeriod, projectNativeActivitySessions, activityEntries, codexActivityCandidates, rememberProjection, activityPatch, applyActivityPatch,
     compactActivity, needsActivityRenewal, materializeActivity, invalidateActivityIndex };
 });

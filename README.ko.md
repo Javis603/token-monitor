@@ -319,8 +319,8 @@ Token Monitor는 **토큰 사용량**, **계정 한도**, **세션 상세**를 �
 | 출력 속도／토큰 소비 속도 | Claude Code, Codex, OpenCode, Antigravity, Kimi, GitHub Copilot, Pi, Oh My Pi, OmO Native, Kilo CLI, MiMo Code/MiMo Desktop, Muse Code, ZCode CLI, Kiro, DeepSeek Harness, Devin CLI | 출력 속도는 `tok/s`, 전체 토큰 소비 속도는 `tok/min`이며, 측정 시간에 대기가 포함될 수 있습니다. |
 | 세션 모델 및 추론 강도 | Claude Code, Codex | 세션에 명시적으로 기록된 모델과 추론 강도만 표시합니다. |
 | 추론 토큰 수 | Codex, OpenCode, Pi, Oh My Pi, OmO Native, CodeBuddy, WorkBuddy, Reasonix, DeepSeek Harness | — |
-| 턴 시작／완료 감지 | Claude Code, Codex, OpenCode, Cursor, CodeBuddy, WorkBuddy, DeepSeek Harness | 도구가 기록한 턴 신호를 사용합니다. 기타 도구나 유효한 신호가 없는 경우 마지막 활동 후 약 10분 동안 실행 중으로 추정합니다. |
-| 네이티브 실행 중／입력 대기 상태 | Claude Code, Codex | — |
+| 턴 시작／완료 감지 | Claude Code, Codex, OpenCode, Cursor, Antigravity, CodeBuddy, WorkBuddy, DeepSeek Harness | 도구가 기록한 턴 신호를 사용합니다. 기타 도구나 유효한 신호가 없는 경우 마지막 활동 후 약 10분 동안 실행 중으로 추정합니다. |
+| 네이티브 실행 중／입력 대기 상태 | Claude Code, Codex, Antigravity | T3 Code의 Antigravity ACP는 실행 중과 유휴 상태만 표시합니다. |
 | 부모 세션／하위 에이전트 그룹화 | Codex, Antigravity, Oh My Pi, ZCode; 부모 세션 연결을 검증할 수 있는 T3 Code 세션 | Claude Code의 그룹화는 T3 Code를 통해 제공합니다. |
 | 동일 대화의 이어진 기록 그룹화 | Codex; 검증된 스레드 연결이 있는 T3 Code 세션 | — |
 | 로컬 계정 전환 | Codex | Token Monitor에 추가한 계정으로 전환합니다. |

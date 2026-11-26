@@ -91,7 +91,7 @@ Declarations drive common dispatch, rendering, normalization and expiry; native 
 
 ## T3 Code session relationships
 
-T3 delegation uses one shared relationship reader, independent of the provider. `src/shared/t3SessionIdentity.js` binds its strong native ids to accounting clients. For a new direct driver or ACP Registry agent, verify that T3’s native id is the same id Tokscale emits before adding the binding; otherwise provide a verified conversion separately. ACP instances require the colocated T3 server configuration, not an instance-name convention or model guess. See [the architecture contract](../architecture.md#session-relationships) for ownership, historical-run and missing-parent rules. These bindings do not register a new usage source, title resolver or live-activity adapter.
+T3 delegation uses one shared relationship reader, independent of the provider. `src/shared/t3/sessionIdentity.js` binds its strong native ids to accounting clients. For a new direct driver or ACP Registry agent, verify that T3’s native id is the same id Tokscale emits before adding the binding; otherwise provide a verified conversion separately. ACP instances require the colocated T3 server configuration, not an instance-name convention or model guess. See [the architecture contract](../architecture.md#session-relationships) for ownership, historical-run and missing-parent rules. These bindings do not register a new usage source, title resolver or live-activity adapter.
 
 ## Adding a limits provider
 

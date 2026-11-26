@@ -24,6 +24,38 @@ function deferred() {
   return { promise, resolve, reject };
 }
 
+test('session detail keeps its group destination only while replacement pages are pending', () => {
+  const group = { kind: 'session-group', period: 'month', summary: { key: 'group', name: 'old group' } };
+  const request = { kind: 'session', client: 'codex', sessionId: 'child', returnTo: group, headingSignature: 'heading' };
+  let pending = true;
+  let rows = [];
+  const state = { period: 'month', openSession: request, stats: { periods: { month: {} } } };
+  const start = rendererSource.indexOf('function refreshSessionDetailHeading(');
+  const end = rendererSource.indexOf('\nfunction sessionDetailBackLabel(', start);
+  const context = {
+    state, els: {}, sessionRowsForPeriod: () => rows, sessionDetailHeadingSignature: () => 'heading',
+    pagedSessionsPending: () => pending
+  };
+  vm.runInNewContext(rendererSource.slice(start, end), context);
+  context.refreshSessionDetailHeading();
+  assert.strictEqual(request.returnTo, group);
+
+  rows = [{ key: 'group', name: 'fresh group', groupRows: [{ key: 'session:codex:child' }] }];
+  context.refreshSessionDetailHeading();
+  assert.strictEqual(request.returnTo.summary, rows[0]);
+
+  rows = [];
+  pending = false;
+  context.refreshSessionDetailHeading();
+  assert.equal(request.returnTo, null);
+
+  pending = true;
+  request.returnTo = group;
+  state.settings = { sessionTitlesEnabled: false };
+  context.refreshSessionDetailHeading();
+  assert.equal(request.returnTo, null, 'a title-bearing destination must clear when titles are disabled');
+});
+
 test('session detail renders its heading before loading, errors and empty results, and keeps it when sorting', async () => {
   const timers = [];
   const frames = [];
@@ -67,6 +99,7 @@ test('session detail renders its heading before loading, errors and empty result
   let render;
   const context = {
     rendererDom,
+    displayedSessions: key => state.stats?.periods?.[key]?.sessions,
     els, state, document: { createElement: element, querySelectorAll: () => [els.sessionDetailHead.querySelector('.detail-heading')].filter(Boolean) }, window: { addEventListener() {} }, t: (key, params) => translate('en', key, params),
     sessionDetailBack() { state.backClicked = true; },
     detailNote: text => ({ textContent: text }),
@@ -455,6 +488,7 @@ function sessionDetailHarness(getSessionDetail) {
   const context = {
     rendererDom,
     state,
+    displayedSessions: key => state.stats?.periods?.[key]?.sessions,
     sessionRowsApi: require('../../src/electron/renderer/sessionRows'),
     visibleStatsSurface: () => 'main',
     isRendererWindowHidden: () => false,

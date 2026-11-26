@@ -62,6 +62,8 @@ test('composeLocalSyncStats replaces the hub copy of the local device without do
   ], 0, Date.parse('2026-07-16T00:01:00.000Z'));
   const localHubDevice = hubStats.devices.find((entry) => entry.deviceId === 'local');
   const remoteHubDevice = hubStats.devices.find((entry) => entry.deviceId === 'remote');
+  localHubDevice.sessionDetailsOmitted = { month: 1 };
+  remoteHubDevice.sessionDetailsOmitted = { month: 2 };
   localHubDevice.displayName = 'This Mac';
   remoteHubDevice.displayName = 'Studio';
   remoteHubDevice.stale = true;
@@ -79,6 +81,8 @@ test('composeLocalSyncStats replaces the hub copy of the local device without do
   assert.equal(result.devices.length, 2);
   assert.equal(result.devices.find((entry) => entry.deviceId === 'local').periods.today.totalTokens, 120);
   assert.equal(result.devices.find((entry) => entry.deviceId === 'local').displayName, 'This Mac');
+  assert.equal(Object.hasOwn(result.devices.find((entry) => entry.deviceId === 'local'), 'sessionDetailsOmitted'), false);
+  assert.deepEqual(result.devices.find((entry) => entry.deviceId === 'remote').sessionDetailsOmitted, { month: 2 });
   // The live record owns receivedAt; the Hub's copy is kept as proof of upload.
   assert.equal(result.devices.find((entry) => entry.deviceId === 'local').receivedAt, '2026-07-16T00:02:00.000Z');
   assert.equal(result.devices.find((entry) => entry.deviceId === 'local').hubReceivedAt, '2026-07-16T00:00:00.000Z');

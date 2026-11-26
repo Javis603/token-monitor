@@ -596,6 +596,9 @@ function coerceHistory(raw) {
   };
   if (Array.isArray(src.dailyTotals)) history.dailyTotals = src.dailyTotals;
   if (Number.isFinite(src.dailyTotalsOmitted)) history.dailyTotalsOmitted = src.dailyTotalsOmitted;
+  if (typeof src.dailyTotalsRevision === 'string' && /^[a-f0-9]{64}$/.test(src.dailyTotalsRevision)) {
+    history.dailyTotalsRevision = src.dailyTotalsRevision;
+  }
   return history;
 }
 

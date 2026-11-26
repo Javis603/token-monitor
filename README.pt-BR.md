@@ -318,8 +318,8 @@ O Token Monitor suporta uso de tokens, verificação de limites da conta e detal
 | Velocidade de saída/taxa de consumo de tokens | Claude Code, Codex, OpenCode, Antigravity, Kimi, GitHub Copilot, Pi, Oh My Pi, OmO Native, Kilo CLI, MiMo Code/MiMo Desktop, Muse Code, ZCode CLI, Kiro, DeepSeek Harness, Devin CLI | Saída em `tok/s` e consumo total de tokens em `tok/min`; o tempo pode incluir espera. |
 | Modelo da sessão e esforço de raciocínio | Claude Code, Codex | Exibe apenas o modelo e o esforço de raciocínio explicitamente registrados na sessão. |
 | Contagem de tokens de raciocínio | Codex, OpenCode, Pi, Oh My Pi, OmO Native, CodeBuddy, WorkBuddy, Reasonix, DeepSeek Harness | — |
-| Detecção de início/conclusão de turno | Claude Code, Codex, OpenCode, Cursor, CodeBuddy, WorkBuddy, DeepSeek Harness | Usa sinais de turno registrados pela ferramenta. Para outras ferramentas ou sem sinais válidos, estima como em execução por cerca de 10 minutos após a última atividade. |
-| Estado nativo: em execução/aguardando entrada | Claude Code, Codex | — |
+| Detecção de início/conclusão de turno | Claude Code, Codex, OpenCode, Cursor, Antigravity, CodeBuddy, WorkBuddy, DeepSeek Harness | Usa sinais de turno registrados pela ferramenta. Para outras ferramentas ou sem sinais válidos, estima como em execução por cerca de 10 minutos após a última atividade. |
+| Estado nativo: em execução/aguardando entrada | Claude Code, Codex, Antigravity | O Antigravity ACP no T3 Code informa apenas os estados em execução e ocioso. |
 | Agrupamento de sessões pai e subagentes | Codex, Antigravity, Oh My Pi, ZCode; sessões do T3 Code com vínculos verificáveis à sessão pai | O agrupamento do Claude Code é oferecido pelo T3 Code. |
 | Agrupamento de registros de continuação da mesma conversa | Codex; sessões do T3 Code com vínculos verificados à mesma thread | — |
 | Alternar contas locais | Codex | Alterna entre contas adicionadas ao Token Monitor. |

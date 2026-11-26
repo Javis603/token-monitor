@@ -12,7 +12,8 @@
 })(typeof window !== 'undefined' ? window : null, function createApi() {
   const SESSION_ACTIVITY_PROVIDERS = Object.freeze([
     Object.freeze({ id: 'claude', t3Driver: 'claudeAgent', metadataDepsKey: 'claudeMetadataDeps' }),
-    Object.freeze({ id: 'codex', t3Driver: 'codex', metadataDepsKey: 'codexDeps' })
+    Object.freeze({ id: 'codex', t3Driver: 'codex', metadataDepsKey: 'codexDeps' }),
+    Object.freeze({ id: 'antigravity', t3Driver: 'antigravity', metadataDepsKey: 'antigravityDeps' })
   ]);
   const SESSION_ACTIVITY_CLIENTS = Object.freeze(SESSION_ACTIVITY_PROVIDERS.map((entry) => entry.id));
   const clients = new Set(SESSION_ACTIVITY_CLIENTS);
