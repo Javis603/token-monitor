@@ -3,6 +3,7 @@
 
 const { readT3Activity } = require('../../t3/sessionActivity');
 const { activityEntries, applyActivityPatch } = require('../../sessionActivityProjection');
+const { liveActivityExpiryAt } = require('../../sessionLive');
 
 const CLIENT = 'antigravity';
 const RENEW_INTERVAL_MS = 10_000;
@@ -28,7 +29,9 @@ function projectActivity(summary, { readings }, now = Date.now()) {
     const reading = readings.get(sessionId);
     // Keep permission and input prompts outside this adapter's running/idle
     // scope. In the absence of live evidence, restore the ordinary turn state.
-    let liveActivity = reading?.state === 'running' || reading?.state === 'idle'
+    const hasLiveReading = (reading?.state === 'running' || reading?.state === 'idle')
+      && liveActivityExpiryAt({ ...session, liveActivity: reading }, now);
+    let liveActivity = hasLiveReading
       ? reading
       : { state: 'unknown', observedAt: new Date(now).toISOString() };
     // T3 only returns recent completions. A recovered completion can replace
