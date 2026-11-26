@@ -138,13 +138,38 @@ test('the seed refuses a Qoder CN anchor that includes the retired SQLite source
   assert.equal(deviceRecordFromAnchor(legacyAnchor, seedOptions(options)), null);
 });
 
-test('the seed carries local-only native Reasonix views when the anchor has them', () => {
-  const nativeSessions = { today: { 'reasonix:session': { client: 'reasonix', totalTokens: 12 } }, month: {}, allTime: {} };
-  const nativeProjects = { today: { 'token monitor': { label: 'Token Monitor', tokens: 12, clients: { reasonix: 12 } } }, month: {}, allTime: {} };
+test('the seed carries local-only native views when the anchor has them', () => {
+  const nativeSessions = { today: { 'codex:session': { client: 'codex', totalTokens: 0, tokenDataUnavailable: true } }, month: {}, allTime: {} };
+  const nativeProjects = { today: { 'token monitor': { label: 'Token Monitor', tokens: 12, clients: { codex: 12 } } }, month: {}, allTime: {} };
   const record = deviceRecordFromAnchor(anchorFixture({ nativeSessions, nativeProjects }), seedOptions());
 
   assert.deepEqual(record.nativeSessions, nativeSessions);
   assert.deepEqual(record.nativeProjects, nativeProjects);
+});
+
+test('an upgrade seed removes Reasonix native views while keeping aggregate usage and Codex rows', () => {
+  const codex = { client: 'codex', sessionId: 'pre-token', tokenDataUnavailable: true };
+  const codexProject = { label: 'Codex project', tokens: 12, clients: { codex: 12 } };
+  const today = periodWith(140);
+  today.clients.reasonix = 140;
+  today.clientCosts.reasonix = 0.12;
+  const saved = anchorFixture({
+    today,
+    nativeSessions: { today: {
+      'reasonix:old': { client: 'reasonix', sessionId: 'reasonix:old' },
+      'codex:pre-token': codex
+    } },
+    nativeProjects: { today: {
+      old: { label: 'Reasonix project', tokens: 140, clients: { reasonix: 140 }, sessionIds: ['reasonix:old'] },
+      codex: codexProject
+    } }
+  });
+  const record = deviceRecordFromAnchor(saved, seedOptions());
+
+  assert.equal(record.today.clients.reasonix, 140);
+  assert.equal(record.today.clientCosts.reasonix, 0.12);
+  assert.deepEqual(record.nativeSessions.today, { 'codex:pre-token': codex });
+  assert.deepEqual(record.nativeProjects.today, { codex: codexProject });
 });
 
 test('the seed removes legacy Reasonix stats paths from ordinary period sessions', () => {
@@ -332,7 +357,7 @@ test('a pricing or tokscale binary change still seeds, but nothing else that mov
 
 test('native views of windows that have ended are dropped from an earlier-day seed', () => {
   // The renderer shows these per window without a date of their own.
-  const nativeSessions = { today: { 'reasonix:a': { client: 'reasonix', totalTokens: 12 } }, month: { 'reasonix:a': { client: 'reasonix', totalTokens: 40 } }, allTime: { 'reasonix:a': { client: 'reasonix', totalTokens: 90 } } };
+  const nativeSessions = { today: { 'codex:a': { client: 'codex', totalTokens: 0 } }, month: { 'codex:a': { client: 'codex', totalTokens: 0 } }, allTime: { 'codex:a': { client: 'codex', totalTokens: 0 } } };
   const nativeProjects = { today: { p: { tokens: 12 } }, month: { p: { tokens: 40 } }, allTime: { p: { tokens: 90 } } };
 
   const yesterday = deviceRecordFromAnchor(

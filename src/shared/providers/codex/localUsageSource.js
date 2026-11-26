@@ -10,7 +10,7 @@ const { resolveProxyConfig } = require('../../outboundFetch');
 const { appVersion } = require('../../appVersion');
 const { codexOAuthRequestContext, hashAccountKey } = require('./auth');
 const { codexHomeDir } = require('./sessionMetadata');
-const { localExecutorIds, localThreadEnvironment } = require('./localExecutor');
+const { DOTS_ORIGINATORS, localExecutorIds, localThreadEnvironment } = require('./localExecutor');
 const { createLocalUsageStore, usageCounters } = require('./localUsageStore');
 
 const APP_SERVER_URL = 'wss://codex-cloud-backend.chatgpt.com/';
@@ -194,7 +194,7 @@ function createLocalUsageSource(options = {}, deps = {}) {
     do {
       const page = await request('thread/list', {
         archived: false, limit: 100, sortKey: 'updated_at', sortDirection: 'desc',
-        originators: ['codex_work_cca'], ...(cursor ? { cursor } : {})
+        originators: DOTS_ORIGINATORS, ...(cursor ? { cursor } : {})
       });
       if (stopped || connection !== current) return;
       const candidates = Array.isArray(page.data) ? page.data : [];

@@ -252,7 +252,7 @@ O Token Monitor suporta uso de tokens, verificação de limites da conta e detal
 | <img src=".github/assets/tools-icon/proma.png" width="28" alt="Proma" /> | Proma | `~/.proma/` (`agent-sessions/`, `sdk-config/sessions/`, `sdk-config/projects/`), `~/.proma-dev/` | ✅ | — | — |
 | <img src=".github/assets/tools-icon/catpaw.png" width="28" alt="CatPaw" /> | CatPaw | `<platform-app-data>/` (`catpaw-moon/`, `catpaw-overseas/`, `catpaw-memory-*.db`) | ✅ | — | — |
 | <img src=".github/assets/tools-icon/qoder.png" width="28" alt="Qoder" /> | Qoder | `~/.qoder/projects/**/*.jsonl` (global), `~/.qoder-cn/projects/**/*.jsonl` (CN) | ✅ | ✅ | — |
-| <img src=".github/assets/tools-icon/reasonix.png" width="28" alt="Reasonix" /> | Reasonix | `~/.reasonix/` (`stats/`, `sessions/`, `projects/*/sessions/`) | ✅ | — | — |
+| <img src=".github/assets/tools-icon/reasonix.png" width="28" alt="Reasonix" /> | Reasonix | `~/.reasonix/` (`stats/`, `sessions/`, `projects/*/sessions/`) | ✅ | — | ✅ |
 | <img src=".github/assets/tools-icon/deepseek.png" width="28" alt="DeepSeek" /> | DeepSeek / DeepSeek Harness | `~/.dsh/sessions/` (`session.jsonl`, `session.jsonl.zstd`) | ✅ | ✅ | ✅ |
 | <img src=".github/assets/tools-icon/cherrystudio.png" width="28" alt="Cherry Studio" /> | Cherry Studio | `<platform-app-data>/CherryStudio/` (`Data/Agents/.claude/projects/` V2, `.claude/projects/` legado) | ✅ | — | — |
 | <img src=".github/assets/tools-icon/lmstudio.png" width="28" alt="LM Studio" /> | LM Studio | `~/.lmstudio/server-logs/**/*.log` | ✅ | — | — |
@@ -309,15 +309,15 @@ O Token Monitor suporta uso de tokens, verificação de limites da conta e detal
 | Recurso | Ferramentas/fontes suportadas | Observações |
 |---------|-------------------------|------------|
 | Títulos de sessão | Claude Code, Codex, OpenCode, Cursor, Antigravity, Cline CLI, Factory Droid, Kimi CLI, Grok Build, Pi, Oh My Pi, OmO Native, MiMo, ZCode, CodeBuddy, WorkBuddy, Reasonix, DeepSeek Harness, Cherry Studio, Devin CLI, fx, MiniMax Code | — |
-| Uso por prompt/resposta e chamadas de ferramentas | Claude Code, Codex, OpenCode, Pi, Oh My Pi, OmO Native, CodeBuddy, WorkBuddy, Reasonix, DeepSeek Harness | Os detalhes são lidos localmente e não são sincronizados. |
+| Uso por prompt/resposta e chamadas de ferramentas | Claude Code, Codex, OpenCode, Pi, Oh My Pi, OmO Native, CodeBuddy, WorkBuddy, DeepSeek Harness | Os detalhes são lidos localmente e não são sincronizados. |
 | Uso de contexto/espaço restante | Claude Code, Codex, DeepSeek Harness, Grok Build, WorkBuddy, CatPaw | O limite de contexto do Claude Code é estimado pelo modelo. |
 | Uso de cache/taxa de acerto do cache da sessão | Fontes com campos de cache, por exemplo: Claude Code, Codex, OpenCode, Cursor, Kimi, Pi, Oh My Pi, OmO Native, DeepSeek Harness | A taxa de acerto aparece quando há dados de uso de cache. |
 | Estimativa de tempo restante do cache | Claude Code | 5 minutos ou 1 hora, conforme o tipo de cache registrado. |
 | Velocidade de saída/taxa de consumo de tokens | Claude Code, Codex, OpenCode, Antigravity, Kimi, GitHub Copilot, Pi, Oh My Pi, OmO Native, Kilo CLI, MiMo Code/MiMo Desktop, Muse Code, ZCode CLI, Kiro, DeepSeek Harness, Devin CLI | Saída em `tok/s` e consumo total de tokens em `tok/min`; o tempo pode incluir espera. |
 | Modelo da sessão e esforço de raciocínio | Claude Code, Codex | Exibe apenas o modelo e o esforço de raciocínio explicitamente registrados na sessão. |
-| Contagem de tokens de raciocínio | Codex, OpenCode, Pi, Oh My Pi, OmO Native, CodeBuddy, WorkBuddy, Reasonix, DeepSeek Harness | — |
-| Detecção de início/conclusão de turno | Claude Code, Codex, OpenCode, Cursor, CodeBuddy, WorkBuddy, DeepSeek Harness | Usa sinais de turno registrados pela ferramenta. Para outras ferramentas ou sem sinais válidos, estima como em execução por cerca de 10 minutos após a última atividade. |
-| Estado nativo: em execução/aguardando entrada | Claude Code, Codex | — |
+| Contagem de tokens de raciocínio | Codex, OpenCode, Pi, Oh My Pi, OmO Native, CodeBuddy, WorkBuddy, DeepSeek Harness | — |
+| Detecção de início/conclusão de turno | Claude Code, Codex, OpenCode, Cursor, Antigravity, CodeBuddy, WorkBuddy, DeepSeek Harness | Usa sinais de turno registrados pela ferramenta. Para outras ferramentas ou sem sinais válidos, estima como em execução por cerca de 10 minutos após a última atividade. |
+| Estado nativo: em execução/aguardando entrada | Claude Code, Codex, Antigravity | O Antigravity ACP no T3 Code informa apenas os estados em execução e ocioso. |
 | Agrupamento de sessões pai e subagentes | Codex, Antigravity, Oh My Pi, ZCode; sessões do T3 Code com vínculos verificáveis à sessão pai | O agrupamento do Claude Code é oferecido pelo T3 Code. |
 | Agrupamento de registros de continuação da mesma conversa | Codex; sessões do T3 Code com vínculos verificados à mesma thread | — |
 | Alternar contas locais | Codex | Alterna entre contas adicionadas ao Token Monitor. |

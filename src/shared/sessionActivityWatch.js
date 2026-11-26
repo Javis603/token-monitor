@@ -4,7 +4,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const os = require('node:os');
 const { sessionActivityProvidersFor } = require('./sessionActivityRegistry');
-const { discoverT3DbPaths } = require('./t3SessionMetadata');
+const { discoverT3DbPaths } = require('./t3/sessionMetadata');
 const comparablePath = path.sep === '\\' ? (value) => value.toLowerCase() : (value) => value;
 
 function inside(root, file) {
@@ -98,4 +98,4 @@ function activityWatchIgnored(usageIgnored, usageDirs, sources) {
   };
 }
 
-module.exports = { activityWatchSources, activityClientsForPath, activityWatchIgnored };
+module.exports = { activityWatchSources, activityClientsForPath, activityWatchIgnored, comparablePath };

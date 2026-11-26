@@ -8,11 +8,11 @@
   const MIN_PERIOD_TABS = 3;
   const MAX_PERIOD_TABS = 6;
   const LABELS = Object.freeze({
-    today: 'Day',
-    month: 'Month',
-    allTime: 'Total',
+    today: 'DAY',
+    month: 'MONTH',
+    allTime: 'TOTAL',
     yesterday: 'YDAY',
-    week: 'Week',
+    week: 'WEEK',
     last7: '7D',
     last30: '30D'
   });
@@ -117,7 +117,8 @@
     }
     if (selection === 'week') {
       const weekday = new Date(`${todayKey}T00:00:00Z`).getUTCDay();
-      const offset = (weekday - weekStartsOn(options.locale) + 7) % 7;
+      const firstDay = Number.isInteger(options.weekStartsOn) ? options.weekStartsOn : weekStartsOn(options.locale);
+      const offset = (weekday - firstDay + 7) % 7;
       return { start: dayKeyAddDays(todayKey, -offset), end: todayKey };
     }
     if (selection === 'last7') return { start: dayKeyAddDays(todayKey, -6), end: todayKey };
@@ -758,6 +759,7 @@
     dayKeyAddDays,
     derivePeriod,
     deviceInventorySignature,
+    deviceDayState,
     devicesForReadySnapshot,
     displayLabel,
     fixedPeriodDeviceSnapshots,

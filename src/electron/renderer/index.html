@@ -20,9 +20,9 @@
           <div id="pluginPageActions" class="plugin-page-actions hidden"></div>
           <nav id="periodTabs" class="tabs" aria-label="Period tabs" data-i18n-aria-label="periodRange.tabsTitle">
             <span class="tab-indicator" aria-hidden="true"></span>
-            <button class="tab active" data-period="today" data-period-slot="today">Day</button>
-            <button id="monthPeriodTab" class="tab" data-period="month" data-period-slot="month" aria-haspopup="menu" aria-expanded="false">Month</button>
-            <button class="tab" data-period="allTime" data-period-slot="allTime">Total</button>
+            <button class="tab active" data-period="today" data-period-slot="today">DAY</button>
+            <button id="monthPeriodTab" class="tab" data-period="month" data-period-slot="month" aria-haspopup="menu" aria-expanded="false">MONTH</button>
+            <button class="tab" data-period="allTime" data-period-slot="allTime">TOTAL</button>
           </nav>
           <div id="monthPeriodMenu" class="view-switcher-menu period-menu hidden" popover="manual" role="menu" aria-labelledby="monthPeriodTab">
             <button class="view-switcher-menu-item" type="button" role="menuitemradio" data-fixed-period="month"><span class="view-switcher-menu-label" data-i18n="periodRange.month">This month</span></button>
@@ -128,7 +128,7 @@
                     <div class="settings-group-header maintenance-header"><span data-i18n="settings.proxy.title">Network proxy</span><span id="networkProxySource"></span></div>
                     <label><span data-i18n="settings.proxy.url">Proxy URL</span><input id="proxyUrlInput" type="text" spellcheck="false" autocomplete="off" placeholder="http://127.0.0.1:7890" aria-describedby="networkProxyNote" /></label>
                     <label><span data-i18n="settings.proxy.noProxy">Bypass proxy for</span><input id="noProxyInput" type="text" spellcheck="false" autocomplete="off" placeholder="example.com, .internal.net, 10.0.0.1:8080" data-i18n-placeholder="settings.proxy.noProxyPlaceholder" /></label>
-                    <p id="networkProxyNote" class="settings-note" data-i18n="settings.proxy.note">Used only for Token Monitor's own limit and account requests; sign-ins in your browser or a CLI are not affected. While set, it replaces HTTP(S)_PROXY and NO_PROXY for these requests, so list any hosts to bypass here; local addresses always stay direct. Leave empty to use the environment or system proxy.</p>
+                    <p id="networkProxyNote" class="settings-note" data-i18n="settings.proxy.note">Used for Token Monitor's own limit and account requests and desktop Hub sync; sign-ins in your browser or a CLI are not affected. While set, it replaces HTTP(S)_PROXY and NO_PROXY for these requests, so list any hosts to bypass here; local addresses always stay direct. Leave empty to use the environment or system proxy.</p>
                     <div id="proxyUrlError" class="hub-status error" role="alert" hidden></div>
                   </div>
                   <div id="tokscaleGroup" class="settings-group advanced-settings-block maintenance-panel">

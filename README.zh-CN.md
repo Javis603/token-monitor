@@ -252,7 +252,7 @@ Token Monitor 对 Token 用量、账户额度和 session 明细分别支持：
 | <img src=".github/assets/tools-icon/proma.png" width="28" alt="Proma" /> | Proma | `~/.proma/` (`agent-sessions/`, `sdk-config/sessions/`, `sdk-config/projects/`), `~/.proma-dev/` | ✅ | — | — |
 | <img src=".github/assets/tools-icon/catpaw.png" width="28" alt="CatPaw" /> | CatPaw | `<platform-app-data>/` (`catpaw-moon/`, `catpaw-overseas/`, `catpaw-memory-*.db`) | ✅ | — | — |
 | <img src=".github/assets/tools-icon/qoder.png" width="28" alt="Qoder" /> | Qoder | `~/.qoder/projects/**/*.jsonl` (global), `~/.qoder-cn/projects/**/*.jsonl` (CN) | ✅ | ✅ | — |
-| <img src=".github/assets/tools-icon/reasonix.png" width="28" alt="Reasonix" /> | Reasonix | `~/.reasonix/`（`stats/`、`sessions/`、`projects/*/sessions/`） | ✅ | — | — |
+| <img src=".github/assets/tools-icon/reasonix.png" width="28" alt="Reasonix" /> | Reasonix | `~/.reasonix/`（`stats/`、`sessions/`、`projects/*/sessions/`） | ✅ | — | ✅ |
 | <img src=".github/assets/tools-icon/deepseek.png" width="28" alt="DeepSeek" /> | DeepSeek / DeepSeek Harness | `~/.dsh/sessions/`（`session.jsonl`、`session.jsonl.zstd`） | ✅ | ✅ | ✅ |
 | <img src=".github/assets/tools-icon/cherrystudio.png" width="28" alt="Cherry Studio" /> | Cherry Studio | `<platform-app-data>/CherryStudio/`（`Data/Agents/.claude/projects/` V2、`.claude/projects/` legacy） | ✅ | — | — |
 | <img src=".github/assets/tools-icon/lmstudio.png" width="28" alt="LM Studio" /> | LM Studio | `~/.lmstudio/server-logs/**/*.log` | ✅ | — | — |
@@ -310,15 +310,15 @@ Token Monitor 对 Token 用量、账户额度和 session 明细分别支持：
 | 功能 | 支持的工具／来源 | 补充说明 |
 |---------|-------------------------|------------|
 | 会话标题 | Claude Code, Codex, OpenCode, Cursor, Antigravity, Cline CLI, Factory Droid, Kimi CLI, Grok Build, Pi, Oh My Pi, OmO Native, MiMo, ZCode, CodeBuddy, WorkBuddy, Reasonix, DeepSeek Harness, Cherry Studio, Devin CLI, fx, MiniMax Code | — |
-| 每次提示／回复的用量与工具调用 | Claude Code, Codex, OpenCode, Pi, Oh My Pi, OmO Native, CodeBuddy, WorkBuddy, Reasonix, DeepSeek Harness | 明细仅在本地读取，不会同步。 |
+| 每次提示／回复的用量与工具调用 | Claude Code, Codex, OpenCode, Pi, Oh My Pi, OmO Native, CodeBuddy, WorkBuddy, DeepSeek Harness | 明细仅在本地读取，不会同步。 |
 | 上下文用量／剩余空间 | Claude Code, Codex, DeepSeek Harness, Grok Build, WorkBuddy, CatPaw | Claude Code 的上下文上限根据模型估算。 |
 | 缓存用量／会话缓存命中率 | 提供缓存字段的来源，例如 Claude Code, Codex, OpenCode, Cursor, Kimi, Pi, Oh My Pi, OmO Native, DeepSeek Harness | 有缓存用量数据时才显示命中率。 |
 | 缓存剩余时间估算 | Claude Code | 根据记录中的缓存层级估算为 5 分钟或 1 小时。 |
 | 输出速度／Token 消耗速率 | Claude Code, Codex, OpenCode, Antigravity, Kimi, GitHub Copilot, Pi, Oh My Pi, OmO Native, Kilo CLI, MiMo Code/MiMo Desktop, Muse Code, ZCode CLI, Kiro, DeepSeek Harness, Devin CLI | `tok/s` 为输出速度，`tok/min` 为总 Token 消耗速率；计时可能包含等待。 |
 | 会话模型与推理强度 | Claude Code, Codex | 仅显示会话中明确记录的模型与推理强度。 |
-| 推理 Token 数 | Codex, OpenCode, Pi, Oh My Pi, OmO Native, CodeBuddy, WorkBuddy, Reasonix, DeepSeek Harness | — |
-| 回合开始／完成识别 | Claude Code, Codex, OpenCode, Cursor, CodeBuddy, WorkBuddy, DeepSeek Harness | 依据工具记录的回合信号。其他工具或缺少有效信号时，最后活动后约 10 分钟内估算为运行中。 |
-| 原生运行中／等待输入状态 | Claude Code, Codex | — |
+| 推理 Token 数 | Codex, OpenCode, Pi, Oh My Pi, OmO Native, CodeBuddy, WorkBuddy, DeepSeek Harness | — |
+| 回合开始／完成识别 | Claude Code, Codex, OpenCode, Cursor, Antigravity, CodeBuddy, WorkBuddy, DeepSeek Harness | 依据工具记录的回合信号。其他工具或缺少有效信号时，最后活动后约 10 分钟内估算为运行中。 |
+| 原生运行中／等待输入状态 | Claude Code, Codex, Antigravity | T3 Code 内的 Antigravity ACP 仅报告运行中和空闲状态。 |
 | 父会话／子代理分组 | Codex, Antigravity, Oh My Pi, ZCode；具有可验证父会话链接的 T3 Code 会话 | Claude Code 的分组通过 T3 Code 提供。 |
 | 同一对话的续接记录分组 | Codex；具有已验证线程链接的 T3 Code 会话 | — |
 | 切换本地账号 | Codex | 可切换至已添加到 Token Monitor 的账号。 |

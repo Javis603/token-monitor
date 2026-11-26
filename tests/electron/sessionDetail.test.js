@@ -24,6 +24,38 @@ function deferred() {
   return { promise, resolve, reject };
 }
 
+test('session detail keeps its group destination only while replacement pages are pending', () => {
+  const group = { kind: 'session-group', period: 'month', summary: { key: 'group', name: 'old group' } };
+  const request = { kind: 'session', client: 'codex', sessionId: 'child', returnTo: group, headingSignature: 'heading' };
+  let pending = true;
+  let rows = [];
+  const state = { period: 'month', openSession: request, stats: { periods: { month: {} } } };
+  const start = rendererSource.indexOf('function refreshSessionDetailHeading(');
+  const end = rendererSource.indexOf('\nfunction sessionDetailBackLabel(', start);
+  const context = {
+    state, els: {}, sessionRowsForPeriod: () => rows, sessionDetailHeadingSignature: () => 'heading',
+    pagedSessionsPending: () => pending
+  };
+  vm.runInNewContext(rendererSource.slice(start, end), context);
+  context.refreshSessionDetailHeading();
+  assert.strictEqual(request.returnTo, group);
+
+  rows = [{ key: 'group', name: 'fresh group', groupRows: [{ key: 'session:codex:child' }] }];
+  context.refreshSessionDetailHeading();
+  assert.strictEqual(request.returnTo.summary, rows[0]);
+
+  rows = [];
+  pending = false;
+  context.refreshSessionDetailHeading();
+  assert.equal(request.returnTo, null);
+
+  pending = true;
+  request.returnTo = group;
+  state.settings = { sessionTitlesEnabled: false };
+  context.refreshSessionDetailHeading();
+  assert.equal(request.returnTo, null, 'a title-bearing destination must clear when titles are disabled');
+});
+
 test('session detail renders its heading before loading, errors and empty results, and keeps it when sorting', async () => {
   const timers = [];
   const frames = [];
@@ -67,6 +99,7 @@ test('session detail renders its heading before loading, errors and empty result
   let render;
   const context = {
     rendererDom,
+    displayedSessions: key => state.stats?.periods?.[key]?.sessions,
     els, state, document: { createElement: element, querySelectorAll: () => [els.sessionDetailHead.querySelector('.detail-heading')].filter(Boolean) }, window: { addEventListener() {} }, t: (key, params) => translate('en', key, params),
     sessionDetailBack() { state.backClicked = true; },
     detailNote: text => ({ textContent: text }),
@@ -251,11 +284,13 @@ test('session detail renders its heading before loading, errors and empty result
   render({ detail: state.openSession.detail, preserveScroll: true });
   assert.deepEqual(state.expands, [false], 'an exchange the reader never opened stays collapsed');
 
-  state.openSession = { kind: 'session', client: 'reasonix', sessionId: 'reasonix:n', period: 'month', title: '' };
-  state.stats = { nativeSessions: { today: { 'reasonix:n': { title: 'Wrong period' } },
-    month: { 'reasonix:n': { title: 'Native session' } } } };
+  state.openSession = { kind: 'session', client: 'codex', sessionId: 'n', period: 'month', title: '' };
+  state.stats = { periods: {
+    today: { sessions: { 'codex:n': { title: 'Wrong period' } } },
+    month: { sessions: { 'codex:n': { title: 'Period session' } } }
+  } };
   context.refreshSessionDetailHeading();
-  assert.equal(els.sessionDetailHead.querySelector('.detail-heading').textContent, 'Native session');
+  assert.equal(els.sessionDetailHead.querySelector('.detail-heading').textContent, 'Period session');
   context.setSettings({ sessionTitlesEnabled: false });
   const groupOpening = context.open({ client: 'codex', sessionId: 's', title: 'gpt-5 · 12:00',
     returnTo: { kind: 'session-group' } });
@@ -458,6 +493,7 @@ function sessionDetailHarness(getSessionDetail) {
   const context = {
     rendererDom,
     state,
+    displayedSessions: key => state.stats?.periods?.[key]?.sessions,
     sessionRowsApi: require('../../src/electron/renderer/sessionRows'),
     visibleStatsSurface: () => 'main',
     isRendererWindowHidden: () => false,
@@ -621,13 +657,137 @@ test('a confirmed remote session never opens a local transcript with the same ID
   assert.equal(renders[0].detail.found, false);
 });
 
-test('Reasonix rows enter the shared detail navigation path instead of a native accordion', () => {
-  assert.match(rendererSource, /client !== 'claude' && client !== 'codex' && client !== 'opencode' && client !== 'reasonix'/);
-  assert.match(rendererSource, /const sessionId = client === 'reasonix' \? `reasonix:\$\{match\[2\]\}` : match\[2\];/);
-  assert.match(rendererSource, /state\.stats\?\.nativeSessions\?\.\[state\.period\]\?\.\[sessionId\]/);
-  assert.match(rendererSource, /client === 'reasonix' && rowEl\.dataset\.detailUnavailable === 'true'/);
-  assert.match(rendererSource, /sessionCost: client === 'reasonix' \? Number\(session\?\.reportedCostUsd \|\| 0\)/);
-  assert.doesNotMatch(rendererSource, /nativeSessionBreakdown/);
+function reasonixSessionListHarness(listReasonixSessions) {
+  const source = rendererSource.slice(rendererSource.indexOf('let reasonixSessionList = null;'),
+    rendererSource.indexOf('function sessionRowsForPeriod('));
+  const refreshHandler = rendererSource.slice(rendererSource.indexOf("els.refreshButton.addEventListener('click',"),
+    rendererSource.indexOf("els.minButton.addEventListener('click',"));
+  const state = { breakdown: 'home', period: 'today', settings: { sessionTitlesEnabled: true, allTimeSince: '2024-01-01' } };
+  const calendar = { today: '2026-11-30' };
+  let renders = 0;
+  let refresh;
+  const context = {
+    state, clientRowTracked: () => true,
+    fixedPeriodTodayKey: () => calendar.today,
+    fixedPeriodRangesApi: { isDerived: period => period === 'last7days' },
+    console: { log() {} },
+    els: { refreshButton: { addEventListener: (_type, handler) => { refresh = handler; } } },
+    refreshStats() {},
+    statsRenderScheduler: { request: () => { renders += 1; } },
+    window: { tokenMonitor: { listReasonixSessions } }
+  };
+  const request = vm.runInNewContext(`${source}\n${refreshHandler}\n() => reasonixSessionList`, context);
+  return { state, calendar, load: context.loadReasonixSessionList, refresh, request, renders: () => renders };
+}
+
+test('Reasonix loads on a Sessions visit and reloads once when the local day changes', async () => {
+  let calls = 0;
+  const { state, calendar, load, renders } = reasonixSessionListHarness(async () => {
+    calls += 1;
+    return {};
+  });
+  load();
+  assert.equal(calls, 0);
+  state.breakdown = 'session';
+  load();
+  load();
+  await Promise.resolve();
+  assert.equal(calls, 1);
+  assert.equal(renders(), 1);
+  calendar.today = '2026-12-01';
+  state.openSession = {};
+  load();
+  assert.equal(calls, 1, 'an open detail does not trigger a list read');
+  state.openSession = null;
+  load();
+  load();
+  assert.equal(calls, 2, 'the first list render on the new day reloads once');
+  state.settings.allTimeSince = '2025-01-01';
+  load();
+  assert.equal(calls, 3);
+  state.breakdown = 'home';
+  load();
+  state.breakdown = 'session';
+  load();
+  assert.equal(calls, 4);
+});
+
+test('Reasonix marks a failed list read and retries on Refresh', async () => {
+  let calls = 0;
+  const emptyPeriods = { today: {}, month: {}, allTime: {} };
+  const { state, load, refresh, request, renders } = reasonixSessionListHarness(async () => {
+    calls += 1;
+    if (calls === 1) throw new Error('worker timed out');
+    return emptyPeriods;
+  });
+  state.breakdown = 'session';
+  load();
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(request().failed, true);
+  assert.equal(renders(), 1, 'the failure prompts a repaint');
+  load();
+  load();
+  assert.equal(calls, 1, 'ordinary repaints do not retry a failed read');
+
+  refresh();
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(calls, 2);
+  assert.notEqual(request().failed, true);
+  assert.equal(request().periods, emptyPeriods);
+  assert.equal(renders(), 2);
+});
+
+test('Reasonix list IPC does not reuse a worker read started before midnight', async () => {
+  const main = fs.readFileSync(path.join(__dirname, '../../src/electron/main.js'), 'utf8');
+  const source = main.slice(main.indexOf('  let reasonixSessionRead;'),
+    main.indexOf("  ipcMain.handle('session:getDetail'"));
+  const reads = [];
+  let today = '2026-11-30';
+  let list;
+  const sender = {};
+  vm.runInNewContext(source, {
+    ipcMain: { handle: (_name, handler) => { list = handler; } },
+    mainWindow: { webContents: sender },
+    settings: { clients: ['reasonix'] },
+    clientsCsvForSetting: clients => clients,
+    trackedClientSet: clients => new Set(clients),
+    fixedPeriodRangesApi: { localDayKey: () => today },
+    latestStats: null,
+    projectModelAliasSessions: (_stats, rows) => rows,
+    runSessionDetailWorker() {
+      const read = deferred();
+      reads.push(read);
+      return read.promise;
+    }
+  });
+
+  const previous = list({ sender });
+  today = '2026-12-01';
+  const current = list({ sender });
+  assert.equal(reads.length, 2);
+  reads[0].resolve({ today: { previous: {} } });
+  assert.deepEqual(Object.keys((await previous).today), ['previous']);
+
+  const concurrent = list({ sender });
+  assert.equal(reads.length, 2, 'only reads on the same local day are shared');
+  reads[1].resolve({ today: { current: {} } });
+  assert.deepEqual(Object.keys((await current).today), ['current']);
+  assert.deepEqual(Object.keys((await concurrent).today), ['current']);
+});
+
+test('Reasonix detail stays on demand even if ordinary stats contain a matching row', async () => {
+  const { sessionRowDetailAvailable } = require('../../src/electron/renderer/sessionRows');
+  assert.equal(sessionRowDetailAvailable({ client: 'reasonix' }), false);
+  assert.equal(sessionRowDetailAvailable({ client: 'reasonix', sessionDetailAvailable: true }), true);
+  let reads = 0;
+  const { openSessionDetail, refreshOpenSessionDetail, state } = sessionDetailHarness(async () => {
+    reads += 1;
+    return { found: true };
+  });
+  await openSessionDetail({ client: 'reasonix', sessionId: 'reasonix:session' });
+  state.stats = { periods: { today: { sessions: { 'reasonix:reasonix:session': { totalTokens: 100 } } } } };
+  await refreshOpenSessionDetail();
+  assert.equal(reads, 1);
 });
 
 for (const scenario of ['catch-up', 'hover', 'unchanged', 'hidden', 'closed', 'replaced', 'initial failure', 'initial rejection', 'catch-up failure', 'catch-up rejection']) {
@@ -662,7 +822,7 @@ for (const scenario of ['catch-up', 'hover', 'unchanged', 'hidden', 'closed', 'r
     if (shouldCatchUp) {
       const succeeded = scenario === 'catch-up' || scenario === 'hover';
       assert.equal(request.detail.marker, succeeded ? 200 : 100);
-      assert.equal(request.liveSignature, JSON.stringify(succeeded ? [200, 2, 0] : [100, 1, 0]));
+      assert.equal(request.liveSignature, JSON.stringify(succeeded ? [200, 2] : [100, 1]));
       assert.equal(request.detailLiveBusy, false);
       assert.equal(renders.at(-1).detail.marker, succeeded ? 200 : 100);
       await new Promise(resolve => setImmediate(resolve));
@@ -779,7 +939,7 @@ for (const failureMode of ['resolved', 'rejected']) {
     await new Promise(resolve => setImmediate(resolve));
     assert.equal(reads, 3, 'the successful 200 read attempts the final 300 reading once');
     assert.equal(state.openSession.detail.marker, 200);
-    assert.equal(state.openSession.liveSignature, JSON.stringify([200, 2, 0]));
+    assert.equal(state.openSession.liveSignature, JSON.stringify([200, 2]));
     assert.equal(state.openSession.sessionCost, 2);
     assert.equal(state.openSession.detailLiveBusy, false);
     assert.deepEqual(renders.filter(render => render.detail).map(render => render.detail.marker), [100, 200]);
@@ -788,7 +948,7 @@ for (const failureMode of ['resolved', 'rejected']) {
     await refreshOpenSessionDetail();
     assert.equal(reads, 4);
     assert.equal(state.openSession.detail.marker, 300);
-    assert.equal(state.openSession.liveSignature, JSON.stringify([300, 3, 0]));
+    assert.equal(state.openSession.liveSignature, JSON.stringify([300, 3]));
     assert.equal(state.openSession.sessionCost, 3);
     await refreshOpenSessionDetail();
     assert.equal(reads, 4, 'successful recovery suppresses idle reads');

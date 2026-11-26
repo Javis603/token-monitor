@@ -218,6 +218,7 @@ test('typing after a session-status repaint uses the refreshed projection cache'
   const stats = {};
   const staleRows = [{ key: 'session:1', running: true, context: { percentLeft: 50 } }];
   const freshRows = [{ key: 'session:1', running: false }];
+  const pagedSession = { running: true };
   const state = { stats, period: 'today', breakdown: 'session', sessionSearchQuery: '',
     sessionRowsCache: { stats, period: 'today', rows: staleRows } };
   let timer;
@@ -226,15 +227,20 @@ test('typing after a session-status repaint uses the refreshed projection cache'
     rendererDom,
     state, Date, els: { breakdown: { scrollTop: 120 } },
     window: { TokenMonitorSessionLive: {
-      nextSessionStatusChangeAt: () => timer ? 0 : Date.now() + 1000
+      sessionWithActivity: (_period, _key, session) => session,
+      nextSessionStatusChangeAt: (sessions) => {
+        assert.deepEqual(sessions, [pagedSession], 'the timer includes paged-only rows');
+        return timer ? 0 : Date.now() + 1000;
+      }
     } },
+    displayedSessions: () => ({ 'paged:1': pagedSession }),
     stopSessionStatusRepaint: () => {},
     visibleStatsSurface: () => 'main',
     setTimeout: callback => { timer = callback; return 1; },
     sessionRowsForPeriod: () => freshRows,
     renderRows: rows => rendered.push(rows),
     syncSessionSearchChrome: () => {},
-    sessionRowsApi: { sessionBreakdownIncomplete: () => false },
+    sessionBreakdownIncomplete: () => false,
     overflowText: { batch: callback => callback() },
     render: () => { assert.fail('the fresh cache should avoid a full render'); }
   };
@@ -264,10 +270,14 @@ test('typing filters the cached session rows instead of rebuilding the projectio
   };
   const els = { breakdown: { scrollTop: 240 } };
   const calls = [];
-  const update = Function('state', 'els', 'sessionRowsApi', 'syncSessionSearchChrome', 'renderRows', 'render', 'overflowText',
-    `${app.slice(start, end)}\nreturn updateSessionSearchQuery;`)(
+  const hintStart = app.indexOf('function sessionBreakdownIncomplete(');
+  const hintEnd = app.indexOf('\n}', hintStart) + 2;
+  let recovered = true;
+  const update = Function('state', 'els', 'sessionRowsApi', 'syncedSessionPeriod', 'syncSessionSearchChrome', 'renderRows', 'render', 'overflowText',
+    `${app.slice(start, end)}\n${app.slice(hintStart, hintEnd)}\nreturn updateSessionSearchQuery;`)(
     state, els,
-    { sessionBreakdownIncomplete: () => false },
+    { sessionBreakdownIncomplete: () => true },
+    () => ({ detailsAvailable: recovered }),
     () => calls.push('sync'),
     (nextRows, options) => calls.push(['rows', nextRows, options]),
     () => calls.push('render'),
@@ -280,6 +290,9 @@ test('typing filters the cached session rows instead of rebuilding the projectio
   assert.equal(state.sessionPage, 0);
   assert.equal(state.rowSignature, 'previous');
   assert.equal(els.breakdown.scrollTop, 0);
+  recovered = false;
+  update('review again');
+  assert.equal(calls.at(-1)[2].incompleteHint, 'sessions.incomplete');
 });
 
 test('typing without a valid projection forwards search intent through the full render', () => {
@@ -325,7 +338,7 @@ test('search renders reuse matching rows without layout motion or rebuilding too
   const start = app.indexOf('function renderRows(');
   const end = app.indexOf('\n}', start) + 2;
   const policy = require('../../src/electron/renderer/breakdownRenderPolicy');
-  const state = { breakdown: 'session', sessionSearchQuery: '', sessionToolFilter: '', sessionPage: 0 };
+  const state = { breakdown: 'session', period: 'today', sessionSearchQuery: '', sessionToolFilter: '', sessionPage: 0 };
   const calls = { capture: 0, animate: 0, tools: 0, replace: 0, update: 0 };
   const breakdown = {
     children: [],
@@ -335,9 +348,17 @@ test('search renders reuse matching rows without layout motion or rebuilding too
   const noop = () => {};
   const batch = { active: false, calls: 0 };
   const statuses = [];
+  const reasonixSessionList = { failed: false };
   const dependencies = {
     rendererDom,
     state, els: { breakdown }, ...policy,
+    reasonixSessionList,
+    fixedPeriodRangesApi: { isDerived: period => period === 'last7days' },
+    document: { createElement() {
+      const node = { setAttribute() {} };
+      node.classList = { contains: name => node.className === name };
+      return node;
+    } },
     sessionSearchQuery: () => state.sessionSearchQuery,
     sessionRowsApi: { filterSessionRows },
     sessionToolClients: row => [row.client, ...(row.groupRows || []).map(member => member.client)],
@@ -423,4 +444,24 @@ test('search renders reuse matching rows without layout motion or rebuilding too
   assert.equal(calls.tools, 2);
   assert.equal(calls.capture, 1);
   assert.equal(calls.animate, 1);
+
+  reasonixSessionList.failed = true;
+  renderRows(data, { incompleteHint: 'sessions.incomplete', fromSearch: true });
+  assert.equal(breakdown.children[0].textContent, 'sessions.incomplete sessions.reasonixReadFailed');
+  assert.equal(breakdown.children.length, 4, 'other sessions remain visible');
+
+  state.sessionSearchQuery = 'not found';
+  renderRows(data, { fromSearch: true });
+  assert.equal(breakdown.children[0].textContent, 'sessions.reasonixReadFailed');
+  assert.equal(breakdown.children[1].query, 'not found');
+
+  state.period = 'last7days';
+  renderRows(data, { fromSearch: true });
+  assert.equal(breakdown.children[0].query, 'not found', 'derived periods do not read local Reasonix sessions');
+
+  state.period = 'today';
+  state.sessionSearchQuery = '';
+  reasonixSessionList.failed = false;
+  renderRows([], { fromSearch: true });
+  assert.equal(breakdown.children.length, 0, 'a successful empty result does not display a failure');
 });

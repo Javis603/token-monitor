@@ -485,7 +485,7 @@ function clientSourceRoots(clientsCsv, options = {}) {
   );
   add('reasonix', [
     REASONIX_SOURCE_CHECK_ID,
-    resolveReasonixStatsDir({ env: process.env, homeDir: home, platform: process.platform, cwdDir: process.cwd() })
+    resolveReasonixStatsDir({ env, homeDir: home, platform, cwdDir: options.cwdDir || process.cwd() })
   ]);
   // DeepSeek Harness (DSH) — zstd JSONL session transcripts at
   // `<dshHome>/sessions/` (default `~/.dsh`, overridable via `DSH_HOME`).

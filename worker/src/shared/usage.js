@@ -189,6 +189,8 @@ function applyParentLink(target, source) {
   const parentSessionId = normalizeParentSessionId(source.parentSessionId ?? source.parent_session_id, target.sessionId, parentClient, target.client);
   if (!parentSessionId) return;
   target.parentSessionId = parentSessionId;
+  if (source.t3ParentLink === true) target.t3ParentLink = true;
+  else delete target.t3ParentLink;
   if (parentClient !== target.client) target.parentClient = parentClient;
   else delete target.parentClient;
 }
@@ -1422,6 +1424,15 @@ function normalizeRecordHistoryFields(record, nowIso = new Date().toISOString())
   return fields;
 }
 
+// History recovery follows an already accepted usage publication. It must
+// never reprocess that record's usage rows or their admitted titles.
+function restoreDeviceHistory(record, incoming) {
+  if (!record || !hasOwn(incoming, 'history') || record.historyAvailable === false) return record;
+  const { history } = normalizeRecordHistoryFields({ history: incoming.history });
+  if (!history?.summary?.activeDaysComplete || !Array.isArray(history.dailyTotals)) return record;
+  return { ...record, history };
+}
+
 // `options.normalizePeriod` lets a caller that sees the same period object in
 // several records reuse its normalization. It must return what normalizePeriod
 // would, and whatever it returns is read, never mutated.
@@ -1681,6 +1692,7 @@ function mergeDeviceRecord(existing, incoming) {
   }
   if (incoming?.limitsOnly === true) {
     normalizedIncoming.periods = normalizedExisting.periods;
+    normalizedIncoming.updatedAt = normalizedExisting.updatedAt;
     delete normalizedIncoming.allTimeTokensUnavailable;
     if (normalizedExisting.allTimeTokensUnavailable === true) normalizedIncoming.allTimeTokensUnavailable = true;
     // The three attribution fields describe the usage this branch is carrying
@@ -1713,6 +1725,20 @@ function mergeDeviceRecord(existing, incoming) {
   if (!hasIncomingLimits) normalizedIncoming.limits = normalizedExisting.limits;
   else normalizedIncoming.limits = mergeDeviceLimits(normalizedExisting, normalizedIncoming);
   if (!hasIncomingHistory && hasOwn(normalizedExisting, 'history')) normalizedIncoming.history = normalizedExisting.history;
+  const incomingHistory = normalizedIncoming.history;
+  const previousHistory = normalizedExisting.history;
+  if (normalizedIncoming.historyAvailable !== false && incomingHistory?.dailyTotalsOmitted > 0
+    && !Array.isArray(incomingHistory.dailyTotals) && incomingHistory.dailyTotalsRevision
+    && incomingHistory.dailyTotalsRevision === previousHistory?.dailyTotalsRevision
+    && previousHistory.summary?.activeDaysComplete === true
+    && previousHistory.dailyTotals?.length === incomingHistory.dailyTotalsOmitted) {
+    const { dailyTotalsOmitted: _omitted, ...history } = incomingHistory;
+    normalizedIncoming.history = {
+      ...history,
+      dailyTotals: previousHistory.dailyTotals,
+      summary: { ...history.summary, activeDaysComplete: true }
+    };
+  }
   if (hasOwn(normalizedIncoming, 'history')) normalizedIncoming.history = historyWithAvailability(normalizedIncoming.history, normalizedIncoming.historyAvailable);
   if (hasIncomingTrackedClients) {
     preserveUntrackedClientUsage(normalizedExisting, normalizedIncoming, normalizedIncoming.trackedClients || []);
@@ -2398,6 +2424,7 @@ function deltaValue(base, fresh, anchor, key) {
 
       delete result.parentSessionId;
       delete result.parentClient;
+      delete result.t3ParentLink;
       applyParentLink(result, base?.parentSessionId ? base : fresh || {});
       const freshModelAt = timestampMs(fresh?.lastUsedAt);
       const retainedModelAt = timestampMs(base?.lastUsedAt);
@@ -2435,6 +2462,7 @@ module.exports = {
   applyProjectRollups,
   canonicalProjectKey,
   carryDeviceHistory,
+  restoreDeviceHistory,
   emptyPeriod,
   extractUsageBundleFromTokscale,
   extractUsageFromTokscale,

@@ -1,4 +1,4 @@
-/* global state, els, renderLimits, renderTrends, renderSessionDetail, renderRows, updateRow, sessionRowsForPeriod, renderSessionGroupDetail, sessionRowsApi, rendererDom, document, getComputedStyle, PointerEvent, requestAnimationFrame */
+/* global state, els, renderLimits, renderTrends, renderSessionDetail, renderRows, updateRow, sessionRowsForPeriod, setRendererSettings, renderSessionGroupDetail, sessionRowsApi, rendererDom, document, getComputedStyle, PointerEvent, requestAnimationFrame */
 'use strict';
 (async () => {
   const assert = (ok, message) => { if (!ok) throw new Error(message); };
@@ -90,6 +90,39 @@
   assert(await historyCount() === opens, 'a newly inserted balance disclosure suppresses its retained row history timer');
   mimoRow.dispatchEvent(new PointerEvent('pointerleave'));
   state.breakdown = 'session';
+  const untitled = { client: 'codex', sessionId: 'project-test', projectLabel: 'Token Monitor',
+    totalTokens: 100, models: { 'gpt-5': 100 }, messageCount: 2 };
+  state.stats.periods.today.sessions = { 'codex:project-test': untitled };
+  els.breakdown.classList.remove('hidden');
+  renderRows(sessionRowsForPeriod(state.stats.periods.today));
+  const projectRow = els.breakdown.querySelector('[data-key="session:codex:project-test"]');
+  const projectId = projectRow.querySelector('.row-detail');
+  assert(projectRow.querySelector('.row-title').textContent === 'Token Monitor', 'untitled session uses the project name');
+  assert(!projectId.classList.contains('hidden') && projectId.textContent === 'project-test', 'project-labelled row retains its visible session ID');
+  projectRow.click();
+  assert(els.sessionDetailHead.querySelector('.detail-heading')?.textContent === 'Codex · gpt-5', 'Details retains the tool/model heading');
+  state.openSession = null;
+
+  const settingsWithTitles = { ...state.settings, sessionTitlesEnabled: true };
+  const statsWithTitles = state.stats;
+  const titled = { ...untitled, title: 'Project work', reasoningEffort: 'high' };
+  statsWithTitles.periods.today.sessions = { 'codex:project-test': titled };
+  renderRows(sessionRowsForPeriod(state.stats.periods.today));
+  assert(projectRow.querySelector('.row-title').textContent === 'Project work', 'enabled titles show the session title');
+  assert(projectId.classList.contains('hidden'), 'titled session moves the ID into Details');
+
+  setRendererSettings({ ...settingsWithTitles, sessionTitlesEnabled: false });
+  renderRows(sessionRowsForPeriod(state.stats.periods.today));
+  assert(projectRow.querySelector('.row-title').textContent === 'Codex · gpt-5 · high', 'disabling titles restores the tool/model/effort heading');
+  assert(projectRow.querySelector('.row-subtitle').textContent === '2 calls', 'disabling titles restores the activity subtitle');
+  assert(projectRow.querySelector('.row-activity').classList.contains('hidden'), 'disabling titles removes the separate activity line');
+  assert(!projectId.classList.contains('hidden') && projectId.textContent === 'project-test', 'disabling titles shows the session ID');
+
+  setRendererSettings(settingsWithTitles);
+  state.stats = statsWithTitles;
+  renderRows(sessionRowsForPeriod(state.stats.periods.today));
+  assert(projectRow.querySelector('.row-title').textContent === 'Project work', 're-enabling titles restores the session title after stats refresh');
+
   const raw = { client: 'codex', sessionId: 'test', title: 'Test session', totalTokens: 100,
     models: { 'gpt-5': 70, 'gpt-5-mini': 30 }, lastUsedAt: new Date().toISOString() };
   state.stats.periods.today.sessions = { 'codex:test': raw };

@@ -686,7 +686,10 @@ const RANGE_PROJECT_FIELDS = Object.freeze(['projectId', 'projectLabel']);
 // title, project and links come from its All Time row; every count comes from
 // the days themselves.
 function sessionForRange(entry, window, today, now, key) {
-  const days = Object.entries(entry.days || {}).filter(([day]) => day >= window.start && day <= window.end && day < today);
+  const single = window.start === window.end && window.start < today ? entry.days?.[window.start] : null;
+  const days = window.start === window.end
+    ? (single ? [[window.start, single]] : [])
+    : Object.entries(entry.days || {}).filter(([day]) => day >= window.start && day <= window.end && day < today);
   const rows = days.map(([, value]) => value.session);
   const captures = days.map(([, value]) => Date.parse(value.capturedAt) || 0);
   if (window.start <= today && today <= window.end && entry.periods?.today && shouldApplyPeriod('today', entry, now)) {
@@ -749,12 +752,26 @@ function applySessionDayArchive(summary, archive, options = {}) {
     candidates.push([sessionKey(entry.client, entry.sessionId) || archiveKey, entry, archiveKey]);
   }
   if (!candidates.length) return summary;
+  const dayCandidates = new Map();
+  for (const window of Object.values(windows)) {
+    if (window?.start && window.start === window.end) dayCandidates.set(window.start, []);
+  }
+  if (dayCandidates.size) {
+    for (const candidate of candidates) {
+      const [, entry] = candidate;
+      for (const day of Object.keys(entry.days || {})) {
+        if (day < today) dayCandidates.get(day)?.push(candidate);
+      }
+      if (entry.periods?.today) dayCandidates.get(today)?.push(candidate);
+    }
+  }
   const retainedRows = new Map();
   const targets = new Map();
   for (const [name, range] of Object.entries(ranges)) {
     const window = windows[name];
     if (!range || typeof range !== 'object' || !window?.start || !window?.end) continue;
-    for (const [key, entry, archiveKey] of candidates) {
+    const relevant = window.start === window.end ? dayCandidates.get(window.start) : candidates;
+    for (const [key, entry, archiveKey] of relevant) {
       if (range.sessions?.[key]) continue;
       const restored = sessionForRange(entry, window, today, now, key);
       if (!restored) continue;

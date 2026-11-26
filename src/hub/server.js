@@ -1,12 +1,17 @@
 'use strict';
 
 const http = require('node:http');
+const {
+  createFixedRangeUploads, fixedRangeRequestPages, retireFixedRangeSnapshot, rememberFixedRangeObservation,
+  hasCurrentFixedRangeObservation, withoutFixedRangeObservation
+} = require('../shared/fixedRangeUploads');
+const { dailyRangeKeys, decodeFixedRangePeriod, legacyFixedRangeView, rangesMatchDeviceDay, redactDailyRangeSnapshot, removedPagedClients, restorePagedClientSessions, FIXED_RANGE_HEADER, FIXED_RANGE_VERSION } = require('../shared/fixedRangeSync');
 const { UPLOAD_HEADER, UPLOAD_VERSION, createUploadBaselines } = require('../shared/uploadDelta');
 const path = require('node:path');
 const { URL } = require('node:url');
 const {
-  aggregateDevices,
-  mergeSyncDeviceRecord,
+  mergePeriods, aggregateDevices,
+  mergeSyncDeviceRecord, restoreDeviceHistory,
   aggregateHistory,
   stripSessionTextFromDeviceRecord
 } = require('../shared/usage');
@@ -76,6 +81,64 @@ function createHub({
   store.devices = Object.assign(Object.create(null), store.devices);
   store.syncTitlePolicies = Object.assign(Object.create(null), store.syncTitlePolicies || {});
   store.syncSettings = Object.assign(Object.create(null), store.syncSettings || {});
+  store.fixedRanges = Object.assign(Object.create(null), store.fixedRanges || {});
+  const fixedRangeUploads = createFixedRangeUploads();
+  const legacyRangeViews = new WeakMap();
+  function getFixedRanges(id) {
+    const snapshot = store.fixedRanges[id];
+    const device = store.devices[id];
+    return snapshot?.revision && hasCurrentFixedRangeObservation(device)
+      && snapshot.observedAt === device.updatedAt
+      && rangesMatchDeviceDay(snapshot.ranges, device.periodWindows?.today?.key) ? snapshot : undefined;
+  }
+
+  function readFixedRange(id, name, window, revision) {
+    const snapshot = getFixedRanges(id);
+    if (!snapshot || snapshot.revision !== revision) return null;
+    const daily = !Object.hasOwn(snapshot.ranges, name);
+    const names = daily ? dailyRangeKeys(window) : [name];
+    if (!names.length) return null;
+    const periods = [];
+    for (const key of names) {
+      const range = snapshot.ranges[key];
+      if (range?.start !== (daily ? key : window.start) || range.end !== (daily ? key : window.end)) return null;
+      const decoded = decodeFixedRangePeriod(snapshot.ranges, snapshot.pages.slice(range.firstPage, range.firstPage + range.pageCount), key);
+      if (!decoded) return null;
+      periods.push(decoded);
+    }
+    return daily ? mergePeriods(...periods) : periods[0];
+  }
+
+  function acceptFixedRange(deviceId, payload) {
+    const pages = fixedRangeRequestPages(payload);
+    if (!pages) return { status: 400 };
+    const preserveTitles = acceptsSessionTitles(serverTitlesEnabled, store.syncTitlePolicies[deviceId], pages[0]?.sessionTitleSyncGeneration);
+    const previous = store.fixedRanges[deviceId];
+    let result;
+    for (const page of pages) {
+      const published = previous && previous.revision === page?.revision ? {
+        ...previous,
+        pageCount: previous.pages.length,
+        rows: previous.pages.length === 0 && page.page === 0 ? [] : previous.pages[page.page]
+      } : previous;
+      result = fixedRangeUploads.accept(deviceId, page, store.devices[deviceId], preserveTitles, published);
+      if (result.status !== 200) return result;
+    }
+    if (result.snapshot) publishFixedRanges(deviceId, result.snapshot);
+    return result;
+  }
+
+  function publishFixedRanges(id, snapshot) {
+    const previous = store.fixedRanges[id];
+    store.fixedRanges[id] = snapshot;
+    try { queuePersist(); } catch (error) {
+      if (previous) store.fixedRanges[id] = previous;
+      else delete store.fixedRanges[id];
+      throw error;
+    }
+    if (statsListeners.size > 0) notifyStatsListeners('fixed-ranges');
+    queueStatsBroadcast();
+  }
   const bindHost = resolveBindHost(host, secret);
   const uploadBaselines = createUploadBaselines();
   let persistTimer = null;
@@ -85,7 +148,7 @@ function createHub({
 
   // Apply the permission at startup, including records from offline devices.
   // Keep disabled policies as tombstones so re-enabling cannot reuse old tokens.
-  const beforeCleanup = JSON.stringify([store.devices, store.syncTitlePolicies]);
+  const beforeCleanup = JSON.stringify([store.devices, store.syncTitlePolicies, store.fixedRanges]);
   for (const [id, policy] of Object.entries(store.syncTitlePolicies)) {
     if (!serverTitlesEnabled && policy?.enabled === true) store.syncTitlePolicies[id] = nextTitlePolicy(policy, false);
   }
@@ -94,7 +157,14 @@ function createHub({
       preserveSessionTitles: serverTitlesEnabled && normalizeTitlePolicy(store.syncTitlePolicies[id]).enabled
     });
   }
-  if (JSON.stringify([store.devices, store.syncTitlePolicies]) !== beforeCleanup) persist();
+  for (const id of Object.keys(store.fixedRanges)) {
+    const snapshot = store.fixedRanges[id];
+    if (snapshot.titleGeneration && !acceptsSessionTitles(serverTitlesEnabled, store.syncTitlePolicies[id], snapshot.titleGeneration)) {
+      store.fixedRanges[id] = redactDailyRangeSnapshot(snapshot, store.devices[id]?.periodWindows?.today?.key)
+        || retireFixedRangeSnapshot(snapshot);
+    }
+  }
+  if (JSON.stringify([store.devices, store.syncTitlePolicies, store.fixedRanges]) !== beforeCleanup) persist();
 
   function persist() {
     store.version = 1;
@@ -128,6 +198,11 @@ function createHub({
     stats.historyPreview = historyPreview(history);
     stats.historyRevision = historyRevision(history);
     stats.deviceHistoryRevision = deviceHistoryRevision(Object.values(store.devices));
+    stats.fixedRangeRevisions = Object.fromEntries(Object.keys(store.fixedRanges)
+      .flatMap(id => {
+        const snapshot = getFixedRanges(id);
+        return snapshot ? [[id, snapshot.revision]] : [];
+      }));
     // The version of the shared subscription list, never the list itself. A
     // device compares it against the copy it holds and re-reads only when it has
     // been overtaken, so learning about another device's edit costs nothing in
@@ -142,7 +217,7 @@ function createHub({
   }
 
   function getDevices() {
-    return Object.values(store.devices);
+    return Object.values(store.devices).map(withoutFixedRangeObservation);
   }
 
   const sseClients = new Set();
@@ -245,20 +320,31 @@ function createHub({
     return ingestRecord(payload);
   }
 
-  function ingestRecord(payload) {
+  function ingestRecord(payload, { historyOnly = false } = {}) {
     if (!payload || (!payload.deviceId && !payload.id)) {
       throw new Error('deviceId_required');
     }
     const deviceId = String(payload.deviceId || payload.id);
-    uploadBaselines.forget(deviceId);
-    const record = mergeSyncDeviceRecord(store.devices[deviceId], { ...payload, receivedAt: new Date().toISOString() }, {
+    if (!historyOnly) uploadBaselines.forget(deviceId);
+    const previous = store.devices[deviceId];
+    const removed = removedPagedClients(previous, payload);
+    const published = removed.length ? getFixedRanges(deviceId) : null;
+    const previousWithSessions = published
+      ? restorePagedClientSessions(previous, published.ranges, published.pages, removed) : previous;
+    const record = historyOnly ? restoreDeviceHistory(previous, payload) : mergeSyncDeviceRecord(previousWithSessions, { ...payload, receivedAt: new Date().toISOString() }, {
       preserveSessionTitles: acceptsSessionTitles(serverTitlesEnabled, store.syncTitlePolicies[deviceId], payload.sessionTitleSyncGeneration)
     });
+    rememberFixedRangeObservation(record, previous);
+    const projectsChanged = (previous?.projectsEnabled !== false) !== (record.projectsEnabled !== false);
+    const dayChanged = previous?.periodWindows?.today?.key !== record.periodWindows?.today?.key;
+    if (previous?.updatedAt !== record.updatedAt || dayChanged || projectsChanged) fixedRangeUploads.discard(deviceId);
+    const snapshot = store.fixedRanges[deviceId];
+    if (projectsChanged && snapshot?.revision) store.fixedRanges[deviceId] = retireFixedRangeSnapshot(snapshot);
     store.devices[record.deviceId] = record;
     queuePersist();
     if (statsListeners.size > 0) notifyStatsListeners('ingest');
     queueStatsBroadcast();
-    return record;
+    return withoutFixedRangeObservation(record);
   }
 
   function deleteDevice(deviceId) {
@@ -266,16 +352,20 @@ function createHub({
     // Commit deletion and revocation together, keeping a generation tombstone.
     const previousPolicy = store.syncTitlePolicies[deviceId];
     const previousDevice = store.devices[deviceId];
+    const previousRanges = store.fixedRanges[deviceId];
     const previousSavedAt = store.savedAt;
     store.syncTitlePolicies[deviceId] = nextTitlePolicy(previousPolicy, false);
     delete store.devices[deviceId];
+    delete store.fixedRanges[deviceId];
     try { persist(); } catch (error) {
       if (previousPolicy) store.syncTitlePolicies[deviceId] = previousPolicy;
       else delete store.syncTitlePolicies[deviceId];
       if (previousDevice) store.devices[deviceId] = previousDevice;
+      if (previousRanges) store.fixedRanges[deviceId] = previousRanges;
       store.savedAt = previousSavedAt;
       throw error;
     }
+    fixedRangeUploads.discard(deviceId);
     broadcastStats('delete');
   }
 
@@ -318,16 +408,23 @@ function createHub({
     if (enabled && normalizeTitlePolicy(previous).enabled) return next;
     uploadBaselines.forget(deviceId);
     const previousDevice = store.devices[deviceId];
+    const previousRanges = store.fixedRanges[deviceId];
     const previousSavedAt = store.savedAt;
     store.syncTitlePolicies[deviceId] = next;
     if (!enabled && previousDevice) store.devices[deviceId] = stripSessionTextFromDeviceRecord(previousDevice);
+    if (!enabled && previousRanges?.titleGeneration) {
+      store.fixedRanges[deviceId] = redactDailyRangeSnapshot(previousRanges, previousDevice?.periodWindows?.today?.key)
+        || retireFixedRangeSnapshot(previousRanges);
+    }
     try { persist(); } catch (error) {
       if (previous) store.syncTitlePolicies[deviceId] = previous;
       else delete store.syncTitlePolicies[deviceId];
       if (previousDevice) store.devices[deviceId] = previousDevice;
+      if (previousRanges) store.fixedRanges[deviceId] = previousRanges;
       store.savedAt = previousSavedAt;
       throw error;
     }
+    fixedRangeUploads.discard(deviceId);
     broadcastStats('sync-titles');
     return next;
   }
@@ -419,6 +516,49 @@ function createHub({
 
     if (!isAuthorized(req, secret)) return sendJson(res, 401, { error: 'unauthorized' });
 
+    if (url.pathname === '/api/fixed-ranges') {
+      const deviceId = url.searchParams.get('deviceId') || '';
+      if (!deviceId) return sendJson(res, 400, { error: 'deviceId_required' });
+      if (req.method === 'PUT') {
+        try {
+          const payload = await readJsonBody(req);
+          const { status, complete } = acceptFixedRange(deviceId, payload);
+          return sendJson(res, status, status === 200 ? { complete } : {
+            error: status === 409 ? 'fixed_range_revision_mismatch' : 'bad_fixed_range_page'
+          });
+        } catch (error) {
+          const status = error.code === 'payload_too_large' ? 413 : 400;
+          return sendJson(res, status, { error: status === 413 ? 'payload_too_large' : 'bad_fixed_range_page' });
+        }
+      }
+      if (req.method === 'GET') {
+        const snapshot = getFixedRanges(deviceId);
+        if (!snapshot) {
+          return sendJson(res, 404, { error: 'not_found' });
+        }
+        let view = snapshot;
+        const day = store.devices[deviceId]?.periodWindows?.today?.key;
+        if (url.searchParams.get('daily') !== '1' && Object.hasOwn(snapshot.ranges, day)) {
+          let legacy = legacyRangeViews.get(snapshot);
+          if (!legacy) {
+            legacy = legacyFixedRangeView(snapshot.ranges, snapshot.pages, day);
+            legacyRangeViews.set(snapshot, legacy);
+          }
+          view = { ...snapshot, ...legacy };
+        }
+        if (!url.searchParams.has('page')) {
+          const { pages: _pages, retiredRevisions: _retired, ...index } = view;
+          return sendJson(res, 200, index);
+        }
+        if (url.searchParams.get('revision') !== snapshot.revision) {
+          return sendJson(res, 409, { error: 'fixed_range_revision_mismatch' });
+        }
+        const page = url.searchParams.get('page');
+        const rows = /^(0|[1-9]\d*)$/.test(page) ? view.pages[Number(page)] : null;
+        return rows ? sendJson(res, 200, { rows }) : sendJson(res, 404, { error: 'not_found' });
+      }
+    }
+
     if (req.method === 'GET' && url.pathname === '/api/sync/content') return sendJson(res, 200, getSyncContent());
 
     const settingsMatch = url.pathname.match(/^\/api\/sync\/settings\/(modelAliases|customPricing|limitAccountPresentation)$/);
@@ -500,17 +640,36 @@ function createHub({
       return;
     }
 
-    if (req.method === 'POST' && ['/api/ingest', '/api/ingest/delta'].includes(url.pathname)) {
+    if (req.method === 'POST' && ['/api/ingest', '/api/ingest/delta', '/api/ingest/compact'].includes(url.pathname)) {
       try {
         const incoming = await readJsonBody(req);
-        const delta = url.pathname === '/api/ingest/delta';
+        const compact = url.pathname === '/api/ingest/compact';
+        const delta = compact || url.pathname === '/api/ingest/delta';
         const payload = delta ? uploadBaselines.prepare(incoming) : incoming;
-        const record = ingestRecord(payload);
-        const upload = delta || req.headers[UPLOAD_HEADER] === UPLOAD_VERSION
+        if (compact) {
+          const published = getFixedRanges(payload.deviceId);
+          const day = payload.periodWindows?.today?.key;
+          if (!published || published.observedAt !== payload.updatedAt || !Object.hasOwn(published.ranges, day)) {
+            return sendJson(res, 409, { error: 'fixed_range_revision_mismatch' });
+          }
+        }
+        const record = ingestRecord(payload, { historyOnly: compact });
+        const upload = !compact && (delta || req.headers[UPLOAD_HEADER] === UPLOAD_VERSION)
           ? uploadBaselines.commit(record.deviceId, stripSessionTextFromDeviceRecord(payload, {
               preserveSessionTitles: acceptsSessionTitles(serverTitlesEnabled, store.syncTitlePolicies[record.deviceId], payload.sessionTitleSyncGeneration)
             })) : undefined;
-        const response = { ok: true, deviceId: record.deviceId, ...(upload ? { upload } : {}) };
+        const response = {
+          ok: true, deviceId: record.deviceId,
+          ...(req.headers[FIXED_RANGE_HEADER] === FIXED_RANGE_VERSION ? {
+            fixedRanges: 1, fixedRangeDelta: 1, fixedRangeBatch: 1, fixedRangeIndexDelta: 1, dailySessionRanges: 1,
+            fixedRangeRevision: getFixedRanges(record.deviceId)?.revision ?? null
+          } : {}),
+          ...(upload ? { upload } : {}),
+          ...(!compact && payload.history?.dailyTotalsOmitted > 0 && payload.history.dailyTotalsRevision
+            && payload.history.dailyTotalsRevision === record.history?.dailyTotalsRevision
+            && record.history.summary?.activeDaysComplete === true
+            ? { historyCalendarRetained: true } : {})
+        };
         return sendJson(res, 200, wantsMinimalResponse(req) ? response : { ...response, stats: getStats() });
       } catch (error) {
         if (error.status) return sendJson(res, error.status, { error: error.code });
@@ -622,7 +781,8 @@ function createHub({
 
   return {
     start, stop, server, getStats, getHistory, getDevices, ingest, deleteDevice, onStats, bindHost,
-    getSubscriptions, setSubscriptions, getSyncContent, getSyncSettings, setSyncSettings, setSyncTitlePolicy
+    getSubscriptions, setSubscriptions, getSyncContent, getSyncSettings, setSyncSettings, setSyncTitlePolicy,
+    acceptFixedRange, readFixedRange, restoreHistory: payload => ingestRecord(payload, { historyOnly: true })
   };
 }
 
@@ -651,7 +811,7 @@ if (require.main === module) {
     });
   }
   hub.start().then(() => {
-    console.log(`Token Monitor hub listening on http://${hub.bindHost}:${port}`);
+    console.log(`Token Monitor hub listening on http://${hub.bindHost}:${hub.server.address().port}`);
     console.log(`Data file: ${dataFile}`);
     console.log(`Persistence interval: ${persistIntervalMs}ms`);
     if (!secret) {

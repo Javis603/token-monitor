@@ -45,7 +45,7 @@ const USAGE_STRUCTURAL_KEYS = Object.freeze([
 const USAGE_CONFIG_FINGERPRINT_KEYS = Object.freeze([
   'clients',
   'codexDotsEnabled',
-  'nativeRangesEnabled',
+  'nativeRangesEnabled', 'dailySessionSyncEnabled',
   'weekStartsOn',
   'customScanPaths',
   'allTimeSince',
@@ -115,7 +115,6 @@ function usageConfigFromSettings(settings = {}, context = {}) {
     dailyHistoryArchiveEnabled: settings.sessionUsageArchiveEnabled !== false,
     dailyHistoryArchiveWriteEnabled: context.dailyHistoryArchiveWriteEnabled,
     projectsEnabled: settings.projectsEnabled !== false,
-    reasonixNativeSessionsEnabled: context.reasonixNativeSessionsEnabled === true,
     historyIntervalMs: context.historyIntervalMs ?? settings.historyIntervalMs,
     watchEnabled: context.watchEnabled,
     // Deliberately passed through as a tri-state rather than coerced: undefined
@@ -127,6 +126,7 @@ function usageConfigFromSettings(settings = {}, context = {}) {
     watchDebounceMs: Number(context.watchDebounceMs || 1500),
     wslScanEnabled: settings.wslScanEnabled === true,
     nativeRangesEnabled: context.nativeRangesEnabled === true,
+    dailySessionSyncEnabled: context.dailySessionSyncEnabled === true,
     ...(Number.isInteger(context.weekStartsOn) ? { weekStartsOn: context.weekStartsOn } : {}),
     onError: context.onError,
     logger: context.logger

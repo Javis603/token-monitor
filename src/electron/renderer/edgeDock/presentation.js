@@ -222,7 +222,10 @@
     for (const periodKey of ['month', 'today']) {
       for (const [key, session] of Object.entries(stats?.periods?.[periodKey]?.sessions || {})) {
         const previous = byKey.get(key);
-        if (previous && (!sessionLive.isArchivedSession(previous.session) || sessionLive.isArchivedSession(session))) continue;
+        const replacesZeroUsage = session?.client === 'antigravity'
+          && session.totalTokens > 0 && !(previous?.session.totalTokens > 0);
+        if (previous && (sessionLive.isArchivedSession(session)
+          || (!replacesZeroUsage && !sessionLive.isArchivedSession(previous.session)))) continue;
         if (session?.sessionKind === 'background-review') continue;
         const lastUsedMs = Date.parse(session?.lastUsedAt || session?.startedAt || '');
         if (!Number.isFinite(lastUsedMs)) continue;
@@ -239,16 +242,16 @@
     for (const periodKey of ['month', 'today']) for (const [key, session] of Object.entries(stats?.nativeSessions?.[periodKey] || {})) {
       if (native.has(key) || !activityProviders.isSessionActivityClient(session.client) || session.sessionKind === 'background-review') continue;
       const accounted = base.byKey.get(key);
-      if (accounted) {
-        if (!sessionLive.isArchivedSession(accounted.session) || !['running', 'waiting'].includes(sessionLive.sessionActivityState(session))) continue;
-      }
+      const zeroUsage = accounted && session.client === 'antigravity' && !(accounted.session.totalTokens > 0);
+      if (accounted && ((!zeroUsage && !sessionLive.isArchivedSession(accounted.session))
+        || !['running', 'waiting'].includes(sessionLive.sessionActivityState(session)))) continue;
       const lastUsedMs = Date.parse(session.lastUsedAt || session.startedAt || '');
       if (Number.isFinite(lastUsedMs)) native.set(key, { key, session: accounted
         ? { ...session, totalTokens: accounted.session.totalTokens, costUsd: accounted.session.costUsd,
           unpricedTokens: accounted.session.unpricedTokens, models: accounted.session.models,
           inputTokens: accounted.session.inputTokens, cacheReadTokens: accounted.session.cacheReadTokens,
           cacheWriteTokens: accounted.session.cacheWriteTokens, cacheReported: accounted.session.cacheReported,
-          tokenDataUnavailable: accounted.session.tokenDataUnavailable === true,
+          tokenDataUnavailable: zeroUsage || accounted.session.tokenDataUnavailable === true,
           nativeSessionId: session.nativeSessionId || accounted.session.nativeSessionId,
           t3ThreadId: session.t3ThreadId || accounted.session.t3ThreadId,
           parentSessionId: session.parentSessionId || accounted.session.parentSessionId,
@@ -302,7 +305,7 @@
         cacheReadTokens: finite(session.cacheReadTokens) || 0,
         cacheWriteTokens: finite(session.cacheWriteTokens) || 0,
         cacheReported: session.cacheReported === true,
-        costUsd: finite(session.costUsd ?? session.reportedCostUsd) || 0,
+        costUsd: finite(session.costUsd) || 0,
         ...(session.unpricedTokens > 0 ? { unpricedTokens: finite(session.unpricedTokens) || 0 } : {}),
         lastUsedAt: session.lastUsedAt || null,
         startedAt: session.startedAt || null,
@@ -321,6 +324,7 @@
         deleted: session.deleted === true,
         sourceDeleted: session.sourceDeleted === true,
         running: stateByKey.get(key) === 'running',
+        ...(session.native === true ? { native: true } : {}),
         tokenDataUnavailable: session.tokenDataUnavailable === true,
         // The same gate the Sessions list uses, so one surface cannot show a
         // gauge for a session the other has already dropped it from.
@@ -366,7 +370,7 @@
         titled: Boolean(session.title || session.projectLabel),
         latestModel: session.latestModel,
         modelTokens: models,
-        value: finite(session.totalTokens) || 0, cost: finite(session.costUsd ?? session.reportedCostUsd) || 0,
+        value: finite(session.totalTokens) || 0, cost: finite(session.costUsd) || 0,
         unpricedTokens: session.unpricedTokens > 0 ? finite(session.unpricedTokens) : undefined,
         tokenDataUnavailable: session.tokenDataUnavailable === true,
         parentKey: parentSessionId && (parentClient !== client || parentSessionId !== sessionId)

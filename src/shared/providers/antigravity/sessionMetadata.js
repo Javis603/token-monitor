@@ -5,7 +5,12 @@ const os = require('node:os');
 const path = require('node:path');
 const { fileURLToPath } = require('node:url');
 const { antigravityDataRoots } = require('./selfSync');
+const { discoverAntigravityAcpPaths } = require('./acpPaths');
 const { antigravityCliDataDir } = require('../../clientSources');
+const { readT3SessionRelationResult } = require('../../t3/sessionMetadata');
+const { RUNNING_WINDOW_MS } = require('../../sessionLive');
+const { normalizeSessionContext } = require('../../sessionContext');
+const { cliContextPath, readCliContext } = require('./cliContext');
 
 // Deferred like cursor: importing this resolver must not emit Node's
 // experimental node:sqlite warning for collectors that never see an Antigravity row.
@@ -19,6 +24,7 @@ function resolveSqlite(deps = {}) {
 }
 
 const titleCache = new Map();
+const recentTurnCache = new Map();
 
 function fileStamp(filePath) {
   try {
@@ -42,7 +48,7 @@ function cleanTitle(value) {
     : '';
 }
 
-function antigravityConversationSummaryCandidates({ home = os.homedir(), env = process.env } = {}) {
+function antigravityConversationSummaryCandidates({ home = os.homedir(), env = process.env, useEnvRoot = true, antigravityAcpPaths } = {}) {
   const candidates = [];
   const explicit = typeof env.ANTIGRAVITY_HOME === 'string' ? env.ANTIGRAVITY_HOME.trim() : '';
   if (explicit) {
@@ -56,6 +62,12 @@ function antigravityConversationSummaryCandidates({ home = os.homedir(), env = p
     candidates.push(path.join(root, 'conversation_summaries.db'));
   }
   candidates.push(path.join(path.dirname(antigravityCliDataDir({ homeDir: home, env })), 'conversation_summaries.db'));
+  const acpDirs = Array.isArray(antigravityAcpPaths)
+    ? antigravityAcpPaths
+    : discoverAntigravityAcpPaths({ homeDir: home, env, useEnvRoot });
+  for (const dir of acpDirs) {
+    candidates.push(path.join(path.dirname(dir), 'conversation_summaries.db'));
+  }
   return [...new Set(candidates)];
 }
 
@@ -86,6 +98,79 @@ function projectFromWorkspaceUris(workspaceUris, context) {
   return null;
 }
 
+function catalogTime(value) {
+  // Use ISO parsing for SQLite's space-separated timestamps. V8 otherwise
+  // interprets the year-0001 sentinel as 2001.
+  return typeof value === 'string' ? Date.parse(value.replace(' ', 'T')) : NaN;
+}
+
+function readTurn(row) {
+  const inputAt = catalogTime(row.last_user_input_time);
+  if (row.status === 'CASCADE_RUN_STATUS_RUNNING') {
+    return { turnEnded: false, inputAt: inputAt > 0 ? inputAt : 0 };
+  }
+  // The catalog also contains idle conversations that have never had a local
+  // turn. Antigravity stores a year-1 timestamp when it has no user input.
+  if (row.status === 'CASCADE_RUN_STATUS_IDLE' && row.not_fully_idle === 0 && inputAt > 0) {
+    return { turnEnded: true, inputAt };
+  }
+  return null;
+}
+
+function rememberTurn(turns, id, turn) {
+  if (turn && turn.inputAt > (turns.get(id)?.inputAt ?? -1)) turns.set(id, turn);
+}
+
+function canReadTurns(dbPath) {
+  return path.basename(path.dirname(dbPath)) !== 'antigravity-backup';
+}
+
+// Anchored scans only reload today's usage. A resumed conversation can still
+// have all its tokens in earlier days, so query running rows and recent idle updates
+// instead of looking up every historical session on each watch tick.
+function readRecentTurns(home, deps, now) {
+  const turns = new Map();
+  const sqlite = resolveSqlite(deps);
+  if (typeof sqlite?.DatabaseSync !== 'function') return turns;
+  const since = now - RUNNING_WINDOW_MS;
+  for (const dbPath of antigravityConversationSummaryCandidates({ home, env: deps.env, antigravityAcpPaths: deps.antigravityAcpPaths })) {
+    if (!canReadTurns(dbPath)) continue;
+    const stamp = databaseStamp(dbPath);
+    if (!stamp) continue;
+    let cached = recentTurnCache.get(dbPath);
+    if (cached?.stamp !== stamp || cached.since > since) {
+      let db;
+      try {
+        db = new sqlite.DatabaseSync(dbPath, { readOnly: true });
+        const rows = db.prepare(`
+          SELECT conversation_id, status, not_fully_idle, last_user_input_time, last_modified_time
+          FROM conversation_summaries
+          WHERE status = 'CASCADE_RUN_STATUS_RUNNING'
+            OR julianday(last_user_input_time) >= julianday(?1)
+            OR (status = 'CASCADE_RUN_STATUS_IDLE' AND not_fully_idle = 0
+              AND julianday(last_modified_time) >= julianday(?1))
+        `).all({ '?1': new Date(since).toISOString() });
+        cached = { stamp, since, rows };
+        recentTurnCache.set(dbPath, cached);
+      } catch (_) {
+        // Older schemas and temporarily unreadable catalogs have no reading.
+        continue;
+      } finally {
+        try { db?.close(); } catch (_) { /* A failed read must not fail collection. */ }
+      }
+    }
+    for (const row of cached.rows) {
+      const turn = readTurn(row);
+      // RUNNING can reach the catalog before either timestamp updates. The
+      // displayed state still expires based on the session's activity time.
+      if (turn && (!turn.turnEnded || turn.inputAt >= since || catalogTime(row.last_modified_time) >= since)) {
+        rememberTurn(turns, row.conversation_id, turn);
+      }
+    }
+  }
+  return turns;
+}
+
 function readSummaries(dbPath, sqlite, wantedIds) {
   let db;
   try {
@@ -108,9 +193,11 @@ function readSummaries(dbPath, sqlite, wantedIds) {
     }
     if (!hasTable) return null;
 
-    // Subagent columns arrived in a later Antigravity schema. Detect them up
+    // Older schemas may lack subagent or turn data. Detect the columns up
     // front so a transient prepare failure is never read as an older schema.
-    const optional = ['parent_conversation_id', 'agent_name'].filter((name) => columns.has(name));
+    const optional = [
+      'parent_conversation_id', 'agent_name', 'status', 'not_fully_idle', 'last_user_input_time'
+    ].filter((name) => columns.has(name));
     let stmt = null;
     try {
       stmt = db.prepare(
@@ -148,17 +235,32 @@ function resolveSessionMetadata(sessionIds, context = {}) {
 
   const home = context.home || os.homedir();
   const env = context.deps?.scopedHome ? {} : (context.deps?.env || process.env);
-  const candidates = antigravityConversationSummaryCandidates({ home, env });
+  const candidates = antigravityConversationSummaryCandidates({
+    home,
+    env,
+    useEnvRoot: !context.deps?.scopedHome,
+    antigravityAcpPaths: context.deps?.antigravityAcpPaths
+  });
   const cache = context.deps?.antigravityTitleCache || titleCache;
   const unresolved = new Set();
+  const unresolvedNativeSources = new Set();
   const priorities = new Map();
+  const turns = new Map();
+  const sourceFor = key => context.metadata?.get(key)?.catalogTitleSource || context.deps?.catalogTitleSources?.[key];
+  const nativeSourceFor = key => {
+    const source = sourceFor(key);
+    return typeof source === 'string' ? source : source?.native;
+  };
 
   for (const dbPath of candidates) {
+    const canReadTurn = canReadTurns(dbPath);
     const stamp = databaseStamp(dbPath);
     let cached = cache.get(dbPath);
     if (!stamp) {
       for (const id of sessionIds) {
-        if (cached || stamp === null || context.deps?.catalogTitleSources?.[`antigravity:${id}`] === dbPath) unresolved.add(id);
+        const previouslySelected = nativeSourceFor(`antigravity:${id}`) === dbPath;
+        if (previouslySelected) unresolvedNativeSources.add(id);
+        if (cached || stamp === null || previouslySelected) unresolved.add(id);
       }
       if (!cached) continue;
     }
@@ -187,17 +289,25 @@ function resolveSessionMetadata(sessionIds, context = {}) {
     cache.set(dbPath, cached);
 
     for (const id of wanted) {
-      if (stamp && !cached.validatedIds.has(id) && !cached.misses.has(id)) unresolved.add(id);
+      if (stamp && !cached.validatedIds.has(id) && !cached.misses.has(id)) {
+        unresolved.add(id);
+        if (nativeSourceFor(`antigravity:${id}`) === dbPath) unresolvedNativeSources.add(id);
+      }
     }
 
     for (const sessionId of sessionIds) {
       const row = cached.summaries.get(sessionId);
       if (cached.misses.has(sessionId)) continue;
       if (!row) continue;
+      const validated = stamp && cached.validatedIds.has(sessionId);
+      // Pick activity independently of the title. A richer title, backup, or
+      // last-known row from an unreadable database never vouches for a turn.
+      if (validated && canReadTurn) {
+        rememberTurn(turns, sessionId, readTurn(row));
+      }
       const title = cleanTitle(row?.title) || cleanTitle(row?.preview) || cleanTitle(row?.agent_name);
       const key = `antigravity:${sessionId}`;
-      const selectedSource = context.metadata?.get(key)?.catalogTitleSource || context.deps?.catalogTitleSources?.[key];
-      const validated = stamp && cached.validatedIds.has(sessionId);
+      const selectedSource = nativeSourceFor(key);
       // Candidate order regains priority only with a validated row. If both
       // reads are stale, keep the source that last supplied the chosen value.
       const priority = (validated ? 2 : 0) + (title ? 4 : 0)
@@ -220,14 +330,25 @@ function resolveSessionMetadata(sessionIds, context = {}) {
     }
   }
 
+  const { facts: t3Relations, status: t3Status, completedStores, ambiguous, ownershipComplete } = readT3SessionRelationResult(sessionIds, {
+    ...context.deps,
+    includeAntigravityTitles: true,
+    includeAntigravityContext: !context.deps?.scopedHome,
+    includeOwnershipStatus: true,
+    homeDir: home,
+    useEnvRoot: !context.deps?.scopedHome
+  });
+  const cliReadings = readCliContext(sqlite, cliContextPath({ homeDir: home, env }), sessionIds, context.now ?? Date.now());
   for (const sessionId of sessionIds) {
     const key = `antigravity:${sessionId}`;
     const previous = context.metadata?.get(key);
     const anchored = context.deps?.t3Titles?.[key];
     const retained = previous && Object.prototype.hasOwnProperty.call(previous, 'catalogTitle')
       ? previous.catalogTitle : anchored;
+    const previousT3Store = sourceFor(key)?.t3;
     const hasAnchoredProject = Boolean(context.deps?.catalogProjects?.today?.[key]);
-    if (result.get(sessionId)?.catalogTitle === null && unresolved.has(sessionId) && retained) {
+    if (result.get(sessionId)?.catalogTitle === null && unresolved.has(sessionId) && retained
+      && !previousT3Store) {
       const meta = result.get(sessionId);
       meta.catalogTitle = retained;
       meta.title = retained;
@@ -247,12 +368,55 @@ function resolveSessionMetadata(sessionIds, context = {}) {
           if (cached?.misses.has(sessionId)) cached.summaries.set(sessionId, null);
         }
         result.set(sessionId, { catalogOnly: true, catalogTitle: null, catalogProjectResolved: true });
-      } else if (typeof retained === 'string' && retained) {
+      } else if (typeof retained === 'string' && retained && !previousT3Store) {
         result.set(sessionId, { catalogOnly: true, catalogTitle: retained, title: retained });
       } else if (retained === null) result.set(sessionId, { catalogOnly: true, catalogTitle: null });
       else if (hasAnchoredProject) result.set(sessionId, { catalogOnly: true });
     }
+    const nativeMeta = result.get(sessionId);
+    const previousNativeSource = nativeSourceFor(key);
+    if (nativeMeta && previousNativeSource && unresolvedNativeSources.has(sessionId) && !nativeMeta.projectId
+      && nativeMeta.catalogTitleSource !== previousNativeSource) {
+      delete nativeMeta.catalogProjectResolved;
+      nativeMeta.catalogTitleSource = previousNativeSource;
+    }
+    const previousT3Title = previousT3Store ? retained : null;
+    const match = t3Relations.get(key);
+    const retainT3Title = previousT3Title && !ambiguous?.has(key)
+      && (t3Status === 'retryable' || (match?.titleStore !== previousT3Store && !completedStores?.has(previousT3Store)));
+    const t3Title = match?.title || (retainT3Title ? previousT3Title : null);
+    if (t3Title) {
+      result.set(sessionId, {
+        ...nativeMeta,
+        catalogOnly: true,
+        catalogTitle: t3Title,
+        catalogTitleSource: { native: nativeMeta?.catalogTitleSource || nativeSourceFor(key), t3: match?.title ? match.titleStore : previousT3Store },
+        title: t3Title
+      });
+    } else if (previousT3Title && !nativeMeta?.title) {
+      result.set(sessionId, { ...nativeMeta, catalogOnly: true, catalogTitle: null });
+    }
+    if (ambiguous?.has(key) || (ownershipComplete && !match && (!previousT3Store || completedStores?.has(previousT3Store)))) {
+      result.set(sessionId, { catalogOnly: true, ...result.get(sessionId), t3ThreadRevoked: true });
+    }
+    let contextReading = !match && !ambiguous?.has(key) ? cliReadings.get(sessionId) : undefined;
+    if (match && Object.hasOwn(match, 'contextUsage')) {
+      const { contextTokens, contextWindow } = match.contextUsage;
+      contextReading = Number.isSafeInteger(contextTokens) && Number.isSafeInteger(contextWindow)
+        ? normalizeSessionContext(match.contextUsage) : null;
+    }
+    if (contextReading !== undefined || Object.hasOwn(previous || {}, 'contextWindow')) {
+      result.set(sessionId, {
+        catalogOnly: true, ...result.get(sessionId),
+        ...(contextReading || { contextTokens: 0, contextWindow: 0 })
+      });
+    }
     const meta = result.get(sessionId);
+    const turn = turns.get(sessionId);
+    if (meta && turn) {
+      meta.turnEnded = turn.turnEnded;
+      if (turn.inputAt) meta.lastUsedAt = new Date(turn.inputAt).toISOString();
+    }
     if (meta && previous && Object.prototype.hasOwnProperty.call(previous, 'titleFallback')) meta.titleFallback = previous.titleFallback;
     if (meta?.catalogTitle !== null) continue;
     context.deps?.invalidatedTitleKeys?.add(key);
@@ -267,5 +431,6 @@ module.exports = {
   cleanTitle,
   antigravityConversationSummaryCandidates,
   readSummaries,
+  readRecentTurns,
   resolveSessionMetadata
 };
