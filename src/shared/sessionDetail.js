@@ -11,8 +11,8 @@ const {
   userPromptText
 } = require('./providers/codebuddy/transcript');
 const codebuddyExtension = require('./providers/codebuddy/extension');
-const opencodeSession = require('./providers/opencode/session');
 const { readReasonixSessionEvents } = require('./providers/reasonix/sessionDetail');
+const opencodeSession = require('./providers/opencode/session');
 const { createLocalUsageStore } = require('./providers/codex/localUsageStore');
 const PI_FORMAT_CLIENTS = new Set(['pi', 'omp', 'senpi']);
 
@@ -607,9 +607,10 @@ function readOpenCodeSessionDetail({ sessionId, period = 'total', deps = {} }) {
   return { found: true, client: 'opencode', sessionId, period, exchanges: grouped, totals: totalsOf(grouped, filteredCost) };
 }
 
-function readReasonixSessionDetail({ sessionId, period = 'total', home, deps = {} }) {
+function readReasonixSessionDetail({ sessionId, reasonixSessionRef, period = 'total', home, deps = {} }) {
   const result = readReasonixSessionEvents({
     sessionId,
+    sessionRef: reasonixSessionRef,
     home,
     env: deps.env || process.env,
     platform: deps.platform || process.platform,
@@ -623,7 +624,7 @@ function readReasonixSessionDetail({ sessionId, period = 'total', home, deps = {
   const grouped = filterExchangesByPeriod(groupEvents(result.events), period, now);
   // Reasonix's reported session cost belongs to the native-session sidecar.
   // It is intentionally not promoted to the generic Session Detail cost.
-  const tokenDataAvailable = result.tokenDataAvailable === true;
+  const tokenDataAvailable = grouped.every((exchange) => exchange.tokensAvailable !== false);
   return {
     found: true,
     client: 'reasonix',
@@ -682,9 +683,9 @@ function readCodebuddyExtensionSessionDetail({ sessionId, period, sessionCost, h
   return { found: true, client: 'codebuddy', sessionId, period, exchanges: grouped, totals: totalsOf(grouped, sessionCost) };
 }
 
-function readSessionDetail({ client, sessionId, period = 'total', sessionCost = 0, home, env, useEnvRoots, deps = {} }) {
+function readSessionDetail({ client, sessionId, reasonixSessionRef, period = 'total', sessionCost = 0, home, env, useEnvRoots, deps = {} }) {
   if (client === 'opencode') return readOpenCodeSessionDetail({ sessionId, period, deps });
-  if (client === 'reasonix') return readReasonixSessionDetail({ sessionId, period, home, deps });
+  if (client === 'reasonix') return readReasonixSessionDetail({ sessionId, reasonixSessionRef, period, home, deps });
   const filePath = resolveSessionFile(client, sessionId, home, { env, useEnvRoots, fs: deps.fs });
   if (!filePath && client === 'codebuddy') {
     return readCodebuddyExtensionSessionDetail({ sessionId, period, sessionCost, home, env, deps });
@@ -762,6 +763,5 @@ module.exports = {
   groupEvents,
   filterExchangesByPeriod,
   distributeCost,
-  readReasonixSessionDetail,
   readSessionDetail
 };

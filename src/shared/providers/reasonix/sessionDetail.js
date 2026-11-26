@@ -6,6 +6,7 @@
 // the canonical prompt/turn events consumed by sessionDetail.js.
 
 const fs = require('node:fs');
+const { createHash } = require('node:crypto');
 const os = require('node:os');
 const path = require('node:path');
 const { StringDecoder } = require('node:string_decoder');
@@ -131,7 +132,7 @@ function namespaceId(sessionId) {
   return value.slice(SESSION_PREFIX.length).trim();
 }
 
-function stableId(meta) {
+function reasonixBranchId(meta) {
   const root = objectValue(meta);
   if (!root) return '';
   const nested = [
@@ -140,7 +141,11 @@ function stableId(meta) {
     root.branch_meta,
     root.branch
   ];
-  return textValue(firstValue([root, ...nested], ['id', 'ID']), 512);
+  for (const source of [root, ...nested]) {
+    const id = textValue(source?.id, 256) || textValue(source?.ID, 256);
+    if (id) return id;
+  }
+  return '';
 }
 
 function timestampOf(record, payload, fallback = '') {
@@ -522,9 +527,7 @@ function preflightJsonValue(text, limits) {
       }
       while (state.index < text.length) {
         skipJsonWhitespace(text, state);
-        const keyStart = state.index + 1;
-        parseJsonString(text, state);
-        const key = text.slice(keyStart, state.index - 1);
+        const key = parseJsonString(text, state, true);
         skipJsonWhitespace(text, state);
         if (text[state.index] !== ':') throw new SyntaxError('JSON object colon is missing');
         state.index += 1;
@@ -861,6 +864,11 @@ function metaCandidate(name) {
   return null;
 }
 
+// The renderer receives an opaque candidate identity, never a filesystem path.
+function reasonixSessionFileRef(metaPath) {
+  return createHash('sha256').update(metaPath).digest('hex');
+}
+
 function findSessionEventFile({ sessionId, home, options = {} } = {}) {
   const id = namespaceId(sessionId);
   if (!id) return '';
@@ -884,8 +892,9 @@ function findSessionEventFile({ sessionId, home, options = {} } = {}) {
       .sort((left, right) => left.name.localeCompare(right.name) || left.priority - right.priority);
     for (const candidate of candidates) {
       const metaPath = pathApi.join(directory, candidate.name);
+      if (options.sessionRef !== undefined && reasonixSessionFileRef(metaPath) !== options.sessionRef) continue;
       const meta = readBoundedJson(metaPath, REASONIX_META_MAX_BYTES, fsApi);
-      if (stableId(meta) !== id) continue;
+      if (reasonixBranchId(meta) !== id) continue;
       const eventsPath = pathApi.join(directory, `${candidate.stem}${EVENTS_SUFFIX}`);
       if (isFile(fsApi, eventsPath)) return eventsPath;
     }
@@ -915,6 +924,8 @@ function readReasonixSessionEvents({ sessionId, home, ...options } = {}) {
 }
 
 module.exports = {
+  reasonixBranchId,
+  reasonixSessionFileRef,
   findSessionEventFile,
   parseReasonixEventLog,
   readReasonixEventLog,
@@ -922,7 +933,6 @@ module.exports = {
   REASONIX_EVENT_REPLAY_LIMITS,
   REASONIX_EVENT_REPLAY_PROBE_MAX_BYTES,
   reasonixTokens,
-  stableId,
   countReasonixProviderMessages,
   tokenDataAvailable
 };

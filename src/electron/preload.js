@@ -41,6 +41,7 @@ contextBridge.exposeInMainWorld('tokenMonitor', {
   deleteDevice: (deviceId) => ipcRenderer.invoke('devices:delete', deviceId),
   getAllTimeSessions: (snapshotId) => ipcRenderer.invoke('stats:allTimeSessions', snapshotId),
   getArchivedSessionCount: () => ipcRenderer.invoke('stats:archivedSessionCount'),
+  listReasonixSessions: () => ipcRenderer.invoke('session:listReasonix'),
   getSessionDetail: (args) => ipcRenderer.invoke('session:getDetail', args),
   getStreamStatus: () => ipcRenderer.invoke('stream:status'),
   getServiceStatus: (options) => ipcRenderer.invoke('serviceStatus:get', options),

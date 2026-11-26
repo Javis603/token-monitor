@@ -305,7 +305,7 @@
         cacheReadTokens: finite(session.cacheReadTokens) || 0,
         cacheWriteTokens: finite(session.cacheWriteTokens) || 0,
         cacheReported: session.cacheReported === true,
-        costUsd: finite(session.costUsd ?? session.reportedCostUsd) || 0,
+        costUsd: finite(session.costUsd) || 0,
         ...(session.unpricedTokens > 0 ? { unpricedTokens: finite(session.unpricedTokens) || 0 } : {}),
         lastUsedAt: session.lastUsedAt || null,
         startedAt: session.startedAt || null,
@@ -370,7 +370,7 @@
         titled: Boolean(session.title || session.projectLabel),
         latestModel: session.latestModel,
         modelTokens: models,
-        value: finite(session.totalTokens) || 0, cost: finite(session.costUsd ?? session.reportedCostUsd) || 0,
+        value: finite(session.totalTokens) || 0, cost: finite(session.costUsd) || 0,
         unpricedTokens: session.unpricedTokens > 0 ? finite(session.unpricedTokens) : undefined,
         tokenDataUnavailable: session.tokenDataUnavailable === true,
         parentKey: parentSessionId && (parentClient !== client || parentSessionId !== sessionId)

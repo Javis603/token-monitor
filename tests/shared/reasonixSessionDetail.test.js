@@ -6,6 +6,8 @@ const os = require('node:os');
 const path = require('node:path');
 const test = require('node:test');
 
+const { runSessionDetailWorker } = require('../../src/shared/sessionDetailResolver');
+const { readReasonixNativeSession } = require('../../src/shared/providers/reasonix/sessions');
 const { readSessionDetail } = require('../../src/shared/sessionDetail');
 const { REASONIX_META_MAX_BYTES } = require('../../src/shared/providers/reasonix/fileIo');
 const {
@@ -300,6 +302,14 @@ test('Reasonix replay applies cumulative append limits before accepting the next
     replayLimits: { maxMessages: 3 }
   }).found, false);
 
+  const escapedAppend = JSON.stringify(append)
+    .replace('"type"', String.raw`"\u0074ype"`)
+    .replace('"messages"', String.raw`"\u006dessages"`);
+  fs.writeFileSync(eventsPath, `${JSON.stringify(replace)}\n${escapedAppend}\n`);
+  const escapedLimit = readReasonixEventLog(eventsPath, { replayLimits: { maxMessages: 3 } });
+  assert.equal(escapedLimit.resource, 'messages');
+  assert.equal(escapedLimit.value, 4);
+
   const collectionReplace = {
     schema_version: 1,
     type: 'replace',
@@ -495,4 +505,63 @@ test('Reasonix detail bounds metadata lookup before opening the event log', () =
   );
 
   assert.equal(readReasonix(root, stateHome, 'reasonix:oversized').found, false);
+});
+
+
+test('the on-demand worker lists local sessions and reads only the requested detail', async () => {
+  const stateHome = fs.mkdtempSync(path.join(os.tmpdir(), 'reasonix-on-demand-'));
+  const previousHome = process.env.REASONIX_STATE_HOME;
+  process.env.REASONIX_STATE_HOME = stateHome;
+  const now = new Date();
+  try {
+    const older = new Date(now.getTime() - 3_600_000).toISOString();
+    const fileFor = (directory, createdAt, text) => writeSidecarSession(stateHome, directory, 'file', {
+      id: '', BranchMeta: { ID: 'demand' }, created_at: createdAt, updated_at: createdAt
+    }, [
+      JSON.stringify({ type: 'user.message', ts: now.toISOString(), text }),
+      JSON.stringify({ type: 'model.final', ts: now.toISOString(), usage: { prompt_tokens: 3, completion_tokens: 2 } })
+    ]);
+    fileFor('sessions', older, 'older duplicate prompt');
+    const directory = fileFor('projects/opaque/sessions', now.toISOString(), 'local fixture prompt');
+    writeJson(path.join(directory, 'file.jsonl.telemetry.json'), {
+      usage: { totalTokens: 10, promptTokens: 10, cacheHitTokens: 7, cacheMissTokens: 3 }
+    });
+
+    const list = await runSessionDetailWorker({ action: 'listReasonixSessions', allTimeSince: '2024-01-01' });
+    assert.deepEqual(Object.keys(list).sort(), ['allTime', 'month', 'today']);
+    const session = list.allTime['reasonix:demand'];
+    assert.equal(session.sessionDetailAvailable, true);
+    assert.equal(session.totalTokens, 10);
+    assert.equal(session.cacheReadTokens, 7);
+    assert.equal(session.inputTokens, 3);
+    assert.equal(session.cacheReported, true);
+    assert.doesNotMatch(JSON.stringify(list), /local fixture prompt|reasonix-on-demand-/);
+
+    const detail = await runSessionDetailWorker({
+      client: 'reasonix', sessionId: session.sessionId, reasonixSessionRef: session.reasonixSessionRef, period: 'total'
+    });
+    assert.equal(detail.exchanges[0].promptPreview, 'local fixture prompt');
+    assert.equal(detail.totals.totalTokens, 5);
+  } finally {
+    if (previousHome === undefined) delete process.env.REASONIX_STATE_HOME;
+    else process.env.REASONIX_STATE_HOME = previousHome;
+    fs.rmSync(stateHome, { recursive: true, force: true });
+  }
+});
+
+test('Reasonix keeps an explicit zero cache miss and only derives missing counts', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'reasonix-cache-miss-'));
+  try {
+    const meta = path.join(root, 'branch.jsonl.meta');
+    const telemetry = path.join(root, 'branch.jsonl.telemetry.json');
+    writeJson(meta, { id: 'branch' });
+    for (const [counts, expected] of [[{ cacheMissTokens: 0 }, 0], [{}, 100]]) {
+      writeJson(telemetry, { usage: { totalTokens: 1000, promptTokens: 1000, cacheHitTokens: 900, ...counts } });
+      const row = readReasonixNativeSession(meta, telemetry);
+      assert.equal(row.inputTokens, expected);
+      assert.equal(row.cacheReadTokens, 900);
+    }
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
 });

@@ -138,7 +138,7 @@ test('activity overlays remain cloneable and materialize to ordinary wire rows w
 test('patches preserve totals, usage freshness, archive exclusions, native clients and prior snapshots', () => {
   const summary = fixture(10);
   summary.month.sessions['claude:id-5'].archived = true;
-  summary.nativeSessions = { today: { other: { client: 'reasonix', sessionId: 'other' } } };
+  summary.nativeSessions = { today: { other: { client: 'opencode', sessionId: 'other' } } };
   const patch = { observations: [
     { client: 'claude', sessionId: 'id-4', liveActivity: observation('waiting') },
     { client: 'claude', sessionId: 'id-5', liveActivity: observation('waiting') }
