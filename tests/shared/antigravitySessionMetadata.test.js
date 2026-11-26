@@ -1,6 +1,7 @@
 'use strict';
 
 const assert = require('node:assert/strict');
+const { spawnSync } = require('node:child_process');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
@@ -11,6 +12,9 @@ const { collectUsageOnce, localTodayKey, startCollector } = require('../../src/s
 const { sessionActivityState } = require('../../src/shared/sessionLive');
 const { projectRollupFromSessions } = require('../../src/shared/usage');
 const { installSourceEnvGuard } = require('../helpers/sourceEnv');
+const { installInProcessWatchHost } = require('../helpers/watchHost');
+const { cliContextPath } = require('../../src/shared/providers/antigravity/cliContext');
+const { watchIgnoreMatcher } = require('../../src/shared/watchPolicy');
 const {
   cleanTitle,
   antigravityConversationSummaryCandidates,
@@ -21,6 +25,7 @@ let sqlite;
 try { sqlite = require('node:sqlite'); } catch (_) { sqlite = null; }
 
 installSourceEnvGuard(test);
+installInProcessWatchHost(test);
 
 function summaryStore(t, source = '.gemini/antigravity') {
   const temp = fs.realpathSync.native(os.tmpdir());
@@ -55,6 +60,117 @@ test('cleanTitle strips whitespace and limits code points', () => {
   assert.equal(cleanTitle(null), '');
   const long = 'a'.repeat(200);
   assert.equal(cleanTitle(long).length, 96);
+});
+
+test('T3 context-only WAL writes refresh Antigravity without changing usage totals', { skip: !sqlite, timeout: 12000 }, async t => {
+  let handle;
+  let db;
+  const oldShared = process.env.TOKEN_MONITOR_SHARED_DIR;
+  // Register before summaryStore removes the directory. Windows cannot remove
+  // the SQLite files while the collector or the fixture still has them open.
+  t.after(async () => {
+    try {
+      handle?.stop();
+      await handle?.whenIdle();
+    } finally {
+      db?.close();
+      if (oldShared === undefined) delete process.env.TOKEN_MONITOR_SHARED_DIR;
+      else process.env.TOKEN_MONITOR_SHARED_DIR = oldShared;
+    }
+  });
+  const store = summaryStore(t);
+  const id = '1349661f-2212-4dae-b0b5-000000000001';
+  const key = `antigravity:${id}`;
+  const dir = path.join(store.home, '.t3', 'userdata');
+  fs.mkdirSync(dir, { recursive: true });
+  const file = path.join(dir, 'statev2.sqlite');
+  db = new sqlite.DatabaseSync(file);
+  db.exec(`PRAGMA journal_mode = WAL;
+    CREATE TABLE orchestration_v2_projection_threads (thread_id TEXT PRIMARY KEY, title TEXT, deleted_at TEXT, payload_json TEXT);
+    CREATE TABLE orchestration_v2_projection_provider_threads (provider_thread_id TEXT PRIMARY KEY, thread_id TEXT, driver TEXT, payload_json TEXT);
+    INSERT INTO orchestration_v2_projection_threads VALUES ('app', 'T3 title', NULL, '{}');`);
+  db.prepare('INSERT INTO orchestration_v2_projection_provider_threads VALUES (?, ?, ?, ?)').run(
+    'provider', 'app', 'antigravity', JSON.stringify({
+      nativeThreadRef: { nativeId: id, driver: 'antigravity', strength: 'strong' },
+      contextUsage: { usedTokens: 100, maxTokens: 1048576 }
+    })
+  );
+  db.prepare('INSERT INTO orchestration_v2_projection_provider_threads VALUES (?, ?, ?, ?)').run(
+    'malformed', 'app', 'antigravity', JSON.stringify({
+      nativeThreadRef: { nativeId: Number.MAX_SAFE_INTEGER + 1, driver: 'antigravity', strength: 'strong' }
+    })
+  );
+  const update = db.prepare("UPDATE orchestration_v2_projection_provider_threads SET payload_json = json_set(payload_json, '$.contextUsage.usedTokens', CAST(? AS INTEGER)) WHERE provider_thread_id = 'provider'");
+  process.env.TOKEN_MONITOR_SHARED_DIR = path.join(store.home, 'shared');
+  const updates = [];
+  let onEvent;
+  t.mock.method(require('../../src/shared/fileWatcher'), 'watch', () => {
+    const watcher = {
+      on(event, handler) { if (event === 'all') onEvent = handler; return watcher; },
+      close() {}
+    };
+    return watcher;
+  });
+  const lastUsedAt = new Date().toISOString();
+  handle = startCollector({
+    clients: 'antigravity', homeDir: store.home, projectsEnabled: false, historyEnabled: false,
+    dailyHistoryArchiveEnabled: false, codexLocalUsageEnabled: false, wslScanEnabled: false,
+    osInfo: {}, allTimeSince: '2024-01-01', watchEnabled: true, intervalMs: 3600000, watchDebounceMs: 20,
+    sessionMetadataDeps: store.deps, runAntigravitySync: async () => {},
+    runTokscale: async () => ({ entries: [{ client: 'antigravity', sessionId: id, input: 12, output: 2, lastUsedAt }] }),
+    onUpdate: (value) => updates.push(value)
+  });
+  const pause = ms => new Promise(resolve => setTimeout(resolve, ms));
+  const walEventPath = process.platform === 'win32' ? `${file.toUpperCase()}-WAL` : `${file}-wal`;
+  await handle.whenIdle();
+  assert.equal(updates[0]?.today.sessions[key]?.contextTokens, 100);
+  db.prepare("UPDATE orchestration_v2_projection_threads SET title = 'Renamed'").run();
+  onEvent('change', walEventPath);
+  await pause(60);
+  assert.equal(updates.length, 1);
+  update.run(250);
+  onEvent('change', walEventPath);
+  for (let i = 0; i < 100 && updates.length < 2; i += 1) await pause(20);
+  assert.equal(updates.at(-1).today.sessions[key]?.contextTokens, 250);
+  assert.equal(updates.at(-1).month.totalTokens, updates[0].month.totalTokens);
+});
+
+test('CLI status-line readings reach recent session rows and clear without changing usage', { skip: !sqlite }, t => {
+  const s = summaryStore(t, 'gemini-profile/antigravity-cli');
+  const env = { GEMINI_CLI_HOME: path.dirname(s.dir) };
+  const script = require.resolve('../../src/shared/providers/antigravity/cliContext');
+  const id = '1349661f-2212-4dae-b0b5-000000000001';
+  const otherId = '1349661f-2212-4dae-b0b5-000000000002';
+  const statusLine = (conversationId, percent, product = 'antigravity') => {
+    const child = spawnSync(process.execPath, [script], {
+      env: { ...process.env, ...env },
+      input: JSON.stringify({ product, conversation_id: conversationId, email: 'private@example.com',
+        context_window: { context_window_size: 1048576, used_percentage: percent, total_input_tokens: 5000000 } })
+    });
+    assert.equal(child.status, 0, child.stderr?.toString());
+    assert.equal(child.stdout.toString(), '');
+  };
+  const deps = { ...s.deps, env };
+  const row = { client: 'antigravity', sessionId: id, lastUsedAt: new Date().toISOString(), totalTokens: 100 };
+  const periods = { today: { sessions: { [`antigravity:${id}`]: row } } };
+  const file = cliContextPath({ homeDir: s.home, env });
+  statusLine(id, 25, 'other');
+  assert.equal(fs.existsSync(file), false);
+  statusLine(id, 25);
+  statusLine(otherId, 50);
+  applySessionMetadata(periods, s.home, deps);
+  assert.equal(row.contextTokens, 262144);
+  assert.equal(row.contextWindow, 1048576);
+  assert.equal(row.totalTokens, 100);
+  assert.equal(watchIgnoreMatcher('antigravity', { homeDir: s.home, env })(file), false);
+
+  statusLine(id, 0);
+  applySessionMetadata(periods, s.home, deps);
+  assert.equal(row.contextTokens, 0);
+  assert.equal(row.contextWindow, 0);
+  statusLine(id, 12.5);
+  applySessionMetadata(periods, s.home, { ...deps, now: Date.now() + 31 * 60_000 });
+  assert.equal(row.contextWindow, 0);
 });
 
 test('antigravityConversationSummaryCandidates includes data roots and env', () => {
