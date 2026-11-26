@@ -710,9 +710,11 @@ function toggleAccordionRow(row) {
   const isExpanded = row.classList.contains('expanded');
   document.querySelectorAll('.row.expanded').forEach((other) => {
     other.classList.remove('expanded');
+    other.querySelector('.row-accordion-inner').inert = true;
     other.querySelector('.row-head')?.setAttribute('aria-expanded', 'false');
   });
   if (!isExpanded) {
+    row.querySelector('.row-accordion-inner').inert = false;
     row.classList.add('expanded');
     row.querySelector('.row-head')?.setAttribute('aria-expanded', 'true');
     renderActiveToolDetail();
@@ -3249,6 +3251,7 @@ function updateRow(row, { name, subtitle, subtitleIdentity, subagentCountLabel, 
   }
   const rowHead = row.querySelector('.row-head');
   const hasAccordion = row.classList.contains('has-accordion');
+  accordionInner.inert = !row.classList.contains('expanded');
   const costLabel = `, ${t('dashboard.stat.totalCost')}: ${costLabelText}`;
   sessionRowsApi.applyBreakdownRowSemantics(row, rowHead, {
     interactive,

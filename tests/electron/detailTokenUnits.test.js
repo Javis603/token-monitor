@@ -874,6 +874,39 @@ test('keyboard activation inside rebuilt tool, device, and project accordions pr
   }
 });
 
+test('opening and closing accordions updates which detail controls can receive focus', () => {
+  const list = new FakeElement();
+  const addRow = (expanded) => {
+    const row = new FakeElement();
+    row.className = expanded ? 'row expanded' : 'row';
+    const head = new FakeElement();
+    head.className = 'row-head';
+    const body = new FakeElement();
+    body.className = 'row-accordion-inner';
+    body.inert = !expanded;
+    row.append(head, body);
+    list.append(row);
+    return { row, head, body };
+  };
+  const first = addRow(true);
+  const second = addRow(false);
+  const start = appSource.indexOf('function toggleAccordionRow(');
+  const end = appSource.indexOf("document.addEventListener('click'", start);
+  const toggle = vm.runInNewContext(`${appSource.slice(start, end)} toggleAccordionRow`, {
+    document: list,
+    renderActiveToolDetail() {},
+    renderToolDetailFooter() {},
+    renderProjectBreakdownFooter() {}
+  });
+  toggle(second.row);
+  assert.equal(first.body.inert, true);
+  assert.equal(first.head.getAttribute('aria-expanded'), 'false');
+  assert.equal(second.body.inert, false);
+  assert.equal(second.head.getAttribute('aria-expanded'), 'true');
+  toggle(second.row);
+  assert.equal(second.body.inert, true);
+});
+
 test('open session group toggle refreshes both group total and member model tooltips', () => {
   const api = freshDetailTokenDisplay();
   const document = fakeDocument();
