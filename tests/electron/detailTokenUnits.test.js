@@ -627,9 +627,11 @@ test('session detail, session group header, sessionRows tooltips, and row animat
     bindHoverMarquee() {},
     formatNumber,
     formatDetailTokens: (value) => api.formatDetailTokens(value),
+    isDetailCompactEnabled: () => api.isEnabled(),
     decorateDetailTokenElement: (el, value, options = {}) => {
       const exactText = options.exactText !== undefined ? String(options.exactText) : formatNumber(value);
       api.decorateTokenElement(el, exactText, {
+        enabled: options.enabled ?? api.isEnabled(),
         exactHint: 'Click for exact count',
         compactHint: 'Click for compact units'
       });
@@ -672,6 +674,21 @@ test('session detail, session group header, sessionRows tooltips, and row animat
   exValue.dispatch('click');
   assert.equal(exchange.classList.contains('expanded'), false, 'clicking exchange token must not toggle turns');
   assert.equal(api.isTransientExact(), true);
+
+  // A late usage update patches the toggle marker onto the same transcript nodes.
+  api.reset();
+  const unavailable = context.exchangeNode({
+    key: 'pending', title: 'Waiting for usage', tokensAvailable: false,
+    turns: [{ key: 'pending-turn', tokensAvailable: false }]
+  }, 120_000, true);
+  for (const selector of ['.detail-ex-value', '.detail-turn-value', '.detail-turn-split']) {
+    const retained = unavailable.querySelector(selector);
+    assert.equal(retained.hasAttribute('tabindex'), false);
+    retained.dataset.detailTokenToggle = 'true';
+    retained.dispatch('keydown', { key: 'Enter' });
+    assert.equal(api.isTransientExact(), true, selector);
+    api.reset();
+  }
 
   // Row number animation uses formatDetailTokens (no flash of exact count in compact mode).
   api.reset();
