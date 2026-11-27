@@ -1,0 +1,15 @@
+services:
+  hub:
+    image: ghcr.io/javis603/token-hub:latest
+    container_name: token-monitor-hub
+    restart: unless-stopped
+    ports:
+      - "17321:17321"
+    environment:
+      # Without a secret the Hub binds to loopback inside the container and is unreachable.
+      TOKEN_MONITOR_SECRET: ${TOKEN_MONITOR_SECRET:?set TOKEN_MONITOR_SECRET in .env}
+    volumes:
+      - token-monitor-data:/app/data
+
+volumes:
+  token-monitor-data:
