@@ -2610,10 +2610,11 @@
       ? deviceHistorySources
         .filter(device => !activeMachine || device.deviceId === activeMachine.deviceId)
         .map(device => {
-          const day = fixedPeriodRanges.deviceDayState(device, { now: nowMs })?.currentKey || todayKey;
+          const deviceDay = fixedPeriodRanges.deviceDayState(device, { now: nowMs })?.currentKey;
+          const day = deviceDay || todayKey;
           const uncovered = uncoveredSnapshots.get(device.deviceId);
           const range = uncovered
-            ? (uncovered.status === 'ready' ? uncovered.range : null)
+            ? (uncovered.status === 'ready' && deviceDay ? activityRange(deviceDay) : null)
             : stats?.syncedFixedPeriodDeviceWindows?.[periodKey]?.[device.deviceId] || activityRange(day);
           const devicePeriod = device.periods?.[periodKey] || uncovered?.period
             || fixedHistorySnapshot?.devices.find((/** @type {any} */ entry) => entry.deviceId === device.deviceId)?.period;
@@ -2624,7 +2625,8 @@
               ? device.periodWindows?.today?.key || day : undefined,
             // An inactive device with no matching rows has nothing to add.
             empty: devicePeriod
-              ? devicePeriod.totalTokens === 0 && !(devicePeriod.costUsd > 0)
+              ? !periodHasUsage(devicePeriod) && (Boolean(range) || !device.history?.daily?.some((/** @type {any} */ row) =>
+                n(row.messages) > 0 || n(row.activeTimeMs) > 0))
               : fixedHistorySnapshot?.status === 'ready'
           };
         })

@@ -1719,6 +1719,39 @@ test('a synced fixed page keeps uncovered device History without counting covere
   assert.equal(view(fullPage).hero.activeTimeMs, 2000);
 });
 
+test('activity-only uncovered History uses the device calendar or marks activity unavailable', () => {
+  const stats = {
+    mode: 'sync',
+    devices: [{ deviceId: 'utc', periods: { yesterday: { totalTokens: 100 } } }],
+    periods: { yesterday: { totalTokens: 100 } },
+    syncedFixedPeriodDeviceWindows: { yesterday: { utc: { start: '2026-11-23', end: '2026-11-23' } } }
+  };
+  const tokyo = {
+    deviceId: 'tokyo', historyAvailable: true,
+    periodWindows: { timeZone: 'Asia/Tokyo', today: { key: '2026-11-25', endsAt: '2026-11-25T15:00:00Z' } },
+    history: { daily: [
+      { date: '2026-11-23', tokens: 0, messages: 2, activeTimeMs: 1000 },
+      { date: '2026-11-24', tokens: 0, messages: 7, activeTimeMs: 4000 }
+    ] }
+  };
+  const history = { fixedPeriods: { historyTransportAvailable: true }, deviceHistories: [
+    { deviceId: 'utc', historyAvailable: true, history: { daily: [
+      { date: '2026-11-23', tokens: 100, messages: 3, activeTimeMs: 1000 }
+    ] } }, tokyo
+  ] };
+  const activity = selectedDeviceId => {
+    const { hero } = model.buildScopedOverview({ stats, history, periodKey: 'yesterday', selectedDeviceId,
+      nowMs: Date.parse('2026-11-24T18:00:00Z') });
+    return [hero.messages, hero.activeTimeMs];
+  };
+  assert.deepEqual(activity('tokyo'), [7, 4000]);
+  assert.deepEqual(activity('all'), [10, 5000]);
+  delete tokyo.periodWindows;
+  assert.deepEqual(activity('tokyo'), [null, null]);
+  assert.deepEqual(activity('all'), [null, null]);
+  assert.deepEqual(activity('utc'), [3, 1000]);
+});
+
 test('a synced fixed period renders without totals while device History is pending or unavailable', () => {
   const stats = {
     mode: 'sync',
