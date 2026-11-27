@@ -194,6 +194,9 @@ test('selected-device workspaces and Flow omit stale sessions when a displayed s
   const updatedAt = new Date(boundary - 1000).toISOString();
   const period = {
     totalTokens: 100,
+    clients: { codex: 100 },
+    models: { 'gpt-5': 100 },
+    clientModels: { codex: { 'gpt-5': 100 } },
     projects: { repo: { label: 'Repo', tokens: 100 } },
     sessions: { 'codex:one': {
       client: 'codex', sessionId: 'one', projectLabel: 'Repo', totalTokens: 100,
@@ -214,8 +217,13 @@ test('selected-device workspaces and Flow omit stale sessions when a displayed s
     assert.equal(before.workspaces[0]?.tokens, 100);
     assert.equal(before.topology.hubs[0]?.tokens, 100);
     const after = model.buildScopedOverview({ ...options, nowMs: boundary });
+    assert.equal(after.hero.tokens, 0);
+    assert.equal(after.activeMachine.tokens, 0);
+    assert.equal(after.topology.devices[0]?.tokens, 0);
     assert.deepEqual(after.workspaces, []);
     assert.deepEqual(after.topology.hubs, []);
+    assert.deepEqual(after.topology.endpoints, []);
+    assert.deepEqual(after.topology.devToHub, []);
     assert.deepEqual(after.sessions, []);
   }
   period.sessions['codex:one'].turnEnded = false;
@@ -223,6 +231,32 @@ test('selected-device workspaces and Flow omit stale sessions when a displayed s
   assert.equal(running.sessions[0]?.resumedFromPriorPeriod, true);
   assert.equal(running.sessions[0]?.totalTokens, 0);
   assert.equal(running.topology.hubs[0]?.tokens, 0);
+});
+
+test('a fresh native activity row survives expiry of the local usage snapshot', () => {
+  const endsAt = '2026-12-01T00:00:00Z';
+  const observedAt = '2026-12-01T00:00:01Z';
+  const activity = {
+    client: 'codex', sessionId: 'new', totalTokens: 0, costUsd: 0, lastUsedAt: observedAt,
+    liveActivity: { state: 'running', observedAt }
+  };
+  const periods = { today: { totalTokens: 50 }, month: { totalTokens: 50 } };
+  const stats = {
+    mode: 'sync', localDeviceId: 'a', periods,
+    nativeSessions: { today: { 'codex:new': activity }, month: { 'codex:new': activity } },
+    devices: [
+      { deviceId: 'a', periods, periodWindows: { today: { endsAt }, month: { endsAt } } },
+      { deviceId: 'b' }
+    ]
+  };
+  for (const periodKey of ['today', 'month']) {
+    const overview = model.buildScopedOverview({ stats, periodKey, selectedDeviceId: 'a', nowMs: Date.parse(observedAt) });
+    const active = overview.sessions.find(row => row.sessionId === 'new');
+    assert.equal(active?.activityState, 'running');
+    assert.equal(active?.totalTokens, 0);
+    assert.equal(overview.topology.endpoints[0]?.id, 'codex:new');
+    assert.equal(overview.hero.tokens, 0);
+  }
 });
 
 test('computeTokenAnatomy fails closed on unclassifiedTokens and computes cacheHitRate accurately', () => {

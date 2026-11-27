@@ -445,11 +445,15 @@
       const devHistory = historyMap.get(deviceId) || null;
       const mergedDevice = { ...devHistory, ...device, deviceId };
       const devDaily = devHistory?.history?.daily || [];
+      /** @param {string} key */
+      const resolveDevicePeriod = (key) => isDevicePeriodExpired(device, key, nowMs)
+        ? null
+        : resolvePeriodData(mergedDevice, devDaily, key, rangeOptions);
       const resolvedPeriod = options.fixedHistorySnapshot
         ? mergedDevice.periods?.[periodKey] || fixedHistoryById.get(deviceId) || null
         : (localFixed && (deviceId === localId || ids.size === 1) ? livePeriod : null)
-          || resolvePeriodData(mergedDevice, devDaily, periodKey, rangeOptions);
-      const todayPeriod = resolvePeriodData(mergedDevice, devDaily, 'today', rangeOptions);
+          || resolveDevicePeriod(periodKey);
+      const todayPeriod = periodKey === 'today' ? resolvedPeriod : resolveDevicePeriod('today');
       const tokens = Math.max(0, n(resolvedPeriod?.totalTokens));
       const cost = Math.max(0, n(resolvedPeriod?.costUsd ?? resolvedPeriod?.totalCost));
       const unpricedTokens = Math.max(0, n(resolvedPeriod?.unpricedTokens));
@@ -1004,10 +1008,8 @@
     const selectedDevice = selectedDeviceId !== 'all' && (stats?.devices || []).find((/** @type {any} */ item) =>
       String(item.deviceId || item.id || '').trim() === selectedDeviceId);
     const expired = isDevicePeriodExpired(selectedDevice, periodKey, nowMs);
-    // Keep Today's live carryovers from prior periods, which contribute zero Today tokens.
-    const collectedSessions = collectPeriodSessionEntries(stats, periodKey, expired ? null : aggregatePeriod, nowMs, {
-      includeNative: includeNative && !expired
-    });
+    // Native activity and Today's zero-usage carryovers are independent of the usage window.
+    const collectedSessions = collectPeriodSessionEntries(stats, periodKey, expired ? null : aggregatePeriod, nowMs, { includeNative });
 
     /** @type {Map<string, { name: string, deviceKind: string, isLocal: boolean }>} */
     const deviceLookup = new Map();
