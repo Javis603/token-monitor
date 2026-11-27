@@ -6,7 +6,7 @@
   --surface-top-rim: light-dark(rgba(255, 255, 255, 0.45), rgba(255, 255, 255, 0.05));
   --surface-border: light-dark(rgba(var(--line-rgb), 0.10), rgba(var(--overlay-rgb), 0.072));
   --dash-card-radius: 14px;
-  --dash-card-bg: light-dark(rgba(var(--overlay-rgb), 0.032), rgba(var(--overlay-rgb), 0.018));
+  --dash-card-bg: light-dark(rgba(var(--overlay-rgb), 0.0208), rgba(var(--overlay-rgb), 0.0117));
   --dash-card-border: light-dark(rgba(var(--line-rgb), 0.085), rgba(var(--line-rgb), 0.068));
   --dash-card-shadow: none;
   --dash-content-width: 1380px;
@@ -1099,8 +1099,7 @@ html.native-high-contrast .dash-stage {
   gap: 4px;
   padding: 8px 11px;
   border-radius: 10px;
-  border: 1px solid light-dark(rgba(var(--line-rgb), 0.085), rgba(var(--line-rgb), 0.068));
-  background: light-dark(rgba(var(--overlay-rgb), 0.036), rgba(var(--overlay-rgb), 0.022));
+  border: 1px solid var(--dash-card-border);
   box-shadow: none;
   cursor: pointer;
   min-width: 0;
@@ -1334,8 +1333,12 @@ html.native-high-contrast .dash-stage {
 }
 
 .topo-live-rate.is-rate::before {
-  background: color-mix(in srgb, var(--success, #34d399) 74%, #ffffff 26%);
-  box-shadow: 0 0 5px color-mix(in srgb, var(--success, #34d399) 45%, transparent);
+  width: 10px;
+  height: 10px;
+  border-radius: 0;
+  background: currentColor;
+  box-shadow: none;
+  mask: url("../icons/actions/zap.svg") center / contain no-repeat;
 }
 
 .topo-mini-bar {
