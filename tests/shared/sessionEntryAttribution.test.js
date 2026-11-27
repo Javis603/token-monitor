@@ -212,7 +212,7 @@ function antigravityFixture(t, { corruptState = false } = {}) {
   }
   const stateDb = new sqlite.DatabaseSync(path.join(t3Home, 'userdata', 'statev2.sqlite'));
   stateDb.exec(`
-    CREATE TABLE orchestration_v2_projection_threads (thread_id TEXT PRIMARY KEY, deleted_at TEXT, payload_json TEXT);
+    CREATE TABLE orchestration_v2_projection_threads (thread_id TEXT PRIMARY KEY, title TEXT, deleted_at TEXT, payload_json TEXT);
     CREATE TABLE orchestration_v2_projection_provider_threads (provider_thread_id TEXT PRIMARY KEY, thread_id TEXT, driver TEXT, payload_json TEXT);
     CREATE TABLE orchestration_v2_projection_nodes (node_id TEXT PRIMARY KEY, thread_id TEXT, root_node_id TEXT, kind TEXT, provider_thread_id TEXT);
     CREATE TABLE orchestration_v2_projection_run_attempts (thread_id TEXT, provider_thread_id TEXT, root_node_id TEXT, status TEXT, payload_json TEXT);
@@ -441,4 +441,74 @@ test('a link refresh moves the anchor row to the confirmed entry', t => {
   const revoked = revokePeriods.today.sessions['codex:bound-native'];
   assert.equal(revoked.t3ThreadId, undefined);
   assert.equal(revoked.sessionEntry, undefined);
+});
+
+test('a retained T3 title source is not evidence and a held entry survives an unavailable read', t => {
+  const fixture = antigravityFixture(t, { corruptState: true });
+  const staleSource = { native: null, t3: path.join(fixture.t3Home, 'userdata', 'statev2.sqlite') };
+  const makeDeps = (extraPrevious) => ({
+    sqlite,
+    env: fixture.env,
+    antigravityTitleCache: new Map(),
+    catalogTitleSources: { 'antigravity:stale-conv': staleSource },
+    metadataCache: new Map(extraPrevious ? [['antigravity:stale-conv', extraPrevious]] : []),
+    resolvedSessionKeys: new Set(),
+    attemptedSessionKeys: new Set(),
+    sessionMetadataResolvers: new Map([
+      ['antigravity', { resolve: antigravitySessionMetadata.resolveSessionMetadata, retryAfterTimestampFallback: true }]
+    ])
+  });
+  const staleDeps = makeDeps({
+    catalogTitle: 'Old T3 title',
+    catalogTitleSource: staleSource
+  });
+  const stalePeriods = { today: normalizePeriod({ sessions: {
+    a: { client: 'antigravity', sessionId: 'stale-conv', totalTokens: 20 }
+  } }) };
+  sessionMetadataMap(stalePeriods, fixture.home, staleDeps);
+  assert.equal(staleDeps.metadataCache.get('antigravity:stale-conv')?.sessionEntryEvidence, undefined,
+    'a retained title source alone is not this tick\'s evidence');
+  applyT3SessionParents(stalePeriods, fixture.home, staleDeps);
+  assert.equal(stalePeriods.today.sessions['antigravity:stale-conv'].sessionEntry, undefined,
+    'no entry is established from old state');
+  // A held entry survives the unavailable read instead of being dropped.
+  const heldDeps = makeDeps({
+    catalogTitle: 'Old T3 title',
+    catalogTitleSource: staleSource
+  });
+  const heldPeriods = { today: normalizePeriod({ sessions: {
+    a: { client: 'antigravity', sessionId: 'stale-conv', totalTokens: 20, sessionEntry: 't3' }
+  } }) };
+  sessionMetadataMap(heldPeriods, fixture.home, heldDeps);
+  applyT3SessionParents(heldPeriods, fixture.home, heldDeps);
+  assert.equal(heldPeriods.today.sessions['antigravity:stale-conv'].sessionEntry, 't3');
+});
+
+test('a title the T3 catalog joined this pass is positive object-source evidence', t => {
+  const fixture = antigravityFixture(t);
+  const stateDb = new sqlite.DatabaseSync(path.join(fixture.t3Home, 'userdata', 'statev2.sqlite'));
+  stateDb.prepare('INSERT INTO orchestration_v2_projection_threads (thread_id, title, deleted_at, payload_json) VALUES (?, ?, NULL, ?)')
+    .run('app-thread', 'T3 Task', JSON.stringify({ lineage: {} }));
+  stateDb.prepare('INSERT INTO orchestration_v2_projection_provider_threads (provider_thread_id, thread_id, driver, payload_json) VALUES (?, ?, ?, ?)')
+    .run('p1', 'app-thread', 'antigravity', JSON.stringify({ nativeThreadRef: { nativeId: 'acp-conv', driver: 'antigravity', strength: 'strong' } }));
+  // Close before the fixture's cleanup removes the directory.
+  stateDb.close();
+  const deps = {
+    sqlite,
+    env: fixture.env,
+    antigravityTitleCache: new Map(),
+    metadataCache: new Map(),
+    resolvedSessionKeys: new Set(),
+    attemptedSessionKeys: new Set(),
+    sessionMetadataResolvers: new Map([
+      ['antigravity', { resolve: antigravitySessionMetadata.resolveSessionMetadata, retryAfterTimestampFallback: true }]
+    ])
+  };
+  const periods = { today: normalizePeriod({ sessions: {
+    acp: { client: 'antigravity', sessionId: 'acp-conv', totalTokens: 10 }
+  } }) };
+  sessionMetadataMap(periods, fixture.home, deps);
+  assert.equal(deps.metadataCache.get('antigravity:acp-conv')?.sessionEntryEvidence, 'verified-t3');
+  applyT3SessionParents(periods, fixture.home, deps);
+  assert.equal(periods.today.sessions['antigravity:acp-conv'].sessionEntry, 't3');
 });

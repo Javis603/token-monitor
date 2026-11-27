@@ -260,15 +260,24 @@ function resolveSessionMetadata(sessionIds, context = {}) {
     return typeof source === 'string' ? source : source?.native;
   };
   // Directory evidence for the launch entry, from the store this pass selected
-  // the session's catalog row from. A T3 ACP store — or a title from T3's own
-  // thread store — is positive T3 evidence; a validated row from any other
-  // store names the native CLI. A session with no row anywhere, a stale read
-  // or an unresolved store claims nothing — only a real row is evidence. The
-  // values spell the evidence contract shared with `usage.js`
-  // (SESSION_ENTRY_EVIDENCE); this module stays out of the wire graph, so the
-  // watch policy can keep loading it.
+  // the session's catalog row from. A T3 ACP store row — or a title the T3
+  // thread catalog joined this pass — is positive T3 evidence; a validated row
+  // from any other store names the native CLI. A session with no row anywhere,
+  // a stale read or an unresolved store claims nothing — only something this
+  // pass actually read is evidence. The values spell the evidence contract
+  // shared with `usage.js` (SESSION_ENTRY_EVIDENCE); this module stays out of
+  // the wire graph, so the watch policy can keep loading it.
   const entryEvidenceFor = (sessionId, source) => {
-    if (source && typeof source === 'object') return source.t3 ? 'verified-t3' : '';
+    if (source && typeof source === 'object') {
+      // A retained title source is not this tick's evidence: only a title the
+      // catalog read joined this pass proves t3. Title retention is display
+      // state and says nothing about the binding now; an unavailable read
+      // claims nothing, so a held entry survives instead of a missing one
+      // being established from old state.
+      if (!source.t3) return '';
+      const match = t3Relations.get(`antigravity:${sessionId}`);
+      return match?.title && match.titleStore === source.t3 ? 'verified-t3' : '';
+    }
     if (typeof source === 'string' && source) {
       // The persisted source is only evidence while this pass still sees the
       // store and a validated row for the session: a confirmed miss or an

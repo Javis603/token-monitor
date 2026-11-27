@@ -3499,10 +3499,27 @@ function sessionEntryLabels() {
 // The entry values a row and its folded group members carry, mirroring the
 // tool filter's group semantics: a group survives a filter when any member
 // matches. Unattributed rows and rows with no entry at all read as unknown.
+// Summary rows (background reviews, bot groups) aggregate members and carry no
+// attribution of their own, so only members speak; a session row is itself a
+// participant beside its folded members, so its own value counts too.
 function sessionEntryValues(row) {
   if (row.kind !== 'session' && row.kind !== 'summary') return [];
-  return [row.sessionEntry, ...(row.groupRows || []).map(member => member.sessionEntry)]
-    .map(value => (typeof value === 'string' ? value : ''));
+  const members = row.kind === 'summary'
+    ? (Array.isArray(row.groupRows) ? row.groupRows : [])
+    : [row, ...(Array.isArray(row.groupRows) ? row.groupRows : [])];
+  return members.map(member => (typeof member.sessionEntry === 'string' ? member.sessionEntry : ''));
+}
+
+// A cleared selection must reach the row labels too, but those are baked when
+// the rows are built — before this pass could know the selection was stale.
+// One deferred rebuild fixes the display without re-entering a live render.
+let sessionEntryRepaintTimer = null;
+function scheduleSessionEntryRepaint() {
+  if (sessionEntryRepaintTimer) return;
+  sessionEntryRepaintTimer = setTimeout(() => {
+    sessionEntryRepaintTimer = null;
+    if (state.breakdown === 'session' && !state.openSession) render();
+  }, 0);
 }
 
 // Orthogonal to the tool filter: an entry narrows the list to sessions
@@ -3518,12 +3535,14 @@ function renderSessionEntryFilter(rows) {
   if (state.sessionEntryFilter && (choices.length < 2 || !choices.includes(state.sessionEntryFilter))) {
     state.sessionEntryFilter = '';
     state.sessionPage = 0;
+    scheduleSessionEntryRepaint();
   }
   host.classList.toggle('hidden', choices.length < 2);
   host.setAttribute('aria-label', t('sessions.filterEntry'));
   const signature = JSON.stringify([currentLocale(), choices, state.sessionEntryFilter]);
   if (host.dataset.signature !== signature) {
     host.dataset.signature = signature;
+    const focused = host.contains(document.activeElement) ? document.activeElement.dataset.entry : null;
     const labels = sessionEntryLabels();
     labels.unknown = t('sessions.entryUnknown');
     const buttons = ['', ...choices].map(choice => {
@@ -3545,6 +3564,7 @@ function renderSessionEntryFilter(rows) {
       return button;
     });
     host.replaceChildren(...buttons);
+    if (focused !== null) buttons.find(button => button.dataset.entry === focused)?.focus({ preventScroll: true });
   }
   // `unknown` targets the empty attribution explicitly; only no selection at
   // all takes the All path.
