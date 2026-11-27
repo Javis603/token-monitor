@@ -51,6 +51,11 @@
     return Number.isFinite(parsed) ? parsed : 0;
   }
 
+  /** @param {any} period */
+  function periodHasUsage(period) {
+    return n(period?.totalTokens) > 0 || n(period?.costUsd ?? period?.totalCost) > 0;
+  }
+
   /** @param {string} client */
   function canonicalClientKey(client) {
     return client === 'antigravity-cli' ? 'antigravity' : String(client || '');
@@ -547,6 +552,39 @@
   }
 
   /**
+   * History owns these metrics. Sum each device's calendar selection before
+   * combining devices, since a fleet may be on both sides of midnight.
+   *
+   * @param {Array<{ history: any, range?: { start: string, end: string } | null, empty?: boolean, liveUsageDay?: string }>} sources
+   * @param {string} periodKey
+   */
+  function summarizeHeroActivity(sources, periodKey) {
+    /** @type {any[]} */
+    const rows = [];
+    for (const { history, range, empty, liveUsageDay } of sources) {
+      if (periodKey === 'allTime') {
+        if (history?.summary) rows.push(history.summary);
+        else if (!empty) rows.push(null);
+        continue;
+      }
+      const selected = range && history?.daily?.filter((/** @type {any} */ row) =>
+        row.date >= range.start && row.date <= range.end);
+      if (range && liveUsageDay && liveUsageDay >= range.start && liveUsageDay <= range.end
+        && !selected?.some((/** @type {any} */ row) => row.date === liveUsageDay)) {
+        return { activeTimeMs: null, messages: null };
+      }
+      if (selected?.length) rows.push(...selected);
+      else if (!empty) rows.push(null);
+    }
+
+    /** @param {'activeTimeMs' | 'messages'} field */
+    const sum = (field) => rows.length && rows.every(row => Number.isFinite(row?.[field]))
+      ? rows.reduce((total, row) => total + Math.max(0, row[field]), 0)
+      : null;
+    return { activeTimeMs: sum('activeTimeMs'), messages: sum('messages') };
+  }
+
+  /**
    * Fail-closed Token Anatomy breakdown (`cacheRead`, `cacheWrite`, `cacheMiss`, `output`, `unclassified`).
    * Never absorbs `unclassifiedTokens` into cache-miss/prompt input.
    *
@@ -571,8 +609,9 @@
       if (cacheRead === 0 && cacheWrite === 0 && output === 0 && totalTokens > 0) {
         unclassified = totalTokens;
       }
-    } else if (periodData && periodData.capabilities?.tokenComponents === false) {
-      unclassified = Math.max(unclassified, Math.max(0, totalTokens - cacheRead - cacheWrite - output));
+    } else if (periodData?.capabilities?.tokenComponents === false && periodData.unclassifiedTokens == null) {
+      // Older periods may flag incomplete components without counting the unknown portion.
+      unclassified = Math.max(0, totalTokens - cacheRead - cacheWrite - output);
     }
 
     const accounted = cacheRead + cacheWrite + output + unclassified;
@@ -2404,10 +2443,12 @@
 
     const synced = isSyncedStatsContext(stats, settings, statsMode);
     const fixed = fixedPeriodRanges?.isDerived(periodKey);
+    /** @type {any[]} */
+    const deviceHistorySources = synced
+      ? fixedPeriodRanges.joinDeviceHistorySources(history?.deviceHistories || [], stats?.devices || [])
+      : [];
     const fixedHistorySnapshot = fixed && synced && !stats?.periods?.[periodKey]
-      ? fixedPeriodRanges.fixedPeriodSnapshotFromDevices(periodKey, fixedPeriodRanges.joinDeviceHistorySources(
-        history?.deviceHistories || [], stats?.devices || []
-      ), {
+      ? fixedPeriodRanges.fixedPeriodSnapshotFromDevices(periodKey, deviceHistorySources, {
         historyAvailable: history?.fixedPeriods?.historyTransportAvailable === true,
         historyEnabled: settings.historyEnabled !== false,
         now: nowMs,
@@ -2430,6 +2471,47 @@
       ? fleet.machines.find((m) => m.deviceId === selectedDeviceId) || null
       : null;
 
+    const todayKey = fixedPeriodRanges.localDayKey(nowMs);
+    /** @param {string} day */
+    const activityRange = (day) => fixed ? fixedPeriodRanges.rangeForSelection(periodKey, {
+      todayKey: day,
+      locale: synced ? settings.locale : settings.calendarLocale || settings.locale,
+      weekStartsOn: synced ? settings.syncWeekStartsOn ?? 1 : undefined
+    }) : {
+      start: periodKey === 'month' ? `${day.slice(0, 7)}-01` : day,
+      end: day
+    };
+    const activitySources = deviceHistorySources.length
+      ? deviceHistorySources
+        .filter(device => !activeMachine || device.deviceId === activeMachine.deviceId)
+        .map(device => {
+          const day = fixedPeriodRanges.deviceDayState(device, { now: nowMs })?.currentKey || todayKey;
+          const range = stats?.syncedFixedPeriodDeviceWindows?.[periodKey]?.[device.deviceId] || activityRange(day);
+          const devicePeriod = device.periods?.[periodKey]
+            || fixedHistorySnapshot?.devices.find((/** @type {any} */ entry) => entry.deviceId === device.deviceId)?.period;
+          return {
+            history: device.history,
+            range,
+            liveUsageDay: periodHasUsage(device.periods?.today)
+              ? device.periodWindows?.today?.key || day : undefined,
+            // An inactive device with no matching rows has nothing to add.
+            empty: devicePeriod
+              ? devicePeriod.totalTokens === 0 && !(devicePeriod.costUsd > 0)
+              : fixedHistorySnapshot?.status === 'ready'
+          };
+        })
+      : [{
+        history: activeMachine ? activeMachine.history : history,
+        range: activityRange(todayKey),
+        liveUsageDay: periodHasUsage(stats?.periods?.today) ? stats?.periodWindows?.today?.key || todayKey : undefined
+      }];
+    const activity = summarizeHeroActivity(
+      settings.historyEnabled === false || (fixedHistorySnapshot && fixedHistorySnapshot.status !== 'ready')
+        ? []
+        : activitySources,
+      periodKey
+    );
+
     const scopedHistory = selectScopedHistory(history, activeMachine ? activeMachine.deviceId : 'all');
     const periodData = fixedHistorySnapshot
       ? (activeMachine ? activeMachine.periodData : fixedHistorySnapshot.period)
@@ -2437,7 +2519,7 @@
         ? activeMachine.periodData
         : resolvePeriodData(stats, scopedHistory.daily, periodKey, {
           locale: synced ? settings.locale : settings.calendarLocale || settings.locale,
-          todayKey: fixedPeriodRanges?.localDayKey(nowMs),
+          todayKey,
           synced
         });
 
@@ -2533,6 +2615,7 @@
         unpricedTokens,
         anatomy,
         cacheHitRate: anatomy.cacheHitRate,
+        ...activity,
         streak: n(scopedHistory.summary.currentStreak),
         activeDays: n(scopedHistory.summary.activeDays),
         liveTokPerSec: activeMachine

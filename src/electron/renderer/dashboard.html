@@ -70,24 +70,37 @@
             <section id="dashHero" class="dash-hero-band">
               <div class="dash-glass-card dash-hero-main">
                 <div class="dash-hero-eyebrow">
-                  <span id="dashHeroScope" class="dash-hero-scope"></span>
+                  <span class="dash-hero-scope">TOTAL TOKENS</span>
                   <span id="dashHeroActive" class="dash-hero-active hidden"></span>
                 </div>
-                <div class="dash-hero-figure-row">
-                  <span id="dashHeroTokens" class="dash-hero-tokens">0</span>
-                  <span id="dashHeroApprox" class="dash-hero-approx hidden"></span>
-                </div>
-                <div class="dash-hero-sub-row">
-                  <span id="dashHeroCost" class="dash-hero-cost">—</span>
-                  <span id="dashHeroCacheSep" class="dash-hero-meta-sep" aria-hidden="true">·</span>
-                  <span id="dashHeroCacheItem" class="dash-hero-meta-item">
-                    <span class="dash-hero-meta-k" data-i18n="dashboard.hero.cacheHit">Cache hit</span>
-                    <strong id="dashHeroCache" class="dash-hero-meta-v">—</strong>
-                  </span>
+                <div class="dash-hero-reading">
+                  <div class="total-number-row dash-hero-figure-row">
+                    <span id="dashHeroTokens" class="total-number dash-hero-tokens">0</span>
+                    <span id="dashHeroApprox" class="total-compact hidden" aria-hidden="true"></span>
+                  </div>
+                  <div class="dash-hero-sub-row">
+                    <span id="dashHeroCost" class="cost dash-hero-cost">—</span>
+                  </div>
+                  <dl class="dash-hero-activity">
+                    <div>
+                      <dt class="dash-hero-metric-label dash-hero-metric-time" data-i18n="trends.activeTime">Active time</dt>
+                      <dd id="dashHeroActiveTime" class="dash-hero-meta-v">—</dd>
+                    </div>
+                    <div>
+                      <dt class="dash-hero-metric-label dash-hero-metric-messages" data-i18n="dashboard.stat.messages">Messages</dt>
+                      <dd id="dashHeroMessages" class="dash-hero-meta-v">—</dd>
+                    </div>
+                  </dl>
                 </div>
                 <div class="dash-hero-tracks">
                   <div id="dashHeroRibbon" class="dash-ribbon" aria-hidden="true"></div>
-                  <div id="dashHeroAnatomy" class="dash-anatomy"></div>
+                  <div class="dash-hero-legend">
+                    <div id="dashHeroAnatomy" class="dash-anatomy"></div>
+                    <span id="dashHeroCacheItem" class="dash-hero-meta-item hidden">
+                      <span class="dash-hero-metric-label dash-hero-metric-cache" data-i18n="dashboard.hero.cacheHit">Cache hit</span>
+                      <strong id="dashHeroCache" class="dash-hero-meta-v">—</strong>
+                    </span>
+                  </div>
                 </div>
               </div>
 

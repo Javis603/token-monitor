@@ -46,12 +46,12 @@ const els = {
   tabs: Array.from(document.querySelectorAll('.dash-tab')),
   trendsPane: document.getElementById('trendsPane'),
   activityPane: document.getElementById('activityPane'),
-  heroScope: document.getElementById('dashHeroScope'),
   heroActive: document.getElementById('dashHeroActive'),
   heroTokens: document.getElementById('dashHeroTokens'),
   heroApprox: document.getElementById('dashHeroApprox'),
   heroCost: document.getElementById('dashHeroCost'),
-  heroCacheSep: document.getElementById('dashHeroCacheSep'),
+  heroActiveTime: document.getElementById('dashHeroActiveTime'),
+  heroMessages: document.getElementById('dashHeroMessages'),
   heroCacheItem: document.getElementById('dashHeroCacheItem'),
   heroCache: document.getElementById('dashHeroCache'),
   heroRibbon: document.getElementById('dashHeroRibbon'),
@@ -1350,13 +1350,16 @@ function updateHeroTokens(text, value, scopeKey) {
   }, numberAnimationApi.duration + 40);
 }
 
+function formatHeroPercent(share) {
+  const percent = Math.min(100, share * 100);
+  if (percent < 100 && percent >= 99.95) return '>99.9%';
+  if (percent < 100 && percent >= 99.5) return `${percent.toFixed(1)}%`;
+  return `${Math.round(percent)}%`;
+}
+
 function renderHero(overview) {
   if (!overview) return;
   const { hero, activeMachine, tools, fleet } = overview;
-  const scopeTitle = activeMachine
-    ? `${activeMachine.name} · ${t(`dashboard.period.${state.periodKey}`)}`
-    : `${fleet?.isFleetMode ? t('dashboard.fleet.all') : (fleet?.machines?.[0]?.name || t('dashboard.fleet.all'))} · ${t(`dashboard.period.${state.periodKey}`)}`;
-  if (els.heroScope) els.heroScope.textContent = scopeTitle;
 
   const activeCount = activeMachine ? activeMachine.activeSessionCount : (fleet?.fleetTotals?.activeSessions || 0);
   if (els.heroActive) {
@@ -1378,7 +1381,7 @@ function renderHero(overview) {
   if (els.heroApprox) {
     if (hero.tokens >= 1000) {
       els.heroApprox.classList.remove('hidden');
-      els.heroApprox.textContent = `≈ ${formatCompact(hero.tokens)} ${t('dashboard.hero.tokens')}`;
+      els.heroApprox.textContent = `≈ ${formatCompact(hero.tokens)}`;
     } else {
       els.heroApprox.classList.add('hidden');
       els.heroApprox.textContent = '';
@@ -1392,11 +1395,14 @@ function renderHero(overview) {
       whole: hero.unpricedTokens > 0 && !(hero.cost > 0)
     });
   }
+  const activeTime = hero.activeTimeMs == null ? '—' : formatDurationCompact(hero.activeTimeMs);
+  const messages = hero.messages == null ? '—' : hero.messages.toLocaleString(state.locale);
+  if (els.heroActiveTime && els.heroActiveTime.textContent !== activeTime) els.heroActiveTime.textContent = activeTime;
+  if (els.heroMessages && els.heroMessages.textContent !== messages) els.heroMessages.textContent = messages;
   const hasCacheHit = hero.cacheHitRate != null;
   if (els.heroCache) {
-    els.heroCache.textContent = hasCacheHit ? `${Math.round(hero.cacheHitRate * 100)}%` : '—';
+    els.heroCache.textContent = hasCacheHit ? formatHeroPercent(hero.cacheHitRate) : '—';
   }
-  els.heroCacheSep?.classList.toggle('hidden', !hasCacheHit);
   els.heroCacheItem?.classList.toggle('hidden', !hasCacheHit);
 
   if (els.heroRibbon) {
@@ -1427,30 +1433,31 @@ function renderHero(overview) {
   }
 
   if (els.heroAnatomy) {
-    const segments = hero.anatomy?.segments || [];
-    const existingItems = Array.from(els.heroAnatomy.children);
-    const sameKinds = existingItems.length === segments.length
-      && segments.every((seg, idx) => existingItems[idx]?.dataset?.kind === seg.key);
-    if (sameKinds && segments.length > 0) {
-      segments.forEach((seg, idx) => {
-        const item = existingItems[idx];
-        const labelEl = item.querySelector('.dash-anatomy-label');
-        const strongEl = item.querySelector('strong');
-        const pctEl = item.querySelector('.dash-anatomy-pct');
-        if (labelEl) labelEl.textContent = t(seg.labelKey);
-        if (strongEl) strongEl.textContent = formatCompact(seg.tokens);
-        if (pctEl) pctEl.textContent = `(${(seg.share * 100).toFixed(0)}%)`;
-      });
-    } else {
-      els.heroAnatomy.innerHTML = segments.map((seg) =>
-        `<span class="dash-anatomy-item" data-kind="${escapeHtml(seg.key)}">`
-        + `<span class="dash-anatomy-dot kind-${escapeHtml(seg.key)}" aria-hidden="true"></span>`
+    const anatomy = hero.anatomy;
+    const components = anatomy?.segments || [];
+    const cacheMissComponents = components.filter(seg => seg.key === 'cacheWrite' || seg.key === 'cacheMiss');
+    const segments = components.flatMap(seg => {
+      if (!cacheMissComponents.includes(seg)) return [seg];
+      if (seg !== cacheMissComponents[0]) return [];
+      return [{
+        key: 'cacheMiss', labelKey: 'dashboard.tooltip.inputCacheMiss',
+        tokens: anatomy.cacheWrite + anatomy.cacheMiss,
+        share: (anatomy.cacheWrite + anatomy.cacheMiss) / (anatomy.totalTokens
+          || anatomy.cacheRead + anatomy.cacheWrite + anatomy.cacheMiss + anatomy.output + anatomy.unclassified)
+      }];
+    });
+    patchDashboardMarkup(els.heroAnatomy, segments.map((seg) => {
+      const kind = escapeHtml(seg.key);
+      const details = seg.key === 'cacheMiss'
+        ? ` tabindex="0" aria-description="${escapeHtml(heroCacheMissDetails(anatomy).map(([label, value]) => `${label}: ${value}`).join(' · '))}"`
+        : '';
+      return `<span class="dash-anatomy-item" data-kind="${kind}" data-key="${kind}"${details}>`
+        + `<span class="dash-anatomy-dot kind-${kind}" aria-hidden="true"></span>`
         + `<span class="dash-anatomy-label">${escapeHtml(t(seg.labelKey))}</span>`
         + `<strong>${escapeHtml(formatCompact(seg.tokens))}</strong>`
-        + `<span class="dash-anatomy-pct">(${(seg.share * 100).toFixed(0)}%)</span>`
-        + `</span>`
-      ).join('');
-    }
+        + `<span class="dash-anatomy-pct">(${escapeHtml(formatHeroPercent(seg.share))})</span>`
+        + `</span>`;
+    }).join(''));
   }
 }
 
@@ -3311,6 +3318,10 @@ function refreshActiveHover() {
       const anchor = hit.querySelector('.iso-face-top') || hit;
       showHeatTooltip(activeHover.date, day, anchor);
     } else hideTooltip();
+  } else if (activeHover.kind === 'cacheMiss') {
+    const item = els.heroAnatomy?.querySelector('[data-kind="cacheMiss"]');
+    if (item) showHeroCacheMissTooltip(item);
+    else hideTooltip();
   } else if (activeHover.kind === 'ribbon' && activeHover.id) {
     const seg = findByDataset(els.heroRibbon, '.dash-ribbon-seg[data-tip-id]', (el) => el.getAttribute('data-tip-id') === activeHover.id);
     if (seg) showRibbonTooltip(seg);
@@ -4109,6 +4120,23 @@ function showRibbonTooltip(seg) {
   positionTooltip(seg);
 }
 
+function heroCacheMissDetails(anatomy) {
+  return [
+    [t('dashboard.tooltip.inputCacheMiss'), anatomy.cacheMiss.toLocaleString(state.locale)],
+    [t('dashboard.anatomy.cacheWrite'), anatomy.cacheWrite.toLocaleString(state.locale)]
+  ];
+}
+
+function showHeroCacheMissTooltip(anchor) {
+  const anatomy = state.overview?.hero?.anatomy;
+  if (!anatomy) return;
+  activeHover = { kind: 'cacheMiss' };
+  els.tooltip.innerHTML = heroCacheMissDetails(anatomy).map(([label, value]) =>
+    `<div class="tt-row"><span class="tt-name">${escapeHtml(label)}</span><span class="tt-val">${escapeHtml(value)}</span></div>`
+  ).join('');
+  positionTooltip(anchor);
+}
+
 function moveHeatmapSpotlight(x, y) {
   spotlightTarget.x = x;
   spotlightTarget.y = y;
@@ -4539,6 +4567,7 @@ window.tokenMonitor.onSettingsPush?.((next) => {
     needsRender = true;
   }
   if (state.reduceMotion !== previousReduceMotion) needsRender = true;
+  if (state.settings.historyEnabled !== previousSettings?.historyEnabled) needsRender = true;
   const nextMetric = state.settings.dashboardHeatmapMetric || state.settings.heatmapMetric || 'cost';
   if (state.heatmapMetric !== nextMetric) {
     state.heatmapMetric = nextMetric;
@@ -5169,6 +5198,19 @@ els.heroRibbon?.addEventListener('pointermove', (ev) => {
 els.heroRibbon?.addEventListener('pointerleave', () => {
   if (activeHover?.kind === 'ribbon') hideTooltip();
 });
+
+for (const event of ['pointerover', 'focusin']) {
+  els.heroAnatomy?.addEventListener(event, (ev) => {
+    const item = ev.target.closest('[data-kind="cacheMiss"]');
+    if (item) showHeroCacheMissTooltip(item);
+  });
+}
+for (const event of ['pointerout', 'focusout']) {
+  els.heroAnatomy?.addEventListener(event, (ev) => {
+    const item = ev.target.closest('[data-kind="cacheMiss"]');
+    if (activeHover?.kind === 'cacheMiss' && item && !item.contains(ev.relatedTarget)) hideTooltip();
+  });
+}
 
 let resizeTimer = null;
 window.addEventListener('resize', () => {

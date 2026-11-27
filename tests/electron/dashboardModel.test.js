@@ -130,11 +130,16 @@ test('computeTokenAnatomy fails closed on unclassifiedTokens and computes cacheH
     totalTokens: 1000,
     cacheReadTokens: 300,
     outputTokens: 100,
-    unclassifiedTokens: 400
+    unclassifiedTokens: 400,
+    capabilities: { tokenComponents: false }
   });
   assert.equal(partial.unclassified, 400);
   assert.equal(partial.cacheMiss, 200);
   assert.equal(partial.segments.find((s) => s.key === 'unclassified').tokens, 400);
+
+  const mixed = { totalTokens: 1000, cacheReadTokens: 300, outputTokens: 100, capabilities: { tokenComponents: false } };
+  assert.equal(model.computeTokenAnatomy(mixed).unclassified, 600);
+  assert.equal(model.computeTokenAnatomy({ ...mixed, unclassifiedTokens: 0 }).cacheMiss, 600);
 });
 
 test('buildQuotaAccounts keys credits formatting off metric === credits across any provider', () => {
@@ -1410,6 +1415,107 @@ test('Today without Stats never substitutes unrestricted History totals', () => 
   assert.equal(today.hero.tokens, 0);
   assert.deepEqual(today.tools, []);
   assert.equal(model.buildScopedOverview({ history, periodKey: 'allTime' }).hero.tokens, 900);
+});
+
+test('summary activity uses the selected calendar range and keeps missing metrics distinct from zero', () => {
+  const history = {
+    daily: [
+      { date: '2026-10-30', activeTimeMs: 60000, messages: 2 },
+      { date: '2026-11-01', activeTimeMs: 120000, messages: 4 },
+      { date: '2026-11-23', activeTimeMs: 240000, messages: 8 },
+      { date: '2026-11-24', activeTimeMs: 0, messages: 0 },
+      { date: '2026-11-25', activeTimeMs: 480000, messages: 16 }
+    ],
+    summary: { activeTimeMs: 3600000, messages: 80 }
+  };
+  const options = {
+    history,
+    nowMs: new Date(2026, 10, 24, 12).getTime(),
+    settings: { calendarLocale: 'en-GB' }
+  };
+  const activity = (periodKey, override) => {
+    const { activeTimeMs, messages } = model.buildScopedOverview({ ...options, periodKey, ...override }).hero;
+    return [activeTimeMs, messages];
+  };
+  assert.deepEqual(activity('today'), [0, 0]);
+  assert.deepEqual(activity('yesterday'), [240000, 8]);
+  assert.deepEqual(activity('week'), [240000, 8]);
+  assert.deepEqual(activity('last7'), [240000, 8]);
+  assert.deepEqual(activity('last30'), [420000, 14]);
+  assert.deepEqual(activity('month'), [360000, 12]);
+  assert.deepEqual(activity('allTime'), [3600000, 80]);
+  assert.deepEqual(activity('today', { history: null }), [null, null]);
+  const pendingToday = {
+    stats: { periods: { today: { totalTokens: 900 } } },
+    history: { ...history, daily: history.daily.filter(row => row.date !== '2026-11-24') }
+  };
+  assert.deepEqual(activity('week', pendingToday), [null, null]);
+  assert.deepEqual(activity('month', pendingToday), [null, null]);
+  assert.deepEqual(activity('yesterday', pendingToday), [240000, 8]);
+  const pendingCostOnly = { ...pendingToday, stats: { periods: { today: { totalTokens: 0, costUsd: 1 } } } };
+  assert.deepEqual(activity('week', pendingCostOnly), [null, null]);
+  assert.deepEqual(activity('month', pendingCostOnly), [null, null]);
+  assert.deepEqual(activity('today', { settings: { historyEnabled: false } }), [null, null]);
+  assert.deepEqual(activity('today', {
+    history: { daily: [{ date: '2026-11-24', messages: 2 }] }
+  }), [null, 2]);
+});
+
+test('synced summary activity applies device calendars and never fills missing device history with fleet totals', () => {
+  const window = (key, endsAt) => ({ today: { key, endsAt } });
+  const devices = [
+    { deviceId: 'east', periodWindows: window('2026-11-24', '2026-11-24T16:00:00Z'), periods: { today: { totalTokens: 300 } } },
+    { deviceId: 'west', periodWindows: window('2026-11-23', '2026-11-24T08:00:00Z'), periods: { today: { totalTokens: 200 } } }
+  ];
+  const history = {
+    daily: [{ date: '2026-11-24', activeTimeMs: 600000, messages: 999 }],
+    deviceHistories: [
+      { deviceId: 'east', historyAvailable: true, history: { daily: [
+        { date: '2026-11-23', tokens: 50, activeTimeMs: 60000, messages: 1 },
+        { date: '2026-11-24', tokens: 300, activeTimeMs: 180000, messages: 3 }
+      ] } },
+      { deviceId: 'west', historyAvailable: true, history: { daily: [
+        { date: '2026-11-23', tokens: 200, activeTimeMs: 120000, messages: 2 }
+      ] } }
+    ],
+    fixedPeriods: { historyTransportAvailable: true }
+  };
+  const stats = { mode: 'sync', devices, periods: { today: { totalTokens: 500 } } };
+  const options = {
+    stats, history, nowMs: Date.parse('2026-11-24T02:00:00Z'),
+    settings: { locale: 'en-US', syncWeekStartsOn: 1 }
+  };
+  const activity = (periodKey, selectedDeviceId, override) => {
+    const { activeTimeMs, messages } = model.buildScopedOverview({
+      ...options, periodKey, selectedDeviceId, ...override
+    }).hero;
+    return [activeTimeMs, messages];
+  };
+  assert.deepEqual(activity('today', 'all'), [300000, 5]);
+  assert.deepEqual(activity('today', 'west'), [120000, 2]);
+  assert.deepEqual(activity('week', 'all'), [360000, 6]);
+  assert.deepEqual(activity('week', 'east'), [240000, 4]);
+  const lagging = {
+    ...history,
+    deviceHistories: [
+      { ...history.deviceHistories[0], history: { daily: history.deviceHistories[0].history.daily.slice(0, 1) } },
+      history.deviceHistories[1]
+    ]
+  };
+  assert.deepEqual(activity('week', 'all', { history: lagging }), [null, null]);
+  assert.deepEqual(activity('week', 'west', { history: lagging }), [120000, 2]);
+  const costOnly = { ...stats, devices: [
+    { ...devices[0], periods: { today: { totalTokens: 0, costUsd: 1 } } },
+    devices[1]
+  ] };
+  assert.deepEqual(activity('week', 'all', { stats: costOnly, history: lagging }), [null, null]);
+  assert.deepEqual(activity('week', 'east', { stats: costOnly, history: lagging }), [null, null]);
+
+  const partial = { ...history, deviceHistories: history.deviceHistories.slice(0, 1) };
+  assert.deepEqual(activity('today', 'east', { history: partial }), [180000, 3]);
+  assert.deepEqual(activity('today', 'west', { history: partial }), [null, null]);
+  assert.deepEqual(activity('today', 'all', { history: partial }), [null, null]);
+  assert.deepEqual(activity('week', 'all', { history: partial }), [null, null]);
 });
 
 test('legacy and current client model attribution merge without dropping either count', () => {
