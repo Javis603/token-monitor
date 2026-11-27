@@ -2654,6 +2654,15 @@
           synced
         });
 
+    const selectedHistory = activeMachine ? uncoveredSnapshots.get(activeMachine.deviceId) : null;
+    const accountingStatus = accountingExpired || (fixed && (
+      (selectedHistory && selectedHistory.status !== 'ready')
+      || (!periodData && selectedHistory?.status !== 'ready' && fixedHistorySnapshot?.status !== 'ready')
+    )) ? 'unavailable'
+      : !activeMachine && [...uncoveredSnapshots.values()].some(snapshot => snapshot.status !== 'ready')
+        ? 'partial'
+        : 'ready';
+
     const periodFallbackHistory = periodKey === 'allTime' ? scopedHistory : null;
     const anatomy = computeTokenAnatomy(periodData, periodFallbackHistory?.daily);
     const totalTokens = periodData ? Math.max(0, n(periodData.totalTokens)) : n(periodFallbackHistory?.summary.totalTokens);
@@ -2749,6 +2758,7 @@
       omittedSessionCount,
       sessionsIncomplete,
       hero: {
+        accountingStatus,
         tokens: totalTokens,
         cost: totalCost,
         unpricedTokens,

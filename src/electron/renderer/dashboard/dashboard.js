@@ -50,6 +50,7 @@ const els = {
   heroTokens: document.getElementById('dashHeroTokens'),
   heroApprox: document.getElementById('dashHeroApprox'),
   heroCost: document.getElementById('dashHeroCost'),
+  heroCoverage: document.getElementById('dashHeroCoverage'),
   heroActiveTime: document.getElementById('dashHeroActiveTime'),
   heroMessages: document.getElementById('dashHeroMessages'),
   heroCacheItem: document.getElementById('dashHeroCacheItem'),
@@ -1383,11 +1384,16 @@ function renderHero(overview) {
   const prevScopeKey = lastHeroRender.scopeKey;
   const scopeKey = `${state.selectedDeviceId}:${state.periodKey}`;
   const scopeChanged = Boolean(prevScopeKey && prevScopeKey !== scopeKey);
-  const exactTokens = overview.accountingExpired ? '—' : formatExactTokens(hero.tokens);
-  updateHeroTokens(exactTokens, overview.accountingExpired ? null : hero.tokens, scopeKey);
+  const unavailable = overview.accountingExpired || hero.accountingStatus === 'unavailable';
+  const coverage = hero.accountingStatus === 'partial' ? t('dashboard.accounting.partial') : '';
+  if (els.heroCoverage) {
+    els.heroCoverage.classList.toggle('hidden', !coverage);
+    if (els.heroCoverage.textContent !== coverage) els.heroCoverage.textContent = coverage;
+  }
+  updateHeroTokens(unavailable ? '—' : formatExactTokens(hero.tokens), unavailable ? null : hero.tokens, scopeKey);
 
   if (els.heroApprox) {
-    if (hero.tokens >= 1000) {
+    if (!unavailable && hero.tokens >= 1000) {
       els.heroApprox.classList.remove('hidden');
       els.heroApprox.textContent = `≈ ${formatCompact(hero.tokens)}`;
     } else {
@@ -1397,9 +1403,9 @@ function renderHero(overview) {
   }
 
   if (els.heroCost) {
-    animateMetricText(els.heroCost, overview.accountingExpired ? '—' : formatCost(hero.cost, hero.unpricedTokens), {
-      value: hero.cost,
-      immediate: overview.accountingExpired,
+    animateMetricText(els.heroCost, unavailable ? '—' : formatCost(hero.cost, hero.unpricedTokens), {
+      value: unavailable ? null : hero.cost,
+      immediate: unavailable,
       period: scopeChanged,
       whole: hero.unpricedTokens > 0 && !(hero.cost > 0)
     });

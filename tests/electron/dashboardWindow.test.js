@@ -402,6 +402,35 @@ test('Dashboard Trends renders the selected calendar range and labels unrecorded
   assert.match(js, /t\('dashboard\.noRecord'\)/);
 });
 
+test('Hero labels partial coverage and distinguishes unavailable totals from zero', () => {
+  const classes = new Set();
+  const coverage = { textContent: '', classList: {
+    toggle(name, on) { if (on) classes.add(name); else classes.delete(name); }
+  } };
+  const cost = { textContent: '' };
+  let tokens;
+  const render = dashboardFunction('renderHero', '\nfunction renderVelocity', {
+    els: { heroCoverage: coverage, heroCost: cost },
+    state: { selectedDeviceId: 'all', periodKey: 'yesterday' },
+    lastHeroRender: {}, t: () => 'Partial totals', formatExactTokens: String,
+    updateHeroTokens(text) { tokens = text; },
+    formatCost: String,
+    animateMetricText(target, text) { target.textContent = text; }
+  });
+  render({ hero: { accountingStatus: 'partial', tokens: 310000, cost: 5 } });
+  assert.equal(tokens, '310000');
+  assert.equal(cost.textContent, '5');
+  assert.equal(coverage.textContent, 'Partial totals');
+  assert.equal(classes.has('hidden'), false);
+  render({ hero: { accountingStatus: 'unavailable', tokens: 0, cost: 0 } });
+  assert.equal(tokens, '—');
+  assert.equal(cost.textContent, '—');
+  assert.equal(classes.has('hidden'), true);
+  render({ hero: { accountingStatus: 'ready', tokens: 0, cost: 0 } });
+  assert.equal(tokens, '0');
+  assert.equal(cost.textContent, '0');
+});
+
 test('Dashboard tooltips distinguish unrecorded days and buckets from recorded zeros', () => {
   const tooltip = { innerHTML: '' };
   const context = {

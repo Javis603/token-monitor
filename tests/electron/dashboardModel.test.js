@@ -1698,6 +1698,10 @@ test('a synced fixed page keeps uncovered device History without counting covere
   assert.equal(view(paged).hero.tokens, 310000);
   assert.equal(view(paged, 'pc').hero.tokens, 200000);
   const unverifiedView = view(paged);
+  assert.equal(unverifiedView.hero.accountingStatus, 'partial');
+  assert.equal(view(paged, 'undated').hero.accountingStatus, 'unavailable');
+  assert.equal(view(paged, 'pc').hero.accountingStatus, 'ready');
+  assert.equal(view(paged, 'mac').hero.accountingStatus, 'ready');
   assert.equal(unverifiedView.sessionsIncomplete, true);
   assert.deepEqual(unverifiedView.sessions, []);
   assert.deepEqual(unverifiedView.workspaces, []);
@@ -1715,6 +1719,7 @@ test('a synced fixed page keeps uncovered device History without counting covere
   };
   assert.equal(view(fullPage).hero.tokens, 330000);
   assert.equal(view(fullPage).sessionsIncomplete, false);
+  assert.equal(view(fullPage).hero.accountingStatus, 'ready');
   assert.equal(view(fullPage).hero.messages, 6);
   assert.equal(view(fullPage).hero.activeTimeMs, 2000);
 });
@@ -1758,6 +1763,16 @@ test('activity-only uncovered History uses the device calendar or marks activity
   assert.deepEqual(activity('tokyo'), [null, null]);
   assert.deepEqual(activity('all'), [null, null]);
   assert.deepEqual(activity('utc'), [3, 1000]);
+});
+
+test('fixed-period accounting distinguishes unavailable History from a verified zero', () => {
+  const options = { stats: { mode: 'sync', devices: [] }, periodKey: 'yesterday' };
+  assert.equal(model.buildScopedOverview(options).hero.accountingStatus, 'unavailable');
+  const { hero } = model.buildScopedOverview({ ...options,
+    history: { fixedPeriods: { historyTransportAvailable: true }, deviceHistories: [] }
+  });
+  assert.equal(hero.accountingStatus, 'ready');
+  assert.equal(hero.tokens, 0);
 });
 
 test('a synced fixed period renders without totals while device History is pending or unavailable', () => {
