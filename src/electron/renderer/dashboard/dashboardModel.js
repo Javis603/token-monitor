@@ -2558,20 +2558,25 @@
       ...(stats?.devices || []).filter((/** @type {any} */ device) => !pageWindows || device.periods?.[periodKey])
         .map((/** @type {any} */ device) => device.deviceId)
     ]) : null;
-    const historySources = coveredDevices
-      ? deviceHistorySources.filter(device => device.historyAvailable && !coveredDevices.has(device.deviceId))
-      : deviceHistorySources;
-    const fixedHistorySnapshot = fixed && synced && (!syncedPage || historySources.length > 0)
-      ? fixedPeriodRanges.fixedPeriodSnapshotFromDevices(periodKey, historySources, {
-        historyAvailable: history?.fixedPeriods?.historyTransportAvailable === true,
-        historyEnabled: settings.historyEnabled !== false,
-        now: nowMs,
-        locale: settings.locale,
-        weekStartsOn: settings.syncWeekStartsOn ?? 1
-      })
-      : null;
-    const uncoveredUsage = syncedPage && fixedHistorySnapshot?.status === 'ready'
-      && periodHasUsage(fixedHistorySnapshot.period) ? fixedHistorySnapshot.period : null;
+    const historyOptions = {
+      historyAvailable: history?.fixedPeriods?.historyTransportAvailable === true,
+      historyEnabled: settings.historyEnabled !== false,
+      now: nowMs,
+      locale: settings.locale,
+      weekStartsOn: settings.syncWeekStartsOn ?? 1
+    };
+    const uncoveredSnapshots = new Map(deviceHistorySources
+      .filter(device => coveredDevices && !coveredDevices.has(device.deviceId))
+      .map(device => [device.deviceId, fixedPeriodRanges.fixedPeriodSnapshotFromDevices(periodKey, [device], historyOptions)]));
+    const fixedHistorySnapshot = !fixed || !synced ? null : syncedPage
+      ? { devices: [...uncoveredSnapshots.values()].flatMap(snapshot => snapshot.devices) }
+      : fixedPeriodRanges.fixedPeriodSnapshotFromDevices(periodKey, deviceHistorySources, historyOptions);
+    let syncedAccounting = syncedPage;
+    for (const snapshot of uncoveredSnapshots.values()) {
+      if (snapshot.status === 'ready' && periodHasUsage(snapshot.period)) {
+        syncedAccounting = mergeFixedPeriodAccounting(syncedAccounting, snapshot.period);
+      }
+    }
     const freshness = aggregatePeriodFreshness(stats, periodKey, nowMs);
     const fleet = { ...buildFleetModel({
       fixedHistorySnapshot,
@@ -2634,7 +2639,7 @@
     const periodData = accountingExpired ? null : activeMachine
       ? activeMachine.periodData
       : syncedPage
-        ? (uncoveredUsage ? mergeFixedPeriodAccounting(syncedPage, uncoveredUsage) : syncedPage)
+        ? syncedAccounting
         : fixedHistorySnapshot ? fixedHistorySnapshot.period : resolvePeriodData(stats, scopedHistory.daily, periodKey, {
           locale: synced ? settings.locale : settings.calendarLocale || settings.locale,
           todayKey,
@@ -2649,8 +2654,12 @@
 
     const tools = buildToolRows(periodData, periodFallbackHistory?.daily || [], totalTokens);
     const models = buildModelRows(periodData, periodFallbackHistory?.daily || [], totalTokens);
+    const uncoveredDetails = [...uncoveredSnapshots.entries()].some(([deviceId, snapshot]) =>
+      (!activeMachine || activeMachine.deviceId === deviceId)
+      && (snapshot.status !== 'ready' || periodHasUsage(snapshot.period)));
     const derivedIncomplete = Boolean(
-      (!syncedPage && fixedHistorySnapshot) || stats?.syncedFixedPeriodDetailsAvailable?.[periodKey] === false
+      uncoveredDetails
+      || (!syncedPage && fixedHistorySnapshot) || stats?.syncedFixedPeriodDetailsAvailable?.[periodKey] === false
       || (fixed && !synced && (!periodData || periodData.derivedFromHistory))
     );
     const sessions = derivedIncomplete ? [] : buildSessionList({
@@ -2692,8 +2701,7 @@
     const omittedSessionCount = activeMachine
       ? Math.max(0, n(activeRawDevice?.sessionDetailsOmitted?.[periodKey]))
       : Math.max(0, n(stats?.sessionDetailsOmitted?.[periodKey]));
-    const sessionsIncomplete = (omittedSessionCount > 0 && options.syncedPagesLoaded !== true) || derivedIncomplete
-      || Boolean(uncoveredUsage && (!activeMachine || !coveredDevices?.has(activeMachine.deviceId)));
+    const sessionsIncomplete = (omittedSessionCount > 0 && options.syncedPagesLoaded !== true) || derivedIncomplete;
 
     const dailyLedger = (scopedHistory.daily || [])
       .slice()

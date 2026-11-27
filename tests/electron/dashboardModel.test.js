@@ -1663,7 +1663,12 @@ test('a synced fixed page keeps uncovered device History without counting covere
   });
   assert.equal(view(stats).hero.tokens, 300000);
 
-  const exact = { totalTokens: 110000, costUsd: 3, clients: { codex: 110000 } };
+  const exact = {
+    totalTokens: 110000, costUsd: 3, clients: { codex: 110000 },
+    projects: { repo: { label: 'Mac Repo', tokens: 110000 } },
+    sessions: { 'codex:mac': { client: 'codex', sessionId: 'mac', totalTokens: 110000,
+      projectLabel: 'Mac Repo', sourceDevice: { deviceId: 'mac' } } }
+  };
   const paged = {
     ...stats, periods: { ...stats.periods, yesterday: exact },
     devices: [{ ...mac, periods: { ...mac.periods, yesterday: exact } }],
@@ -1674,9 +1679,24 @@ test('a synced fixed page keeps uncovered device History without counting covere
   assert.equal(overview.hero.cost, 5);
   assert.equal(overview.tools.find(row => row.id === 'codex').tokens, 310000);
   assert.equal(overview.sessionsIncomplete, true);
+  assert.deepEqual(overview.sessions, []);
+  assert.deepEqual(overview.workspaces, []);
+  assert.deepEqual(overview.sessions, []);
+  assert.deepEqual(overview.workspaces, []);
   assert.equal(overview.fleet.machines.reduce((sum, row) => sum + row.tokens, 0), 310000);
   assert.equal(view(paged, 'pc').hero.tokens, 200000);
-  assert.equal(view(paged, 'mac').hero.tokens, 110000);
+  const macView = view(paged, 'mac');
+  assert.equal(macView.hero.tokens, 110000);
+  assert.equal(macView.sessionsIncomplete, false);
+  assert.equal(macView.sessions.length, 1);
+  assert.deepEqual(macView.workspaces.map(row => row.name), ['Mac Repo']);
+
+  history.deviceHistories.push({ deviceId: 'undated', historyAvailable: true,
+    history: { daily: [{ date: '2026-11-23', tokens: 40000, cost: 1 }] } });
+  assert.equal(view(paged).hero.tokens, 310000);
+  assert.equal(view(paged, 'pc').hero.tokens, 200000);
+  assert.equal(view(paged).sessionsIncomplete, true);
+  history.deviceHistories.pop();
   assert.deepEqual(exact.clients, { codex: 110000 });
 
   const fullPage = {
