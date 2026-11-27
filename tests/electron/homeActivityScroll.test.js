@@ -23,13 +23,14 @@ class ScrollerDouble extends EventTarget {
     super();
     this.clientWidth = clientWidth;
     this.scrollWidth = scrollWidth;
+    this.effectiveMax = Infinity;
     this.left = 0;
     this.scrollPending = false;
     this.classList = { toggle() {}, add() {}, remove() {}, contains: () => false };
   }
   get scrollLeft() { return this.left; }
   set scrollLeft(value) {
-    const next = Math.max(0, Math.min(this.scrollWidth - this.clientWidth, value));
+    const next = Math.max(0, Math.min(this.scrollWidth - this.clientWidth, this.effectiveMax, value));
     if (next === this.left) return;
     this.left = next;
     this.scrollPending = true;
@@ -113,4 +114,37 @@ test('Home activity heatmap keeps a deliberate scroll back across resizes', () =
   f.resizeTo(700);
   f.resizeTo(300);
   assert.equal(f.scroller.scrollLeft, f.max());
+});
+
+test('Home activity heatmap records the next user scroll after a restore that Chromium clamps to a no-op', () => {
+  const f = fixture();
+  f.settle();
+
+  // Chromium can round the measured overflow up to 341px while the
+  // actual scroll limit is still 340px, especially at fractional zoom.
+  f.scroller.scrollWidth = 641;
+  f.scroller.effectiveMax = 340;
+  f.settle();
+  assert.equal(f.scroller.scrollLeft, 340);
+  assert.equal(f.scroller.scrollPending, false);
+
+  f.userScroll(100);
+  assert.equal(f.state.homeActivityScrollLeft, 100);
+  assert.equal(f.state.homeActivityFollowEnd, false);
+});
+
+test('Home activity heatmap records a drag that shares a scroll event with a pending restore', () => {
+  const f = fixture();
+  assert.equal(f.scroller.scrollPending, true, 'initial right-edge restore has not dispatched yet');
+  f.scroller.dispatchEvent(Object.assign(new Event('pointerdown'), {
+    button: 0, pointerType: 'mouse', clientX: 100, pointerId: 1
+  }));
+  f.scroller.dispatchEvent(Object.assign(new Event('pointermove'), { clientX: 180 }));
+  assert.equal(f.scroller.scrollLeft, 260);
+
+  f.settle();
+  assert.equal(f.state.homeActivityScrollLeft, 260);
+  assert.equal(f.state.homeActivityFollowEnd, false);
+  f.resizeTo(310);
+  assert.equal(f.scroller.scrollLeft, 260);
 });
