@@ -12,7 +12,6 @@ module.exports = /** @satisfies {import('../../limits/accounts').AccountDeclarat
   id: 'qwenwork',
   sources: [
     { id: 'oauth', kind: 'oauth', relation: 'alternative', products: ['qwenwork'], labelKey: 'settings.limits.sources.oauth', descriptionKey: 'settings.limits.sources.oauthDescription' },
-    { id: 'api', kind: 'env', relation: 'alternative', products: ['qwenwork'], labelKey: 'settings.limits.sources.env', descriptionKey: 'settings.limits.sources.envDescription' },
     { id: 'local', kind: 'file', relation: 'alternative', products: ['qwenwork'], labelKey: 'settings.limits.sources.file', descriptionKey: 'settings.limits.sources.fileDescription' }
   ],
   fetch: 'fetchQwenworkLimits',
