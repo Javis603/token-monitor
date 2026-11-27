@@ -47,7 +47,7 @@ class Node {
   click() { const result = this.listeners.click?.({ detail: 0 }); if (this.attributes.popovertarget) { const menu = this.document.getElementById(this.attributes.popovertarget); if (menu.popoverOpen) menu.hidePopover(); else menu.showPopover(); } return result; }
   key(key, altKey = false) { return this.listeners.keydown?.({ key, altKey, preventDefault() {}, stopPropagation() {} }); }
 }
-function harness(translateMessage = t, providerId = 'qoder', loginAction, maskEmail) {
+function harness(translateMessage = t, providerId = 'qoder', loginAction, maskEmail, copyToClipboard) {
   const document = { defaultView: { innerWidth: 400, innerHeight: 400, addEventListener() {}, removeEventListener() {} }, addEventListener() {}, removeEventListener() {}, moves: 0, createElement: tag => new Node(tag, document), createTextNode: text => ({ textContent: text }), getElementById: id => document.root.querySelector(`#${id}`) };
   const calls = []; let verdict = { saved: true, verdict: 'valid', accounts: [] };
   const records = [{ id: 'a', label: 'Zulu', fingerprint: 'aa', accountKey: 'ka', enabled: true }, { id: 'b', label: 'Alpha', fingerprint: 'bb', accountKey: 'kb', enabled: false }];
@@ -62,7 +62,7 @@ function harness(translateMessage = t, providerId = 'qoder', loginAction, maskEm
   const defaultForm = createCredentialPanel(limitAccountFormsForRenderer().find(f => f.id === providerId), { document, translate: t, onToggle() {}, onClear() {}, onOpen() {}, onRefresh() {}, onSave() {} });
   for (const child of [...defaultForm.querySelector('.cursor-settings-details').children]) defaultPanel.append(child);
   host.append(defaultPanel);
-  const panel = createPanel({ loginAction, maskEmail, defaultPanel, form: limitAccountFormsForRenderer().find(f => f.id === providerId), label: 'Qoder', document, t: translateMessage, ipc, forms: { createCredentialPanel, resolveOpenUrl }, preserveScroll: fn => fn(), onChanged() {}, openExternal() {} });
+  const panel = createPanel({ loginAction, maskEmail, copyToClipboard, defaultPanel, form: limitAccountFormsForRenderer().find(f => f.id === providerId), label: 'Qoder', document, t: translateMessage, ipc, forms: { createCredentialPanel, resolveOpenUrl }, preserveScroll: fn => fn(), onChanged() {}, openExternal() {} });
   host.append(panel.element);
   document.root = host;
   const update = () => panel.update(slots, [{ accountKey: 'ka', status: 'unauthorized', updatedAt: new Date().toISOString() }], true);
@@ -1081,6 +1081,91 @@ test('Copilot browser choice carries only host and flowId; cancelling fences sta
   await signingIn;
   assert.equal(requests[1][0], 'cancel');
   assert.equal(h.document.getElementById('copilotSlotDraftcopilotApiTokenInput').value, 'new-draft');
+});
+
+test('Copilot browser sign-in keeps the device code visible and copyable through polling without error styling', async () => {
+  const requests = [];
+  const copied = [];
+  let status, finish;
+  const pending = new Promise(resolve => { finish = resolve; });
+  const loginAction = {
+    signIn: request => { requests.push(request); return pending; },
+    cancelSignIn() {},
+    onLoginStatus: listener => { status = listener; return () => {}; }
+  };
+  const h = harness(t, 'copilot', loginAction, undefined, (text, button) => { copied.push([text, button]); });
+  h.panel.openEditor(null);
+  const signingIn = h.click(h.panel.element, t('settings.copilot.signIn'));
+  const { flowId } = requests[0];
+  const editor = h.panel.element.querySelector('.slot-editor');
+  const verdict = h.document.getElementById('copilotSlotDraftVerdict');
+
+  status({ flowId, phase: 'requesting' });
+  const loginStatus = editor.querySelector('.slot-login-status');
+  assert.ok(loginStatus && !loginStatus.classList.contains('hidden'));
+  assert.equal(loginStatus.attributes.role, 'status');
+  assert.equal(loginStatus.textContent, t('settings.copilot.loginStarting'));
+  assert.equal(verdict.textContent, '');
+
+  status({ flowId, phase: 'authorize', userCode: 'WXYZ-5678', copiedToClipboard: true });
+  assert.equal(loginStatus.querySelector('.slot-login-code')?.textContent, 'WXYZ-5678');
+  assert.ok(loginStatus.textContent.includes(t('settings.copilot.authorize', { code: 'WXYZ-5678' })));
+  assert.equal(verdict.textContent, '');
+
+  status({ flowId, phase: 'polling', userCode: 'WXYZ-5678', copiedToClipboard: true });
+  assert.equal(loginStatus.querySelector('.slot-login-code')?.textContent, 'WXYZ-5678');
+  assert.ok(loginStatus.textContent.includes(t('settings.copilot.authorize', { code: 'WXYZ-5678' })));
+  assert.ok(loginStatus.textContent.includes(t('settings.copilot.polling')));
+  assert.equal(verdict.textContent, '');
+
+  const copyButton = loginStatus.querySelector('.slot-login-copy');
+  assert.ok(copyButton);
+  copyButton.click();
+  assert.deepEqual(copied, [['WXYZ-5678', copyButton]]);
+
+  status({ flowId, phase: 'polling' });
+  assert.equal(loginStatus.querySelector('.slot-login-code')?.textContent, 'WXYZ-5678');
+
+  status({ flowId, phase: 'success', userCode: 'WXYZ-5678' });
+  assert.equal(loginStatus.querySelector('.slot-login-code'), undefined);
+  assert.equal(loginStatus.textContent, t('settings.copilot.loginSuccess'));
+  assert.equal(verdict.textContent, '');
+
+  finish({ ok: true, flowId });
+  await signingIn;
+});
+
+test('Copilot browser sign-in uses manual-entry copy when clipboard copy fails and moves errors to verdict', async () => {
+  const requests = [];
+  let status, finish;
+  const pending = new Promise(resolve => { finish = resolve; });
+  const loginAction = {
+    signIn: request => { requests.push(request); return pending; },
+    cancelSignIn() {},
+    onLoginStatus: listener => { status = listener; return () => {}; }
+  };
+  const h = harness(t, 'copilot', loginAction);
+  h.panel.openEditor(null);
+  const signingIn = h.click(h.panel.element, t('settings.copilot.signIn'));
+  const { flowId } = requests[0];
+  const editor = h.panel.element.querySelector('.slot-editor');
+  const verdict = h.document.getElementById('copilotSlotDraftVerdict');
+
+  status({ flowId, phase: 'authorize', userCode: 'MNO1-2345', copiedToClipboard: false });
+  status({ flowId, phase: 'polling', userCode: 'MNO1-2345', copiedToClipboard: false });
+  const loginStatus = editor.querySelector('.slot-login-status');
+  assert.equal(loginStatus.querySelector('.slot-login-code')?.textContent, 'MNO1-2345');
+  assert.ok(loginStatus.textContent.includes(t('settings.copilot.authorizeManual', { code: 'MNO1-2345' })));
+  assert.ok(!loginStatus.textContent.includes('copied'));
+  assert.equal(verdict.textContent, '');
+
+  status({ flowId, phase: 'error', error: 'GitHub sign-in timed out.' });
+  assert.equal(loginStatus.classList.contains('hidden'), true);
+  assert.equal(verdict.textContent, 'GitHub sign-in timed out.');
+
+  finish({ ok: false, error: 'GitHub sign-in timed out.', flowId });
+  await signingIn;
+  assert.equal(verdict.textContent, 'GitHub sign-in timed out.');
 });
 
 test('token providers say token in the replace and fix actions', () => {

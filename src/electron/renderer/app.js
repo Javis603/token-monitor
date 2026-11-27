@@ -14974,6 +14974,7 @@ function setupLimitAccountPanels() {
         document, t, ipc: window.tokenMonitor.limits.accountSlots, forms: limitAccountPanelsApi,
         maskEmail: email => state.settings?.maskLimitAccountEmails === true ? accountIdentityApi.maskEmailAddress(email) : email,
         preserveScroll: preserveSettingsPanelScroll, openExternal: url => window.tokenMonitor.openExternal(url),
+        copyToClipboard: (text, button) => copyToClipboard(text, button),
         onChanged: slots => { accountSlotLists[form.id] = slots; render(); renderExternalProviderStatus(form.id); void refreshStats(); }
       });
       accountSlotPanels.set(form.id, slotsPanel);

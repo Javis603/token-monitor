@@ -228,7 +228,12 @@ async function runCopilotDeviceFlowLogin(options = {}, deps = {}) {
     await deps.openExternal(deviceCode.verificationUrl);
   }
 
-  onStatus({ phase: 'polling', userCode: deviceCode.userCode });
+  onStatus({
+    phase: 'polling',
+    userCode: deviceCode.userCode,
+    verificationUrl: deviceCode.verificationUrl,
+    copiedToClipboard
+  });
   const accessToken = await pollForAccessToken(deviceCode, enterpriseHost, flowDeps);
   onStatus({ phase: 'success', userCode: deviceCode.userCode });
   return { ok: true, accessToken };
