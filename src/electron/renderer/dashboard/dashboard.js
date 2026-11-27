@@ -3462,11 +3462,18 @@ let renderedSyncedCalendar = null;
 function revalidateSyncedPeriodOnRender() {
   const periodKey = state.periodKey;
   const stats = latestBaseStats;
-  if (!isSyncedDerivedPeriod(periodKey) || !isSyncedStatsContext(stats)) {
+  if (!isSyncedDerivedPeriod(periodKey)) {
     renderedSyncedCalendar = null;
     return 0;
   }
   const now = Date.now();
+  const midnight = new Date(now);
+  midnight.setHours(24, 0, 0, 0);
+  let deadline = midnight.getTime();
+  if (!isSyncedStatsContext(stats)) {
+    renderedSyncedCalendar = null;
+    return deadline;
+  }
   const calendarKey = stats ? syncedPeriodCalendarKey(stats, periodKey, now) : '';
   const source = stats?.snapshot?.source;
   const previous = renderedSyncedCalendar;
@@ -3480,9 +3487,6 @@ function revalidateSyncedPeriodOnRender() {
     ensureSyncedSessionPages();
   }
 
-  const midnight = new Date(now);
-  midnight.setHours(24, 0, 0, 0);
-  let deadline = midnight.getTime();
   const devices = fixedPeriodRangesApi.joinDeviceHistorySources(state.history?.deviceHistories, stats?.devices);
   for (const device of devices) {
     const endsAt = fixedPeriodRangesApi.nextDeviceDayBoundary(device, now);

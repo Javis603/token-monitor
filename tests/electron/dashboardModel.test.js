@@ -1647,6 +1647,51 @@ test('synced Week History fallback uses the published Monday calendar in an en-U
 });
 
 
+test('a synced fixed page keeps uncovered device History without counting covered devices twice', () => {
+  const periodWindows = { today: { key: '2026-11-24', endsAt: '2026-11-25T00:00:00Z' } };
+  const mac = { deviceId: 'mac', periodWindows, periods: { today: { totalTokens: 1 } } };
+  const stats = { mode: 'sync', devices: [mac], periods: { today: { totalTokens: 1 } } };
+  const history = {
+    fixedPeriods: { historyTransportAvailable: true },
+    deviceHistories: [['mac', 100000], ['pc', 200000]].map(([deviceId, tokens]) => ({
+      deviceId, periodWindows, historyAvailable: true,
+      history: { daily: [{ date: '2026-11-23', tokens, cost: 2, perClient: { codex: { tokens, cost: 2 } } }] }
+    }))
+  };
+  const view = (snapshot, selectedDeviceId = 'all') => model.buildScopedOverview({
+    stats: snapshot, selectedDeviceId, history, periodKey: 'yesterday', nowMs: Date.parse('2026-11-24T12:00:00Z')
+  });
+  assert.equal(view(stats).hero.tokens, 300000);
+
+  const exact = { totalTokens: 110000, costUsd: 3, clients: { codex: 110000 } };
+  const paged = {
+    ...stats, periods: { ...stats.periods, yesterday: exact },
+    devices: [{ ...mac, periods: { ...mac.periods, yesterday: exact } }],
+    syncedFixedPeriodDeviceWindows: { yesterday: { mac: { start: '2026-11-23', end: '2026-11-23' } } }
+  };
+  const overview = view(paged);
+  assert.equal(overview.hero.tokens, 310000);
+  assert.equal(overview.hero.cost, 5);
+  assert.equal(overview.tools.find(row => row.id === 'codex').tokens, 310000);
+  assert.equal(overview.sessionsIncomplete, true);
+  assert.equal(overview.fleet.machines.reduce((sum, row) => sum + row.tokens, 0), 310000);
+  assert.equal(view(paged, 'pc').hero.tokens, 200000);
+  assert.equal(view(paged, 'mac').hero.tokens, 110000);
+  assert.deepEqual(exact.clients, { codex: 110000 });
+
+  const fullPage = {
+    ...paged,
+    periods: { ...paged.periods, yesterday: { totalTokens: 330000 } },
+    devices: [...paged.devices, { deviceId: 'pc', periods: { yesterday: { totalTokens: 220000 } } }],
+    syncedFixedPeriodDeviceWindows: { yesterday: {
+      ...paged.syncedFixedPeriodDeviceWindows.yesterday,
+      pc: { start: '2026-11-23', end: '2026-11-23' }
+    } }
+  };
+  assert.equal(view(fullPage).hero.tokens, 330000);
+  assert.equal(view(fullPage).sessionsIncomplete, false);
+});
+
 test('a synced fixed period renders without totals while device History is pending or unavailable', () => {
   const stats = {
     mode: 'sync',

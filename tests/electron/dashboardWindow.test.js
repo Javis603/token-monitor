@@ -3944,6 +3944,43 @@ test('Dashboard discards synced Yesterday at device midnight without a Stats pus
   assert.equal(context.revalidateSyncedPeriodOnRender(), boundary, 'History-only periods still have a deadline');
 });
 
+test('Local Dashboard repaints Yesterday at local midnight without a Stats push', () => {
+  const boundary = new Date(2026, 10, 27).getTime();
+  let now = boundary - 1000;
+  let timer;
+  class Clock extends Date {
+    static now() { return now; }
+  }
+  const state = { periodKey: 'yesterday', overview: null, motion: 'none' };
+  const stats = {
+    mode: 'local',
+    nativeRangeWindows: { yesterday: { start: '2026-11-25', end: '2026-11-25' } },
+    periods: { yesterday: { totalTokens: 100 } }
+  };
+  const history = { daily: [{ date: '2026-11-25', tokens: 100 }, { date: '2026-11-26', tokens: 50 }] };
+  const model = require('../../src/electron/renderer/dashboard/dashboardModel');
+  const revalidate = dashboardFunction('revalidateSyncedPeriodOnRender', '\nfunction resolvedSyncedPageSession', {
+    state, Date: Clock, latestBaseStats: stats, renderedSyncedCalendar: null,
+    isSyncedDerivedPeriod: () => true, isSyncedStatsContext: () => false
+  });
+  const render = () => {
+    state.overview = model.buildScopedOverview({ stats, history, periodKey: state.periodKey, nowMs: now });
+    state.overview.nextFixedPeriodExpiryAt = revalidate();
+  };
+  const schedule = dashboardFunction('scheduleRateExpiry', '\nfunction observeStatsRates', {
+    state, Date: Clock, document: { hidden: false }, rateExpiryTimer: null,
+    deviceRateTracker: null, rateHistory: null, deviceRateTrackers: new Map(), render,
+    setTimeout(callback, delay) { timer = { callback, delay }; }
+  });
+  render();
+  assert.equal(state.overview.hero.tokens, 100);
+  schedule();
+  assert.equal(timer.delay, 1020);
+  now += timer.delay;
+  timer.callback();
+  assert.equal(state.overview.hero.tokens, 50);
+});
+
 test('Dashboard repaints when the displayed accounting period expires', () => {
   let now = 1_000;
   let timer;

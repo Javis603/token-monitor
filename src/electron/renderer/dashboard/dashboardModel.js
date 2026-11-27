@@ -2491,6 +2491,29 @@
     };
   }
 
+  /** @param {any} exact @param {any} history */
+  function mergeFixedPeriodAccounting(exact, history) {
+    const merged = { ...exact };
+    // A History period contains flat accounting maps and no session/project details.
+    for (const [field, value] of Object.entries(history)) {
+      if (typeof value === 'number') {
+        merged[field] = n(exact[field]) + value;
+      } else if (value && typeof value === 'object'
+        && field !== 'capabilities' && field !== 'sessions' && field !== 'projects') {
+        const amounts = new Map(Object.entries(exact[field] || {}));
+        for (const [key, amount] of Object.entries(value)) amounts.set(key, n(amounts.get(key)) + n(amount));
+        merged[field] = Object.fromEntries(amounts);
+      }
+    }
+    const exactAnatomy = computeTokenAnatomy(exact);
+    const historyAnatomy = computeTokenAnatomy(history);
+    merged.unclassifiedTokens = exactAnatomy.unclassified + historyAnatomy.unclassified;
+    if (exact.inputTokens != null) {
+      merged.inputTokens = n(exact.inputTokens) + historyAnatomy.cacheMiss + historyAnatomy.cacheRead + historyAnatomy.cacheWrite;
+    }
+    return merged;
+  }
+
   /**
    * Builds the full overview projection for the selected machine & period.
    *
@@ -2528,8 +2551,18 @@
     const deviceHistorySources = synced
       ? fixedPeriodRanges.joinDeviceHistorySources(history?.deviceHistories || [], stats?.devices || [])
       : [];
-    const fixedHistorySnapshot = fixed && synced && !stats?.periods?.[periodKey]
-      ? fixedPeriodRanges.fixedPeriodSnapshotFromDevices(periodKey, deviceHistorySources, {
+    const syncedPage = fixed && synced ? stats?.periods?.[periodKey] : null;
+    const pageWindows = stats?.syncedFixedPeriodDeviceWindows?.[periodKey];
+    const coveredDevices = syncedPage ? new Set([
+      ...Object.keys(pageWindows || {}),
+      ...(stats?.devices || []).filter((/** @type {any} */ device) => !pageWindows || device.periods?.[periodKey])
+        .map((/** @type {any} */ device) => device.deviceId)
+    ]) : null;
+    const historySources = coveredDevices
+      ? deviceHistorySources.filter(device => device.historyAvailable && !coveredDevices.has(device.deviceId))
+      : deviceHistorySources;
+    const fixedHistorySnapshot = fixed && synced && (!syncedPage || historySources.length > 0)
+      ? fixedPeriodRanges.fixedPeriodSnapshotFromDevices(periodKey, historySources, {
         historyAvailable: history?.fixedPeriods?.historyTransportAvailable === true,
         historyEnabled: settings.historyEnabled !== false,
         now: nowMs,
@@ -2537,6 +2570,8 @@
         weekStartsOn: settings.syncWeekStartsOn ?? 1
       })
       : null;
+    const uncoveredUsage = syncedPage && fixedHistorySnapshot?.status === 'ready'
+      && periodHasUsage(fixedHistorySnapshot.period) ? fixedHistorySnapshot.period : null;
     const freshness = aggregatePeriodFreshness(stats, periodKey, nowMs);
     const fleet = { ...buildFleetModel({
       fixedHistorySnapshot,
@@ -2596,11 +2631,11 @@
     );
 
     const scopedHistory = selectScopedHistory(history, activeMachine ? activeMachine.deviceId : 'all');
-    const periodData = accountingExpired ? null : fixedHistorySnapshot
-      ? (activeMachine ? activeMachine.periodData : fixedHistorySnapshot.period)
-      : activeMachine
-        ? activeMachine.periodData
-        : resolvePeriodData(stats, scopedHistory.daily, periodKey, {
+    const periodData = accountingExpired ? null : activeMachine
+      ? activeMachine.periodData
+      : syncedPage
+        ? (uncoveredUsage ? mergeFixedPeriodAccounting(syncedPage, uncoveredUsage) : syncedPage)
+        : fixedHistorySnapshot ? fixedHistorySnapshot.period : resolvePeriodData(stats, scopedHistory.daily, periodKey, {
           locale: synced ? settings.locale : settings.calendarLocale || settings.locale,
           todayKey,
           synced
@@ -2615,7 +2650,7 @@
     const tools = buildToolRows(periodData, periodFallbackHistory?.daily || [], totalTokens);
     const models = buildModelRows(periodData, periodFallbackHistory?.daily || [], totalTokens);
     const derivedIncomplete = Boolean(
-      fixedHistorySnapshot || stats?.syncedFixedPeriodDetailsAvailable?.[periodKey] === false
+      (!syncedPage && fixedHistorySnapshot) || stats?.syncedFixedPeriodDetailsAvailable?.[periodKey] === false
       || (fixed && !synced && (!periodData || periodData.derivedFromHistory))
     );
     const sessions = derivedIncomplete ? [] : buildSessionList({
@@ -2657,7 +2692,8 @@
     const omittedSessionCount = activeMachine
       ? Math.max(0, n(activeRawDevice?.sessionDetailsOmitted?.[periodKey]))
       : Math.max(0, n(stats?.sessionDetailsOmitted?.[periodKey]));
-    const sessionsIncomplete = (omittedSessionCount > 0 && options.syncedPagesLoaded !== true) || derivedIncomplete;
+    const sessionsIncomplete = (omittedSessionCount > 0 && options.syncedPagesLoaded !== true) || derivedIncomplete
+      || Boolean(uncoveredUsage && (!activeMachine || !coveredDevices?.has(activeMachine.deviceId)));
 
     const dailyLedger = (scopedHistory.daily || [])
       .slice()
