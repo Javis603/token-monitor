@@ -4,6 +4,7 @@ const assert = require('node:assert/strict');
 const test = require('node:test');
 
 const { runAgent, runAgentOnce } = require('../../src/agent/runtime');
+const { startCollector } = require('../../src/shared/collector');
 
 function deferred() {
   let resolve;
@@ -52,6 +53,50 @@ function usageSummary(tokens = 1) {
     allTime: { totalTokens: tokens }
   };
 }
+
+test('agent once waits for the initial Amp import before uploading usage', { timeout: 15_000 }, async () => {
+  const started = deferred();
+  const release = deferred();
+  const delivered = [];
+  let importsReady = false;
+  let scans = 0;
+  let runtime;
+  const agent = runAgentOnce({
+    envelope: { deviceId: 'amp-once' },
+    onRuntime: instance => { runtime = instance; },
+    usageOptions: {
+      clients: 'amp', deviceId: 'amp-once', allTimeSince: '2020-01-01', historyEnabled: false,
+      async runAmpSync() {
+        started.resolve();
+        await release.promise;
+        importsReady = true;
+        return { complete: true, exported: 1 };
+      },
+      async runTokscale() {
+        scans++;
+        return { entries: importsReady ? [{ source: 'amp', model: 'test', input: 42 }] : [] };
+      }
+    },
+    deliver: record => { delivered.push(record); }
+  }, { deviceRuntimeDeps: {
+    createUsageRuntime: startCollector,
+    createLimitsRuntime: () => ({ refresh: () => null, stop() {} })
+  } });
+  try {
+    await started.promise;
+    const concurrentTick = runtime.tick('watch:fixture');
+    await new Promise(setImmediate);
+    assert.equal(scans, 0);
+    assert.equal(delivered.length, 0);
+    release.resolve();
+    await concurrentTick;
+  } finally {
+    release.resolve();
+    await agent;
+  }
+  assert.equal(delivered.length, 1);
+  assert.equal(delivered[0].allTime.clients.amp, 42);
+});
 
 test('long-running agent posts usage before hung limits and never overlaps posts', async () => {
   const harness = runtimeHarness();

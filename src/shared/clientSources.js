@@ -288,8 +288,7 @@ function clientSourceRoots(clientsCsv, options = {}) {
   add('opencode', ['opencode-data', path.join(xdgHome, 'opencode')]);
   add('openclaw', ['openclaw-agents', path.join(home, '.openclaw', 'agents')]);
   // The sync cache is config-derived; legacy local threads stay XDG-data
-  // derived. Token Monitor reads both and watches external `tokscale amp sync`
-  // writes; it does not create this cache during collection.
+  // derived. Token Monitor reads both, but only watches the legacy source.
   add('amp',
     ['amp-threads', path.join(xdgHome, 'amp', 'threads')],
     ['amp-threads', path.join(tokscaleConfigDir({ env, platform, homeDir: home }), 'amp-cache', 'threads'), null, true]);

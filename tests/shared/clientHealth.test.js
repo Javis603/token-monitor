@@ -656,6 +656,7 @@ test('labelling roots keeps diagnostics separate from watcher roots', () => {
       .filter((root) => (
         !(client === 'copilot' && ['copilot-otel', 'copilot-session-state'].includes(root.id))
         && root.id !== 'kiro-ide-globalstorage'
+        && !(client === 'amp' && root.id === 'amp-threads' && root.optional)
       ))
       .map((root) => root.dir);
     if (client === 'senpi') {

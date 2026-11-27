@@ -48,7 +48,7 @@ const CLIENT_SOURCE_STATES = Object.freeze(['detected', 'missing', 'unknown']);
 
 // `direct` is the common case: tokscale parses the client's own files and there
 // is no fetch step to succeed or fail. Only the self-synced clients
-// (cursor / antigravity) ever report `idle` / `pending` / `ok` / `failed`.
+// report `idle` / `pending` / `ok` / `failed`.
 //
 // `unknown` is never produced — it is where an unrecognised value lands. It must
 // exist as its own state precisely because `direct` is a positive claim: a

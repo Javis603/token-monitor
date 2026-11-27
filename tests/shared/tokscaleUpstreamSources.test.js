@@ -12,7 +12,7 @@ const { installSourceEnvGuard } = require('../helpers/sourceEnv');
 
 installSourceEnvGuard(test);
 
-test('Amp follows its config sync cache and independently retains legacy XDG threads', (t) => {
+test('Amp scans its sync cache but only watches legacy XDG threads', (t) => {
   const home = fs.mkdtempSync(path.join(fs.realpathSync.native(os.tmpdir()), 'tm-amp-roots-'));
   t.after(() => fs.rmSync(home, { recursive: true, force: true }));
   const config = path.join(home, 'custom-config');
@@ -24,9 +24,9 @@ test('Amp follows its config sync cache and independently retains legacy XDG thr
   const roots = clientSourceRoots('amp', options).amp;
   assert.deepEqual(roots.map(({ dir }) => dir), [legacy, cache]);
   assert.ok(roots.every(({ sourcePath }) => sourcePath === undefined));
-  assert.deepEqual(watchPathsForClients('amp', options), [legacy, cache]);
+  assert.deepEqual(watchPathsForClients('amp', options), [legacy]);
   const attribution = watchAttributionRootsForClients('amp', null, options);
-  assert.deepEqual(clientsForWatchPath(path.join(cache, 'T-new.json'), attribution), ['amp']);
+  assert.deepEqual(clientsForWatchPath(path.join(cache, 'T-new.json'), attribution), []);
   assert.deepEqual(clientsForWatchPath(path.join(legacy, 'T-old.json'), attribution), ['amp']);
   assert.equal(MARKER_CLIENTS['.config/tokscale/amp-cache/threads'], 'amp');
 });
