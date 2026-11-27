@@ -3354,6 +3354,52 @@ function sessionToolClients(row) {
   return [row.client, ...(row.groupRows || []).map(member => member.client)].filter(Boolean);
 }
 
+function resolveSessionToolFilter(rows) {
+  const clients = [...new Set((Array.isArray(rows) ? rows : []).flatMap(sessionToolClients))];
+  if (state.sessionToolFilter && (clients.length < 2 || !clients.includes(state.sessionToolFilter))) {
+    state.sessionToolFilter = '';
+    state.sessionPage = 0;
+  }
+  return state.sessionToolFilter;
+}
+
+function sessionPeriodTotals(period, rows, clientFilter = '') {
+  if (!clientFilter) {
+    return {
+      totalTokens: Number(period?.totalTokens || 0),
+      costUsd: Number(period?.costUsd || 0),
+      unpricedTokens: Number(period?.unpricedTokens || 0)
+    };
+  }
+  const hasClientAggregate = Boolean(period) && (
+    Object.hasOwn(period.clients || {}, clientFilter)
+    || Object.hasOwn(period.clientCosts || {}, clientFilter)
+    || Object.hasOwn(period.clientUnpricedTokens || {}, clientFilter)
+  );
+  if (hasClientAggregate) {
+    return {
+      totalTokens: Number(period.clients?.[clientFilter] || 0),
+      costUsd: Number(period.clientCosts?.[clientFilter] || 0),
+      unpricedTokens: Number(period.clientUnpricedTokens?.[clientFilter] || 0)
+    };
+  }
+  let totalTokens = 0;
+  let costUsd = 0;
+  let unpricedTokens = 0;
+  for (const row of Array.isArray(rows) ? rows : []) {
+    const members = row?.kind === 'summary' && Array.isArray(row.groupRows) && row.groupRows.length > 0
+      ? row.groupRows
+      : row?.kind === 'session' ? [row] : [];
+    for (const member of members) {
+      if (member?.client !== clientFilter) continue;
+      totalTokens += Number(member.value || 0);
+      costUsd += Number(member.cost || 0);
+      unpricedTokens += Number(member.unpricedTokens || 0);
+    }
+  }
+  return { totalTokens, costUsd, unpricedTokens };
+}
+
 function sessionSearchQuery() {
   return String(state.sessionSearchQuery || '').trim();
 }
@@ -9113,7 +9159,15 @@ function renderAppContent({ fromSearch = false } = {}) {
     return;
   }
   els.fixedPeriodMessage.classList.add('hidden');
-  const nextTotal = Number(period.totalTokens || 0);
+  const sessionRows = state.breakdown === 'session'
+    && (!state.openSession || state.sessionToolFilter)
+    ? sessionRowsForPeriod(period)
+    : null;
+  const activeToolFilter = state.breakdown === 'session' && state.sessionToolFilter
+    ? resolveSessionToolFilter(sessionRows)
+    : '';
+  const displayTotals = sessionPeriodTotals(period, sessionRows, activeToolFilter);
+  const nextTotal = displayTotals.totalTokens;
   const totalChanged = nextTotal !== state.currentTotal;
   if (state.suppressInitialNumberAnimation) {
     cancelNumberAnimation();
@@ -9141,7 +9195,7 @@ function renderAppContent({ fromSearch = false } = {}) {
     updateTotalCompact(nextTotal);
   }
   state.currentTotal = nextTotal;
-  setTotalCost(period.costUsd || 0, period.unpricedTokens);
+  setTotalCost(displayTotals.costUsd, displayTotals.unpricedTokens);
   renderTokenRate();
   if (!state.refreshBusy && !state.refreshFeedbackTimer) setRefreshButtonState('idle');
   els.shell.classList.toggle('session-mode', state.breakdown === 'session');
@@ -9217,7 +9271,7 @@ function renderAppContent({ fromSearch = false } = {}) {
     els.serviceStatusPanel?.classList.add('hidden');
     els.trendsPanel.classList.add('hidden');
     els.breakdown.classList.remove('hidden');
-    const rows = rowsForPeriod(period);
+    const rows = sessionRows || rowsForPeriod(period);
     state.sessionRowsCache = state.breakdown === 'session'
       ? { stats: state.stats, period: state.period, rows }
       : null;
