@@ -82,7 +82,7 @@ Only app, agent and packaging entry points run `ensure:tokscale`; install, Hub, 
 
 The collector owns one `selfSyncThrottle.js` instance shared by provider self-syncs and supplies their binary resolver. It resets with the collector; cancellation during replacement is not a provider failure. `forceSelfSync`, `sourceSelfSync` and `todayOnly` are independent: forcing a sync must not downgrade a full scan. Keep the floor and catch-up deadline centralized. Source details belong in [Cursor](providers/cursor.md#self-sync-and-sessions) and [Antigravity](providers/antigravity.md#source-roots-and-self-sync).
 
-Continuous Cursor imports must not block local collection; local scans merge only completed snapshots and must not read a cache being replaced in the same runtime. One-shot collection retains its awaited self-sync behavior.
+Continuous Cursor and Amp imports run independently of local collection. Cursor merges completed snapshots. Amp replaces thread exports individually and schedules a full usage and History scan when an import writes any threads, including partial imports. Its cadence does not depend on local file activity. One-shot collection awaits self-sync.
 
 ### WSL
 
