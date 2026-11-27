@@ -2384,14 +2384,15 @@
             if (hasDeviceTotal) edge.tokens = devTokens;
             if (wsActiveDeviceIds.has(matchedDev.id)) edge.active = true;
           } else {
+            const active = wsActiveDeviceIds.has(matchedDev.id);
             devToHubMap.set(edgeKey, {
               id: `d2h:${edgeKey}`,
               from: matchedDev.id,
               to: hub.id,
               tokens: hasDeviceTotal ? devTokens : Math.round(hub.tokens / Math.max(1, confirmedDeviceIds.length)),
               share: 0,
-              active: wsActiveDeviceIds.has(matchedDev.id) || (hub.activeSessionCount > 0 && matchedDev.liveTokPerSec > 0),
-              liveRate: n(matchedDev.liveTokPerSec),
+              active,
+              liveRate: active ? n(matchedDev.liveTokPerSec) : 0,
               color: hub.color,
               sessionCount: 0
             });
@@ -2861,6 +2862,7 @@
   }
 
   return {
+    isDevicePeriodExpired,
     resolvePeriodData,
     summarizeDaily,
     buildFleetModel,

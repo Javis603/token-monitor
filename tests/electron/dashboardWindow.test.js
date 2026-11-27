@@ -3917,6 +3917,46 @@ test('Dashboard replaces a rejected fixed-period read only if its selected revis
   assert.deepEqual(reads.map(read => read.id), [1, 2]);
 });
 
+test('Dashboard drops cached iCloud session pages at Today and Month accounting rollover', () => {
+  const boundary = Date.parse('2026-12-01T00:00:00Z');
+  let now = boundary - 1;
+  const modelApi = require('../../src/electron/renderer/dashboard/dashboardModel');
+  const context = vm.createContext({
+    Date: { now: () => now }, modelApi,
+    state: { settings: {}, statsMode: 'icloud' },
+    sessionTitleDisplayApi: null, sessionActivityProjectionApi: null, allTimeSessionsApi: null,
+    window: { tokenMonitor: {} }
+  });
+  const js = read('src', 'electron', 'renderer', 'dashboard', 'dashboard.js');
+  vm.runInContext(js.slice(js.indexOf('let localSessionActivity = null;'), js.indexOf('function syncOpenSessionDrawer('))
+    + '\nconst allTimeSessions = null;\nfunction ensureSyncedSessionPages() {}\nglobalThis.cache = syncedSessionPagesByPeriod;', context);
+  for (const periodKey of ['today', 'month']) {
+    now = boundary - 1;
+    const raw = {
+      mode: 'icloud', snapshot: { id: 1, source: 1 }, fixedRangeRevisions: { mac: 'unchanged' },
+      sessionDetailsOmitted: { [periodKey]: 1 },
+      devices: [{ deviceId: 'mac', periodWindows: { [periodKey]: { endsAt: new Date(boundary).toISOString() } } }],
+      periods: { [periodKey]: { sessions: {} } }
+    };
+    context.state.periodKey = periodKey;
+    context.base = raw;
+    vm.runInContext('latestBaseStats = base;', context);
+    const revisionsKey = context.syncedSessionPagesRevisionsKey(raw, periodKey);
+    context.cache.set(periodKey, { revisionsKey, sessions: { cached: { sourceDevice: { deviceId: 'mac' } } } });
+    context.state.stats = context.attachSyncedSessionPages(raw);
+    assert.ok(context.state.stats.periods[periodKey].sessions.cached);
+    now = boundary;
+    const publication = { ...raw, snapshot: { id: 2, source: 1 } };
+    assert.notEqual(context.syncedSessionPagesRevisionsKey(publication, periodKey), revisionsKey);
+    context.revalidateSyncedPeriodOnRender();
+    assert.equal(context.cache.has(periodKey), false);
+    assert.deepEqual(context.state.stats.periods[periodKey].sessions, {});
+    context.cache.set(periodKey, { revisionsKey, sessions: { cached: { sourceDevice: { deviceId: 'mac' } } } });
+    assert.equal(context.attachSyncedSessionPages(publication), publication);
+    assert.equal(context.cache.has(periodKey), false);
+  }
+});
+
 test('Dashboard discards synced Yesterday at device midnight without a Stats push', async () => {
   const boundary = Date.parse('2026-11-26T15:00:00Z');
   let now = boundary - 1000;

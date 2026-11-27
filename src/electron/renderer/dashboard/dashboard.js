@@ -3444,11 +3444,17 @@ function syncedSessionPagesRevisionsKey(stats, periodKey) {
       state.settings?.syncWeekStartsOn || ''
     ]);
   }
+  const now = Date.now();
+  const expiredDevices = (stats.devices || [])
+    .filter(device => typeof modelApi !== 'undefined' && modelApi?.isDevicePeriodExpired?.(device, periodKey, now))
+    .map(device => String(device.deviceId || device.id || ''))
+    .sort();
   return JSON.stringify([
     stats.snapshot.source,
     periodKey,
     Object.entries(revisions).sort(),
-    stats.localFixedRangeRevision || ''
+    stats.localFixedRangeRevision || '',
+    expiredDevices
   ]);
 }
 
@@ -3478,6 +3484,12 @@ function revalidateSyncedPeriodOnRender() {
   const stats = latestBaseStats;
   if (!isSyncedDerivedPeriod(periodKey)) {
     renderedFixedCalendar = null;
+    const entry = syncedSessionPagesByPeriod.get(periodKey);
+    if (stats && entry && entry.revisionsKey !== syncedSessionPagesRevisionsKey(stats, periodKey)) {
+      const base = allTimeSessions ? allTimeSessions.attach(stats) : stats;
+      state.stats = applyLocalSessionActivity(attachSyncedSessionPages(base));
+      ensureSyncedSessionPages();
+    }
     return 0;
   }
   const now = Date.now();
@@ -3979,7 +3991,8 @@ function renderNow() {
   renderDeviceSelector(overview?.fleet);
 
   const hasHistory = (state.history?.daily || []).length > 0 || (state.history?.monthly || []).length > 0;
-  const hasStats = Boolean(overview && (overview.hero.tokens > 0 || overview.accountingExpired));
+  const accountingStatus = overview?.hero.accountingStatus;
+  const hasStats = accountingStatus === 'ready' || accountingStatus === 'partial';
   els.empty.classList.toggle('hidden', hasHistory || hasStats);
   els.trendsPane.classList.toggle('hidden', state.tab !== 'trends');
   els.activityPane.classList.toggle('hidden', state.tab !== 'activity');

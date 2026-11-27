@@ -1770,18 +1770,25 @@ test('buildTopologyGraph does not attribute duplicate-named Desktop workspace ed
 });
 
 
-test('a confirmed zero-token device retains a zero Live Flow edge when its session is outside the visible endpoints', () => {
+test('a hidden zero-token session retains its edge without borrowing unrelated live activity', () => {
   const overview = {
-    fleet: { machines: [{ deviceId: 'a', tokens: 40 }, { deviceId: 'b', tokens: 0 }] },
-    sessions: [{ key: 'a', projectLabel: 'Repo', deviceId: 'a', totalTokens: 40 }],
-    workspaces: [{ name: 'Repo', tokens: 40, deviceIds: ['a', 'b'], deviceTokens: { a: 40, b: 0 } }],
+    fleet: { machines: [{ deviceId: 'a', tokens: 40 }, { deviceId: 'b', tokens: 0, liveTokPerSec: 10 }] },
+    sessions: [
+      { key: 'a', projectLabel: 'Repo', sourceDevice: { deviceId: 'a' }, totalTokens: 40, isActive: true },
+      { key: 'b', projectLabel: 'Repo', sourceDevice: { deviceId: 'b' }, totalTokens: 0 }
+    ],
+    workspaces: [{ name: 'Repo', tokens: 40, activeSessionCount: 1,
+      deviceIds: ['a', 'b'], deviceTokens: { a: 40, b: 0 }, activeDeviceIds: ['a'] }],
     hero: { tokens: 40 }
   };
   const graph = model.buildTopologyGraph(overview, { maxEndpoints: 1 });
+  assert.deepEqual(graph.endpoints.map(endpoint => endpoint.id), ['a']);
   assert.equal(graph.devToHub.find(edge => edge.from === 'a')?.tokens, 40);
-  assert.equal(graph.devToHub.find(edge => edge.from === 'b')?.tokens, 0);
+  const hidden = graph.devToHub.find(edge => edge.from === 'b');
+  assert.equal(hidden?.tokens, 0);
+  assert.equal(hidden.active, false);
+  assert.equal(hidden.liveRate, 0);
 });
-
 
 test('synced Week History fallback uses the published Monday calendar in an en-US dashboard', () => {
   const device = {
