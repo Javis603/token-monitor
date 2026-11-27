@@ -161,6 +161,49 @@ test('The account allowance survives a quota endpoint failure, and auth failures
   assert.equal(limited.status, 'sourceRateLimited');
 });
 
+test('A malformed HTTP 200 quota falls back to account-context, but authorization failures do not', async () => {
+  for (const [quotaBody, httpStatus, expected] of [[{}, 200, 'ok'], [{}, 403, 'unauthorized']]) {
+    const result = await fetchQwenworkLimits(options, deps((url) => url.includes('account-context')
+      ? response(account({ quota: { total: 900, used: 100, remaining: 800 } }))
+      : response(quotaBody, httpStatus)));
+    assert.equal(result.status, expected);
+    assert.equal(result.windows[0]?.remaining, expected === 'ok' ? 800 : undefined);
+  }
+});
+
+test('Personal quota reports remaining credits even without total or used', async () => {
+  for (const remaining of [80.5, 0]) {
+    const personalQuota = { total: null, used: null, remaining };
+    for (const useQuotaEndpoint of [true, false]) {
+      const result = await fetchQwenworkLimits(options, deps((url) => url.includes('account-context')
+        ? response(account({ quota: personalQuota }))
+        : response(useQuotaEndpoint ? { user_quota: personalQuota } : {})));
+      assert.equal(result.status, 'ok');
+      assert.equal(result.windows.length, 1);
+      const window = result.windows[0];
+      assert.equal(window.remaining, remaining);
+      assert.equal(window.limit, null);
+      assert.equal(window.used, null);
+      assert.equal(window.usedPercent, null);
+      assert.equal(window.remainingPercent, null);
+      assert.equal(window.showMeter, false);
+      assert.equal(window.resetsAt, null);
+      assert.equal(window.metric, 'credits');
+      assert.equal(window.currency, 'CREDITS');
+    }
+  }
+  for (const remaining of [-1, null, 'invalid']) {
+    assert.throws(() => parseQwenworkQuota({ quota: { total: null, used: null, remaining } }), /inconsistent/);
+  }
+});
+
+test('An unusable fallback preserves quota endpoint throttling', async () => {
+  const result = await fetchQwenworkLimits(options, deps((url) => url.includes('account-context')
+    ? response(account({ quota: null }))
+    : response({}, 429)));
+  assert.equal(result.status, 'sourceRateLimited');
+});
+
 test('A missing token returns notConfigured without touching the network', async () => {
   const d = deps(() => { throw new Error('must not fetch'); });
   d.env.MAGPIE_HOME = path.join(os.tmpdir(), 'no-such-magpie-home');

@@ -3679,3 +3679,14 @@ test('QwenWork allowance credits render a meter without the money metric', () =>
   assert.ok(card.children[0].find('limit-meter'));
   assert.match(card.text, /10% left/);
 });
+
+test('QwenWork personal credits render a count without a meter or currency', () => {
+  const provider = normalizeLimitProvider({
+    provider: 'qwenwork', status: 'ok', source: 'oauth',
+    windows: [{ kind: 'billing', label: 'Credits', metric: 'credits', currency: 'CREDITS', remaining: 80, showMeter: false }]
+  });
+  const card = dockView().renderProviderWindows(provider, '#7771F4');
+  assert.equal(card.children.length, 1);
+  assert.equal(card.children[0].children[0].children[1].textContent, '80.00');
+  assert.ok(!card.children[0].find('limit-meter'));
+});

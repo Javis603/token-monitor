@@ -146,15 +146,21 @@ function parseQwenworkQuota(body) {
   if (!payload || typeof payload !== 'object' || Array.isArray(payload)) {
     throw errorWithStatus('unavailable', 'QwenWork returned an invalid quota response');
   }
-  const primary = creditAllowance(payload.user_quota ?? payload.userQuota ?? payload.quota, 'user quota');
+  const raw = payload.user_quota ?? payload.userQuota ?? payload.quota;
+  const remaining = numberOrNull(raw?.remaining);
+  const balanceOnly = raw && raw.total == null && raw.cap == null && raw.used == null
+    && remaining !== null && remaining >= 0;
+  const primary = balanceOnly ? null : creditAllowance(raw, 'user quota');
   const windows = [{
     kind: 'billing',
     label: 'Credits',
-    used: primary.used,
-    limit: primary.total,
-    remaining: primary.remaining,
-    usedPercent: primary.usedPercent,
-    showMeter: true
+    ...(primary ? {
+      used: primary.used,
+      limit: primary.total,
+      remaining: primary.remaining,
+      usedPercent: primary.usedPercent,
+      showMeter: true
+    } : { metric: 'credits', currency: 'CREDITS', remaining, showMeter: false })
   }];
   const pools = [
     ['add_on_quota', 'Add-on credits'],
@@ -306,35 +312,32 @@ async function fetchQwenworkLimits(options = {}, deps = {}) {
   try {
     const result = await runWithProbeDeadline(async ({ signal }) => {
       let accountBody = null;
-      let accountError = null;
       try {
         accountBody = await requestJson(fetchImpl, baseUrl + QWENWORK_ACCOUNT_PATH, token, signal);
       } catch (error) {
         if (error?.status === 401 || error?.status === 403) throw error;
-        accountError = error;
       }
-      let quotaBody = null;
-      let quotaError = null;
-      try {
-        quotaBody = await requestJson(fetchImpl, baseUrl + QWENWORK_QUOTA_PATH, token, signal);
-      } catch (error) {
-        if (error?.status === 401 || error?.status === 403) throw error;
-        quotaError = error;
-      }
-      if (!quotaBody && !accountBody) throw quotaError || accountError || errorWithStatus('unavailable', 'QwenWork returned no data');
       const account = parseQwenworkAccount(accountBody);
-      const parsed = quotaBody ? parseQwenworkQuota(quotaBody)
-        : parseQwenworkQuota({ quota: unwrap(accountBody)?.quota });
-      return { parsed, account };
+      try {
+        const body = await requestJson(fetchImpl, baseUrl + QWENWORK_QUOTA_PATH, token, signal);
+        return { parsed: parseQwenworkQuota(body), account };
+      } catch (quotaError) {
+        if (quotaError?.status === 401 || quotaError?.status === 403 || signal.aborted) throw quotaError;
+        try {
+          return { parsed: parseQwenworkQuota({ quota: unwrap(accountBody)?.quota }), account };
+        } catch {
+          // A fallback without quota must not hide the gateway failure.
+          throw quotaError;
+        }
+      }
     }, { signal: deps.signal, deadlineMs: deps.qwenworkFetchTimeoutMs || QWENWORK_FETCH_TIMEOUT_MS });
-
 
     const user = result.account?.user || null;
     const plan = result.account?.plan || null;
     const identity = user?.id || '';
     const planWindowMinutes = inferredBillingWindowMinutes(plan?.resetsAt);
     const windows = result.parsed.windows.map((window, index) => (
-      index === 0 && plan?.resetsAt
+      index === 0 && window.showMeter && plan?.resetsAt
         ? { ...window, resetsAt: plan.resetsAt, ...(planWindowMinutes ? { windowMinutes: planWindowMinutes } : {}) }
         : window
     ));

@@ -22,9 +22,11 @@ The catalog id is `qwenwork`. It is not a tracked client, is not mapped to one i
 | User, organization, plan name and reset | `GET /api/v1/adapter/user/account-context?include=user,plan,quota` |
 | Plan credits and optional add-on/team pools | `GET /api/v2/quota/usage` |
 
-The quota endpoint is authoritative for the allowance. If it fails without an authentication error, the provider falls back to the `quota` object on `account-context`; identity and plan metadata then remain available. A 401/403 on either request is an authorization failure, not a missing provider.
+The quota endpoint is authoritative for the allowance. If it fails without an authentication error or returns unusable quota data, the provider falls back to the `quota` object on `account-context`; identity and plan metadata then remain available. A 401/403 on either request is an authorization failure, not a missing provider.
 
-The plan window is a `billing` window labelled `Credits`; add-on and team pools are marked `additional` so they render as their own rows. The reset timestamp comes from `plan.next_refresh_date`, falling back to `next_due_date`. It is attached only to the plan window.
+The plan window is a `billing` window labelled `Credits`; add-on and team pools are marked `additional` so they render as their own rows. The reset timestamp comes from `plan.next_refresh_date`, falling back to `next_due_date`. It is attached only to a plan allowance with a known total.
+
+Personal accounts can return only remaining credits. Those readings show the remaining count without a meter and do not infer used credits, a total, or a shared reset for the balance.
 
 ## Credentials and transport
 
