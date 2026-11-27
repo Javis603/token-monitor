@@ -959,7 +959,10 @@ span.settings-note.settings-item-desc {
 }
 .settings-section-toggle {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(0, auto);
+  /* The title takes its full width first and the summary truncates in the
+     space left over. The 12px floor keeps the disclosure chevron visible when
+     the window is too narrow for the whole title. */
+  grid-template-columns: minmax(0, max-content) minmax(12px, 1fr);
   align-items: center;
   gap: 10px;
   width: 100%;
