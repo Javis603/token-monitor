@@ -125,13 +125,7 @@ function creditAllowance(raw, name) {
     throw errorWithStatus('unavailable', `QwenWork returned an inconsistent ${name}`);
   }
   const remaining = numberOrNull(raw.remaining);
-  const explicitPercent = numberOrNull(raw.percentage);
-  let usedPercent = explicitPercent === null ? (used / total) * 100 : explicitPercent;
-  // The gateway reports 0.9893 for 98.93%. Multiply only when the value
-  // matches the raw fraction; a genuine sub-1% percentage stays as reported.
-  if (explicitPercent !== null && usedPercent >= 0 && usedPercent <= 1 && Math.abs(usedPercent - (used / total)) < 0.001) {
-    usedPercent *= 100;
-  }
+  const usedPercent = (used / total) * 100;
   return {
     total,
     used,

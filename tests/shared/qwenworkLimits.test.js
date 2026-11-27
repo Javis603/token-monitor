@@ -83,7 +83,7 @@ test('QwenWork base URL accepts only its HTTPS gateways', () => {
   }
 });
 
-test('Quota parsing normalizes the gateway fraction and keeps additional pools separate', () => {
+test('Quota parsing calculates usage and keeps additional pools separate', () => {
   const parsed = parseQwenworkQuota(quota({
     add_on_quota: { total: 1000, used: 200, remaining: 800, percentage: 0.2, unit: 'credits' },
     shared_quota: { used: 10, cap: 40, remaining: 30, unit: 'credits' }
@@ -284,6 +284,15 @@ test('A rejected refresh keeps the provider unauthorized instead of retrying the
   assert.equal(new URL(d.calls[0].url).pathname, '/api/v1/deviceToken/refresh');
 });
 
+
+test('Allowance percentages use the consumed credits for overages and tiny readings', () => {
+  const overage = parseQwenworkQuota({ user_quota: { total: 100, used: 110, percentage: 1.1 } });
+  assert.equal(overage.windows[0].usedPercent, 100);
+  assert.equal(overage.windows[0].remaining, 0);
+
+  const tiny = parseQwenworkQuota({ user_quota: { total: 46000, used: 0.1, percentage: 0.0002173913 } });
+  assert.ok(Math.abs(tiny.windows[0].usedPercent - (0.1 / 46000) * 100) < 1e-12);
+});
 
 test('A tiny computed allowance percentage is not interpreted as a gateway fraction', () => {
   const parsed = parseQwenworkQuota({ user_quota: { total: 46000, used: 0.1 } });
