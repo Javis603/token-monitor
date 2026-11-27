@@ -3951,7 +3951,7 @@ test('Local Dashboard repaints Yesterday at local midnight without a Stats push'
   class Clock extends Date {
     static now() { return now; }
   }
-  const state = { periodKey: 'yesterday', overview: null, motion: 'none' };
+  const state = { periodKey: 'yesterday', overview: null, motion: 'none', drawer: { kind: 'session' } };
   const stats = {
     mode: 'local',
     nativeRangeWindows: { yesterday: { start: '2026-11-25', end: '2026-11-25' } },
@@ -3959,10 +3959,15 @@ test('Local Dashboard repaints Yesterday at local midnight without a Stats push'
   };
   const history = { daily: [{ date: '2026-11-25', tokens: 100 }, { date: '2026-11-26', tokens: 50 }] };
   const model = require('../../src/electron/renderer/dashboard/dashboardModel');
-  const revalidate = dashboardFunction('revalidateSyncedPeriodOnRender', '\nfunction resolvedSyncedPageSession', {
-    state, Date: Clock, latestBaseStats: stats, renderedSyncedCalendar: null,
+  const context = {
+    state, Date: Clock, latestBaseStats: stats, renderedFixedCalendar: null, drawerRequestToken: 0,
+    els: {}, fixedPeriodRangesApi: require('../../src/electron/renderer/fixedPeriodRanges'),
     isSyncedDerivedPeriod: () => true, isSyncedStatsContext: () => false
-  });
+  };
+  const js = read('src', 'electron', 'renderer', 'dashboard', 'dashboard.js');
+  vm.runInNewContext(js.slice(js.indexOf('function closeDrawer('), js.indexOf('function isRemoteSession('))
+    + js.slice(js.indexOf('function revalidateSyncedPeriodOnRender('), js.indexOf('function resolvedSyncedPageSession(')), context);
+  const revalidate = context.revalidateSyncedPeriodOnRender;
   const render = () => {
     state.overview = model.buildScopedOverview({ stats, history, periodKey: state.periodKey, nowMs: now });
     state.overview.nextFixedPeriodExpiryAt = revalidate();
@@ -3974,11 +3979,23 @@ test('Local Dashboard repaints Yesterday at local midnight without a Stats push'
   });
   render();
   assert.equal(state.overview.hero.tokens, 100);
+  render();
+  assert.equal(state.drawer.kind, 'session');
+  assert.equal(context.drawerRequestToken, 0);
   schedule();
   assert.equal(timer.delay, 1020);
   now += timer.delay;
   timer.callback();
   assert.equal(state.overview.hero.tokens, 50);
+  assert.equal(state.drawer, null);
+  assert.equal(context.drawerRequestToken, 1);
+  state.drawer = { kind: 'workspace' };
+  render();
+  assert.equal(state.drawer.kind, 'workspace');
+  now = new Date(2026, 10, 28).getTime();
+  render();
+  assert.equal(state.drawer, null);
+  assert.equal(context.drawerRequestToken, 2);
 });
 
 test('Dashboard repaints when the displayed accounting period expires', () => {

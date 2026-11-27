@@ -3457,29 +3457,35 @@ function isSyncedSessionPagesLoaded(stats = state.stats, periodKey = state.perio
   return Boolean(key && entry?.key === key && (!entry.derived || entry.detailsAvailable));
 }
 
-let renderedSyncedCalendar = null;
+let renderedFixedCalendar = null;
 
 function revalidateSyncedPeriodOnRender() {
   const periodKey = state.periodKey;
   const stats = latestBaseStats;
   if (!isSyncedDerivedPeriod(periodKey)) {
-    renderedSyncedCalendar = null;
+    renderedFixedCalendar = null;
     return 0;
   }
   const now = Date.now();
   const midnight = new Date(now);
   midnight.setHours(24, 0, 0, 0);
   let deadline = midnight.getTime();
+  const previous = renderedFixedCalendar;
   if (!isSyncedStatsContext(stats)) {
-    renderedSyncedCalendar = null;
+    const calendarKey = fixedPeriodRangesApi.localDayKey(now);
+    renderedFixedCalendar = { periodKey, calendarKey, local: true };
+    if (previous?.local && previous.periodKey === periodKey && previous.calendarKey !== calendarKey
+      && (state.drawer?.kind === 'session' || state.drawer?.kind === 'workspace')) {
+      closeDrawer({ restoreFocus: false });
+    }
     return deadline;
   }
   const calendarKey = stats ? syncedPeriodCalendarKey(stats, periodKey, now) : '';
   const source = stats?.snapshot?.source;
-  const previous = renderedSyncedCalendar;
-  renderedSyncedCalendar = { periodKey, source, calendarKey };
+  renderedFixedCalendar = { periodKey, source, calendarKey };
   const entry = syncedSessionPagesByPeriod.get(periodKey);
-  const calendarChanged = previous?.periodKey === periodKey && previous.source === source && previous.calendarKey !== calendarKey;
+  const calendarChanged = previous?.periodKey === periodKey && !previous.local
+    && previous.source === source && previous.calendarKey !== calendarKey;
   if (stats && (calendarChanged || (entry?.derived && entry.calendarKey !== calendarKey))) {
     const base = allTimeSessions ? allTimeSessions.attach(stats) : stats;
     state.stats = applyLocalSessionActivity(attachSyncedSessionPages(base));
