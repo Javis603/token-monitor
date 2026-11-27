@@ -120,9 +120,9 @@ function create(host) {
       capabilities: (/** @type {any} */ slot) => ({
         rename: false, move: false, replace: slot?.id === 'oauth', setEnabled: false, remove: slot?.id === 'oauth'
       }),
-      extraActions: () => [{
+      extraActions: (/** @type {() => any} */ getSlot) => [{
         label: t('settings.common.refresh'),
-        visible: () => host.isEnabled() && !flowId,
+        visible: () => getSlot().source !== 'remote' && host.isEnabled() && !flowId,
         run: () => host.refreshQuota()
       }],
       ipc: {
@@ -132,9 +132,6 @@ function create(host) {
             error = '';
             await host.refreshStats();
             return { ok: true };
-          } catch (cause) {
-            error = cause instanceof Error ? cause.message : t('settings.qwenwork.loginFailed');
-            return { ok: false };
           } finally {
             refreshReadings();
           }

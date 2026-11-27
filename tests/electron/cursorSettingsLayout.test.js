@@ -3304,10 +3304,11 @@ function qwenworkAccountOwner({ source = 'settings', enabled = true, readStatus 
   return { hidden, handlers, output, panel, accounts, finish: () => finishSignIn({ ok: false }) };
 }
 
-test('QwenWork keeps sign-out reachable and hides refresh when Limits is off', () => {
+test('QwenWork keeps sign-out reachable and only offers refresh for monitored local accounts', () => {
   for (const enabled of [true, false]) {
     const { accounts, panel } = qwenworkAccountOwner({ enabled });
-    assert.equal(panel.extraActions()[0].visible(), enabled);
+    assert.equal(panel.extraActions(() => accounts[0])[0].visible(), enabled);
+    assert.equal(panel.extraActions(() => ({ source: 'remote' }))[0].visible(), false);
     assert.equal(panel.capabilities(accounts[0]).remove, true);
   }
 });

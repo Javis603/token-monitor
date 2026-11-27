@@ -233,6 +233,7 @@
             if (result.errorCode !== 'slotLimit') error();
             return result;
           }
+          if (message.textContent === tr('failed')) message.textContent = '';
           if (result.presentation) presentation = result.presentation[form.id] || {};
           if (result.accounts) {
             slots = result.accounts;

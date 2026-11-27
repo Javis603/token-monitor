@@ -47,7 +47,7 @@ Requests use the injected transport, `credentials: 'omit'`, `redirect: 'error'`,
 
 - No token components, message counts or per-session billing are reported. QwenWork does not expose them locally.
 - Existing provider selections and custom Home orders are preserved on upgrade. Browser sign-in adds QwenWork to the provider selection and enables Limits if that selection was empty. With an existing selection, sign-in preserves the Limits switch.
-- With no stored session and no fallback token it reports `notConfigured` and performs no network request. Settings offers browser sign-in and shows the active source for this device in the provider’s connection card.
+- With no stored session and no fallback token it reports `notConfigured` and performs no network request. The Settings connection card lists OAuth and local Magpie credentials. The environment token remains available as a fallback.
 - Allowance meters use consumed credits divided by the total. Usage above the allowance fills the meter.
 - Credit resets are visible only as the plan window's `resetsAt`; a reset does not create historical token rows.
 
