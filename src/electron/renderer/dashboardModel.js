@@ -68,6 +68,32 @@
     return recordedAt.toISOString().slice(0, length) !== new Date(nowMs).toISOString().slice(0, length);
   }
 
+  /** @param {any} stats @param {string} periodKey @param {number} nowMs */
+  function aggregatePeriodFreshness(stats, periodKey, nowMs) {
+    let expired = false;
+    let nextExpiryAt = 0;
+    if (periodKey !== 'today' && periodKey !== 'month') return { expired, nextExpiryAt };
+    const publishedAt = Date.parse(stats?.updatedAt || '');
+    const devices = stats?.devices?.length ? stats.devices : stats?.periodWindows ? [stats] : [];
+    for (const device of devices) {
+      if (!periodHasUsage(device.periods?.[periodKey])) continue;
+      // A newer publication has already excluded devices expired at its clock.
+      if (Number.isFinite(publishedAt) && isDevicePeriodExpired(device, periodKey, publishedAt)) continue;
+      if (isDevicePeriodExpired(device, periodKey, nowMs)) {
+        expired = true;
+        continue;
+      }
+      let endsAt = Date.parse(device.periodWindows?.[periodKey]?.endsAt || '');
+      if (!(endsAt > 0)) {
+        const date = new Date(device.updatedAt || device.receivedAt || '');
+        date.setUTCHours(0, 0, 0, 0);
+        endsAt = periodKey === 'today' ? date.setUTCDate(date.getUTCDate() + 1) : date.setUTCMonth(date.getUTCMonth() + 1, 1);
+      }
+      if (endsAt > nowMs && (!nextExpiryAt || endsAt < nextExpiryAt)) nextExpiryAt = endsAt;
+    }
+    return { expired, nextExpiryAt };
+  }
+
   /** @param {any} device @param {string} periodKey */
   function deviceProjectRollup(device, periodKey) {
     const projects = device?.periods?.[periodKey]?.projects;
@@ -983,6 +1009,7 @@
    *   selectedDeviceId?: string,
    *   settings?: any,
    *   statsMode?: string,
+   *   accountingExpired?: boolean,
    *   labels?: {
    *     subagent?: string,
    *     subagentCount?: (count: number) => string,
@@ -1009,7 +1036,7 @@
     const includeNative = selectedDeviceId === 'all' || (Boolean(localId) && selectedDeviceId === localId);
     const selectedDevice = selectedDeviceId !== 'all' && (stats?.devices || []).find((/** @type {any} */ item) =>
       String(item.deviceId || item.id || '').trim() === selectedDeviceId);
-    const expired = isDevicePeriodExpired(selectedDevice, periodKey, nowMs);
+    const expired = options.accountingExpired === true || isDevicePeriodExpired(selectedDevice, periodKey, nowMs);
     // During rollover, keep live native rows and Today's zero-usage carryovers.
     const collectedSessions = collectPeriodSessionEntries(stats, periodKey, expired ? null : aggregatePeriod, nowMs, {
       includeNative,
@@ -2524,6 +2551,8 @@
     const activeMachine = fleet.isFleetMode && selectedDeviceId !== 'all'
       ? fleet.machines.find((m) => m.deviceId === selectedDeviceId) || null
       : null;
+    const freshness = aggregatePeriodFreshness(stats, periodKey, nowMs);
+    const accountingExpired = !activeMachine && freshness.expired;
 
     const todayKey = fixedPeriodRanges.localDayKey(nowMs);
     /** @param {string} day */
@@ -2560,14 +2589,14 @@
         liveUsageDay: periodHasUsage(stats?.periods?.today) ? stats?.periodWindows?.today?.key || todayKey : undefined
       }];
     const activity = summarizeHeroActivity(
-      settings.historyEnabled === false || (fixedHistorySnapshot && fixedHistorySnapshot.status !== 'ready')
+      accountingExpired || settings.historyEnabled === false || (fixedHistorySnapshot && fixedHistorySnapshot.status !== 'ready')
         ? []
         : activitySources,
       periodKey
     );
 
     const scopedHistory = selectScopedHistory(history, activeMachine ? activeMachine.deviceId : 'all');
-    const periodData = fixedHistorySnapshot
+    const periodData = accountingExpired ? null : fixedHistorySnapshot
       ? (activeMachine ? activeMachine.periodData : fixedHistorySnapshot.period)
       : activeMachine
         ? activeMachine.periodData
@@ -2596,10 +2625,11 @@
       selectedDeviceId: activeMachine ? activeMachine.deviceId : 'all',
       settings,
       statsMode,
+      accountingExpired,
       labels: options.sessionLabels,
       nowMs
     });
-    const workspaces = derivedIncomplete ? [] : buildWorkspaceList({
+    const workspaces = derivedIncomplete || accountingExpired ? [] : buildWorkspaceList({
       stats,
       periodData,
       periodKey,
@@ -2661,6 +2691,8 @@
       scopedHistory,
       periodData,
       periodKey,
+      accountingExpired,
+      nextAccountingExpiryAt: freshness.nextExpiryAt,
       isSynced: synced,
       omittedSessionCount,
       sessionsIncomplete,

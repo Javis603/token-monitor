@@ -278,6 +278,49 @@ test('a fresh native activity row survives expiry of the local usage snapshot', 
   }
 });
 
+test('aggregate Today and Month wait for a fresh publication after a contributing device rolls over', () => {
+  const endsAt = '2026-12-01T00:00:00Z';
+  const boundary = Date.parse(endsAt);
+  const capturedAt = new Date(boundary - 1000).toISOString();
+  const period = {
+    totalTokens: 100, clients: { codex: 100 }, models: { 'gpt-5': 100 },
+    projects: { repo: { label: 'Old Repo', tokens: 100 } },
+    sessions: { 'codex:old': {
+      client: 'codex', sessionId: 'old', projectLabel: 'Old Repo', totalTokens: 100,
+      turnEnded: true, lastUsedAt: capturedAt, sourceDevice: { deviceId: 'a' }
+    } }
+  };
+  const a = { deviceId: 'a', periods: { today: period, month: period }, periodWindows: { today: { endsAt }, month: { endsAt } } };
+  const fresh = { totalTokens: 25, clients: { claude: 25 } };
+  const b = { deviceId: 'b', periods: { today: fresh, month: fresh }, updatedAt: endsAt,
+    periodWindows: { today: { endsAt: '2026-12-01T08:00:00Z' }, month: { endsAt: '2026-12-02T08:00:00Z' } } };
+  for (const devices of [[a], [a, b]]) {
+    for (const periodKey of ['today', 'month']) {
+      const aggregate = { ...period, totalTokens: devices.length > 1 ? 125 : 100 };
+      const stats = { mode: 'sync', updatedAt: capturedAt, periods: { [periodKey]: aggregate }, devices };
+      const before = model.buildScopedOverview({ stats, periodKey, nowMs: boundary - 1 });
+      assert.equal(before.hero.tokens, aggregate.totalTokens);
+      assert.equal(before.nextAccountingExpiryAt, boundary);
+      const expired = model.buildScopedOverview({ stats, periodKey, nowMs: boundary });
+      assert.equal(expired.accountingExpired, true);
+      assert.equal(expired.hero.tokens, 0);
+      assert.deepEqual(expired.sessions, []);
+      assert.deepEqual(expired.workspaces, []);
+      assert.deepEqual(expired.topology.hubs, []);
+      if (devices.length > 1) {
+        const selected = model.buildScopedOverview({ stats, periodKey, selectedDeviceId: 'b', nowMs: boundary });
+        assert.equal(selected.hero.tokens, 25);
+      }
+      const nextPeriod = devices.length > 1 ? fresh : { totalTokens: 0 };
+      const next = model.buildScopedOverview({
+        stats: { ...stats, updatedAt: endsAt, periods: { [periodKey]: nextPeriod } }, periodKey, nowMs: boundary
+      });
+      assert.equal(next.accountingExpired, false);
+      assert.equal(next.hero.tokens, nextPeriod.totalTokens);
+    }
+  }
+});
+
 test('a native-only session disappears when its live activity expires after rollover', () => {
   const endsAt = '2026-12-01T00:00:00Z';
   const observedAt = '2026-11-30T23:59:40Z';

@@ -3790,6 +3790,34 @@ test('Dashboard schedules a repaint for session expiry without throughput sample
   assert.equal(rendered, 1);
 });
 
+test('Dashboard repaints and refreshes once when the displayed accounting period expires', () => {
+  let now = 1_000;
+  let timer;
+  let refreshes = 0;
+  let rendered = 0;
+  const state = { overview: { nextAccountingExpiryAt: 2_000 } };
+  const schedule = dashboardFunction('scheduleRateExpiry', '\nfunction observeStatsRates', {
+    state,
+    document: { hidden: false }, Date: { now: () => now },
+    deviceRateTracker: null, rateHistory: null, deviceRateTrackers: new Map(), rateExpiryTimer: null,
+    setTimeout(callback, delay) { timer = { callback, delay }; },
+    render() { rendered += 1; },
+    scheduleDashboardRefresh() { refreshes += 1; }
+  });
+  schedule();
+  assert.equal(timer.delay, 1_020);
+  now = 2_020;
+  timer.callback();
+  assert.equal(rendered, 1);
+  assert.equal(refreshes, 1);
+  timer = null;
+  schedule();
+  assert.equal(timer, null);
+  state.overview.nextAccountingExpiryAt = now + 31 * 86_400_000;
+  schedule();
+  assert.equal(timer.delay, 2_147_483_647);
+});
+
 
 test('Dashboard can reveal History while a silent Stats request is pending', async () => {
   const js = read('src', 'electron', 'renderer', 'dashboard.js');

@@ -1310,6 +1310,8 @@ function updateHeroTokens(text, value, scopeKey) {
   const canAnimate = numberAnimationApi
     && previous.text
     && previous.text !== text
+    && Number.isFinite(previous.value)
+    && Number.isFinite(value)
     && !prefersReducedMotion()
     && !document.hidden;
   lastHeroRender = { text, value, scopeKey };
@@ -1381,8 +1383,8 @@ function renderHero(overview) {
   const prevScopeKey = lastHeroRender.scopeKey;
   const scopeKey = `${state.selectedDeviceId}:${state.periodKey}`;
   const scopeChanged = Boolean(prevScopeKey && prevScopeKey !== scopeKey);
-  const exactTokens = formatExactTokens(hero.tokens);
-  updateHeroTokens(exactTokens, hero.tokens, scopeKey);
+  const exactTokens = overview.accountingExpired ? '—' : formatExactTokens(hero.tokens);
+  updateHeroTokens(exactTokens, overview.accountingExpired ? null : hero.tokens, scopeKey);
 
   if (els.heroApprox) {
     if (hero.tokens >= 1000) {
@@ -1395,8 +1397,9 @@ function renderHero(overview) {
   }
 
   if (els.heroCost) {
-    animateMetricText(els.heroCost, formatCost(hero.cost, hero.unpricedTokens), {
+    animateMetricText(els.heroCost, overview.accountingExpired ? '—' : formatCost(hero.cost, hero.unpricedTokens), {
       value: hero.cost,
+      immediate: overview.accountingExpired,
       period: scopeChanged,
       whole: hero.unpricedTokens > 0 && !(hero.cost > 0)
     });
@@ -3881,7 +3884,7 @@ function renderNow() {
   renderDeviceSelector(overview?.fleet);
 
   const hasHistory = (state.history?.daily || []).length > 0 || (state.history?.monthly || []).length > 0;
-  const hasStats = Boolean(overview && overview.hero.tokens > 0);
+  const hasStats = Boolean(overview && (overview.hero.tokens > 0 || overview.accountingExpired));
   els.empty.classList.toggle('hidden', hasHistory || hasStats);
   els.trendsPane.classList.toggle('hidden', state.tab !== 'trends');
   els.activityPane.classList.toggle('hidden', state.tab !== 'activity');
@@ -4199,6 +4202,8 @@ function scheduleRateExpiry() {
   }
   if (typeof document !== 'undefined' && document.hidden) return;
   const expiries = [];
+  const accountingExpiry = state.overview?.nextAccountingExpiryAt;
+  if (accountingExpiry > Date.now()) expiries.push(accountingExpiry);
   const collect = (ts) => {
     if (Number.isFinite(ts) && ts > 0) expiries.push(ts);
   };
@@ -4214,12 +4219,13 @@ function scheduleRateExpiry() {
   }
   if (!expiries.length) return;
   const earliest = Math.min(...expiries);
-  const delayMs = Math.max(50, earliest - Date.now() + 20);
+  const delayMs = Math.min(2_147_483_647, Math.max(50, earliest - Date.now() + 20));
   rateExpiryTimer = setTimeout(() => {
     rateExpiryTimer = null;
     if (typeof document !== 'undefined' && document.hidden) return;
     state.motion = 'none';
     render();
+    if (accountingExpiry > 0 && accountingExpiry <= Date.now()) scheduleDashboardRefresh();
   }, delayMs);
   rateExpiryTimer?.unref?.();
 }
