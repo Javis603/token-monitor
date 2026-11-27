@@ -263,7 +263,7 @@
    * @param {any} source
    * @param {any[]} historyDaily
    * @param {string} periodKey
-   * @param {{ locale?: string, todayKey?: string, synced?: boolean, historyAvailable?: boolean, historyEnabled?: boolean, nowMs?: number }} [options]
+   * @param {{ locale?: string, todayKey?: string, synced?: boolean, historyAvailable?: boolean, historyEnabled?: boolean, historyComplete?: boolean, nowMs?: number }} [options]
    */
   function resolvePeriodData(source, historyDaily, periodKey, options = {}) {
     const todayKey = options.todayKey || fixedPeriodRanges?.localDayKey?.() || '';
@@ -311,7 +311,13 @@
     }
 
     if (periodKey === 'allTime' && daily.length > 0 && fixedPeriodRanges?.derivePeriod) {
-      return { ...fixedPeriodRanges.derivePeriod(daily, { start: daily[0]?.date || '', end: daily[daily.length - 1]?.date || '' }), derivedFromHistory: true };
+      const period = fixedPeriodRanges.derivePeriod(daily, { start: daily[0]?.date || '', end: daily[daily.length - 1]?.date || '' });
+      if (options.historyComplete === false && !periodHasUsage(period)) return null;
+      return {
+        ...period,
+        derivedFromHistory: true,
+        accountingStatus: options.historyComplete === false ? 'partial' : 'ready'
+      };
     }
 
     return null;
@@ -348,6 +354,7 @@
         totalCost: n(base.totalCost),
         unpricedTokens: n(base.unpricedTokens),
         activeDays: n(base.activeDays),
+        activeDaysComplete: base.activeDaysComplete,
         currentStreak: n(base.currentStreak),
         activeTimeMs: n(base.activeTimeMs),
         peakDayTokens: n(base.peakDayTokens),
@@ -414,6 +421,7 @@
       totalCost: Math.max(totalCost, n(base.totalCost)),
       unpricedTokens: Math.max(unpricedTokens, n(base.unpricedTokens)),
       activeDays: base.activeDays != null ? n(base.activeDays) : activeDays,
+      activeDaysComplete: base.activeDaysComplete,
       currentStreak: base.currentStreak != null ? n(base.currentStreak) : currentStreak,
       activeTimeMs: base.activeTimeMs != null ? n(base.activeTimeMs) : activeTimeMs,
       peakDayTokens: Math.max(peakDayTokens, n(base.peakDayTokens)),
@@ -501,7 +509,8 @@
         ? null
         : resolvePeriodData(mergedDevice, devDaily, key, {
           ...rangeOptions,
-          historyAvailable: history?.fixedPeriods?.historyTransportAvailable === true && devHistory?.historyAvailable === true
+          historyAvailable: history?.fixedPeriods?.historyTransportAvailable === true && devHistory?.historyAvailable === true,
+          historyComplete: devHistory?.history?.summary?.activeDaysComplete
         });
       const resolvedPeriod = options.fixedHistorySnapshot
         ? mergedDevice.periods?.[periodKey] || fixedHistoryById.get(deviceId)
@@ -2696,6 +2705,7 @@
         todayKey,
         historyAvailable: historyOptions.historyAvailable,
         historyEnabled: historyOptions.historyEnabled,
+        historyComplete: history?.summary?.activeDaysComplete,
         nowMs,
         synced
       });
@@ -2703,12 +2713,15 @@
     const aggregateHistory = !aggregatePeriod && usesAllTimeHistory
       && (historyOptions.historyAvailable || history?.daily?.length > 0)
       ? (activeMachine ? selectScopedHistory(history) : scopedHistory) : null;
-    const aggregateStatus = freshness.expired || (!aggregatePeriod && !aggregateHistory)
-      ? 'unavailable'
-      : aggregatePeriod?.accountingStatus === 'partial'
-        || [...uncoveredSnapshots.values()].some(snapshot => snapshot.status !== 'ready')
-        ? 'partial'
-        : 'ready';
+    const historyAccountingStatus = (/** @type {any} */ snapshot) => {
+      if (!snapshot) return 'unavailable';
+      if (snapshot.summary.activeDaysComplete !== false) return 'ready';
+      return snapshot.summary.totalTokens > 0 || snapshot.summary.totalCost > 0 ? 'partial' : 'unavailable';
+    };
+    const aggregateStatus = freshness.expired ? 'unavailable' : aggregatePeriod
+      ? (aggregatePeriod.accountingStatus === 'partial'
+        || [...uncoveredSnapshots.values()].some(snapshot => snapshot.status !== 'ready') ? 'partial' : 'ready')
+      : historyAccountingStatus(aggregateHistory);
     const aggregateAccounting = {
       accountingStatus: aggregateStatus,
       hasShares: aggregateStatus === 'ready' && fleet.accountingComplete && fleet.fleetTotals.tokens > 0,
@@ -2720,8 +2733,8 @@
       : aggregateHistory;
     const selectedHistory = activeMachine ? uncoveredSnapshots.get(activeMachine.deviceId) : null;
     const accountingStatus = activeMachine
-      ? (accountingExpired || (selectedHistory && selectedHistory.status !== 'ready') || (!periodData && !periodFallbackHistory)
-        ? 'unavailable' : periodData?.accountingStatus || 'ready')
+      ? (accountingExpired || (selectedHistory && selectedHistory.status !== 'ready')
+        ? 'unavailable' : periodData ? periodData.accountingStatus || 'ready' : historyAccountingStatus(periodFallbackHistory))
       : aggregateStatus;
 
     const anatomy = computeTokenAnatomy(periodData, periodFallbackHistory?.daily);

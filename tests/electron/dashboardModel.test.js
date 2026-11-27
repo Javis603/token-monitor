@@ -454,6 +454,26 @@ test('cold native periods withhold accounting until a source confirms a total', 
   assert.equal(retained.hero.tokens, 100);
 });
 
+test('all-time History fallback preserves missing lifetime coverage', () => {
+  const devices = [{ deviceId: 'mac' }, { deviceId: 'pc' }];
+  for (const [daily, complete, expected, tokens] of [
+    [[], false, 'unavailable', 0],
+    [[{ date: '2026-11-26', tokens: 100 }], false, 'partial', 100],
+    [[], true, 'ready', 0]
+  ]) {
+    const historyData = { daily, summary: { activeDaysComplete: complete } };
+    const history = {
+      ...historyData, fixedPeriods: { historyTransportAvailable: true },
+      deviceHistories: devices.map(device => ({ ...device, historyAvailable: true, history: historyData }))
+    };
+    for (const selectedDeviceId of ['all', 'mac']) {
+      const { hero } = model.buildScopedOverview({ stats: { devices }, history, periodKey: 'allTime', selectedDeviceId });
+      assert.equal(hero.accountingStatus, expected);
+      assert.equal(hero.tokens, tokens);
+    }
+  }
+});
+
 test('computeTokenAnatomy fails closed on unclassifiedTokens and computes cacheHitRate accurately', () => {
   const exact = model.computeTokenAnatomy({
     totalTokens: 1000,
