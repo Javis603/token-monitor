@@ -112,18 +112,38 @@ test('forget attempts all namespaced records and invalidates work before reporti
 });
 
 
-test('explicit forget repairs oversized/unknown-format records and unlinks only the namespaced symlink',t=>{
- const f=fixture(t),s=f.service;
- for(const moduleId of ['one','two','three'])s.update('fixture',moduleId,schema,{expectedRevision:0,patch:{token:'synthetic'}});
- const names=fs.readdirSync(path.join(f.directory,'fixture')).sort();
- fs.writeFileSync(path.join(f.directory,'fixture',names[0]),'x'.repeat(65537));
- fs.writeFileSync(path.join(f.directory,'fixture',names[1]),JSON.stringify({formatVersion:999,revision:8,values:{token:'synthetic'}}));
- const outside=path.join(f.dir,'outside.json');fs.writeFileSync(outside,'synthetic unrelated bytes');
- fs.unlinkSync(path.join(f.directory,'fixture',names[2]));if(!symlinkOrSkip(t,outside,path.join(f.directory,'fixture',names[2])))return;
- s.forget('fixture');
- assert.equal(fs.readFileSync(outside,'utf8'),'synthetic unrelated bytes');
- for(const name of names){const record=JSON.parse(fs.readFileSync(path.join(f.directory,'fixture',name)));assert.deepEqual(record.values,{});assert.equal(fs.lstatSync(path.join(f.directory,'fixture',name)).isSymbolicLink(),false);}
- assert.equal(JSON.parse(fs.readFileSync(path.join(f.directory,'fixture',names[1]))).revision,9);
+test('explicit forget repairs oversized and unknown-format records', t => {
+  const { directory, service } = fixture(t);
+  for (const moduleId of ['one', 'two']) {
+    service.update('fixture', moduleId, schema, { expectedRevision: 0, patch: { token: 'synthetic' } });
+  }
+  const pluginDir = path.join(directory, 'fixture');
+  const [oversized, unknown] = fs.readdirSync(pluginDir).sort().map(name => path.join(pluginDir, name));
+  fs.writeFileSync(oversized, 'x'.repeat(65537));
+  fs.writeFileSync(unknown, JSON.stringify({ formatVersion: 999, revision: 8, values: { token: 'synthetic' } }));
+
+  service.forget('fixture');
+
+  assert.deepEqual(JSON.parse(fs.readFileSync(oversized, 'utf8')).values, {});
+  const repaired = JSON.parse(fs.readFileSync(unknown, 'utf8'));
+  assert.deepEqual(repaired.values, {});
+  assert.equal(repaired.revision, 9);
+});
+
+test('explicit forget unlinks only the namespaced symlink', t => {
+  const { dir, directory, service } = fixture(t);
+  service.update('fixture', 'one', schema, { expectedRevision: 0, patch: { token: 'synthetic' } });
+  const file = path.join(directory, 'fixture', 'one.json');
+  const outside = path.join(dir, 'outside.json');
+  fs.writeFileSync(outside, 'synthetic unrelated bytes');
+  fs.unlinkSync(file);
+  if (!symlinkOrSkip(t, outside, file)) return;
+
+  service.forget('fixture');
+
+  assert.equal(fs.readFileSync(outside, 'utf8'), 'synthetic unrelated bytes');
+  assert.equal(fs.lstatSync(file).isSymbolicLink(), false);
+  assert.deepEqual(JSON.parse(fs.readFileSync(file, 'utf8')).values, {});
 });
 
 test('readable plugin/module paths isolate ambiguous delimiters and leave old flat records untouched',t=>{

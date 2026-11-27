@@ -337,7 +337,7 @@ function clientSourceRoots(clientsCsv, options = {}) {
   const copilotWorkspaceRoots = [
     path.join(home, 'Library', 'Application Support', 'Code', 'User', 'workspaceStorage'),
     path.join(home, '.config', 'Code', 'User', 'workspaceStorage'),
-    ...(process.platform === 'win32'
+    ...(platform === 'win32'
       ? [path.join(env.APPDATA || path.join(home, 'AppData', 'Roaming'), 'Code', 'User', 'workspaceStorage')]
       : []),
     path.join(home, 'AppData', 'Roaming', 'Code', 'User', 'workspaceStorage')
@@ -431,9 +431,9 @@ function clientSourceRoots(clientsCsv, options = {}) {
   // absent, which is the usual case for the Windows-shaped one.
   const codebuddyExtLogRoots = [
     path.join(home, 'AppData', 'Local', 'CodeBuddyExtension', 'Logs'),
-    process.platform === 'win32'
+    platform === 'win32'
       ? path.join(env.LOCALAPPDATA || path.join(home, 'AppData', 'Local'), 'CodeBuddyExtension', 'Logs')
-      : process.platform === 'darwin'
+      : platform === 'darwin'
         ? path.join(home, 'Library', 'Application Support', 'CodeBuddyExtension', 'Logs')
         : path.join(xdgHome, 'CodeBuddyExtension', 'Logs')
   ];

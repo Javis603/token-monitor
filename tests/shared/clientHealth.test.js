@@ -627,6 +627,26 @@ test('source observations keep exact files, optional roots and WSL health in syn
   }
 });
 
+test('Copilot and CodeBuddy source roots follow the injected platform and AppData', () => {
+  const homeDir = path.resolve('fixture-home');
+  const env = {
+    APPDATA: path.join(homeDir, 'roaming'),
+    LOCALAPPDATA: path.join(homeDir, 'local')
+  };
+  const rootsFor = (platform) => clientSourceRoots('copilot,codebuddy', { homeDir, platform, env });
+  const workspace = path.join(env.APPDATA, 'Code', 'User', 'workspaceStorage');
+  const windowsLogs = path.join(env.LOCALAPPDATA, 'CodeBuddyExtension', 'Logs');
+  const windows = rootsFor('win32');
+  assert.ok(windows.copilot.some(({ dir }) => dir === workspace));
+  assert.ok(windows.codebuddy.some(({ dir }) => dir === windowsLogs));
+
+  const mac = rootsFor('darwin');
+  const macLogs = path.join(homeDir, 'Library', 'Application Support', 'CodeBuddyExtension', 'Logs');
+  assert.ok(mac.codebuddy.some(({ dir }) => dir === macLogs));
+  assert.ok(!mac.copilot.some(({ dir }) => dir === workspace));
+  assert.ok(!mac.codebuddy.some(({ dir }) => dir === windowsLogs));
+});
+
 test('labelling roots keeps diagnostics separate from watcher roots', () => {
   const roots = clientSourceRoots(KNOWN_CLIENTS);
   const candidates = clientWatchCandidates(KNOWN_CLIENTS);
