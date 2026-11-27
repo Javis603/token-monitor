@@ -8,21 +8,21 @@
 // A non-activating interactive window must instead return MA_NOACTIVATE.
 // https://learn.microsoft.com/windows/win32/inputdev/wm-mouseactivate
 // Electron's hookWindowMessage observes messages but cannot override LRESULT.
-// Use the documented subclass chain, leaving every other message to Chromium.
+// Keep that subclass chain entirely native: DefSubclassProc can synchronously
+// emit Electron events. Calling it through Koffi's alternate stack lets those
+// events re-enter V8 on the wrong stack and crash during garbage collection.
 
-const WM_MOUSEACTIVATE = 0x0021;
-const WM_NCDESTROY = 0x0082;
-const MA_NOACTIVATE = 3;
-const SUBCLASS_ID = 1;
+const path = require('node:path');
 
-function createWindowsNonActivatingInput(koffi) {
-  const lib = koffi.load('comctl32.dll');
-  const proc = koffi.proto(
-    'intptr_t __stdcall TokenMonitorNonActivatingSubclassProc(uintptr_t hwnd, uint32 msg, uintptr_t wParam, intptr_t lParam, uintptr_t id, uintptr_t data)'
-  );
-  const setSubclass = lib.func('int32_t __stdcall SetWindowSubclass(uintptr_t hwnd, void *proc, uintptr_t id, uintptr_t data)');
-  const removeSubclass = lib.func('int32_t __stdcall RemoveWindowSubclass(uintptr_t hwnd, void *proc, uintptr_t id)');
-  const next = lib.func('intptr_t __stdcall DefSubclassProc(uintptr_t hwnd, uint32 msg, uintptr_t wParam, intptr_t lParam)');
+function windowsInputLibraryPath(app, resourcesPath = process.resourcesPath) {
+  return app.isPackaged
+    ? path.join(resourcesPath, 'windows-dock', 'TokenMonitor.WindowInput.dll')
+    : path.resolve(__dirname, '../../build/windows-dock/TokenMonitor.WindowInput.dll');
+}
+
+function createWindowsNonActivatingInput(koffi, libraryPath) {
+  const lib = koffi.load(libraryPath);
+  const setSubclass = lib.func('int32_t __stdcall TokenMonitorInstallNonActivatingInput(uintptr_t hwnd)');
   const installed = new WeakSet();
 
   return (win) => {
@@ -30,34 +30,8 @@ function createWindowsNonActivatingInput(koffi) {
     if (installed.has(win)) return true;
     const handle = win.getNativeWindowHandle();
     const hwnd = handle.length >= 8 ? handle.readBigUInt64LE() : BigInt(handle.readUInt32LE());
-    let callback = null;
-    let releasePending = false;
-    const release = () => {
-      if (releasePending) return;
-      releasePending = true;
-      // WM_NCDESTROY/closed can run inside this very callback. Unregister only
-      // after the native message stack has returned, never from within it.
-      setImmediate(() => {
-        koffi.unregister(callback);
-        installed.delete(win);
-      });
-    };
-    callback = koffi.register((target, message, wParam, lParam, id) => {
-      if (message === WM_MOUSEACTIVATE) return MA_NOACTIVATE;
-      if (message === WM_NCDESTROY) {
-        try { removeSubclass(target, callback, id); } catch { /* HWND destruction also removes its subclasses. */ }
-        release();
-      }
-      return next(target, message, wParam, lParam);
-    }, koffi.pointer(proc));
-    try {
-      if (setSubclass(hwnd, callback, SUBCLASS_ID, 0) === 0) throw new Error('SetWindowSubclass returned FALSE');
-    } catch (error) {
-      koffi.unregister(callback);
-      throw error;
-    }
+    if (setSubclass(hwnd) === 0) throw new Error('SetWindowSubclass returned FALSE');
     installed.add(win);
-    win.once('closed', release);
     return true;
   };
 }
@@ -67,7 +41,7 @@ let install = null;
 function installWindowsNonActivatingInput(win, { platform = process.platform, logger = () => {} } = {}) {
   if (platform !== 'win32') return false;
   try {
-    install ||= createWindowsNonActivatingInput(require('koffi'));
+    install ||= createWindowsNonActivatingInput(require('koffi'), windowsInputLibraryPath(require('electron').app));
     return install(win);
   } catch (error) {
     logger(`[edge-dock] non-activating input unavailable: ${error.message}`);
@@ -75,4 +49,4 @@ function installWindowsNonActivatingInput(win, { platform = process.platform, lo
   }
 }
 
-module.exports = { createWindowsNonActivatingInput, installWindowsNonActivatingInput };
+module.exports = { createWindowsNonActivatingInput, installWindowsNonActivatingInput, windowsInputLibraryPath };
