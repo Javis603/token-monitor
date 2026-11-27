@@ -224,7 +224,13 @@
     let editorPanel;
     let editorOpenUrl;
     let editorRevision = 0;
-    const error = () => { message.textContent = tr('failed'); };
+    const operationErrorKey = 'settings.slots.failed';
+    const error = () => { localized(message, operationErrorKey); };
+    const clearOperationError = () => {
+      if (message.dataset.i18n !== operationErrorKey) return;
+      delete message.dataset.i18n;
+      message.textContent = '';
+    };
     const enqueue = operation => {
       const task = operationLane.then(async () => {
         try {
@@ -233,7 +239,7 @@
             if (result.errorCode !== 'slotLimit') error();
             return result;
           }
-          if (message.textContent === tr('failed')) message.textContent = '';
+          clearOperationError();
           if (result.presentation) presentation = result.presentation[form.id] || {};
           if (result.accounts) {
             slots = result.accounts;
@@ -413,6 +419,7 @@
           } else if (result.saved) {
             clearInput();
             preserveScroll(() => { closeEditor(); add.focus({ preventScroll: true }); });
+            clearOperationError();
             message.textContent = result.verdict === 'valid' ? '' : t('settings.common.credentialSavedUnconfirmed', { provider: label });
           } else {
             const key = result.status === 'required' ? 'credentialRequired' : result.status === 'invalidFormat' ? 'credentialInvalidFormat' : 'credentialRejected';

@@ -743,20 +743,23 @@ test('a failing default row opens the same retained default editor from its reco
 });
 
 
-test('a successful remove retry clears the shared error', async () => {
-  const h = harness();
+test('a successful remove retry clears the shared error after switching languages', async () => {
+  let locale = 'en';
+  const h = harness((key, params) => translate(locale, key, params));
   const message = h.panel.element.querySelector('.slot-message');
   const remove = () => {
-    const row = h.row('a');
-    h.click(row, 'Remove account');
-    return h.click(row, 'Confirm remove');
+    const action = h.row('a').querySelector('.menu-destructive');
+    action.click();
+    return action.click();
   };
   h.ipc.remove = async () => { throw new Error('write failed'); };
   await remove();
   assert.equal(message.textContent, t('settings.slots.failed'));
+  locale = 'zh-TW';
   h.ipc.remove = async () => ({ ok: true });
   await remove();
   assert.equal(message.textContent, '');
+  assert.equal(message.dataset.i18n, undefined);
 });
 
 test('shared menu navigates visible and enabled controls and restores focus', () => {
