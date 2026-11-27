@@ -762,6 +762,7 @@ test('a pushed animation preference settles the current headline before the next
   context.state.currentTotal = 2000;
   let pluginRefreshes = 0;
   context.pluginViewHost = { refreshMotion: () => { pluginRefreshes++; } };
+  context.invalidateHubPairingQr = () => {};
   api.animateTotalNumber(el, 1000, 2000, 1000);
   api.animateRowNumber(row, 100, 200, 600);
   const start = source.indexOf('function setRendererSettings(');

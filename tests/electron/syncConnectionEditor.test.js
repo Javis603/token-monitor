@@ -34,6 +34,7 @@ function harness(settings = {}, overrides = {}) {
     t: key => i18n.translate('en', key),
     preserveSettingsPanelScroll: callback => callback(),
     isSettingsSurfaceVisible: () => true,
+    syncClientHubPairingUi() {},
     setHoverMarqueeText: (element, value) => { element.textContent = value; },
     saveSettings: async patch => {
       patches.push({ ...patch });

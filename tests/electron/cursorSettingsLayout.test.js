@@ -2007,6 +2007,7 @@ function loadHubSettingsWiring(els, context) {
     t: key => key,
     syncDevicePanelApi: require('../../src/electron/renderer/syncDevicePanel'),
     ...context,
+    syncClientHubPairingUi() {},
     renderHubStatus: () => {},
     renderSyncPanel: () => {},
     renderHubBuildStatus: () => {}

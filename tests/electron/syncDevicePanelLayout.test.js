@@ -242,47 +242,77 @@ test('sync mode enhances the native source with shared icons and translated desc
   assert.match(css, /\.select-control-trigger:focus-visible/);
 });
 
-function hubPairingFixture(loadPairingQr) {
-  const address = '192.168.1.20';
-  const url = `http://${address}:17321`;
+function hubPairingFixture(loadPairingQr, mode = 'host') {
+  const lan = { address: '192.168.1.20', interface: 'Wi-Fi' };
+  const tailscale = { address: '100.79.20.30', interface: 'Tailscale' };
+  const url = mode === 'client' ? 'https://hub.example.com' : `http://${lan.address}:17321`;
+  const button = new Element();
+  let onClose;
   const dialog = {
     open: false,
     showModal() { this.open = true; },
-    close() { this.open = false; }
+    close() { this.open = false; },
+    addEventListener(event, handler) { if (event === 'close') onClose = handler; },
+    dispatchClose() { onClose(); }
   };
+  const editor = { contains: () => false };
   const context = vm.createContext({
     state: {
-      settings: { hubMode: 'host' },
-      hubInfo: { listening: true, listeningPort: 17321, lanAddresses: [{ address }] }
+      settings: { hubMode: mode, hubUrl: url, secret: 'synthetic-client-secret' },
+      settingsSections: { sync: true },
+      hubInfo: { listening: true, listeningPort: 17321, lanAddresses: [lan, tailscale] }
     },
     els: {
-      hubModeOptions: { value: 'host' }, hubStatusRow: {},
+      hubModeOptions: { value: mode }, hubStatusRow: {}, syncConnectionPairPhone: button,
       hubAddressList: { replaceChildren() {} }, hubPairingDialog: dialog,
-      hubPairingAddress: {}, hubPairingQr: {}, hubPairingHelp: {}, hubPairingError: {},
-      hubSecretInput: { value: 'fixture-secret' }
+      hubPairingAddress: {}, hubPairingQr: {}, hubPairingHelp: {}, hubPairingInternetHelp: {},
+      hubPairingError: {}, hubSecretInput: { value: 'synthetic-host-secret' },
+      hubUrlInput: { value: 'https://draft.example.com' }, secretInput: { value: 'synthetic-draft-secret' },
+      syncConnectionEditor: editor, syncDeviceSettings: editor, syncConnectionEdit: {},
+      syncConnectionCancel: {}, syncConnectionIdentity: {}, syncConnectionEndpoint: {},
+      syncUploadIntervalRow: {}, syncConnectionSaveError: {},
     },
-    loadPairingQr, renderIcloudStatus() {}, isSettingsSurfaceVisible: () => true, t: key => key
+    clientConnectionEditing: false, hubSaveBusy: false, hubSaveError: false,
+    visiblyOpen: true, hasDraft: false, clientConnectionHasDraft: () => context.hasDraft,
+    document: { activeElement: null, createElement: () => new Element() },
+    loadPairingQr, renderIcloudStatus() {}, setHoverMarqueeText() {}, syncHubProfileControls() {},
+    syncDevicePanelApi: panelApi, isSettingsSurfaceVisible: () => context.visiblyOpen,
+    t: (key, values) => values?.url ? `${key} ${values.url}` : key
   });
   const start = appSource.indexOf('let hubAddressesExpanded =');
-  const end = appSource.indexOf('els.hubPairingDialog?.addEventListener', start);
+  const end = appSource.indexOf('async function copyToClipboard(', start);
   const pairing = appSource.slice(start, end).replace("import('./hubPairingQr.mjs')", 'loadPairingQr()');
   const status = appSource.slice(appSource.indexOf('function renderHubStatus('),
     appSource.indexOf('const SYNC_PANEL_AGE_REFRESH_MS'));
-  vm.runInContext(status + pairing, context);
+  const connection = functionSource('syncHubConnectionUi', 'syncHubProfileControls');
+  vm.runInContext(status + pairing + connection, context);
   context.renderHubAddresses = () => {};
-  return { url, dialog, context };
+  return { url, dialog, context, button, lan, tailscale };
 }
 
-test('the pairing dialog closes when its advertised endpoint changes', async () => {
-  const { url, dialog, context } = hubPairingFixture(async () => ({ drawHubPairingQr() {} }));
+test('Host Hub pairing still offers private Wi-Fi and Tailscale', async () => {
+  const rendered = [];
+  const { url, dialog, context, lan, tailscale } = hubPairingFixture(async () => ({
+    drawHubPairingQr(_canvas, address, secret) { rendered.push([address, secret]); }
+  }));
+  for (const { address, interface: label } of [lan, tailscale]) {
+    const row = context.hubAddressRow({ address, interface: label }, 17321);
+    assert.ok(row.querySelector('.hub-pairing-button'));
+  }
+  const unsupported = context.hubAddressRow({ address: '203.0.113.15', interface: 'Other' }, 17321);
+  assert.equal(unsupported.querySelector('.hub-pairing-button'), null);
   await context.showHubPairingQr(url, { isConnected: true });
-  assert.equal(dialog.open, true);
+  assert.deepEqual(rendered, [[url, 'synthetic-host-secret']]);
+  assert.equal(context.els.hubPairingHelp.hidden, false);
+  assert.equal(context.els.hubPairingInternetHelp.hidden, true);
   context.renderHubStatus();
   assert.equal(dialog.open, true);
 
   context.state.hubInfo.listeningPort = 17322;
   context.renderHubStatus();
   assert.equal(dialog.open, false);
+  assert.equal(context.els.hubPairingQr.width, 0);
+  assert.equal(context.els.hubPairingAddress.textContent, '');
 });
 
 test('leaving Host mode while the QR module loads prevents opening the dialog', async () => {
@@ -297,6 +327,115 @@ test('leaving Host mode while the QR module loads prevents opening the dialog', 
     await opening;
     assert.equal(dialog.open, false);
   }
+});
+
+test('client Pair phone encodes only the saved public HTTPS address and secret', async () => {
+  const rendered = [];
+  const { url, dialog, context, button } = hubPairingFixture(async () => ({
+    drawHubPairingQr(_canvas, address, secret) { rendered.push([address, secret]); }
+  }), 'client');
+  context.syncHubConnectionUi();
+  assert.equal(button.hidden, false);
+  assert.equal(button['aria-label'], `settings.sync.pairPhoneAt ${url}`);
+  await context.showHubPairingQr(context.els.hubUrlInput.value, { isConnected: true });
+  assert.equal(dialog.open, false);
+  await context.showHubPairingQr(url, { isConnected: true });
+  assert.deepEqual(rendered, [[url, 'synthetic-client-secret']]);
+  assert.equal(context.els.hubPairingAddress.textContent, url);
+  assert.equal(context.els.hubPairingHelp.hidden, true);
+  assert.equal(context.els.hubPairingInternetHelp.hidden, false);
+  context.syncHubConnectionUi();
+  assert.equal(dialog.open, true, 'an unrelated refresh leaves the current dialog open');
+});
+
+test('client Pair phone stays hidden for unsupported saved URLs, secrets and open drafts', () => {
+  const { url, context, button } = hubPairingFixture(() => assert.fail('encoder loaded'), 'client');
+  for (const value of [
+    '', 'http://hub.example.com', 'https://192.0.2.1', 'https://[2001:db8::1]', 'https://hub.0x7f',
+    'https://localhost', 'https://hub.local', 'https://hub.internal', 'https://hub.ts.net',
+    'https://user@hub.example.com', 'https://hub.example.com/api', 'https://hub.example.com/..',
+    'https://hub.example.com?', 'https://hub.example.com#', 'https://hub.example.com:0',
+    'https://hub.example.com:65536', 'https://-hub.example.com', 'https://hub..example.com',
+    'https://hub.example.com/a/../', 'https://hub.example.com\n',
+  ]) {
+    context.state.settings.hubUrl = value;
+    context.syncHubConnectionUi();
+    assert.equal(button.hidden, true, value);
+  }
+  context.state.settings.hubUrl = url;
+  for (const secret of ['', '  ', 'has\ncontrol', 'x'.repeat(513)]) {
+    context.state.settings.secret = secret;
+    context.syncHubConnectionUi();
+    assert.equal(button.hidden, true);
+  }
+  context.state.settings.hubUrl = 'https://hub.example.com:8443/';
+  context.state.settings.secret = 'synthetic-client-secret';
+  context.syncHubConnectionUi();
+  assert.equal(button.hidden, false);
+  context.hasDraft = true;
+  context.syncHubConnectionUi();
+  assert.equal(button.hidden, true);
+});
+
+test('client pairing clears the dialog when its saved connection or surface changes', async () => {
+  const changes = [
+    context => { context.state.settings.hubUrl = 'https://other.example.com'; },
+    context => { context.state.settings.secret = 'synthetic-rotated-secret'; },
+    context => { context.els.hubModeOptions.value = 'local'; },
+    context => { context.state.settings.hubMode = 'host'; },
+    context => { context.clientConnectionEditing = true; },
+    context => { context.state.settingsSections.sync = false; },
+    context => { context.visiblyOpen = false; }
+  ];
+  for (const change of changes) {
+    const { url, dialog, context } = hubPairingFixture(async () => ({
+      drawHubPairingQr(canvas) { canvas.width = 100; }
+    }), 'client');
+    await context.showHubPairingQr(url, { isConnected: true });
+    assert.equal(dialog.open, true);
+    change(context);
+    context.syncHubConnectionUi();
+    assert.equal(dialog.open, false);
+    assert.equal(context.els.hubPairingQr.width, 0);
+    assert.equal(context.els.hubPairingAddress.textContent, '');
+  }
+});
+
+test('client pairing discards a pending encoder load when the saved secret changes', async () => {
+  const { promise, resolve } = Promise.withResolvers();
+  const { url, dialog, context } = hubPairingFixture(() => promise, 'client');
+  const opening = context.showHubPairingQr(url, { isConnected: true });
+  context.state.settings.secret = 'synthetic-rotated-secret';
+  context.syncHubConnectionUi();
+  context.state.settings.secret = 'synthetic-client-secret';
+  context.syncHubConnectionUi();
+  resolve({ drawHubPairingQr() { assert.fail('drawing a cancelled request'); } });
+  await opening;
+  assert.equal(dialog.open, false);
+});
+
+test('a queued dialog close does not discard a new encoder load', async () => {
+  const { promise, resolve } = Promise.withResolvers();
+  const { url, dialog, context } = hubPairingFixture(() => promise, 'client');
+  const opening = context.showHubPairingQr(url, { isConnected: true });
+  dialog.dispatchClose();
+  resolve({ drawHubPairingQr(canvas) { canvas.width = 100; } });
+  await opening;
+  assert.equal(dialog.open, true);
+  dialog.close();
+  dialog.dispatchClose();
+  assert.equal(context.els.hubPairingQr.width, 0);
+});
+
+test('client pairing clears a partial canvas if the encoder fails', async () => {
+  const { url, dialog, context } = hubPairingFixture(async () => ({
+    drawHubPairingQr(canvas) { canvas.width = 100; throw new Error('encode failed'); }
+  }), 'client');
+  await context.showHubPairingQr(url, { isConnected: true });
+  assert.equal(dialog.open, true);
+  assert.equal(context.els.hubPairingError.hidden, false);
+  assert.equal(context.els.hubPairingInternetHelp.hidden, true);
+  assert.equal(context.els.hubPairingQr.width, 0);
 });
 
 test('the pairing button has a visible keyboard focus outline', () => {

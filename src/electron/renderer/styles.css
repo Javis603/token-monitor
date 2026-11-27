@@ -2155,7 +2155,7 @@ span.settings-note.settings-item-desc {
 .hub-address-iface { color: var(--muted); font-size: 0.59375rem; flex: 0 0 auto; }
 .hub-address-row .icon-button { width: 26px; height: 26px; flex: 0 0 auto; font-size: 12px; }
 .hub-address-row .hub-pairing-button { flex: 0 0 auto; min-height: 26px; padding: 3px 7px; font-size: 0.625rem; }
-.hub-address-row .hub-pairing-button:focus-visible { outline: 1px solid var(--accent); outline-offset: 2px; }
+.settings-panel .hub-pairing-button:focus-visible { outline: 1px solid var(--accent); outline-offset: 2px; }
 .hub-pairing-dialog canvas { display: block; width: min(240px, 100%); height: auto; margin: 0 auto; image-rendering: pixelated; }
 .settings-note.hub-warning { color: var(--orange); }
 .sync-content-body { display: grid; min-width: 0; gap: 10px; }
@@ -2442,7 +2442,9 @@ button.settings-help-trigger:focus-visible { outline: 1px solid var(--accent); o
 .sync-panel-state .sync-panel-build::before { content: none; }
 #syncConnectionIdentity #syncConnectionEndpoint { font: inherit; }
 .settings-panel .sync-map .hub-profile-picker .select-control-trigger { color: var(--text); font-weight: 600; }
-.settings-panel .sync-node > .sync-connection-edit {
+.sync-connection-actions { display: flex; align-items: start; align-self: start; gap: 4px; }
+.settings-panel .sync-connection-actions .hub-pairing-button { white-space: nowrap; min-height: 26px; padding: 3px 7px; font-size: 0.625rem; }
+.settings-panel .sync-connection-actions .sync-connection-edit {
   align-self: start;
   grid-template-columns: 12px;
   width: 26px;
@@ -2453,7 +2455,7 @@ button.settings-help-trigger:focus-visible { outline: 1px solid var(--accent); o
   font-size: 0;
   color: var(--muted);
 }
-.settings-panel .sync-node > .sync-connection-edit:hover { color: var(--text); }
+.settings-panel .sync-connection-actions .sync-connection-edit:hover { color: var(--text); }
 /* Forms that act on the target take the full card width under a divider, so
    long URLs and secrets fit at 340px. Notices stay plain and close. */
 .sync-map-form { padding-top: 12px; border-top: 1px solid rgba(var(--line-rgb), 0.08); }
