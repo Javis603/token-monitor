@@ -7,6 +7,14 @@ const ranges = require('../../src/electron/renderer/fixedPeriodRanges');
 const { resolveRegionalLocale } = require('../../src/electron/renderer/i18n');
 const { aggregateHistory, extractUsageFromTokscale, normalizePeriod } = require('../../src/shared/usage');
 
+test('offline device day boundaries follow its own zone through DST', () => {
+  const source = { periodWindows: { timeZone: 'America/New_York', today: { endsAt: '2026-03-07T05:00:00Z' } } };
+  assert.equal(ranges.nextDeviceDayBoundary(source, Date.parse('2026-03-07T04:59:59Z')), Date.parse('2026-03-07T05:00:00Z'));
+  assert.equal(ranges.nextDeviceDayBoundary(source, Date.parse('2026-03-07T05:00:00Z')), Date.parse('2026-03-08T05:00:00Z'));
+  assert.equal(ranges.nextDeviceDayBoundary(source, Date.parse('2026-03-08T05:00:00Z')), Date.parse('2026-03-09T04:00:00Z'));
+  assert.equal(ranges.nextDeviceDayBoundary(source, Date.parse('2026-11-01T04:00:00Z')), Date.parse('2026-11-02T05:00:00Z'));
+});
+
 test('custom period tabs keep a unique supported order or fall back to the legacy layout', () => {
   assert.deepEqual(ranges.normalizePeriodTabOrder(undefined), []);
   assert.deepEqual(ranges.normalizePeriodTabOrder(['today', 'today', 'month', 'invalid']), []);

@@ -3828,6 +3828,7 @@ test('Dashboard discards synced Yesterday after the calendar changes without a S
   let reads = 0;
   const context = vm.createContext({
     Date: Clock, state: { stats, history, periodKey: 'yesterday', settings: {} },
+    isSyncedStatsContext: () => true,
     fixedPeriodRangesApi: { ...ranges, localDayKey: value => new Date(value).toISOString().slice(0, 10) },
     sessionTitleDisplayApi: null, sessionActivityProjectionApi: null, allTimeSessionsApi: null,
     window: { tokenMonitor: { getSyncedFixedPeriod: async () => { reads++; return { status: 'unavailable' }; } } }
@@ -3849,6 +3850,20 @@ test('Dashboard discards synced Yesterday after the calendar changes without a S
   context.revalidateSyncedPeriodOnRender();
   await new Promise(setImmediate);
   assert.equal(reads, 1);
+
+  // A different request can rebuild Stats and remove the outdated entry before render.
+  now = boundary - 1000;
+  context.revalidateSyncedPeriodOnRender();
+  await new Promise(setImmediate);
+  reads = 0;
+  now = boundary + 1000;
+  context.revalidateSyncedPeriodOnRender();
+  await new Promise(setImmediate);
+  assert.equal(reads, 1, 'calendar transition triggers a replacement read even without an attached entry');
+
+  delete stats.fixedRangeRevisions;
+  now = boundary - 1000;
+  assert.equal(context.revalidateSyncedPeriodOnRender(), boundary, 'History-only periods still have a deadline');
 });
 
 test('Dashboard repaints when the displayed accounting period expires', () => {

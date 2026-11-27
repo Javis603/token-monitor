@@ -3396,8 +3396,7 @@ function isSyncedSessionPeriodKey(periodKey) {
   return periodKey === 'today' || periodKey === 'month' || periodKey === 'allTime' || isSyncedDerivedPeriod(periodKey);
 }
 
-function syncedPeriodCalendarKey(stats, periodKey) {
-  const now = Date.now();
+function syncedPeriodCalendarKey(stats, periodKey, now = Date.now()) {
   const devices = (stats.devices || []).map(device => [
     String(device.deviceId || device.id || ''),
     fixedPeriodRangesApi.deviceDayState(device, { now })?.currentKey
@@ -3455,13 +3454,23 @@ function isSyncedSessionPagesLoaded(stats = state.stats, periodKey = state.perio
   return Boolean(key && entry?.key === key && (!entry.derived || entry.detailsAvailable));
 }
 
+let renderedSyncedCalendar = null;
+
 function revalidateSyncedPeriodOnRender() {
   const periodKey = state.periodKey;
   const stats = latestBaseStats;
-  if (!stats || !isSyncedDerivedPeriod(periodKey) || !syncedSessionPagesKeyFor(stats, periodKey)) return 0;
+  if (!isSyncedDerivedPeriod(periodKey) || !isSyncedStatsContext(stats)) {
+    renderedSyncedCalendar = null;
+    return 0;
+  }
   const now = Date.now();
+  const calendarKey = stats ? syncedPeriodCalendarKey(stats, periodKey, now) : '';
+  const source = stats?.snapshot?.source;
+  const previous = renderedSyncedCalendar;
+  renderedSyncedCalendar = { periodKey, source, calendarKey };
   const entry = syncedSessionPagesByPeriod.get(periodKey);
-  if (entry?.derived && entry.calendarKey !== syncedPeriodCalendarKey(stats, periodKey)) {
+  const calendarChanged = previous?.periodKey === periodKey && previous.source === source && previous.calendarKey !== calendarKey;
+  if (stats && (calendarChanged || (entry?.derived && entry.calendarKey !== calendarKey))) {
     const base = allTimeSessions ? allTimeSessions.attach(stats) : stats;
     state.stats = applyLocalSessionActivity(attachSyncedSessionPages(base));
     if (state.drawer?.kind === 'session' || state.drawer?.kind === 'workspace') closeDrawer({ restoreFocus: false });
@@ -3471,8 +3480,9 @@ function revalidateSyncedPeriodOnRender() {
   const midnight = new Date(now);
   midnight.setHours(24, 0, 0, 0);
   let deadline = midnight.getTime();
-  for (const device of stats.devices || []) {
-    const endsAt = Date.parse(device.periodWindows?.today?.endsAt || '');
+  const devices = fixedPeriodRangesApi.joinDeviceHistorySources(state.history?.deviceHistories, stats?.devices);
+  for (const device of devices) {
+    const endsAt = fixedPeriodRangesApi.nextDeviceDayBoundary(device, now);
     if (endsAt > now && endsAt < deadline) deadline = endsAt;
   }
   return deadline;
@@ -3666,10 +3676,10 @@ function ensureSyncedSessionPages(targetPeriodKey = state.periodKey) {
   if (!key || !revisionsKey || !snapshot) return;
   const existing = syncedSessionPagesByPeriod.get(periodKey);
   if (existing?.key === key && (!derived || existing.detailsAvailable)) return;
-  const pending = syncedSessionPagesRequests.get(periodKey);
-  if (pending && (derived || pending.key === key)) return;
-  const request = { key };
   const calendarKey = derived ? syncedPeriodCalendarKey(state.stats, periodKey) : '';
+  const pending = syncedSessionPagesRequests.get(periodKey);
+  if (pending && (pending.key === key || (derived && pending.calendarKey === calendarKey))) return;
+  const request = { key, calendarKey };
   syncedSessionPagesRequests.set(periodKey, request);
   void Promise.resolve()
     .then(() => window.tokenMonitor.getSyncedFixedPeriod(snapshot.id, snapshot.source, periodKey))
