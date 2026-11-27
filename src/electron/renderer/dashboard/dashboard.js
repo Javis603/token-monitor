@@ -2413,7 +2413,7 @@ function layoutTopologyLinks(graph) {
   }
 }
 
-function renderTopology(overview) {
+function renderTopology(overview, revealed = false) {
   if (!els.topology) return;
   const graph = overview?.topology;
   if (!graph || !graph.devices?.length) {
@@ -2532,7 +2532,7 @@ function renderTopology(overview) {
 
   if (changed) applySwatchColors(els.topology);
   const canvas = els.topology.querySelector('.dash-topo-canvas');
-  if (changed && canvas && !prefersReducedMotion()) syncTopologyAnimationClock(canvas);
+  if ((changed || revealed) && canvas && !prefersReducedMotion()) syncTopologyAnimationClock(canvas);
   if (canvas && canvas !== existingCanvas && typeof ResizeObserver === 'function') {
     topologyResizeObserver?.disconnect();
     topologyResizeObserver = new ResizeObserver(() => {
@@ -2682,6 +2682,7 @@ function setHeatmapMarkup(markup) {
 
 function renderActivity(overview) {
   const isFlow = state.stageView === 'flow';
+  const flowRevealed = isFlow && (lastRenderedTab === 'trends' || Boolean(els.topology?.classList.contains('hidden')));
   els.activityCol?.setAttribute('data-stage', state.stageView);
   els.topology?.classList.toggle('hidden', !isFlow);
   els.heatmapMetricControl?.classList.toggle('hidden', isFlow);
@@ -2698,7 +2699,7 @@ function renderActivity(overview) {
     els.skylineStage?.classList.add('hidden');
     els.heatFooter?.classList.add('hidden');
     renderHeatLegend(false);
-    renderTopology(overview);
+    renderTopology(overview, flowRevealed);
   } else {
     state.heatmapView = state.stageView === '2d' ? '2d' : '3d';
     const scopedDailySource = state.selectedDeviceId === 'all'

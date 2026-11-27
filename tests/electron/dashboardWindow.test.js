@@ -4556,3 +4556,37 @@ test('Live Flow configures sync/stagger flowMode and applies workspace-gradient 
 
   assert.match(html, /<select id="dashFlowMode">[\s\S]*?<option value="sync"[^>]*>[\s\S]*?<option value="stagger"[^>]*>/);
 });
+
+test('returning to Live Flow requests clock sync even when its topology is retained', () => {
+  let hidden = true;
+  const reveals = [];
+  const context = {
+    state: { stageView: 'flow', settings: { dashboardShowVelocity: false, dashboardShowQuotas: false } },
+    lastRenderedTab: 'activity',
+    els: {
+      topology: { classList: {
+        contains: () => hidden,
+        toggle(_name, value) { hidden = value; }
+      } },
+      cards: { querySelectorAll: () => [], querySelector: () => null }
+    },
+    charts: { statsCards: () => [], statsCardsHtml: () => '' },
+    t: key => key,
+    heatmapMotionGeneration: 0,
+    renderHeatLegend() {},
+    balanceStatCards() {},
+    renderHero() {},
+    renderWorkPanel() {},
+    renderBreakdown() {},
+    renderTopology(_overview, revealed) {
+      assert.equal(hidden, false);
+      reveals.push(revealed);
+    }
+  };
+  const renderActivity = dashboardFunction('renderActivity', '\nfunction drawerStatGrid(', context);
+  renderActivity({});
+  renderActivity({});
+  context.lastRenderedTab = 'trends';
+  renderActivity({});
+  assert.deepEqual(reveals, [true, false, true]);
+});
