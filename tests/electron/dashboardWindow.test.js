@@ -3004,6 +3004,7 @@ test('dashboard Trends and device selector recover to All Devices when selected 
     withPreservedFocus(_el, _sel, _key, fn) { fn(); },
     rendererDom: { reconcileChildren(el, children) { el.innerHTML = children[0]; } },
     syncAllSegIndicators() {},
+    revalidateSyncedPeriodOnRender: () => 0,
     refreshAfterAccountingRollover() { boundaryRefreshes += 1; },
     prefersReducedMotion: () => true,
     refreshActiveHover() {},
@@ -3805,6 +3806,49 @@ test('Dashboard schedules a repaint for session expiry without throughput sample
   assert.equal(timer.delay, expected - now + 20);
   timer.callback();
   assert.equal(rendered, 1);
+});
+
+test('Dashboard discards synced Yesterday after the calendar changes without a Stats push', async () => {
+  const boundary = Date.parse('2026-11-27T00:00:00Z');
+  let now = boundary - 1000;
+  class Clock extends Date {
+    constructor(value = now) { super(value); }
+    static now() { return now; }
+    setHours(...args) { return this.setUTCHours(...args); }
+  }
+  const ranges = require('../../src/electron/renderer/fixedPeriodRanges');
+  const model = require('../../src/electron/renderer/dashboard/dashboardModel');
+  const stats = {
+    mode: 'sync', snapshot: { id: 1, source: 1 }, fixedRangeRevisions: { mac: 'rev' },
+    devices: [{ deviceId: 'mac', periodWindows: { timeZone: 'UTC', today: { key: '2026-11-26', endsAt: new Date(boundary).toISOString() } },
+      periods: { today: { totalTokens: 0 } } }], periods: { today: { totalTokens: 0 } }
+  };
+  const history = { fixedPeriods: { historyTransportAvailable: true }, deviceHistories: [{ deviceId: 'mac', historyAvailable: true,
+    history: { daily: [{ date: '2026-11-25', tokens: 100 }, { date: '2026-11-26', tokens: 0 }] } }] };
+  let reads = 0;
+  const context = vm.createContext({
+    Date: Clock, state: { stats, history, periodKey: 'yesterday', settings: {} },
+    fixedPeriodRangesApi: { ...ranges, localDayKey: value => new Date(value).toISOString().slice(0, 10) },
+    sessionTitleDisplayApi: null, sessionActivityProjectionApi: null, allTimeSessionsApi: null,
+    window: { tokenMonitor: { getSyncedFixedPeriod: async () => { reads++; return { status: 'unavailable' }; } } }
+  });
+  const js = read('src', 'electron', 'renderer', 'dashboard', 'dashboard.js');
+  vm.runInContext(js.slice(js.indexOf('let localSessionActivity = null;'), js.indexOf('\nfunction renderNow(')), context);
+  vm.runInContext(`latestBaseStats = state.stats;
+    const period = {totalTokens:100};
+    syncedSessionPagesByPeriod.set('yesterday', {derived:true, period, devices:[{deviceId:'mac', period}],
+      calendarKey:syncedPeriodCalendarKey(state.stats, 'yesterday')});
+    state.stats = attachSyncedSessionPages(state.stats);`, context);
+  const tokens = () => model.buildScopedOverview({ stats: context.state.stats, history, periodKey: 'yesterday', nowMs: now }).hero.tokens;
+  assert.equal(tokens(), 100);
+  assert.equal(context.revalidateSyncedPeriodOnRender(), boundary);
+  now = boundary + 1000;
+  context.revalidateSyncedPeriodOnRender();
+  assert.equal(context.state.stats, stats);
+  assert.equal(tokens(), 0);
+  context.revalidateSyncedPeriodOnRender();
+  await new Promise(setImmediate);
+  assert.equal(reads, 1);
 });
 
 test('Dashboard repaints when the displayed accounting period expires', () => {

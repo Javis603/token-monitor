@@ -3397,11 +3397,13 @@ function isSyncedSessionPeriodKey(periodKey) {
 }
 
 function syncedPeriodCalendarKey(stats, periodKey) {
+  const now = Date.now();
   const devices = (stats.devices || []).map(device => [
     String(device.deviceId || device.id || ''),
-    fixedPeriodRangesApi.deviceDayState(device)?.currentKey || device.periodWindows?.today?.key || ''
+    fixedPeriodRangesApi.deviceDayState(device, { now })?.currentKey
+      || (Date.parse(device.periodWindows?.today?.endsAt || '') <= now ? '' : device.periodWindows?.today?.key || '')
   ]);
-  return JSON.stringify([stats.snapshot?.source, periodKey, fixedPeriodRangesApi.localDayKey(), devices.sort()]);
+  return JSON.stringify([stats.snapshot?.source, periodKey, fixedPeriodRangesApi.localDayKey(now), devices.sort()]);
 }
 
 function syncedSessionPagesRevisionsKey(stats, periodKey) {
@@ -3451,6 +3453,29 @@ function isSyncedSessionPagesLoaded(stats = state.stats, periodKey = state.perio
   const key = syncedSessionPagesKeyFor(stats, periodKey);
   const entry = syncedSessionPagesByPeriod.get(periodKey);
   return Boolean(key && entry?.key === key && (!entry.derived || entry.detailsAvailable));
+}
+
+function revalidateSyncedPeriodOnRender() {
+  const periodKey = state.periodKey;
+  const stats = latestBaseStats;
+  if (!stats || !isSyncedDerivedPeriod(periodKey) || !syncedSessionPagesKeyFor(stats, periodKey)) return 0;
+  const now = Date.now();
+  const entry = syncedSessionPagesByPeriod.get(periodKey);
+  if (entry?.derived && entry.calendarKey !== syncedPeriodCalendarKey(stats, periodKey)) {
+    const base = allTimeSessions ? allTimeSessions.attach(stats) : stats;
+    state.stats = applyLocalSessionActivity(attachSyncedSessionPages(base));
+    if (state.drawer?.kind === 'session' || state.drawer?.kind === 'workspace') closeDrawer({ restoreFocus: false });
+    ensureSyncedSessionPages();
+  }
+
+  const midnight = new Date(now);
+  midnight.setHours(24, 0, 0, 0);
+  let deadline = midnight.getTime();
+  for (const device of stats.devices || []) {
+    const endsAt = Date.parse(device.periodWindows?.today?.endsAt || '');
+    if (endsAt > now && endsAt < deadline) deadline = endsAt;
+  }
+  return deadline;
 }
 
 function resolvedSyncedPageSession(stats, periodKey, sessionKey) {
@@ -3671,7 +3696,8 @@ function ensureSyncedSessionPages(targetPeriodKey = state.periodKey) {
           detailsAvailable: result.detailsAvailable === true,
           sessions: result.period.sessions || {}
         });
-        const attached = attachSyncedSessionPages(allTimeSessions ? allTimeSessions.attach(state.stats) : state.stats);
+        const base = latestBaseStats || state.stats;
+        const attached = attachSyncedSessionPages(allTimeSessions ? allTimeSessions.attach(base) : base);
         state.stats = applyLocalSessionActivity(attached);
         state.motion = 'update';
         render();
@@ -3683,7 +3709,8 @@ function ensureSyncedSessionPages(targetPeriodKey = state.periodKey) {
           snapshot: { id: snapshot.id, source: snapshot.source },
           sessions: result.period.sessions
         });
-        const attached = attachSyncedSessionPages(allTimeSessions ? allTimeSessions.attach(state.stats) : state.stats);
+        const base = latestBaseStats || state.stats;
+        const attached = attachSyncedSessionPages(allTimeSessions ? allTimeSessions.attach(base) : base);
         state.stats = applyLocalSessionActivity(attached);
         state.motion = 'update';
         render();
@@ -3708,7 +3735,7 @@ const allTimeSessions = allTimeSessionsApi?.createAllTimeSessionsLoader
       projectionKey: () => state.settings?.sessionTitlesEnabled !== false,
       onLoaded: () => {
         if (!state.stats) return;
-        const attached = allTimeSessions.attach(state.stats);
+        const attached = allTimeSessions.attach(latestBaseStats || state.stats);
         state.stats = applyLocalSessionActivity(attachSyncedSessionPages(attached));
         if (allTimeSessions.current()) syncOpenSessionDrawer('allTime', state.stats.periods?.allTime?.sessions, state.stats.snapshot);
         state.motion = 'update';
@@ -3842,6 +3869,7 @@ function applyIncomingStats(nextStats, { expectedPushSeq = null, fromPush = fals
 }
 
 function renderNow() {
+  const nextFixedPeriodExpiryAt = revalidateSyncedPeriodOnRender();
   const sample = deviceRateTracker?.getSample?.() || null;
   const deviceRateSamples = {};
   const rateSamplesByDevice = {};
@@ -3873,6 +3901,7 @@ function renderNow() {
       grokBotCount: (count) => t('sessions.grokBotCount', { count })
     }
   }) || null;
+  if (overview) overview.nextFixedPeriodExpiryAt = nextFixedPeriodExpiryAt;
   const justExpired = overview?.fleet?.accountingExpired && !state.overview?.fleet?.accountingExpired;
   state.overview = overview;
   if (justExpired) void refreshAfterAccountingRollover();
@@ -4209,6 +4238,7 @@ function scheduleRateExpiry() {
     if (Number.isFinite(ts) && ts > 0) expiries.push(ts);
   };
   collect(state.overview?.nextAccountingExpiryAt);
+  collect(state.overview?.nextFixedPeriodExpiryAt);
   collect(deviceRateTracker?.nextExpiryAt?.());
   collect(rateHistory?.nextExpiryAt?.());
   if (typeof sessionLiveApi !== 'undefined' && sessionLiveApi?.nextSessionStatusChangeAt) {
