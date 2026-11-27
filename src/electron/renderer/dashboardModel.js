@@ -57,21 +57,23 @@
   }
 
   /** @param {any} device @param {string} periodKey @param {number} nowMs */
-  function deviceProjectRollup(device, periodKey, nowMs) {
+  function isDevicePeriodExpired(device, periodKey, nowMs) {
+    if (!device || (periodKey !== 'today' && periodKey !== 'month')) return false;
+    // Match aggregateDevices' expiry rules for both stamped and legacy snapshots.
+    const endsAt = Date.parse(device.periodWindows?.[periodKey]?.endsAt || '');
+    if (endsAt > 0) return nowMs >= endsAt;
+    const recordedAt = new Date(device.updatedAt || device.receivedAt || '');
+    if (!Number.isFinite(recordedAt.getTime())) return false;
+    const length = periodKey === 'today' ? 10 : 7;
+    return recordedAt.toISOString().slice(0, length) !== new Date(nowMs).toISOString().slice(0, length);
+  }
+
+  /** @param {any} device @param {string} periodKey */
+  function deviceProjectRollup(device, periodKey) {
     const projects = device?.periods?.[periodKey]?.projects;
     if (!projects || Object.keys(projects).length === 0) return undefined;
     if (n(device.periodProjectsOmitted?.[periodKey]) > 0) return undefined;
     if (periodKey === 'allTime' && (device.allTimeProjectsOmitted || device.allTimeProjectsIncomplete)) return undefined;
-    if (periodKey === 'today' || periodKey === 'month') {
-      // Match aggregateDevices' expiry rules for both stamped and legacy snapshots.
-      const endsAt = Date.parse(device.periodWindows?.[periodKey]?.endsAt || '');
-      if (endsAt > 0) return nowMs < endsAt ? projects : undefined;
-      const recordedAt = new Date(device.updatedAt || device.receivedAt || '');
-      if (Number.isFinite(recordedAt.getTime())) {
-        const length = periodKey === 'today' ? 10 : 7;
-        if (recordedAt.toISOString().slice(0, length) !== new Date(nowMs).toISOString().slice(0, length)) return undefined;
-      }
-    }
     return projects;
   }
 
@@ -999,7 +1001,13 @@
       || (options.periodData && options.periodData.derivedFromHistory !== true ? options.periodData : null);
     const localId = String(stats?.localDeviceId || options.settings?.deviceId || '').trim();
     const includeNative = selectedDeviceId === 'all' || (Boolean(localId) && selectedDeviceId === localId);
-    const collectedSessions = collectPeriodSessionEntries(stats, periodKey, aggregatePeriod, nowMs, { includeNative });
+    const selectedDevice = selectedDeviceId !== 'all' && (stats?.devices || []).find((/** @type {any} */ item) =>
+      String(item.deviceId || item.id || '').trim() === selectedDeviceId);
+    const expired = isDevicePeriodExpired(selectedDevice, periodKey, nowMs);
+    // Keep Today's live carryovers from prior periods, which contribute zero Today tokens.
+    const collectedSessions = collectPeriodSessionEntries(stats, periodKey, expired ? null : aggregatePeriod, nowMs, {
+      includeNative: includeNative && !expired
+    });
 
     /** @type {Map<string, { name: string, deviceKind: string, isLocal: boolean }>} */
     const deviceLookup = new Map();
@@ -1361,8 +1369,9 @@
     let scopedRollupDevice = null;
     if (selectedDeviceId !== 'all') {
       const device = (stats?.devices || []).find((/** @type {any} */ item) =>
-        String(item.deviceId || item.id || '') === selectedDeviceId);
-      const deviceProjects = deviceProjectRollup(device, periodKey, nowMs);
+        String(item.deviceId || item.id || '').trim() === selectedDeviceId);
+      if (isDevicePeriodExpired(device, periodKey, nowMs)) return [];
+      const deviceProjects = deviceProjectRollup(device, periodKey);
       if (deviceProjects) scopedRollupDevice = device;
       const filteredSessions = Object.fromEntries(
         Object.entries(aggregatePeriod.sessions || {})

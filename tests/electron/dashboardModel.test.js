@@ -188,6 +188,43 @@ test('selected-device workspace rollups respect both stamped and legacy native p
   assert.deepEqual(workspaces('month').map(row => [row.name, row.tokens]), [['Repo', 100]]);
 });
 
+test('selected-device workspaces and Flow omit stale sessions when a displayed snapshot rolls over', () => {
+  const endsAt = '2026-12-01T00:00:00Z';
+  const boundary = Date.parse(endsAt);
+  const updatedAt = new Date(boundary - 1000).toISOString();
+  const period = {
+    totalTokens: 100,
+    projects: { repo: { label: 'Repo', tokens: 100 } },
+    sessions: { 'codex:one': {
+      client: 'codex', sessionId: 'one', projectLabel: 'Repo', totalTokens: 100,
+      lastUsedAt: updatedAt, turnEnded: true, sourceDevice: { deviceId: 'a' }
+    } }
+  };
+  const periods = { today: period, month: period };
+  const stats = {
+    mode: 'sync', periods,
+    devices: [
+      { deviceId: 'a', updatedAt, periods, periodWindows: { today: { endsAt }, month: { endsAt } } },
+      { deviceId: 'b' }
+    ]
+  };
+  for (const periodKey of ['today', 'month']) {
+    const options = { stats, selectedDeviceId: 'a', periodKey };
+    const before = model.buildScopedOverview({ ...options, nowMs: boundary - 1 });
+    assert.equal(before.workspaces[0]?.tokens, 100);
+    assert.equal(before.topology.hubs[0]?.tokens, 100);
+    const after = model.buildScopedOverview({ ...options, nowMs: boundary });
+    assert.deepEqual(after.workspaces, []);
+    assert.deepEqual(after.topology.hubs, []);
+    assert.deepEqual(after.sessions, []);
+  }
+  period.sessions['codex:one'].turnEnded = false;
+  const running = model.buildScopedOverview({ stats, selectedDeviceId: 'a', periodKey: 'today', nowMs: boundary });
+  assert.equal(running.sessions[0]?.resumedFromPriorPeriod, true);
+  assert.equal(running.sessions[0]?.totalTokens, 0);
+  assert.equal(running.topology.hubs[0]?.tokens, 0);
+});
+
 test('computeTokenAnatomy fails closed on unclassifiedTokens and computes cacheHitRate accurately', () => {
   const exact = model.computeTokenAnatomy({
     totalTokens: 1000,
