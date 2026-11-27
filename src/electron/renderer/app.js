@@ -18452,7 +18452,7 @@ function trayDataUrlForMode(mode, size = 44, colors, options = {}) {
 
 async function maybeUpdateBarsIcon(options = {}) {
   if (options.refreshComposers !== false && isSettingsSurfaceVisible()) {
-    refreshTrayComposers();
+    refreshTrayComposers(options);
     if (edgeDockAvailable() && state.settings?.edgeDockEnabled === true) edgeDockComposer?.render();
     if (state.appInfo?.platform === 'darwin' && state.settings?.notchEnabled === true) notchItemsComposer?.render();
   } else {
@@ -18781,7 +18781,7 @@ function syncCustomTrayClockTimer() {
   }
 }
 
-function refreshTrayComposers() {
+function refreshTrayComposers(options) {
   if (isSettingsSurfaceVisible()) syncTrayProviderIconDemand();
   const surfaces = [
     { id: 'tray', root: els.trayComposer, visible: true },
@@ -18793,7 +18793,7 @@ function refreshTrayComposers() {
     trayComposers,
     createTrayComposer
   );
-  Object.values(trayComposers).forEach((composer) => composer?.refresh());
+  Object.values(trayComposers).forEach((composer) => composer?.refresh(options));
   syncCustomTrayClockTimer();
 }
 
@@ -18943,7 +18943,7 @@ async function deliverTrayProviderIcons(showBadge = state.settings?.showTrayProv
   for (const id of [...Object.keys(icons), ...failed]) trayProviderIconsRequested.add(id);
   trayProviderIconsLoading = new Set();
   // Provider images may unlock a richer bars icon now that they're cached.
-  maybeUpdateBarsIcon();
+  maybeUpdateBarsIcon({ refreshOpenPreview: true });
   renderFloatingBubbleContent();
 }
 

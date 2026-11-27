@@ -605,6 +605,46 @@ test('a custom surface keeps the editor affordances instead of a preview', () =>
   assert.equal(strip.children[0].children[0].textContent, 'Add your first item');
 });
 
+test('delivery refreshes the open item preview without replacing the editor', () => {
+  const source = fs.readFileSync(path.join(__dirname, '../../src/electron/renderer/trayComposer.js'), 'utf8');
+  const preview = source.slice(source.indexOf('function reflectItemPreview('), source.indexOf('function updateTextItem('));
+  const refreshSource = source.slice(source.indexOf('function refresh('), source.indexOf('function destroy('));
+  const stripImage = { src: 'fallback' };
+  const editorImage = { src: 'fallback' };
+  const item = { id: 'selected' };
+  const refresh = vm.runInNewContext(`${preview}\n${refreshSource}\nrefresh`, {
+    root: { querySelector: () => stripImage },
+    itemPopover: { querySelector: () => editorImage },
+    itemPopoverId: item.id,
+    drag: null,
+    addPopover: null,
+    CSS: { escape: (value) => value },
+    layout: () => ({ items: [item] }),
+    renderItem: () => 'loaded-provider',
+    render: () => assert.fail('open editor must not be replaced')
+  });
+
+  refresh();
+  assert.equal(editorImage.src, 'fallback');
+  refresh({ refreshOpenPreview: true });
+  assert.equal(editorImage.src, 'loaded-provider');
+  assert.equal(stripImage.src, 'loaded-provider');
+});
+
+test('the picker uses theme ink for an unloaded built-in SVG mark', () => {
+  const source = fs.readFileSync(path.join(__dirname, '../../src/electron/renderer/trayComposer.js'), 'utf8');
+  const helpers = source.slice(source.indexOf('function image('), source.indexOf('function sourceForItem('));
+  const pickerIcon = vm.runInNewContext(`${helpers}\npickerIcon`, {
+    document: { createElement: fakeElement },
+    Image: function FakeImage() { return fakeElement('img'); }
+  });
+  const sourcePath = '../../../assets/icons/hermes-agent.svg';
+  const mark = pickerIcon(sourcePath);
+  assert.equal(mark.style.backgroundColor, 'var(--text)');
+  assert.equal(mark.style.mask, `url("${sourcePath}") center / contain no-repeat`);
+  assert.equal(pickerIcon('data:image/png;base64,MARK').src, 'data:image/png;base64,MARK');
+});
+
 // A capture listener on `window` sees every element's blur, not just the
 // window's. The press moves focus off whatever was clicked last, so the chip
 // drag died on its own first pointerdown whenever a control still held focus.

@@ -206,7 +206,7 @@ test('tray icon demand stays empty without data or layouts', () => {
 
 function trayMarkDeliveryFixture(loadImage) {
   const app = fs.readFileSync(path.resolve(__dirname, '..', '..', 'src', 'electron', 'renderer', 'app.js'), 'utf8');
-  const refreshStart = app.indexOf('function refreshTrayComposers() {');
+  const refreshStart = app.indexOf('function refreshTrayComposers(');
   const refreshEnd = app.indexOf('\nfunction loadImage(', refreshStart);
   const start = app.indexOf('function trayProviderIconDemand() {');
   const end = app.indexOf('\nfunction setAccountGroupExpanded(', start);
