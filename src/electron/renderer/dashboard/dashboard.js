@@ -3690,6 +3690,7 @@ function ensureSyncedSessionPages(targetPeriodKey = state.periodKey) {
   syncedSessionPagesRequests.set(periodKey, request);
   void Promise.resolve()
     .then(() => window.tokenMonitor.getSyncedFixedPeriod(snapshot.id, snapshot.source, periodKey))
+    .catch(() => null)
     .then((result) => {
       if (syncedSessionPagesRequests.get(periodKey) !== request) return;
       syncedSessionPagesRequests.delete(periodKey);
@@ -3733,8 +3734,6 @@ function ensureSyncedSessionPages(targetPeriodKey = state.periodKey) {
         render();
         syncOpenSessionDrawer(periodKey, result.period.sessions, snapshot);
       }
-    }, () => {
-      if (syncedSessionPagesRequests.get(periodKey) === request) syncedSessionPagesRequests.delete(periodKey);
     });
 }
 
@@ -4101,17 +4100,16 @@ function positionTooltip(evOrAnchor) {
 
 function showBarTooltip(bar, ev) {
   const formatVal = typeof state !== 'undefined' && state?.trendMetric === 'cost' ? formatCost : formatCompact;
-  const esc = (v) => String(v ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
   if (bar.hasRecord === false) {
-    els.tooltip.innerHTML = `<div class="tt-head">${esc(shortDate(bar.label))} · ${esc(t('dashboard.noRecord'))}</div>`;
+    els.tooltip.innerHTML = `<div class="tt-head">${escapeHtml(shortDate(bar.label))} · ${escapeHtml(t('dashboard.noRecord'))}</div>`;
     positionTooltip(ev);
     return;
   }
   const segs = bar.segments.slice().reverse();
   const rows = segs.map((s) =>
-    `<div class="tt-row"><span class="tt-dot" data-c="${esc(colorFor(s.key))}"></span><span class="tt-name">${esc(s.key)}</span><span class="tt-val">${esc(formatVal(s.value))}</span></div>`
+    `<div class="tt-row"><span class="tt-dot" data-c="${escapeHtml(colorFor(s.key))}"></span><span class="tt-name">${escapeHtml(s.key)}</span><span class="tt-val">${escapeHtml(formatVal(s.value))}</span></div>`
   ).join('');
-  els.tooltip.innerHTML = `<div class="tt-head">${esc(shortDate(bar.label))} · ${esc(formatVal(bar.total))}</div>${rows}`;
+  els.tooltip.innerHTML = `<div class="tt-head">${escapeHtml(shortDate(bar.label))} · ${escapeHtml(formatVal(bar.total))}</div>${rows}`;
   applySwatchColors(els.tooltip);
   positionTooltip(ev);
 }
@@ -4544,12 +4542,9 @@ async function boot() {
       glassRenderingApi.applyNativeMaterialClasses(nativeMaterialState);
     }
   } catch (_) {}
-  let settings = {};
-  try { settings = await window.tokenMonitor.getSettings(); } catch (_) {}
-  try {
-    const streamStatus = await window.tokenMonitor.getStreamStatus?.();
-    if (streamStatus?.mode) state.statsMode = streamStatus.mode;
-  } catch (_) {}
+  let initialSettings;
+  try { initialSettings = await window.tokenMonitor.getSettings(); } catch (_) {}
+  const settings = { ...initialSettings, ...state.settings };
   state.locale = i18n.resolveLocale(settings.locale || settings.language, navigator.languages);
   state.settings = settings;
   state.currency = settings.currency || 'USD';
@@ -4573,6 +4568,11 @@ async function boot() {
   syncDashboardSettings(settings);
   populatePeriodSelect();
   populateRangeSelect();
+  const streamSourceGeneration = statsSourceGeneration;
+  try {
+    const streamStatus = await window.tokenMonitor.getStreamStatus?.();
+    if (streamSourceGeneration === statsSourceGeneration && streamStatus?.mode) state.statsMode = streamStatus.mode;
+  } catch (_) {}
   render();
   document.fonts?.ready?.then?.(() => syncAllSegIndicators({ animate: false })).catch(() => {});
   await refresh();

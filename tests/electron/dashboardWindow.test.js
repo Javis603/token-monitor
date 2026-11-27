@@ -410,6 +410,7 @@ test('Dashboard tooltips distinguish unrecorded days and buckets from recorded z
     shortDate: () => '10/24',
     longDate: () => '10/24',
     formatCompact: (value) => String(value),
+    escapeHtml: String,
     colorFor: () => '#fff',
     applySwatchColors: () => {},
     positionTooltip: () => {}
@@ -3812,6 +3813,77 @@ test('Dashboard schedules a repaint for session expiry without throughput sample
   assert.equal(timer.delay, expected - now + 20);
   timer.callback();
   assert.equal(rendered, 1);
+});
+
+test('Dashboard preserves pushed settings during both startup reads', async () => {
+  let resolveSettings;
+  let resolveStream;
+  const state = { settings: {} };
+  const boot = dashboardFunction('boot', '\nwindow.tokenMonitor.onSettingsPush', {
+    state,
+    document: {},
+    navigator: { languages: ['en'] },
+    i18n: { resolveLocale: () => 'en' },
+    compactTokenApi: { normalizeCompactTokenUnits: value => value },
+    nativeMaterialRevision: 0,
+    statsSourceGeneration: 0,
+    dashboardReady: false,
+    applyAppearance() {},
+    applyTranslations() {},
+    populateDashboardSettings() {},
+    syncDashboardSettings() {},
+    populatePeriodSelect() {},
+    populateRangeSelect() {},
+    render() {},
+    refresh() {},
+    window: { tokenMonitor: {
+      getSettings: () => new Promise(resolve => { resolveSettings = resolve; }),
+      getStreamStatus: () => new Promise(resolve => { resolveStream = resolve; }),
+      dashboard: { ready() {} }
+    } }
+  });
+  const started = boot();
+  await Promise.resolve();
+  state.settings = { dashboardStageView: '3d' };
+  resolveSettings({ dashboardStageView: 'flow', currency: 'HKD' });
+  await new Promise(setImmediate);
+  assert.equal(state.stageView, '3d');
+  assert.equal(state.currency, 'HKD');
+
+  state.settings = { ...state.settings, dashboardStageView: '2d' };
+  state.stageView = '2d';
+  resolveStream({ mode: 'sync' });
+  await started;
+  assert.equal(state.stageView, '2d');
+  assert.equal(state.settings.dashboardStageView, '2d');
+});
+
+test('Dashboard replaces a rejected fixed-period read only if its selected revision advanced', async () => {
+  const reads = [];
+  const state = { periodKey: 'week', stats: { snapshot: { id: 1, source: 1 } } };
+  const ensure = dashboardFunction('ensureSyncedSessionPages', '\nconst allTimeSessions =', {
+    state,
+    syncedSessionPagesKeyFor: stats => String(stats.snapshot.id),
+    syncedSessionPagesRevisionsKey: stats => String(stats.snapshot.id),
+    syncedPeriodCalendarKey: () => 'same-week',
+    isSyncedDerivedPeriod: () => true,
+    syncedSessionPagesByPeriod: new Map(),
+    syncedSessionPagesRequests: new Map(),
+    window: { tokenMonitor: {
+      getSyncedFixedPeriod: id => new Promise((_, reject) => reads.push({ id, reject }))
+    } }
+  });
+  ensure();
+  await new Promise(setImmediate);
+  state.stats = { snapshot: { id: 2, source: 1 } };
+  ensure();
+  assert.deepEqual(reads.map(read => read.id), [1]);
+  reads[0].reject(new Error('Old revision failed'));
+  await new Promise(setImmediate);
+  assert.deepEqual(reads.map(read => read.id), [1, 2]);
+  reads[1].reject(new Error('Current revision failed'));
+  await new Promise(setImmediate);
+  assert.deepEqual(reads.map(read => read.id), [1, 2]);
 });
 
 test('Dashboard discards synced Yesterday at device midnight without a Stats push', async () => {
