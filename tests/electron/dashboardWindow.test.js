@@ -2914,6 +2914,7 @@ test('dashboard Trends and device selector recover to All Devices when selected 
   const deviceTrigger = makeEl();
   const chartEl = makeEl();
   const dailyLedgerEl = makeEl();
+  let boundaryRefreshes = 0;
 
   const context = {
     state: {
@@ -3001,6 +3002,7 @@ test('dashboard Trends and device selector recover to All Devices when selected 
     withPreservedFocus(_el, _sel, _key, fn) { fn(); },
     rendererDom: { reconcileChildren(el, children) { el.innerHTML = children[0]; } },
     syncAllSegIndicators() {},
+    refreshAfterAccountingRollover() { boundaryRefreshes += 1; },
     prefersReducedMotion: () => true,
     refreshActiveHover() {},
     scheduleRateExpiry() {},
@@ -3059,6 +3061,19 @@ test('dashboard Trends and device selector recover to All Devices when selected 
   assert.doesNotMatch(dailyLedgerEl.innerHTML, />300</);
   const aggregateBar = context.state.chartModel?.bars?.find((b) => b.label === today);
   assert.equal(aggregateBar?.total, 900);
+
+  const now = Date.now();
+  const expiredStats = mkStats(['dev-a', 'dev-b']);
+  expiredStats.updatedAt = new Date(now - 2000).toISOString();
+  expiredStats.devices[0].periodWindows = { today: { endsAt: new Date(now - 1000).toISOString() } };
+  expiredStats.devices[1].periodWindows = { today: { endsAt: new Date(now + 60_000).toISOString() } };
+  context.state.stats = expiredStats;
+  context.renderNow();
+  context.renderNow();
+  assert.equal(boundaryRefreshes, 1, 'the first repaint queues refresh even if it beat the timer');
+  assert.match(deviceMenu.innerHTML, /dash-device-menu-val">—<\/span><span class="dash-device-menu-share">—/);
+  assert.match(deviceMenu.innerHTML, /dash-device-menu-val">600<\/span><span class="dash-device-menu-share">—/);
+  assert.doesNotMatch(deviceMenu.innerHTML, /100%/);
 });
 
 test('dashboard open group drawer revalidates member ownership on click and preserves redacted Back title across delayed detail responses', async () => {
@@ -3790,10 +3805,9 @@ test('Dashboard schedules a repaint for session expiry without throughput sample
   assert.equal(rendered, 1);
 });
 
-test('Dashboard repaints and refreshes once when the displayed accounting period expires', () => {
+test('Dashboard repaints when the displayed accounting period expires', () => {
   let now = 1_000;
   let timer;
-  let refreshes = 0;
   let rendered = 0;
   const state = { overview: { nextAccountingExpiryAt: 2_000 } };
   const schedule = dashboardFunction('scheduleRateExpiry', '\nfunction observeStatsRates', {
@@ -3801,21 +3815,45 @@ test('Dashboard repaints and refreshes once when the displayed accounting period
     document: { hidden: false }, Date: { now: () => now },
     deviceRateTracker: null, rateHistory: null, deviceRateTrackers: new Map(), rateExpiryTimer: null,
     setTimeout(callback, delay) { timer = { callback, delay }; },
-    render() { rendered += 1; },
-    scheduleDashboardRefresh() { refreshes += 1; }
+    render() { rendered += 1; }
   });
   schedule();
   assert.equal(timer.delay, 1_020);
   now = 2_020;
   timer.callback();
   assert.equal(rendered, 1);
-  assert.equal(refreshes, 1);
   timer = null;
   schedule();
   assert.equal(timer, null);
   state.overview.nextAccountingExpiryAt = now + 31 * 86_400_000;
   schedule();
   assert.equal(timer.delay, 2_147_483_647);
+});
+
+test('Dashboard queues a rollover refresh after pre-boundary Stats and History requests settle', async () => {
+  let finishStats;
+  let finishHistory;
+  let reads = 0;
+  const context = {
+    state: { overview: { fleet: { accountingExpired: true } } },
+    document: { hidden: false },
+    silentStatsRequest: { promise: new Promise(resolve => { finishStats = resolve; }) },
+    pullDashboardData() {
+      reads += 1;
+      return reads === 1 ? new Promise(resolve => { finishHistory = resolve; }) : Promise.resolve();
+    }
+  };
+  const js = read('src', 'electron', 'renderer', 'dashboard.js');
+  vm.runInNewContext(js.slice(js.indexOf('let refreshRunning = false;'), js.indexOf('\nasync function boot()')), context);
+  const oldRefresh = context.refresh();
+  const boundaryRefresh = context.refreshAfterAccountingRollover();
+  assert.equal(reads, 1);
+  finishStats();
+  await boundaryRefresh;
+  assert.equal(reads, 1, 'the new request is queued until the older refresh settles');
+  finishHistory();
+  await oldRefresh;
+  assert.equal(reads, 2);
 });
 
 

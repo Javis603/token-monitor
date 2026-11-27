@@ -2018,7 +2018,7 @@
         tokens: Math.max(0, n(m.tokens)),
         cost: Math.max(0, n(m.cost)),
         unpricedTokens: Math.max(0, n(m.unpricedTokens)),
-        share: Math.max(0, n(m.share)),
+        share: fleet.accountingExpired ? 0 : Math.max(0, n(m.share)),
         liveTokPerSec: Math.max(0, n(m.liveTokPerSec)),
         activeSessionCount: Math.max(0, n(m.activeSessionCount)),
         activeWorkspace: String(m.activeWorkspace || ''),
@@ -2537,7 +2537,8 @@
         weekStartsOn: settings.syncWeekStartsOn ?? 1
       })
       : null;
-    const fleet = buildFleetModel({
+    const freshness = aggregatePeriodFreshness(stats, periodKey, nowMs);
+    const fleet = { ...buildFleetModel({
       fixedHistorySnapshot,
       stats,
       history,
@@ -2546,12 +2547,11 @@
       settings,
       statsMode,
       nowMs
-    });
+    }), accountingExpired: freshness.expired };
 
     const activeMachine = fleet.isFleetMode && selectedDeviceId !== 'all'
       ? fleet.machines.find((m) => m.deviceId === selectedDeviceId) || null
       : null;
-    const freshness = aggregatePeriodFreshness(stats, periodKey, nowMs);
     const accountingExpired = !activeMachine && freshness.expired;
 
     const todayKey = fixedPeriodRanges.localDayKey(nowMs);

@@ -1225,8 +1225,8 @@ function renderDeviceMenu(fleet) {
   const allSelected = state.selectedDeviceId === 'all';
   const allItem = `<button type="button" class="dash-device-menu-item is-all${allSelected ? ' is-selected' : ''}" data-device="all" data-key="all" role="menuitemradio" aria-checked="${allSelected}">`
     + `<span class="dash-device-menu-meta"><span class="dash-device-menu-name">${escapeHtml(t('dashboard.fleet.all'))}</span><span class="dash-device-menu-sub">${escapeHtml(t('settings.sync.panel.onlineCount', { online: fleet.fleetTotals.onlineCount, total: machines.length }))}</span></span>`
-    + `<span class="dash-device-menu-val">${escapeHtml(formatCompact(fleet.fleetTotals.tokens))}</span>`
-    + `<span class="dash-device-menu-share">100%</span>`
+    + `<span class="dash-device-menu-val">${fleet.accountingExpired ? '—' : escapeHtml(formatCompact(fleet.fleetTotals.tokens))}</span>`
+    + `<span class="dash-device-menu-share">${fleet.accountingExpired ? '—' : '100%'}</span>`
     + `</button>`;
 
   const machineItems = machines.map((m) => {
@@ -1236,7 +1236,7 @@ function renderDeviceMenu(fleet) {
     if (m.liveTokPerSec > 0) subParts.push(`${Math.round(m.liveTokPerSec)} tok/s`);
     else if (m.activeWorkspace) subParts.push(m.activeWorkspace);
     else if (m.platformLabel) subParts.push(m.platformLabel);
-    const pct = fleet.fleetTotals.tokens > 0 ? `${Math.round(m.share * 100)}%` : '—';
+    const pct = !fleet.accountingExpired && fleet.fleetTotals.tokens > 0 ? `${Math.round(m.share * 100)}%` : '—';
     return `<button type="button" class="dash-device-menu-item${selected ? ' is-selected' : ''}" data-device="${escapeHtml(m.deviceId)}" data-key="${escapeHtml(m.deviceId)}" role="menuitemradio" aria-checked="${selected}">`
       + `<span class="device-kind-icon device-kind-${escapeHtml(m.deviceKind)}" aria-hidden="true"></span>`
       + `<span class="dash-device-menu-meta"><span class="dash-device-menu-name">${escapeHtml(m.name)}</span><span class="dash-device-menu-sub">${escapeHtml(subParts.join(' · ') || '—')}</span></span>`
@@ -1934,6 +1934,7 @@ function renderWorkPanel(overview) {
   if (state.workMode === 'devices') {
     const fleet = overview?.fleet;
     const machines = fleet?.machines || [];
+    const hasFleetShares = !fleet?.accountingExpired && fleet?.fleetTotals?.tokens > 0;
     if (machines.length === 0) {
       lastWorkStructureSig = '';
       els.workPanel.innerHTML = `<div class="dash-quotas-empty">${escapeHtml(t('dashboard.empty'))}</div>`;
@@ -1952,8 +1953,8 @@ function renderWorkPanel(overview) {
         if (m.liveTokPerSec > 0) subParts.push(`${Math.round(m.liveTokPerSec)} tok/s`);
         if (m.activeWorkspace) subParts.push(m.activeWorkspace);
         else if (m.platformLabel) subParts.push(m.platformLabel);
-        const pct = fleet.fleetTotals.tokens > 0 ? `${Math.round(m.share * 100)}%` : '—';
-        const relW = Math.max(0.02, Math.min(1, m.share || 0)).toFixed(4);
+        const pct = hasFleetShares ? `${Math.round(m.share * 100)}%` : '—';
+        const relW = fleet.accountingExpired ? '0' : Math.max(0.02, Math.min(1, m.share || 0)).toFixed(4);
         const metaEl = row.querySelector('.dash-session-meta-text');
         const fillEl = row.querySelector('.dash-project-bar-fill');
         const tokEl = row.querySelector('.dash-row-tokens');
@@ -1988,8 +1989,8 @@ function renderWorkPanel(overview) {
         if (m.activeWorkspace) subParts.push(m.activeWorkspace);
         else if (m.platformLabel) subParts.push(m.platformLabel);
         const badge = m.isLocal ? `<span class="dash-session-badge">${escapeHtml(t('dashboard.devices.you'))}</span>` : '';
-        const pct = fleet.fleetTotals.tokens > 0 ? `${Math.round(m.share * 100)}%` : '—';
-        const relW = Math.max(0.02, Math.min(1, m.share || 0)).toFixed(4);
+        const pct = hasFleetShares ? `${Math.round(m.share * 100)}%` : '—';
+        const relW = fleet.accountingExpired ? '0' : Math.max(0.02, Math.min(1, m.share || 0)).toFixed(4);
         return `<div class="${cls}" data-device-id="${escapeHtml(m.deviceId)}" tabindex="0" role="button">`
           + `<span class="dash-session-lead"><span class="device-kind-icon device-kind-${escapeHtml(m.deviceKind)}" aria-hidden="true"></span><span class="dash-session-live-ring" aria-hidden="true"></span></span>`
           + `<div class="dash-session-body">`
@@ -3872,7 +3873,9 @@ function renderNow() {
       grokBotCount: (count) => t('sessions.grokBotCount', { count })
     }
   }) || null;
+  const justExpired = overview?.fleet?.accountingExpired && !state.overview?.fleet?.accountingExpired;
   state.overview = overview;
+  if (justExpired) void refreshAfterAccountingRollover();
   if (overview?.fleet && state.selectedDeviceId !== 'all') {
     const hasSelected = overview.fleet.isFleetMode && Boolean(overview.activeMachine);
     if (!hasSelected) {
@@ -4225,7 +4228,6 @@ function scheduleRateExpiry() {
     if (typeof document !== 'undefined' && document.hidden) return;
     state.motion = 'none';
     render();
-    if (accountingExpiry > 0 && accountingExpiry <= Date.now()) scheduleDashboardRefresh();
   }, delayMs);
   rateExpiryTimer?.unref?.();
 }
@@ -4414,7 +4416,7 @@ async function pullDashboardData({ manual = false } = {}) {
   } else if (silentStatsRequest?.sourceGen !== pullSourceGen) {
     const request = { sourceGen: pullSourceGen };
     silentStatsRequest = request;
-    void readStats().finally(() => {
+    request.promise = readStats().finally(() => {
       if (silentStatsRequest === request) silentStatsRequest = null;
     });
   }
@@ -4471,6 +4473,11 @@ async function refresh() {
       void refresh();
     }
   }
+}
+
+async function refreshAfterAccountingRollover() {
+  if (silentStatsRequest) await silentStatsRequest.promise;
+  if (!document.hidden && state.overview?.fleet?.accountingExpired) await refresh();
 }
 
 async function boot() {
