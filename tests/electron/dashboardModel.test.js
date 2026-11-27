@@ -146,6 +146,25 @@ test('selected workspace and Flow use the device rollup when session details are
   assert.equal(capped.hubToEnd[0].tokens, 40);
 });
 
+test('Live Flow retains a confirmed device-to-workspace edge without session details', () => {
+  const usage = { totalTokens: 100, clients: { codex: 100 }, models: { 'gpt-5': 100 } };
+  const device = {
+    deviceId: 'a',
+    periods: { today: { ...usage, projects: { repo: { label: 'Repo', tokens: 100 } } } }
+  };
+  const stats = { mode: 'sync', periods: { today: usage }, devices: [device, { deviceId: 'b' }] };
+  const { topology } = model.buildScopedOverview({ stats, selectedDeviceId: 'a' });
+  assert.equal(topology.mode, 'sessions');
+  assert.deepEqual(topology.hubs.map(hub => [hub.id, hub.tokens]), [['ws:repo', 100]]);
+  assert.deepEqual(topology.devToHub.map(edge => [edge.from, edge.to, edge.tokens]), [['a', 'ws:repo', 100]]);
+  assert.deepEqual(topology.endpoints, []);
+
+  device.periods.today.projects = {};
+  const fallback = model.buildScopedOverview({ stats, selectedDeviceId: 'a' }).topology;
+  assert.deepEqual(fallback.hubs.map(hub => hub.id), ['tool:codex']);
+  assert.deepEqual(fallback.endpoints.map(endpoint => endpoint.id), ['model:gpt-5']);
+});
+
 test('selected-device workspace totals use recovered sessions when the project rollup is incomplete', () => {
   const session = (id, projectLabel, totalTokens) => ({
     sessionId: id, client: 'codex', projectLabel, totalTokens, sourceDevice: { deviceId: 'a' }

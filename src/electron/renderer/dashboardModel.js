@@ -1930,7 +1930,7 @@
 
   /**
    * Builds a 3-tier Live Neural Flow graph linking Devices -> Workspaces/Tools -> Sessions/Models.
-   * Uses genuine session topology when sessions exist in scope and falls back cleanly to Tools -> Models.
+   * Uses workspace/session data when available and falls back to Tools -> Models.
    *
    * @param {{
    *   fleet?: any,
@@ -2056,7 +2056,7 @@
       };
     }
 
-    if (sessions.length > 0) {
+    if (sessions.length > 0 || workspaces.length > 0) {
       /** @type {Map<string, Map<string, number>>} */
       const activeTools = new Map();
       for (const session of sessions) {
@@ -2349,7 +2349,7 @@
       };
     }
 
-    // Fallback when no sessions are tracked in the selected period: Devices -> Tools -> Models.
+    // Fallback without workspace or session data: Devices -> Tools -> Models.
     const hubs = tools.slice(0, maxHubs).map((row) => ({
       id: `tool:${row.id}`,
       toolId: row.id,
