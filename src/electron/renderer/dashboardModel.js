@@ -157,7 +157,7 @@
    * @param {string} periodKey
    * @param {any} aggregatePeriod
    * @param {number} nowMs
-   * @param {{ includeNative?: boolean }} [options]
+   * @param {{ includeNative?: boolean, activeNativeOnly?: boolean }} [options]
    * @returns {Array<[string, any, boolean, string]>}
    */
   function collectPeriodSessionEntries(stats, periodKey, aggregatePeriod, nowMs, options = {}) {
@@ -184,8 +184,10 @@
       for (const [key, rawSession] of Object.entries(stats?.nativeSessions?.[periodKey] || {})) {
         if (!rawSession || typeof rawSession !== 'object' || seen.has(key)) continue;
         if (reasonixSessionGuard?.isReasonixSyntheticSession?.(rawSession, key)) continue;
+        const resolved = resolveSession(key, rawSession, aggregatePeriod);
+        if (options.activeNativeOnly && !['running', 'waiting'].includes(sessionLive?.sessionActivityState?.(resolved, nowMs))) continue;
         seen.add(key);
-        collected.push([key, resolveSession(key, rawSession, aggregatePeriod), true, periodKey]);
+        collected.push([key, resolved, true, periodKey]);
       }
     }
 
@@ -1008,8 +1010,11 @@
     const selectedDevice = selectedDeviceId !== 'all' && (stats?.devices || []).find((/** @type {any} */ item) =>
       String(item.deviceId || item.id || '').trim() === selectedDeviceId);
     const expired = isDevicePeriodExpired(selectedDevice, periodKey, nowMs);
-    // Native activity and Today's zero-usage carryovers are independent of the usage window.
-    const collectedSessions = collectPeriodSessionEntries(stats, periodKey, expired ? null : aggregatePeriod, nowMs, { includeNative });
+    // During rollover, keep live native rows and Today's zero-usage carryovers.
+    const collectedSessions = collectPeriodSessionEntries(stats, periodKey, expired ? null : aggregatePeriod, nowMs, {
+      includeNative,
+      activeNativeOnly: expired
+    });
 
     /** @type {Map<string, { name: string, deviceKind: string, isLocal: boolean }>} */
     const deviceLookup = new Map();

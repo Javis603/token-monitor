@@ -259,6 +259,34 @@ test('a fresh native activity row survives expiry of the local usage snapshot', 
   }
 });
 
+test('a native-only session disappears when its live activity expires after rollover', () => {
+  const endsAt = '2026-12-01T00:00:00Z';
+  const observedAt = '2026-11-30T23:59:40Z';
+  const leaseEnd = Date.parse(observedAt) + 30_000;
+  const session = {
+    client: 'antigravity', sessionId: 'acp', native: true, totalTokens: 0, lastUsedAt: observedAt,
+    liveActivity: { state: 'running', observedAt }
+  };
+  const periods = { today: { totalTokens: 50 }, month: { totalTokens: 50 } };
+  const native = { 'antigravity:acp': session };
+  const stats = {
+    mode: 'sync', localDeviceId: 'a', periods, nativeSessions: { today: native, month: native },
+    devices: [
+      { deviceId: 'a', periods, periodWindows: { today: { endsAt }, month: { endsAt } } },
+      { deviceId: 'b' }
+    ]
+  };
+  for (const periodKey of ['today', 'month']) {
+    const options = { stats, periodKey, selectedDeviceId: 'a' };
+    const active = model.buildScopedOverview({ ...options, nowMs: leaseEnd - 1 });
+    assert.equal(active.sessions[0]?.activityState, 'running');
+    assert.equal(active.topology.endpoints[0]?.id, 'antigravity:acp');
+    const expired = model.buildScopedOverview({ ...options, nowMs: leaseEnd });
+    assert.deepEqual(expired.sessions, []);
+    assert.deepEqual(expired.topology.endpoints, []);
+  }
+});
+
 test('computeTokenAnatomy fails closed on unclassifiedTokens and computes cacheHitRate accurately', () => {
   const exact = model.computeTokenAnatomy({
     totalTokens: 1000,
