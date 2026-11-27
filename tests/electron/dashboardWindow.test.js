@@ -3825,6 +3825,14 @@ test('Dashboard repaints when the displayed accounting period expires', () => {
   timer.callback();
   assert.equal(rendered, 1);
   timer = null;
+  // The model calculated the deadline before rollover, but rendering can run past it.
+  schedule();
+  assert.equal(timer?.delay, 50);
+  timer.callback();
+  assert.equal(rendered, 2);
+
+  state.overview.nextAccountingExpiryAt = 0;
+  timer = null;
   schedule();
   assert.equal(timer, null);
   state.overview.nextAccountingExpiryAt = now + 31 * 86_400_000;

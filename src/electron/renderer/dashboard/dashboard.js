@@ -4205,11 +4205,10 @@ function scheduleRateExpiry() {
   }
   if (typeof document !== 'undefined' && document.hidden) return;
   const expiries = [];
-  const accountingExpiry = state.overview?.nextAccountingExpiryAt;
-  if (accountingExpiry > Date.now()) expiries.push(accountingExpiry);
   const collect = (ts) => {
     if (Number.isFinite(ts) && ts > 0) expiries.push(ts);
   };
+  collect(state.overview?.nextAccountingExpiryAt);
   collect(deviceRateTracker?.nextExpiryAt?.());
   collect(rateHistory?.nextExpiryAt?.());
   if (typeof sessionLiveApi !== 'undefined' && sessionLiveApi?.nextSessionStatusChangeAt) {
