@@ -117,10 +117,11 @@ test('hitTestPolygons returns the topmost painted tower when overlapping', () =>
   assert.equal(skyline.hitTestPolygons(10, 10, painted), null);
 });
 
-test('createSkylineController pans on zoomed wheel, horizontal/shift wheel, and middle-drag without trapping default vertical scroll', () => {
+test('createSkylineController handles pointer controls and clears stale hover and reduced-motion inertia', () => {
   const origRaf = global.requestAnimationFrame;
   const origCancelRaf = global.cancelAnimationFrame;
-  global.requestAnimationFrame = () => 1;
+  let frame;
+  global.requestAnimationFrame = callback => { frame = callback; return 1; };
   global.cancelAnimationFrame = () => {};
 
   try {
@@ -176,7 +177,8 @@ test('createSkylineController pans on zoomed wheel, horizontal/shift wheel, and 
       onInteract: () => { interacts += 1; },
       onHover: (hit) => { hoverEvents.push(hit); }
     });
-    ctrl.setData({ cells: [{ date: '2026-11-26', col: 0, row: 3, tokens: 100, cost: 1, intensity: 2 }], weeks: 1, reducedMotion: true });
+    const data = { cells: [{ date: '2026-11-26', col: 0, row: 3, tokens: 100, cost: 1, intensity: 2 }], weeks: 1, reducedMotion: true };
+    ctrl.setData(data);
 
     const wheel = listeners.get('wheel');
     const pointerdown = listeners.get('pointerdown');
@@ -190,6 +192,14 @@ test('createSkylineController pans on zoomed wheel, horizontal/shift wheel, and 
     pointermove({ clientX: projected.x, clientY: projected.y });
     assert.equal(ctrl.getState().hoveredDate, '2026-11-26');
     assert.ok(hoverEvents.at(-1)?.cell?.date === '2026-11-26');
+
+    ctrl.setData(data);
+    assert.equal(ctrl.getState().hoveredDate, '2026-11-26');
+    ctrl.setData({ ...data, cells: [{ ...data.cells[0], date: '2026-11-27' }] });
+    assert.equal(ctrl.getState().hoveredDate, '');
+    assert.equal(hoverEvents.at(-1), null);
+    ctrl.setData(data);
+    pointermove({ clientX: projected.x, clientY: projected.y });
 
     // Ctrl+wheel zoom must clear hoveredDate and emit null hover immediately
     let zoomClearedHover = false;
@@ -254,6 +264,25 @@ test('createSkylineController pans on zoomed wheel, horizontal/shift wheel, and 
     const beforeZoom = ctrl.getState().camera.zoom;
     key('+');
     assert.ok(ctrl.getState().camera.zoom > beforeZoom);
+    const drag = () => {
+      pointerdown({ button: 0, pointerId: 3, clientX: 300, clientY: 150, timeStamp: 100 });
+      pointermove({ pointerId: 3, clientX: 350, clientY: 170, timeStamp: 110 });
+      const camera = ctrl.getState().camera;
+      pointerup({ type: 'pointerup', pointerId: 3, timeStamp: 115 });
+      return camera;
+    };
+    const released = drag();
+    frame(132);
+    assert.deepEqual(ctrl.getState().camera, released, 'reduced motion stops orbit on release');
+    ctrl.setData({ ...data, reducedMotion: false });
+    const animatedRelease = drag();
+    frame(149);
+    assert.notEqual(ctrl.getState().camera.yaw, animatedRelease.yaw, 'normal motion keeps orbit inertia');
+    const orbiting = ctrl.getState().camera;
+    ctrl.setData(data);
+    frame(166);
+    assert.deepEqual(ctrl.getState().camera, orbiting, 'enabling reduced motion stops existing inertia');
+
     const bitmapWidth = canvasStub.width;
     const bitmapHeight = canvasStub.height;
     hostEl.clientWidth /= 2;

@@ -563,6 +563,10 @@
       metric = data.metric === 'tokens' ? 'tokens' : 'cost';
       colorMode = data.colorMode === 'tool' ? 'tool' : 'heat';
       reducedMotion = Boolean(data.reducedMotion);
+      if (reducedMotion) {
+        velYaw = 0;
+        velPitch = 0;
+      }
       if (typeof data.monthLabel === 'function') monthLabelFn = data.monthLabel;
       monthLabels = Array.isArray(data.monthLabels) ? data.monthLabels : [];
 
@@ -638,8 +642,9 @@
       }
 
       activeTowers = nextList;
-      if (reducedMotion) drawFrame();
-      else requestFrame();
+      if (hoveredDate && !activeTowers.some(tower => tower.date === hoveredDate)) clearHover();
+      else if (reducedMotion) drawFrame();
+      if (!reducedMotion) requestFrame();
     }
 
     function clearHover({ notify = true } = {}) {
@@ -1152,8 +1157,8 @@
         } else {
           const stepped = applyOrbitDelta(camera, dx, dy);
           camera = stepped.camera;
-          velYaw = stepped.dYaw * 0.42;
-          velPitch = stepped.dPitch * 0.38;
+          velYaw = reducedMotion ? 0 : stepped.dYaw * 0.42;
+          velPitch = reducedMotion ? 0 : stepped.dPitch * 0.38;
         }
         requestFrame();
         return;
