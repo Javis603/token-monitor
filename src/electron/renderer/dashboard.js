@@ -1197,14 +1197,10 @@ function renderDeviceSelector(fleet) {
   if (!active && state.selectedDeviceId !== 'all') {
     state.selectedDeviceId = 'all';
   }
-  const triggerLabel = active
-    ? `${active.name}${active.share > 0 ? ` · ${Math.round(active.share * 100)}%` : ''}`
-    : `${t('dashboard.fleet.all')} · ${fleet.fleetTotals.onlineCount}/${machines.length}`;
-  const triggerIconHtml = active
-    ? `<span class="device-kind-icon device-kind-${escapeHtml(active.deviceKind)}" aria-hidden="true"></span>`
-    : '';
+  const triggerLabel = active?.name || t('dashboard.fleet.all');
+  const triggerKind = active?.deviceKind || 'desktop';
 
-  els.deviceTrigger.innerHTML = `${triggerIconHtml}`
+  els.deviceTrigger.innerHTML = `<span class="device-kind-icon device-kind-${escapeHtml(triggerKind)}" aria-hidden="true"></span>`
     + `<span class="dash-device-trigger-label">${escapeHtml(triggerLabel)}</span>`
     + `<span class="dash-device-trigger-chevron" aria-hidden="true"></span>`;
 
@@ -1222,7 +1218,7 @@ function renderDeviceMenu(fleet) {
   const machines = fleet.machines;
   const allSelected = state.selectedDeviceId === 'all';
   const allItem = `<button type="button" class="dash-device-menu-item is-all${allSelected ? ' is-selected' : ''}" data-device="all" data-key="all" role="menuitemradio" aria-checked="${allSelected}">`
-    + `<span class="dash-device-menu-meta"><span class="dash-device-menu-name">${escapeHtml(t('dashboard.fleet.all'))}</span><span class="dash-device-menu-sub">${escapeHtml(t('dashboard.fleet.machineCount', { count: machines.length }))}</span></span>`
+    + `<span class="dash-device-menu-meta"><span class="dash-device-menu-name">${escapeHtml(t('dashboard.fleet.all'))}</span><span class="dash-device-menu-sub">${escapeHtml(t('settings.sync.panel.onlineCount', { online: fleet.fleetTotals.onlineCount, total: machines.length }))}</span></span>`
     + `<span class="dash-device-menu-val">${escapeHtml(formatCompact(fleet.fleetTotals.tokens))}</span>`
     + `<span class="dash-device-menu-share">100%</span>`
     + `</button>`;
@@ -2389,14 +2385,7 @@ function renderTopology(overview) {
   const maxHubTokens = graph.hubs.reduce((mx, h) => Math.max(mx, h.tokens), 0) || 1;
   const existingCanvas = els.topology.querySelector('.dash-topo-canvas');
 
-  const activeDevEdgeMap = new Map();
-  for (const e of graph.devToHub || []) {
-    if (!e.active) continue;
-    const prev = activeDevEdgeMap.get(e.from);
-    if (!prev || Number(e.tokens || 0) > Number(prev.tokens || 0)) {
-      activeDevEdgeMap.set(e.from, e);
-    }
-  }
+  const liveDevices = new Set((graph.devToHub || []).filter(edge => edge.active).map(edge => edge.from));
   const activeHubColorMap = new Map();
   for (const e of graph.hubToEnd || []) {
     if (e.active && e.color && !activeHubColorMap.has(e.from)) {
@@ -2422,11 +2411,13 @@ function renderTopology(overview) {
   const nodeSpeedClass = (active, rate) => (active && !reduced ? `topo-speed-${topologyEdgeSpeedTier(rate)}` : '');
 
   const devicesHtml = graph.devices.map((d) => {
-    const devEdge = activeDevEdgeMap.get(d.id) || null;
-    const hasLiveFlow = Boolean(devEdge);
+    const colors = (d.activeToolColors || []).map(color => `color-mix(in srgb, ${displayColor(color)} 72%, var(--text))`);
+    const hasLiveFlow = liveDevices.has(d.id) || colors.length > 0;
     const selected = state.selectedDeviceId === d.id;
-    const accent = hasLiveFlow ? displayColor(devEdge.color || '#6ab4f0') : 'rgba(var(--overlay-rgb), 0.45)';
-    const barColor = hasLiveFlow || d.liveTokPerSec > 0 ? 'rgba(var(--overlay-rgb), 0.56)' : 'rgba(var(--overlay-rgb), 0.34)';
+    const accent = 'rgba(var(--overlay-rgb), 0.45)';
+    const barColor = hasLiveFlow || d.liveTokPerSec > 0
+      ? 'rgba(var(--overlay-rgb), 0.56)' : 'rgba(var(--overlay-rgb), 0.34)';
+    const borderColor = colors.length ? `linear-gradient(180deg, transparent, ${colors.join(', ')}, transparent)` : '';
     const cls = ['topo-node', 'topo-node--device', hasLiveFlow ? 'is-active' : '', nodeSpeedClass(hasLiveFlow, d.liveTokPerSec), selected ? 'is-selected' : '', d.stale ? 'is-stale' : ''].filter(Boolean).join(' ');
     const subLeft = d.liveTokPerSec > 0
       ? `<span class="topo-live-rate is-rate">${Math.round(d.liveTokPerSec)} tok/s</span>`
@@ -2440,6 +2431,7 @@ function renderTopology(overview) {
       + `</div>`
       + `<div class="topo-node-sub"><span class="topo-node-sub-text">${subLeft}</span><span>${escapeHtml(subRight)}</span></div>`
       + `<div class="topo-mini-bar"><div class="topo-mini-bar-fill" data-w="${shareScale}" data-c="${barColor}"></div></div>`
+      + (borderColor ? `<span class="topo-device-edge" data-bg="${escapeHtml(borderColor)}" aria-hidden="true"></span>` : '')
       + `<span class="topo-port topo-port--out${hasLiveFlow ? ' is-live' : ''}" data-port="dev:${escapeHtml(d.id)}"></span>`
       + `</div>`;
   }).join('');

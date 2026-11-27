@@ -1907,6 +1907,7 @@
         activeSessionCount: Math.max(0, n(m.activeSessionCount)),
         activeWorkspace: String(m.activeWorkspace || ''),
         topClients: Array.isArray(m.topClients) ? m.topClients : [],
+        activeToolColors: /** @type {string[]} */ ([]),
         raw: m
       }));
 
@@ -1927,6 +1928,7 @@
         activeSessionCount: sessions.filter((s) => s.isActive).length,
         activeWorkspace: String(workspaces[0]?.name || ''),
         topClients: tools.slice(0, 3),
+        activeToolColors: [],
         raw: null
       }];
     }
@@ -1966,6 +1968,26 @@
     }
 
     if (sessions.length > 0) {
+      /** @type {Map<string, Map<string, number>>} */
+      const activeTools = new Map();
+      for (const session of sessions) {
+        const rows = session.groupRows?.length ? session.groupRows : [session];
+        for (const row of rows) {
+          if (!row.isActive) continue;
+          const deviceId = resolveSessionDeviceId(row);
+          const client = canonicalClientKey(row.client);
+          if (!deviceId || !client) continue;
+          const counts = activeTools.get(deviceId) || new Map();
+          counts.set(client, (counts.get(client) || 0) + 1);
+          activeTools.set(deviceId, counts);
+        }
+      }
+      for (const device of devices) {
+        const tools = [...(activeTools.get(device.id) || [])]
+          .sort(([a, countA], [b, countB]) => countB - countA || a.localeCompare(b));
+        device.activeToolColors = [...new Set(tools.map(([client]) => clientColor(client)))].slice(0, 3);
+      }
+
       /** @type {Map<string, any>} */
       const wsLookup = new Map();
       for (const ws of workspaces) {

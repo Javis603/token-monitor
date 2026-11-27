@@ -1465,3 +1465,28 @@ test('local fixed ranges reject carried periods after rollover and use the curre
   assert.equal(fresh.sessions[0].sessionId, 'stale');
   assert.equal(fresh.sessionsIncomplete, false);
 });
+
+test('device flow accents use confirmed active tools even when their endpoints are offscreen', () => {
+  const session = (key, client, deviceId, isActive = true) => ({
+    key, client, isActive, sourceDevice: { deviceId }, projectLabel: 'Repo'
+  });
+  const graph = model.buildTopologyGraph({
+    isSynced: true,
+    fleet: { machines: [{ deviceId: 'mac' }, { deviceId: 'pc' }, { deviceId: 'idle' }] },
+    sessions: [
+      { ...session('group', 'codex', 'mac'), groupRows: [
+        session('codex', 'codex', 'mac'),
+        session('claude', 'claude', 'mac'),
+        session('gemini', 'gemini', 'pc')
+      ] },
+      session('history', 'gemini', 'mac', false),
+      { ...session('ambiguous', 'claude', 'pc'), sourceDevice: { ambiguous: true } }
+    ]
+  }, { maxEndpoints: 1 });
+  const devices = Object.fromEntries(graph.devices.map(device => [device.id, device.activeToolColors]));
+  assert.equal(devices.mac.length, 2);
+  assert.equal(devices.pc.length, 1);
+  assert.notEqual(devices.mac[0], devices.mac[1]);
+  assert.ok(!devices.mac.includes(devices.pc[0]));
+  assert.deepEqual(devices.idle, []);
+});

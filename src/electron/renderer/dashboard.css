@@ -9,6 +9,10 @@
   --dash-card-bg: light-dark(rgba(var(--overlay-rgb), 0.032), rgba(var(--overlay-rgb), 0.018));
   --dash-card-border: light-dark(rgba(var(--line-rgb), 0.085), rgba(var(--line-rgb), 0.068));
   --dash-card-shadow: none;
+  --dash-content-width: 1380px;
+  --dash-gutter: 22px;
+  --dash-card-gap: 14px;
+  --dash-header-padding-block: 9px;
   --dash-primary-cols: minmax(0, 1.85fr) minmax(292px, 0.95fr);
 }
 
@@ -37,7 +41,6 @@ html.native-reduced-transparency body * {
   -webkit-backdrop-filter: none !important;
   backdrop-filter: none !important;
 }
-html.native-high-contrast .dash-header,
 html.native-high-contrast .dash-glass-card,
 html.native-high-contrast .dash-cards,
 html.native-high-contrast .dash-device-menu,
@@ -64,8 +67,8 @@ html.native-high-contrast .dash-drawer {
   align-items: center;
   justify-content: space-between;
   gap: 12px;
-  padding: 9px 14px;
-  border-bottom: 1px solid rgba(var(--line-rgb), 0.08);
+  padding-block: var(--dash-header-padding-block);
+  padding-inline: max(var(--dash-gutter), calc((100% - var(--dash-content-width)) / 2 + var(--dash-gutter)));
   background: transparent;
 }
 
@@ -98,16 +101,16 @@ html.native-high-contrast .dash-drawer {
   gap: 6px;
   height: 26px;
   max-width: 240px;
-  padding: 0 9px;
-  border-radius: 999px;
-  border: 1px solid var(--surface-border);
-  background: rgba(var(--overlay-rgb), 0.045);
+  padding: 0 7px;
+  border-radius: 6px;
+  border: 1px solid transparent;
+  background: transparent;
   color: inherit;
   font-size: 11px;
   font-family: inherit;
   cursor: pointer;
   white-space: nowrap;
-  transition: background-color 140ms ease, border-color 140ms ease;
+  transition: background-color 140ms ease;
 }
 
 .dash-device-trigger:hover,
@@ -462,6 +465,12 @@ html.native-liquid-glass .seg-indicator {
   flex-direction: column;
   overflow-y: auto;
   overflow-x: hidden;
+  scroll-padding-top: 12px;
+  mask-image: linear-gradient(to bottom, transparent, black 4px);
+}
+
+html.native-high-contrast .dash-stage {
+  mask-image: none;
 }
 
 /* Never put `transition` on `.dash-pane` (dashboardWindow.test.js guard). */
@@ -470,10 +479,10 @@ html.native-liquid-glass .seg-indicator {
   min-height: 0;
   display: flex;
   flex-direction: column;
-  gap: 14px;
-  padding: 16px 22px 24px;
+  gap: var(--dash-card-gap);
+  padding: calc(var(--dash-card-gap) - var(--dash-header-padding-block)) var(--dash-gutter) 24px;
   width: 100%;
-  max-width: 1380px;
+  max-width: var(--dash-content-width);
   margin-inline: auto;
 }
 
@@ -1243,6 +1252,25 @@ html.native-liquid-glass .seg-indicator {
   transform: scaleX(var(--bar-scale, 0));
   transform-origin: left center;
   transition: transform 420ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.topo-device-edge {
+  position: absolute;
+  inset: 12% -1px 12% auto;
+  width: 2px;
+  border-radius: 999px;
+  pointer-events: none;
+  z-index: 2;
+  opacity: 0.7;
+}
+
+.topo-node--device:is(.topo-speed-1, .topo-speed-2, .topo-speed-3) .topo-device-edge {
+  animation: topoDeviceEdgePulse var(--topo-dur) ease-in-out infinite;
+}
+
+@keyframes topoDeviceEdgePulse {
+  0%, 36%, 100% { opacity: 0.55; }
+  12% { opacity: 1; }
 }
 
 /* Precision Optical Terminal Ports */

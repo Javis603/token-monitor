@@ -2969,7 +2969,7 @@ test('dashboard Trends and device selector recover to All Devices when selected 
     scheduleRateExpiry() {},
     t: (k, vars = {}) => {
       if (k === 'dashboard.fleet.all') return 'All Devices';
-      if (k === 'dashboard.fleet.machineCount') return `${vars.count} devices`;
+      if (k === 'settings.sync.panel.onlineCount') return `${vars.online}/${vars.total} online`;
       return k;
     },
     document: { hidden: false, querySelector: () => null }
@@ -2992,7 +2992,9 @@ test('dashboard Trends and device selector recover to All Devices when selected 
   context.renderNow();
 
   assert.equal(context.state.selectedDeviceId, 'all', 'disappeared selected device must reset to All Devices');
-  assert.match(deviceTrigger.innerHTML, /All Devices · 2\/2/);
+  assert.match(deviceTrigger.innerHTML, /device-kind-icon.*>All Devices<.*dash-device-trigger-chevron/);
+  assert.doesNotMatch(deviceTrigger.innerHTML, /2\/2/);
+  assert.match(deviceMenu.innerHTML, /2\/2 online/);
   assert.match(deviceMenu.innerHTML, /is-selected" data-device="all" data-key="all" role="menuitemradio" aria-checked="true"/);
   assert.match(chartEl.innerHTML, /<svg/, 'Trends chart must not go blank when selected device leaves fleet');
   assert.ok(context.state.chartModel && context.state.chartModel.bars.length > 0);
