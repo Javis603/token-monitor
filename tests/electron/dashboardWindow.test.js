@@ -1585,6 +1585,10 @@ test('dashboard guards synced ambiguous transcripts, native activity redaction, 
   assert.equal(typeof resolvePage, 'function');
   const finishPage1 = resolvePage;
   resolvePage = null;
+  const currentInline = context.state.stats.periods.today.sessions['codex:paged-shared'];
+  context.state.stats.periods.today.sessions['codex:paged-shared'] = {
+    ...currentInline, sourceDevice: { ambiguous: true }
+  };
   finishPage1({
     detailsAvailable: true,
     period: {
@@ -1592,9 +1596,9 @@ test('dashboard guards synced ambiguous transcripts, native activity redaction, 
         'codex:paged-shared': {
           client: 'codex',
           sessionId: 'paged-shared',
-          title: 'Paged Ambiguous',
+          title: 'Paged Local Stamp',
           totalTokens: 60,
-          sourceDevice: { ambiguous: true }
+          sourceDevice: { deviceId: 'mac-local', name: 'MacBook' }
         },
         'codex:local-only': {
           client: 'codex',
@@ -1607,8 +1611,10 @@ test('dashboard guards synced ambiguous transcripts, native activity redaction, 
     }
   });
   await new Promise((r) => setTimeout(r, 0));
-  assert.equal(context.state.stats.periods.today.sessions['codex:paged-shared'].sourceDevice?.ambiguous, true, 'paged ambiguity must survive inline merge');
-  assert.equal(detailCalls.length, 0, 'resolved ambiguous paged session must never read local transcript');
+  assert.equal(context.state.stats.periods.today.sessions['codex:paged-shared'].sourceDevice?.ambiguous, true, 'inline ambiguity must survive the page merge');
+  assert.equal(context.state.drawer.session.sourceDevice?.ambiguous, true);
+  assert.doesNotMatch(drawerSubtitle.textContent, /MacBook/);
+  assert.equal(detailCalls.length, 0, 'a local stamp in the raw page must not override merged ambiguity');
 
   // 1B. Held-pending drawer opens transcript IPC once paging confirms positive local ownership for current snapshot
   context.applyIncomingStats({
@@ -2647,7 +2653,7 @@ test('dashboard binds deferred drawer ownership to supplying period and invalida
   pendingTotals.get(101)({ 'codex:total': { ...local, sourceDevice: { ambiguous: true } } });
   await new Promise(setImmediate);
   assert.equal(detailCalls.length, callsBeforeAllTime + 1);
-  assert.equal(context.state.drawer.session.sourceDevice, null);
+  assert.equal(context.state.drawer.session.sourceDevice?.ambiguous, true);
 
 });
 
@@ -3808,8 +3814,8 @@ test('Dashboard schedules a repaint for session expiry without throughput sample
   assert.equal(rendered, 1);
 });
 
-test('Dashboard discards synced Yesterday after the calendar changes without a Stats push', async () => {
-  const boundary = Date.parse('2026-11-27T00:00:00Z');
+test('Dashboard discards synced Yesterday at device midnight without a Stats push', async () => {
+  const boundary = Date.parse('2026-11-26T15:00:00Z');
   let now = boundary - 1000;
   class Clock extends Date {
     constructor(value = now) { super(value); }
@@ -3820,7 +3826,7 @@ test('Dashboard discards synced Yesterday after the calendar changes without a S
   const model = require('../../src/electron/renderer/dashboard/dashboardModel');
   const stats = {
     mode: 'sync', snapshot: { id: 1, source: 1 }, fixedRangeRevisions: { mac: 'rev' },
-    devices: [{ deviceId: 'mac', periodWindows: { timeZone: 'UTC', today: { key: '2026-11-26', endsAt: new Date(boundary).toISOString() } },
+    devices: [{ deviceId: 'mac', periodWindows: { timeZone: 'Asia/Tokyo', today: { key: '2026-11-26', endsAt: new Date(boundary).toISOString() } },
       periods: { today: { totalTokens: 0 } } }], periods: { today: { totalTokens: 0 } }
   };
   const history = { fixedPeriods: { historyTransportAvailable: true }, deviceHistories: [{ deviceId: 'mac', historyAvailable: true,
@@ -4187,19 +4193,26 @@ test('Dashboard date labels format UTC calendar keys independently of the deskto
 
 
 test('2D heatmap assigns one tab stop across recorded dates and retains the selected day', () => {
+  const document = { activeElement: null };
+  let focusCalls = 0;
   const cell = date => {
     const attributes = new Map([['data-d', date]]);
     return {
       getAttribute: name => attributes.get(name),
       hasAttribute: name => attributes.has(name),
       setAttribute: (name, value) => attributes.set(name, value),
-      removeAttribute: name => attributes.delete(name)
+      removeAttribute: name => attributes.delete(name),
+      focus(options) {
+        assert.equal(options.preventScroll, true);
+        document.activeElement = this;
+        focusCalls += 1;
+      }
     };
   };
   const [earlier, unrecorded, latest] = ['2026-11-24', '2026-11-25', '2026-11-26'].map(cell);
   const js = read('src', 'electron', 'renderer', 'dashboard', 'dashboard.js');
   const state = { locale: 'en-US', dayMap: new Map([['2026-11-24', {}], ['2026-11-26', {}]]) };
-  const context = { state, els: { heatmap: { querySelectorAll: () => [earlier, unrecorded, latest] } } };
+  const context = { state, document, els: { heatmap: { querySelectorAll: () => [earlier, unrecorded, latest] } } };
   vm.runInNewContext(js.slice(js.indexOf('const HEATMAP_DAY_SELECTOR'), js.indexOf('function setHeatmapMarkup(')), context);
   assert.equal(context.syncHeatmapKeyboard(), latest);
   assert.equal(latest.getAttribute('tabindex'), '0');
@@ -4207,8 +4220,12 @@ test('2D heatmap assigns one tab stop across recorded dates and retains the sele
   assert.equal(earlier.getAttribute('tabindex'), '-1');
   assert.equal(unrecorded.hasAttribute('tabindex'), false);
   assert.equal(context.syncHeatmapKeyboard('2026-11-24'), earlier);
+  document.activeElement = earlier;
   assert.equal(context.syncHeatmapKeyboard(), earlier);
+  assert.equal(focusCalls, 0);
   state.dayMap.delete('2026-11-24');
   assert.equal(context.syncHeatmapKeyboard(), latest);
   assert.equal(earlier.hasAttribute('tabindex'), false);
+  assert.equal(document.activeElement, latest);
+  assert.equal(focusCalls, 1);
 });

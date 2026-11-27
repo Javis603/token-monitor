@@ -2620,6 +2620,8 @@ function syncHeatmapKeyboard(preferredDate) {
     || recorded.find(cell => cell.getAttribute('tabindex') === '0')
     || recorded.at(-1);
   const available = new Set(recorded);
+  const focused = document.activeElement;
+  const lostFocusedDay = cells.includes(focused) && !available.has(focused);
   for (const cell of cells) {
     if (!available.has(cell)) {
       if (cell.hasAttribute('tabindex')) {
@@ -2636,6 +2638,7 @@ function syncHeatmapKeyboard(preferredDate) {
       dateStyle: 'long', timeZone: 'UTC'
     }));
   }
+  if (lostFocusedDay) current?.focus({ preventScroll: true });
   return current;
 }
 
@@ -3610,11 +3613,15 @@ function syncOpenSessionDrawer(periodKey, periodSessions, snapshot) {
   }
   const prevSession = state.drawer.session;
   const sessionKey = prevSession.key || `${prevSession.client}:${prevSession.sessionId}`;
+  const mergedEntry = state.stats?.periods?.[periodKey]?.sessions?.[sessionKey];
+  const displayedSession = mergedEntry?.sourceDevice?.ambiguous === true
+    ? { ...prevSession, sourceDevice: mergedEntry.sourceDevice }
+    : prevSession;
   const rawEntry = periodSessions && Object.hasOwn(periodSessions, sessionKey)
     ? periodSessions[sessionKey]
     : null;
   const wasPending = state.drawer.pendingOwnershipDetail === true;
-  const { session: resolvedSession } = reconcileSyncedSessionOwnership(prevSession, rawEntry, {
+  const { session: resolvedSession } = reconcileSyncedSessionOwnership(displayedSession, rawEntry, {
     allowAdoptUnowned: wasPending
   });
   const displayDevice = resolvedSession.sourceDevice?.ambiguous === true
