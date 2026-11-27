@@ -29,6 +29,8 @@ const { homeHasData } = require('../../src/shared/wslUsage');
 installSourceEnvGuard(test);
 
 test('Amp imports in the background and rescans historical usage after a partial sync', { timeout: 15_000 }, async (t) => {
+  const config = fs.mkdtempSync(path.join(os.tmpdir(), 'amp-active-cache-'));
+  process.env.TOKSCALE_CONFIG_DIR = config;
   const firstImport = Promise.withResolvers();
   const localUpdate = Promise.withResolvers();
   const importScanFailure = Promise.withResolvers();
@@ -37,6 +39,7 @@ test('Amp imports in the background and rescans historical usage after a partial
   let imports = 0;
   let cacheHasUsage = false;
   let failNextScan = false;
+  let allTimeScans = 0;
   const collector = startCollector({
     clients: 'codex,amp',
     deviceId: 'amp-test',
@@ -45,6 +48,7 @@ test('Amp imports in the background and rescans historical usage after a partial
     intervalRequiresActivity: true,
     runAmpSync: () => ++imports === 1 ? firstImport.promise : Promise.resolve({ complete: true, exported: 0 }),
     async runTokscale({ clients, flags }) {
+      if (flags.includes('--since')) allTimeScans++;
       if (failNextScan) {
         failNextScan = false;
         throw new Error('fixture scan failed after Amp export');
@@ -58,7 +62,7 @@ test('Amp imports in the background and rescans historical usage after a partial
     },
     onUpdate(summary, reason) {
       if (reason === 'interval') localUpdate.resolve(summary);
-      if (reason === 'coalesced' || reason === 'watch:amp-fixture') importedUpdate.resolve(summary);
+      if (cacheHasUsage && (reason === 'coalesced' || reason === 'watch:amp-fixture')) importedUpdate.resolve(summary);
       if (reason === 'manual') manualUpdate.resolve(summary);
     },
     onError(error, reason) {
@@ -69,12 +73,21 @@ test('Amp imports in the background and rescans historical usage after a partial
     firstImport.resolve({ complete: true, exported: 0 });
     collector.stop();
     await collector.whenIdle();
+    fs.rmSync(config, { recursive: true, force: true });
   });
 
   const initial = await localUpdate.promise;
   assert.equal(imports, 1);
   assert.equal(initial.today.clients.codex, 10);
   assert.equal(initial.clientHealth.clients.amp.collection.state, 'pending');
+  const cache = path.join(config, 'amp-cache', 'threads');
+  fs.mkdirSync(cache, { recursive: true });
+  const beforeImport = allTimeScans;
+  for (const file of ['T-first.json', 'T-second.json']) {
+    fs.writeFileSync(path.join(cache, file), '{}');
+    assert.equal(await collector.tick('watch:codex', { todayOnly: true, targetClients: ['codex'] }), true);
+    assert.equal(allTimeScans, beforeImport);
+  }
   cacheHasUsage = true;
   failNextScan = true;
   firstImport.reject(Object.assign(new Error('Amp sync incomplete'), {

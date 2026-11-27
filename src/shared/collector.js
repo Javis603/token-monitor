@@ -2804,9 +2804,10 @@ function startCollector(options) {
   const sourcesChangedDuringScan = Symbol('scan sources changed during scan');
 
   async function performTick(reason, tickOptions = {}) {
+    const ampImportInProgress = Boolean(ampImport);
     const tickAmpCacheRevision = ampCacheRevision;
-    const tickAmpCacheMarker = ampCacheMarker();
-    if (tickAmpCacheRevision !== publishedAmpCacheRevision || tickAmpCacheMarker !== publishedAmpCacheMarker) {
+    const tickAmpCacheMarker = ampImportInProgress ? publishedAmpCacheMarker : ampCacheMarker();
+    if (!ampImportInProgress && (tickAmpCacheRevision !== publishedAmpCacheRevision || tickAmpCacheMarker !== publishedAmpCacheMarker)) {
       // An export can update older threads. Keep demanding a full scan until
       // the import has been published, even if the first scan fails.
       tickOptions = { ...tickOptions, todayOnly: false, targetClients: [], forceHistory: true };
@@ -3136,7 +3137,7 @@ function startCollector(options) {
       }
       const transformedSummary = await onUpdate?.(summary, reason);
       if (tickCursorSnapshot) publishedCursorRevision = tickCursorSnapshot.revision;
-      if (historyScanSucceeded) {
+      if (historyScanSucceeded && !ampImportInProgress) {
         publishedAmpCacheRevision = tickAmpCacheRevision;
         publishedAmpCacheMarker = tickAmpCacheMarker;
       }
@@ -3708,10 +3709,9 @@ function startCollector(options) {
     if (trackedClients.has('amp') && !ampImport && !awaitAmp) {
       const job = startAmpImport();
       void job.promise.then(result => {
-        if (!result || stopped || job.joinedByRefresh) return;
-        return result.changed
-          ? runTick('source-sync')
-          : runTick('client:amp', { todayOnly: true, targetClients: ['amp'] });
+        if (stopped || job.joinedByRefresh) return;
+        if (result?.changed || ampCacheMarker() !== publishedAmpCacheMarker) return runTick('source-sync');
+        if (result) return runTick('client:amp', { todayOnly: true, targetClients: ['amp'] });
       });
     }
     const activityRevisionAtStart = activityRevision;
@@ -3729,8 +3729,7 @@ function startCollector(options) {
       activityGated &&
       initialCollectionComplete &&
       !fullScanDue &&
-      ampCacheRevision === publishedAmpCacheRevision &&
-      ampCacheMarker() === publishedAmpCacheMarker &&
+      (ampImport || (ampCacheRevision === publishedAmpCacheRevision && ampCacheMarker() === publishedAmpCacheMarker)) &&
       activityRevisionAtStart <= collectedActivityRevision
     ) {
       intervalTimer = setTimeout(loop, intervalMs);
