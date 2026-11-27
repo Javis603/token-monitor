@@ -358,7 +358,9 @@ class FakeSocket extends EventTarget {
     this.sent.push(message);
     if (message.id == null) return;
     if (this.heldMethods.has(message.method)) return;
-    const result = message.method === 'thread/list' ? { data: this.threads, nextCursor: null } : {};
+    const result = message.method === 'thread/list'
+      ? { data: this.threads.filter((thread) => message.params.originators.includes(thread.originator)), nextCursor: null }
+      : {};
     queueMicrotask(() => {
       if (this.readyState !== 1) return;
       const event = new Event('message');
@@ -392,6 +394,27 @@ function subscriptionFixture(t, listedThreads) {
     calls(method) { return sockets.flatMap((socket) => socket.sent.filter((item) => item.method === method)); }
   };
 }
+
+test('discovers Web Work tasks on the local executor alongside legacy Dots tasks', async (t) => {
+  const web = { ...LOCAL, id: 'local-web-task', originator: 'codex_work_web', threadSource: 'user' };
+  const f = subscriptionFixture(t, [
+    LOCAL,
+    web,
+    { ...web, id: 'wrong-source', threadSource: 'aeon_child' },
+    { ...web, id: 'native', path: '/rollout.jsonl' },
+    { ...web, id: 'other-device', environments: [{ environmentId: 'executor-other', cwd: '/work/project' }] }
+  ]);
+  f.source.start();
+  await f.settle();
+  assert.deepEqual(
+    f.calls('thread/resume').map((item) => item.params.threadId).sort(),
+    [LOCAL.id, web.id].sort()
+  );
+  const socket = f.sockets[0];
+  socket.notify('thread/tokenUsage/updated', { threadId: web.id, turnId: 'baseline', tokenUsage: { last: LAST, total: TOTAL } });
+  socket.notify('thread/tokenUsage/updated', { threadId: web.id, turnId: 'work', tokenUsage: { last: LAST, total: addCounters(TOTAL, LAST) } });
+  assert.deepEqual(f.store.rows().map((row) => [row.threadId, row.usage.total]), [[web.id, LAST.totalTokens]]);
+});
 
 test('historical idle threads never resume, including after reconnect; newly active work still records usage', async (t) => {
   const listed = Array.from({ length: 90 }, (_, i) => ({ ...LOCAL, id: `${ID}-${i}`, status: { type: 'idle' } }));

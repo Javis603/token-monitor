@@ -37,6 +37,13 @@ function graphContent(graph) {
   return content;
 }
 
+// Native-range days, compared like the periods: usage can move between days
+// without changing Today, Month or All Time.
+function daysContent(days) {
+  if (!days || typeof days !== 'object') return null;
+  return Object.fromEntries(Object.entries(days).map(([name, report]) => [name, reportContent(report)]));
+}
+
 // Revisions restart with the process. A persisted anchor records this instead,
 // so a restart can tell whether the cache still holds the usage it was built
 // from. Null until the first complete read.
@@ -44,6 +51,8 @@ function snapshotUsageKey(snapshot) {
   if (!snapshot || snapshot.revision === 0) return null;
   const hash = createHash('sha256');
   for (const period of ['today', 'month', 'allTime']) hash.update(`${JSON.stringify(reportContent(snapshot[period]) ?? null)}\n`);
+  // Without days the key stays what earlier versions persisted.
+  if (snapshot.days) hash.update(`${JSON.stringify(daysContent(snapshot.days))}\n`);
   return hash.digest('hex');
 }
 
@@ -74,7 +83,8 @@ function createCursorUsageSource({ sync, read, onChange, onError, signal, contex
     const changed = snapshot.revision === 0 || !isDeepStrictEqual(snapshot.context, current)
       || ['today', 'month', 'allTime'].some(key => !isDeepStrictEqual(reportContent(snapshot[key]), reportContent(next[key])))
       || !isDeepStrictEqual(graphContent(snapshot.graph), graphContent(next.graph))
-      || snapshot.graphFailed !== next.graphFailed;
+      || snapshot.graphFailed !== next.graphFailed
+      || !isDeepStrictEqual(daysContent(snapshot.days), daysContent(next.days));
     if (changed) snapshot = { ...next, context: current, revision: snapshot.revision + 1 };
     initialized = true;
     readPending = false;

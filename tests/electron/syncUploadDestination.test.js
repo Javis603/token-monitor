@@ -31,7 +31,7 @@ function harness() {
       posts.push({ url, options });
       return { response: { ok: true, json: async () => ({ ok: true }) } };
     },
-    fetch: async () => {}, saveSettings: () => {},
+    fetchFromHub: async () => {}, saveSettings: () => {},
     HUB_RESPONSE_HEADER: 'x-token-monitor-response', HUB_RESPONSE_MINIMAL: 'minimal'
   });
   vm.runInContext(source.slice(start, end), sandbox);
@@ -179,7 +179,7 @@ test('embedded Host cleanup targets the shared local store after port/secret rot
     embeddedHub: { port: 20000, secret: 'new-private', hub: {
       setSyncTitlePolicy: (device, enabled) => { calls.push([device, enabled]); return { enabled, generation: 2 }; }
     } },
-    fetch: async () => ({ status: 401, json: async () => ({}) }), AbortSignal
+    fetchFromHub: async () => ({ status: 401, json: async () => ({}) }), AbortSignal
   });
   vm.runInContext(source.slice(source.indexOf('async function requestSyncContent('), source.indexOf("const { createAccountPresentationSync }")) + source.slice(start, end), sandbox);
   sandbox.getSyncContentRuntime();
@@ -242,6 +242,7 @@ for (const failure of ['cleanup', 'preferences', 'bind']) test(`host ${failure} 
     getHubInfo: () => ({ error: sandbox.embeddedHubError, listening: Boolean(sandbox.embeddedHub), secret: sandbox.settings.hubHostSecret }),
     sendHubPush: payload => events.push(payload),
     advanceMacWidgetProducerAndSourceEpoch: () => {}, clearLatestHubStatsCache: () => {},
+    fixedRangeReads: { clear() {} },
     stopIcloudRuntime: async () => {}, stopLocalCollector: () => events.push('stopLocal'),
     stopStatsStream: () => {}, stopHostStats: () => {}, stopSyncCollector: () => {},
     syncStatsPublication: { cancel: () => {} },

@@ -72,6 +72,7 @@ function harness(style = 'roll') {
     cancelAnimationFrame(id) { frames.delete(id); },
     prefersReducedMotion: () => false,
     formatNumber: (value) => Math.round(value).toLocaleString('en-US'),
+    formatDetailTokens: (value) => Math.round(value).toLocaleString('en-US'),
     updateTotalCompact: (value) => compactValues.push(value)
   };
   const rowStart = source.indexOf('function animateRowNumber(');
@@ -763,6 +764,8 @@ test('a pushed animation preference settles the current headline before the next
   let pluginRefreshes = 0;
   context.pluginViewHost = { refreshMotion: () => { pluginRefreshes++; } };
   context.invalidateHubPairingQr = () => {};
+  context.detailTokenDisplayApi = { reset() {} };
+  context.currentLocale = () => 'en';
   api.animateTotalNumber(el, 1000, 2000, 1000);
   api.animateRowNumber(row, 100, 200, 600);
   const start = source.indexOf('function setRendererSettings(');

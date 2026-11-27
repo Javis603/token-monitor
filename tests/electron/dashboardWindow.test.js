@@ -19,8 +19,9 @@ function dashboardFunction(name, endMarker, context) {
   return new vm.Script(`${body}\n${name};`).runInNewContext(context);
 }
 
-function dashboardWindowFixture(platform = 'win32') {
+function dashboardWindowFixture(platform = 'win32', settings = {}) {
   const windows = [];
+  const backdrops = new Map();
   const handlers = new Map();
   class Window extends EventEmitter {
     constructor() {
@@ -49,13 +50,19 @@ function dashboardWindowFixture(platform = 'win32') {
   const context = vm.createContext({
     dashboardWindow: null, dashboardWindowReady: false, mainWindow: null, lastRendererStatsFingerprint: null,
     BrowserWindow: Window, process: { platform }, path, __dirname: rootDir,
-    appWindowIcon: () => ({}), applyWindowsChrome() {}, suppressLinuxSystemContextMenu() {}, syncWindowsBackdrop() {},
-    nativeBlurEnabled: () => false, attachNativeMaterialVisibility() {},
-    syncNativeMaterialVisibility() {}, nativeMaterialOptions: () => ({}), settings: {},
+    appWindowIcon: () => ({}), applyWindowsChrome() {}, suppressLinuxSystemContextMenu() {},
+    syncWindowsBackdrop(win, { enabled, mode = 'acrylic' }) {
+      if (platform === 'win32' && win) backdrops.set(win, enabled ? mode : 'transparent');
+    },
+    windowsAccentActive: win => backdrops.get(win) === 'accent',
+    nativeBlurEnabled: (source = settings) => source.systemGlass !== false,
+    attachNativeMaterialVisibility() {}, syncNativeMaterialVisibility() {},
+    nativeMaterialOptions: () => ({}), limitsHistoryController: null, settings,
     isAllowedExternalUrl: () => false, console: { log() {} },
     ipcMain: { on: (name, handler) => handlers.set(name, handler) }
   });
   const main = read('src', 'electron', 'main.js');
+  vm.runInContext(main.slice(main.indexOf('function applyNativeMaterial('), main.indexOf('function withHistoryPreview(')), context);
   vm.runInContext(main.slice(main.indexOf('function discardFailedDashboardWindow('), main.indexOf('async function getDashboardHistory(')), context);
   vm.runInContext(main.slice(main.indexOf("ipcMain.on('dashboard:ready'"), main.indexOf("ipcMain.on('dashboard:minimize'")), context);
   const app = new EventEmitter();
@@ -63,7 +70,8 @@ function dashboardWindowFixture(platform = 'win32') {
   Object.assign(context, { app, quitRequested: false, setTimeout: fn => timers.push(fn) });
   vm.runInContext(main.slice(main.indexOf('const rendererCrashReloadAt ='), main.indexOf('// Every quit route')), context);
   return {
-    windows, open: () => context.createDashboardWindow(),
+    windows, backdrops, open: () => context.createDashboardWindow(),
+    applyNativeMaterial: () => context.applyNativeMaterial(),
     ready: win => handlers.get('dashboard:ready')({ sender: win.webContents }),
     crash(win) {
       const details = { reason: 'crashed' };
@@ -73,6 +81,23 @@ function dashboardWindowFixture(platform = 'win32') {
     }
   };
 }
+
+test('Windows Dashboard uses the widget backdrop on open and when appearance changes', () => {
+  const settings = { systemGlass: true, windowsBackdrop: 'mica-alt' };
+  const f = dashboardWindowFixture('win32', settings);
+  const win = f.open();
+  assert.equal(f.backdrops.get(win), 'mica-alt');
+  f.ready(win);
+
+  settings.windowsBackdrop = 'accent';
+  f.applyNativeMaterial();
+  assert.equal(f.backdrops.get(win), 'accent');
+
+  settings.systemGlass = false;
+  f.applyNativeMaterial();
+  assert.equal(f.backdrops.get(win), 'transparent');
+  assert.equal(f.open(), win);
+});
 
 test('macOS Dashboard restores its transparent canvas before reveal and after reload', () => {
   const f = dashboardWindowFixture('darwin');

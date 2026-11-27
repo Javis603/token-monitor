@@ -302,12 +302,13 @@ test('client archive capture uses the full local observation over its later Hub 
   const afterLimits = mergeSyncDeviceRecord(hub, {
     deviceId: local.deviceId, updatedAt: later, receivedAt: '2026-11-18T12:00:03.000Z', limitsOnly: true, limits: {}
   });
-  assert.equal(afterLimits.updatedAt, later);
+  assert.equal(afterLimits.updatedAt, now.toISOString());
+  assert.equal(afterLimits.receivedAt, '2026-11-18T12:00:03.000Z');
   assert.equal(afterLimits.clientHealth.observedAt, now.toISOString());
   assert.equal(selectLocalDeviceRecord({
     deviceId: local.deviceId, lastCollectedDevice: local, latestHubStats: { devices: [afterLimits] },
     forClientArchive: true
-  }), local, 'a limits-only update advances the envelope but retains the usage observation');
+  }), local, 'a limits-only update advances receipt time and retains the usage observation');
   const legacyLocal = { ...local, clientHealth: undefined };
   const legacyHub = { ...afterLimits, clientHealth: undefined };
   for (const [lastCollectedDevice, hubRecord] of [

@@ -19,15 +19,14 @@ const {
 } = require('./clientSources');
 const { dirExists } = require('./clientSourceObservations');
 const { normalizeCustomScanPaths } = require('./customScanPaths');
+const { ANTIGRAVITY_ACP_SOURCE_ID, discoverAntigravityAcpPaths } = require('./providers/antigravity/acpPaths');
 const { activityWatchIgnored } = require('./sessionActivityWatch');
 const { antigravityDataRoots } = require('./providers/antigravity/selfSync');
 const { antigravityConversationSummaryCandidates } = require('./providers/antigravity/sessionMetadata');
+const { cliContextPath } = require('./providers/antigravity/cliContext');
 const { cursorDesktopWatchRoots, isCursorDesktopStateWrite } = require('./providers/cursor/desktopState');
 const { catpawDatabaseName } = require('./providers/catpaw/paths');
 const { isDshSessionLogName } = require('./providers/dsh/sessionFiles');
-const {
-  isReasonixNativeSessionSidecar, reasonixNativeSessionWatchRoots
-} = require('./providers/reasonix/watchPaths');
 const { SELF_SYNC_KINDS } = require('./selfSyncThrottle');
 
 // A volume root already ends with the platform separator ("/" or "D:\"), so
@@ -91,17 +90,25 @@ function selfSyncSourceRootsForClients(clientsCsv, options = {}) {
   return rootsByClient;
 }
 
-function antigravitySummaryWatchSources(options = {}) {
-  return antigravityConversationSummaryCandidates({
+function antigravityMetadataWatchSources(options = {}) {
+  const catalogs = antigravityConversationSummaryCandidates({
     home: options.homeDir || os.homedir(),
-    env: options.env || process.env
-  }).map((candidate) => {
+    env: options.env || process.env,
+    useEnvRoot: options.useEnvRoot !== false,
+    antigravityAcpPaths: options.antigravityAcpPaths
+  });
+  return [...catalogs, cliContextPath(options)].map((candidate) => {
     const file = canonicalWatchFilePath(candidate);
     return { file, dir: path.dirname(file) };
   });
 }
 
 function watchClientRootsForClients(clientsCsv, options = {}) {
+  const enabled = new Set(String(clientsCsv || '').split(',').map((value) => value.trim().toLowerCase()).filter(Boolean));
+  const acpDirs = enabled.has('antigravity')
+    ? options.antigravityAcpPaths ?? discoverAntigravityAcpPaths(options)
+    : [];
+  options = { ...options, antigravityAcpPaths: acpDirs };
   const rootsByClient = {};
   const customScanPaths = normalizeCustomScanPaths(options.customScanPaths, {
     platform: options.platform || process.platform
@@ -121,7 +128,6 @@ function watchClientRootsForClients(clientsCsv, options = {}) {
   // The Antigravity CLI writes parse-local SQLite that tokscale reads directly,
   // so it is also safe to watch and shares the umbrella client id. The filter
   // expands that id to antigravity-cli when the targeted scan runs.
-  const enabled = new Set(String(clientsCsv || '').split(',').map((value) => value.trim().toLowerCase()).filter(Boolean));
   const antigravityCliDir = antigravityCliDataDir(options);
   if (enabled.has('antigravity') && dirExists(antigravityCliDir)) {
     rootsByClient.antigravity = [...new Set([...(rootsByClient.antigravity || []), antigravityCliDir])];
@@ -129,16 +135,9 @@ function watchClientRootsForClients(clientsCsv, options = {}) {
   if (enabled.has('antigravity')) {
     // Watch the parent so a summary DB or WAL created after startup is seen.
     // Its policy below admits only those exact files, never the surrounding tree.
-    const summaryDirs = antigravitySummaryWatchSources(options).map(({ dir }) => dir).filter(dirExists);
-    if (summaryDirs.length > 0) {
-      rootsByClient.antigravity = [...new Set([...(rootsByClient.antigravity || []), ...summaryDirs])];
-    }
-  }
-  if (enabled.has('reasonix')) {
-    const nativeRoots = reasonixNativeSessionWatchRoots(options);
-    const existingNativeRoots = nativeRoots.filter(dirExists);
-    if (existingNativeRoots.length > 0) {
-      rootsByClient.reasonix = [...new Set([...(rootsByClient.reasonix || []), ...existingNativeRoots])];
+    const summaryDirs = antigravityMetadataWatchSources(options).map(({ dir }) => dir).filter(dirExists);
+    if (acpDirs.length > 0 || summaryDirs.length > 0) {
+      rootsByClient.antigravity = [...new Set([...(rootsByClient.antigravity || []), ...acpDirs, ...summaryDirs])];
     }
   }
   return rootsByClient;
@@ -184,9 +183,10 @@ function watchAttributionRootsForClients(clientsCsv, watchRoots = null, options 
     const canonicalRoot = (dir) => path.resolve(canonicalWatchPath(dir));
     const usageRoots = new Set([
       ...antigravityDataRoots(options.homeDir || os.homedir()), antigravityCliDataDir(options),
+      ...(options.antigravityAcpPaths ?? discoverAntigravityAcpPaths(options)),
       ...(normalizeCustomScanPaths(options.customScanPaths, options).antigravity || [])
     ].map(canonicalRoot));
-    const summaries = antigravitySummaryWatchSources(options);
+    const summaries = antigravityMetadataWatchSources(options);
     const summaryDirs = new Set(summaries.map(({ dir }) => dir));
     const watched = new Set(rootsByClient.antigravity.map(canonicalRoot));
     const antigravity = rootsByClient.antigravity.filter((dir) => !summaryDirs.has(canonicalRoot(dir)) || usageRoots.has(canonicalRoot(dir)));
@@ -600,27 +600,11 @@ function watchPolicyEntries(clientsCsv, options = {}) {
     return false;
   });
   if (antigravityEnabled) {
-    for (const { file, dir } of antigravitySummaryWatchSources(options)) {
+    for (const { file, dir } of antigravityMetadataWatchSources(options)) {
       const name = path.basename(file);
       bound('antigravity', [dir], directChildOnly((child) => child === name || child === `${name}-wal`));
     }
   }
-
-  const reasonixEnabled = String(clientsCsv || '').split(',').map((value) => value.trim().toLowerCase()).includes('reasonix');
-  bound(
-    'reasonix',
-    reasonixEnabled ? reasonixNativeSessionWatchRoots(options).filter(dirExists) : [],
-    (_parts, resolved) => {
-      if (isReasonixNativeSessionSidecar(resolved)) return false;
-      try {
-        if (fs.statSync(resolved).isDirectory()) return false;
-      } catch (_) {
-        // A removed sidecar is still delivered by chokidar; other removed
-        // files do not need to invalidate the native-session cache.
-      }
-      return true;
-    }
-  );
 
   // Prime's sessionDir may be cwd or the whole home. Its normal root sessions
   // are direct JSONL files; RLM transcripts are artifacts/<parent>/sub-*/*.jsonl.
@@ -711,12 +695,15 @@ function watchPolicyEntries(clientsCsv, options = {}) {
   ]));
   const isCustomOnly = (client, root) => Boolean(customRoots.get(client)?.has(root))
     && !builtInBySource.get(client)?.has(root);
+  const acpDirs = new Set(rootsByClient.antigravity
+    ?.filter(root => root.id === ANTIGRAVITY_ACP_SOURCE_ID).map(root => root.dir));
   const recursive = [
     ...Object.entries(candidates)
       .flatMap(([client, dirs]) => dirs
         .filter((dir) => (
           (client !== 'copilot' || customRoots.get(client)?.has(canonicalRoot(dir)))
-          && (!SELF_SYNCED_CLIENTS.has(client) || customScanPaths[client]?.includes(dir))
+          && (!SELF_SYNCED_CLIENTS.has(client) || customScanPaths[client]?.includes(dir)
+            || (client === 'antigravity' && acpDirs.has(dir)))
           && !(claimed.get(client) || EMPTY_SET).has(dir)
         ))
         .map((dir) => ({ client, root: canonicalRoot(dir), custom: isCustomOnly(client, canonicalRoot(dir)) }))),
@@ -795,7 +782,7 @@ function watchIgnoreMatcher(clientsCsv, options = {}) {
 // entry point so the widget and the headless agent cannot drift apart.
 // Tri-state on purpose: unset must fall through to the caller's value, which
 // is why parseBoolean's fallback semantics don't fit. The default is native on
-// every platform — chokidar 4 has no per-platform backend left to differ on,
+// every platform, with a backend selected by the platform watcher,
 // and the failure cases it cannot cover are handled by the watch-descriptor
 // fallback below rather than by pre-emptively polling everywhere.
 //
@@ -899,7 +886,7 @@ function watchEntriesExceed(dirs, ignored, limit) {
 
 // chokidar reads CHOKIDAR_USEPOLLING after the options it is handed and lets it
 // win, so the polling mode it actually runs can differ from the one we asked
-// for. Parsed exactly as chokidar 4 parses it; undefined when unset.
+// for. Parsed as Chokidar parses it; undefined when unset.
 function chokidarPollingEnv(env = process.env) {
   const raw = env.CHOKIDAR_USEPOLLING;
   if (raw === undefined) return undefined;
@@ -925,6 +912,7 @@ function openWatch(chokidar, config = {}, onEvent) {
   const copilotExporter = copilotEnabled ? copilotExporterWatch(os.homedir()) : null;
   const ignored = activityWatchIgnored(watchIgnoreMatcher(config.clients, {
     customScanPaths: config.customScanPaths,
+    antigravityAcpPaths: config.antigravityAcpPaths,
     cursorDesktopRoots: config.cursorDesktopRoots,
     homeDir: config.homeDir,
     env: config.env,
@@ -953,7 +941,16 @@ function openWatch(chokidar, config = {}, onEvent) {
     error.code = WATCH_POLLING_LIMIT_CODE;
     throw error;
   }
-  const watcher = chokidar.watch(config.dirs, watcherOptions(usePolling, ignored));
+  // Chokidar 4 treats an empty override as unset. Chokidar 6 reads the
+  // environment synchronously and rejects the zero it gets from an empty string.
+  const emptyInterval = process.env.CHOKIDAR_INTERVAL === '';
+  if (emptyInterval) delete process.env.CHOKIDAR_INTERVAL;
+  let watcher;
+  try {
+    watcher = chokidar.watch(config.dirs, watcherOptions(usePolling, ignored));
+  } finally {
+    if (emptyInterval) process.env.CHOKIDAR_INTERVAL = '';
+  }
   if (onEvent) watcher.on('all', (event, filePath) => {
     // Reuse the matcher that saw initial discovery. Keep the reported path so
     // the collector can still apply every other client's own source policy.
@@ -1022,7 +1019,7 @@ function isSelfWatchSqliteSidecarEvent(filePath, rootsByClient = {}) {
 module.exports = {
   clientWatchCandidates,
   selfSyncSourceRootsForClients,
-  antigravitySummaryWatchSources,
+  antigravityMetadataWatchSources,
   watchClientRootsForClients,
   watchPathsForClients,
   watchAttributionRootsForClients,

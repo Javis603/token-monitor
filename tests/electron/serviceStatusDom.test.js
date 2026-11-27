@@ -203,17 +203,21 @@ test('Home module jump icons align optically with their titles', () => {
   assert.match(cssRule(css, '.home-module-jump'), /transform:\s*translateY\(-1px\)/);
 });
 
-test('Home limit percentages use the compact Limits view typography', () => {
+test('Home limit rows share one column grid across accounts', () => {
   const css = readRendererFile('styles.css');
-  assert.match(cssRule(css, '.home-limit-window .home-list-value'), /font-size:\s*0\.625rem/);
-  assert.match(cssRule(css, '.home-limit-window .home-list-value'), /line-height:\s*1\.1/);
-});
-
-test('Home billing-only and explicit wide limit rows span the full summary width', () => {
-  const css = readRendererFile('styles.css');
-  const rule = cssRule(css, '.home-limit-window:only-child,\n.home-limit-window-wide');
-  assert.match(rule, /grid-column:\s*1 \/ -1/);
-  assert.match(rule, /max-width:\s*none/);
+  assert.match(cssRule(css, '.home-module-limits .home-module-body'), /grid-template-columns:\s*10px fit-content\(40%\) fit-content\(26%\) minmax\(28px, 1fr\) auto/);
+  assert.match(cssRule(css, '.home-limit-account'), /grid-template-columns:\s*subgrid/);
+  const rows = cssRule(css, '.home-limit-windows,\n.home-limit-window');
+  assert.match(rows, /grid-column:\s*1 \/ -1/);
+  assert.match(rows, /grid-template-columns:\s*subgrid/);
+  assert.match(cssRule(css, '.home-limit-window > .home-limit-reading-wide'), /grid-column:\s*4 \/ 6/);
+  assert.match(cssRule(css, '.home-limit-reset'), /grid-column:\s*3;[^}]*justify-self:\s*end/s);
+  // Hover reveal: a monochrome account shows its vendor colour.
+  assert.match(css, /\.home-limit-account:hover \.home-limit-window:not\(\.is-low, \.is-exhausted\) \.home-limit-track\s*\{[^}]*--home-limit-bar:\s*var\(--home-vendor-color\)/s);
+  // Accounts are set apart by the Limits page's feathered hairline, softer than the module rules.
+  const divider = cssRule(css, '.home-module-limits:not(.home-module-limits-classic) .home-limit-account + .home-limit-account::before,\n.home-session-row.starts-recent::after');
+  assert.match(divider, /left:\s*0/);
+  assert.match(divider, /rgba\(var\(--line-rgb\), 0\) 0,\s*rgba\(var\(--line-rgb\), 0\.075\) 22%/);
 });
 
 test('Home limit provider settings stay compact and list only enabled providers', () => {

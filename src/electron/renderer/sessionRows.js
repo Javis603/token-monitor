@@ -40,6 +40,11 @@
     return [row?.modelLabel ?? sessionModelLabel(row), sessionReasoningEffortForRow(row)].filter(Boolean).join(' · ');
   }
 
+  function remoteSessionDevice(sourceDevice, localDeviceId) {
+    return localDeviceId && sourceDevice?.deviceId && sourceDevice.deviceId !== localDeviceId && sourceDevice.name
+      ? sourceDevice : null;
+  }
+
   function sessionSubtitleForDisplay(row, subtitle, { keepClient = false } = {}) {
     const text = subtitle || '';
     const client = row.clientLabel || row.client;
@@ -195,13 +200,10 @@
   }
 
   function sessionIds(id) {
-    const raw = String(id || '').trim();
+    const raw = String(id || '').trim().replace(/^reasonix:/i, '');
     if (!raw) return [];
-    const reasonixPrefix = raw.match(/^reasonix:/i);
-    const reasonixLabel = reasonixPrefix ? raw.slice(reasonixPrefix[0].length) : raw;
-    if (reasonixLabel.toLowerCase().startsWith('reasonix-stats:')) return [];
-    if (reasonixPrefix) return [reasonixLabel];
-    if (raw.toLowerCase().startsWith('reasonix-stats:')) return [];
+    const lower = raw.toLowerCase();
+    if (lower.startsWith('reasonix-stats:')) return [];
     const uuids = raw.match(/[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}/gi) || [];
     // Rollout filenames can contain multiple UUIDs. These are display labels,
     // not proof that each UUID is a conversation identity.
@@ -290,6 +292,20 @@
     return compactSessionTime(session?.lastUsedAt || session?.startedAt, now);
   }
 
+  // The one-line age a row carries ("<1m", "28m", "3h", "2d"), in the same units
+  // as the limit countdowns. Shared so Home, the edge dock and the notch read
+  // alike; each row keeps the full localized phrase as its accessible name.
+  function sessionAgeShort(value, now = Date.now()) {
+    const ms = typeof value === 'number' ? value : Date.parse(value || '');
+    if (!Number.isFinite(ms) || ms <= 0) return '';
+    const minutes = Math.round(Math.max(0, now - ms) / 60000);
+    if (minutes < 1) return '<1m';
+    if (minutes < 60) return `${minutes}m`;
+    const hours = Math.round(minutes / 60);
+    if (hours < 24) return `${hours}h`;
+    return `${Math.round(hours / 24)}d`;
+  }
+
   function textValue(value) {
     return typeof value === 'string' ? value.trim() : '';
   }
@@ -328,6 +344,7 @@
 
   function handleBreakdownRowKeydown(event) {
     if (event?.key !== 'Enter' && event?.key !== ' ') return false;
+    if (event.target?.dataset?.detailTokenToggle === 'true') return false;
     const row = event.target?.closest?.('.row[role="button"]');
     if (!row) return false;
     event.preventDefault();
@@ -475,53 +492,38 @@
 
   function sessionRowDetailAvailable(row) {
     return ['claude', 'codebuddy', 'codex', 'opencode', 'dsh', 'workbuddy', 'pi', 'omp', 'senpi'].includes(row?.client)
-      || (row?.client === 'reasonix' && row?.sessionDetailAvailable === true);
+      || (row?.client === 'reasonix' && row.sessionDetailAvailable === true);
   }
 
   function nativeSessionRow(session, key, options, now) {
-    const periodTokenDataUnavailable = session?.periodTokenDataUnavailable === true;
-    // Native telemetry is cumulative for a resumed Branch, but it remains a
-    // trusted conversation total. Only an actually missing native total is
-    // unavailable; periodTokenDataUnavailable is reserved for aggregation so
-    // the same lifetime value is never counted as today's project usage.
     const tokenDataUnavailable = session?.tokenDataUnavailable === true;
     const value = tokenDataUnavailable ? 0 : finiteNumber(session?.totalTokens);
-    if (value <= 0 && !tokenDataUnavailable) return null;
+    const hasReasonixDetail = session?.client === 'reasonix' && sessionRowDetailAvailable(session);
+    if (value <= 0 && !tokenDataUnavailable && !hasReasonixDetail) return null;
     const labels = options.clientLabels || {};
     const colors = options.clientColors || {};
     const stable = typeof options.stableColor === 'function' ? options.stableColor : stableColor;
     const palette = options.fallbackColors || fallbackColors;
-    const client = textValue(session?.client) || 'reasonix';
+    const client = textValue(session?.client);
+    if (!client) return null;
     const { clientLabel, titleParts, modelLabel } = sessionTitleParts(
       { ...session, client },
       labels,
-      client === 'codex' ? 'Codex' : client === 'claude' ? 'Claude Code' : 'Reasonix',
+      client === 'codex' ? 'Codex' : client === 'claude' ? 'Claude Code' : client,
       session?.model
     );
-    // Native Reasonix prompt totals include cache hits; explicit misses win,
-    // matching the detail reader's split without counting those hits twice.
-    const cacheRead = Math.max(0, finiteNumber(session?.cacheHitTokens));
-    const cacheInput = session?.cacheMissTokens ?? Math.max(0, finiteNumber(session?.promptTokens) - cacheRead);
-    // Positive explicit misses prove a cold-cache reading; prompt-only or
-    // all-zero counters do not prove that cache telemetry is available.
-    const cacheLabel = cacheHitLabel({
-      inputTokens: cacheInput,
-      cacheReadTokens: cacheRead,
-      cacheWriteTokens: session?.cacheWriteTokens
-    }) || (finiteNumber(session?.cacheMissTokens) > 0 ? '0%' : '');
-    const usageMetrics = sessionUsageMetrics({
-      ...session,
-      ...(tokenDataUnavailable ? { inputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0,
-        outputTokens: 0, timedOutputTokens: 0, timedDurationMs: 0 } : client === 'reasonix' ? {
-        inputTokens: cacheInput, cacheReadTokens: cacheRead,
-        cacheReported: finiteNumber(session?.cacheMissTokens) > 0
-      } : {})
-    });
+    const cacheLabel = tokenDataUnavailable ? '' : cacheHitLabel(session);
+    const usageMetrics = sessionUsageMetrics(
+      tokenDataUnavailable
+        ? { ...session, inputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0,
+            outputTokens: 0, timedOutputTokens: 0, timedDurationMs: 0 }
+        : session
+    );
     const activityTime = sessionActivityLabel(session, now);
     const subtitleParts = [
       activityTime,
       messageLabel(session),
-      tokenDataUnavailable ? '' : cacheLabel,
+      cacheLabel,
       tokenRateLabel(session)
     ].filter(Boolean);
     // One derivation, not two: the boolean is a projection of the three-state
@@ -534,15 +536,19 @@
     const parentSessionId = textValue(session?.parentSessionId);
     const subagent = Boolean(parentSessionId) && (parentClient !== client || parentSessionId !== session.sessionId)
       && !isBackgroundReviewSession(session);
+    const sessionTitle = client === 'reasonix' ? sessionTitleForDisplay(session) : '';
     return {
       key: `session:${key}`,
       kind: 'session',
-      name: titleParts.join(' · '),
+      name: sessionTitle || titleParts.join(' · '),
       modelLabel,
       modelTooltipEntries: sessionModelTooltipEntries(session, {
-        unattributedLabel: options.unattributedLabel, latestModelLabel: options.latestModelLabel
+        unattributedLabel: options.unattributedLabel,
+        latestModelLabel: options.latestModelLabel,
+        formatTokens: options.formatTokens
       }),
-      subtitle: subtitleParts.join(' · '),
+      subtitle: (sessionTitle ? titleParts : subtitleParts).join(' · '),
+      activity: sessionTitle ? subtitleParts.join(' · ') : undefined,
       activitySummary: subtitleParts.join(' · '),
       activityTime,
       usageMetrics,
@@ -557,11 +563,7 @@
       detail: sessionIdLabel(session?.sessionId || key),
       value,
       tokenDataUnavailable,
-      periodTokenDataUnavailable,
-      // A reported session cost is the same trusted conversation-level value
-      // as the cumulative token total. Do not hide it merely because the
-      // period cannot be split exactly.
-      cost: tokenDataUnavailable ? 0 : finiteNumber(session?.reportedCostUsd),
+      cost: tokenDataUnavailable ? 0 : finiteNumber(session?.costUsd ?? session?.reportedCostUsd),
       sessionDetailAvailable: session?.sessionDetailAvailable === true,
       color: colors[client] || stable(key, palette),
       stale: false,
@@ -589,7 +591,8 @@
       session.client, clientLabel, id, session.models, session.latestModel, session.reasoningEffort,
       session.title, session.totalTokens, session.messageCount, session.cacheReadTokens,
       session.cacheWriteTokens, session.cacheReported, session.inputTokens, session.outputTokens,
-      session.timedOutputTokens, session.timedDurationMs, options.unattributedLabel, options.latestModelLabel
+      session.timedOutputTokens, session.timedDurationMs, options.unattributedLabel, options.latestModelLabel,
+      options.formatTokensKey ?? ''
     ]);
     const cached = previous?.get(key);
     if (cached && cached.signature === signature) {
@@ -605,7 +608,9 @@
       tokenRate: tokenRateLabel(session),
       usageMetrics: sessionUsageMetrics(session),
       modelTooltipEntries: sessionModelTooltipEntries(session, {
-        unattributedLabel: options.unattributedLabel, latestModelLabel: options.latestModelLabel
+        unattributedLabel: options.unattributedLabel,
+        latestModelLabel: options.latestModelLabel,
+        formatTokens: options.formatTokens
       })
     };
     if (next) next.set(key, { signature, data });
@@ -674,6 +679,7 @@
           key: `session:${key}`,
           kind: 'session',
           name: sessionTitle || titleParts.join(' · '),
+          projectLabel: textValue(session.projectLabel),
           modelLabel,
           modelTooltipEntries,
           subtitle: (sessionTitle ? titleParts : activityParts).join(' · '),
@@ -720,7 +726,12 @@
     if (nextLabels) options.rowLabelCache.entries = nextLabels;
     const usageKeys = new Set(rows.map((row) => row.key));
     for (const [key, session] of Object.entries(options.nativeSessions || {})) {
+      if (isReasonixSyntheticSession(session, key)) continue;
       if (usageKeys.has(`session:${key}`)) continue;
+      const row = nativeSessionRow(session, key, options, now);
+      if (row) rows.push(row);
+    }
+    for (const [key, session] of Object.entries(options.reasonixSessions || {})) {
       const row = nativeSessionRow(session, key, options, now);
       if (row) rows.push(row);
     }
@@ -885,7 +896,11 @@
       name: display.titled ? display.name : titleParts,
       modelLabel,
       modelTooltipEntries: options.includeModelTooltip === false ? []
-        : sessionModelTooltipEntries(group, { unattributedLabel: options.unattributedLabel, latestModelLabel: options.latestModelLabel }),
+        : sessionModelTooltipEntries(group, {
+          unattributedLabel: options.unattributedLabel,
+          latestModelLabel: options.latestModelLabel,
+          formatTokens: options.formatTokens
+        }),
       modelTokens: models,
       // Keep the tool/model reading order; the renderer reserves space for the
       // count while the preceding text can shrink in a narrow window.
@@ -968,6 +983,19 @@
     });
   }
 
+  function sessionListRows(rows, options) {
+    const grouped = groupSessionRows(rows, options);
+    // Keep the tool/model presentation when the user hides session titles.
+    if (options?.sessionTitlesEnabled === false) return grouped;
+    // A project identifies a standalone row on the list. Group members and
+    // transcript headings still use the session's own title or tool/model.
+    return grouped.map(row => {
+      if (row.kind !== 'session' || row.titled || !row.projectLabel) return row;
+      return { ...row, name: row.projectLabel, subtitle: row.name, activity: row.subtitle,
+        sessionDetailHeading: row.name };
+    });
+  }
+
   function sessionBreakdownIncomplete(stats, periodName) {
     const omitted = stats?.sessionDetailsOmitted || {};
     if (periodName === 'today') return finiteNumber(omitted.today) > 0;
@@ -993,6 +1021,7 @@
     sessionStatusNode,
     sessionReasoningEffortForRow,
     sessionModelMetadataLabel,
+    remoteSessionDevice,
     sessionSubtitleForDisplay,
     sessionModelMetadataNode,
     applyBreakdownRowSemantics,
@@ -1001,6 +1030,7 @@
     filterSessionRows,
     groupBackgroundReviewRows,
     groupSessionRows,
+    sessionListRows,
     groupSubagentRows,
     grokBotSessionIdsForMaps,
     isGrokBotSession,
@@ -1012,6 +1042,7 @@
     sessionIdLabel,
     sessionDetailIdLabel,
     sessionTitleForDisplay,
+    sessionAgeShort,
     // Exported for the edge dock's session rows: a card that shows the top
     // model reads a different name than the list's "N models" for the same
     // session, so both surfaces compose the label from this one helper.

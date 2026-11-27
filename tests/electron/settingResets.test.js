@@ -16,7 +16,7 @@ test('the app projects defaults only for settings with a reset control', () => {
   const keys = Array.from(html.matchAll(/data-reset-setting="([^"]+)"/g), match => match[1]);
   keys.push(
     'heatmapMetric', 'homeActiveDaysWindow', 'showExactHomeTrendTokens', 'homeModuleCounts',
-    'homeLimitDisplayMode', 'showHomeLimitBars', 'showHomeLimitProviderNames', 'homeLimitAccountCount',
+    'homeLimitDisplayMode', 'showHomeLimitBars', 'showHomeLimitProviderNames', 'homeLimitAccountCount', 'homeVendorColors', 'homeSessionDisplayMode',
     'historyIntervalMs', 'sessionContextMetric', 'limitsHistoryOpenMode', 'modelRankingMetric', 'serviceStatusRefreshMs', 'workbuddyQuotaTotalEnabled'
   );
   const defaults = Object.fromEntries(keys.map(key => [key, 1]));

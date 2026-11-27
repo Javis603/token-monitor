@@ -121,7 +121,7 @@ test('an overlapping Copilot exporter does not request an unrelated Kiro scan', 
   t.mock.method(os, 'homedir', () => f.home);
   const globalIgnore = watchIgnoreMatcher('kiro,copilot', { homeDir: f.home });
   assert.equal(globalIgnore(exporter), false, 'the exporter must survive the global policy union');
-  const chokidar = require('chokidar');
+  const chokidar = require('../../src/shared/fileWatcher');
   let onEvent;
   t.mock.method(chokidar, 'watch', () => {
     const watcher = { on(event, handler) { if (event === 'all') onEvent = handler; return watcher; }, close() {} };

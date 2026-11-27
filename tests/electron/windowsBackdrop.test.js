@@ -19,6 +19,7 @@ const {
   createAccentApi,
   refreshWindowsBackdrop,
   syncWindowsBackdrop,
+  windowsAccentActive,
   windowsBackdropFallback
 } = require('../../src/electron/windowsBackdrop');
 const { normalizeWindowsBackdropMode, normalizeWindowsDockBackdropMode } = require('../../src/electron/windowsBackdropMode');
@@ -64,23 +65,48 @@ test('Windows glass appearance state covers platform and system-glass boundaries
   assert.deepEqual(appearanceState({}, { isWindows: false }), {
     showBackdropControl: false,
     showAccentNote: false,
+    squareCorners: false,
     backdropMode: 'acrylic'
   });
   assert.deepEqual(appearanceState({ systemGlass: false, windowsBackdrop: 'accent' }, { isWindows: true }), {
     showBackdropControl: false,
     showAccentNote: false,
+    squareCorners: false,
     backdropMode: 'accent'
   });
   assert.deepEqual(appearanceState({ systemGlass: true, windowsBackdrop: 'accent' }, { isWindows: true }), {
     showBackdropControl: true,
     showAccentNote: true,
+    squareCorners: false,
     backdropMode: 'accent'
   });
   assert.deepEqual(appearanceState({ systemGlass: true, windowsBackdrop: 'acrylic' }, { isWindows: true }), {
     showBackdropControl: true,
     showAccentNote: false,
+    squareCorners: false,
     backdropMode: 'acrylic'
   });
+});
+
+test('Widget corners follow applied Accent across a failed Win10 cleanup and retry', () => {
+  const f = materialFixture(true, '10.0.19045');
+  const accent = { systemGlass: true, windowsBackdrop: 'accent' };
+  const off = { ...accent, systemGlass: false };
+  const squareCorners = (settings, osRelease = '10.0.19045') => appearanceState(settings, {
+    isWindows: true, osRelease, accentActive: windowsAccentActive(f.win)
+  }).squareCorners;
+
+  assert.equal(squareCorners(accent), false);
+  f.sync({ mode: 'accent' });
+  assert.equal(squareCorners(accent), true);
+  assert.equal(squareCorners(accent, '10.0.22000'), false);
+  assert.equal(squareCorners(accent, ''), false);
+  f.api.clear = () => false;
+  f.sync({ enabled: false });
+  assert.equal(squareCorners(off), true);
+  f.api.clear = () => true;
+  f.sync({ enabled: false });
+  assert.equal(squareCorners(off), false);
 });
 
 test('Accent blur passes the native HWND and configured tint to the native adapter', () => {
@@ -197,7 +223,7 @@ test('Windows material preferences keep transparent document hosts instead of re
   assert.match(main, /windowsBackdropFallback: windowsBackdropFallback\(mainWindow\)/);
   assert.doesNotMatch(main, /previousNativeMaterial|nextNativeMaterial|replaceDashboardWindow|function rebuildWindow/);
   assert.doesNotMatch(main, /transparent: !/);
-  assert.match(main, /dashboardWindow = win;[\s\S]*?syncWindowsBackdrop\(win, \{ enabled: nativeBlurEnabled\(\) \}\)/);
+  assert.match(main, /function createDashboardWindow\(\)[\s\S]*?transparent: true,[\s\S]*?new BrowserWindow\(windowOptions\)/);
   assert.doesNotMatch(main, /windowsBackdropChanged/);
   assert.doesNotMatch(main, /windowsLayeredBlur/);
 });
@@ -314,7 +340,7 @@ for (const [mode, material] of [['mica', 'mica'], ['mica-alt', 'tabbed']]) {
 
   test(`${mode} reaches the renderer without an Accent warning`, () => {
     assert.deepEqual(appearanceState({ systemGlass: true, windowsBackdrop: mode }, { isWindows: true }), {
-      showBackdropControl: true, showAccentNote: false, backdropMode: mode
+      showBackdropControl: true, showAccentNote: false, squareCorners: false, backdropMode: mode
     });
   });
 }

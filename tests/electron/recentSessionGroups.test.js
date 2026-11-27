@@ -147,17 +147,25 @@ function translate(key, params) {
   return key;
 }
 
-function incumbentOptions(stats) {
+function incumbentOptions(stats, settings, formatDetailTokens = String) {
   const { CLIENT_LABELS } = require('../../src/shared/clientCatalog');
   const { clientColors } = require('../../src/electron/renderer/usageCharts');
   const { translate: localize } = require('../../src/electron/renderer/i18n');
   const source = app.slice(app.indexOf('function sessionPresentationOptions()'), app.indexOf('function rawSessionRowsForPeriod('));
   return Function('clientLabels', 'clientColors', 'modelColor', 'stableColor', 'fallbackModelColors', 't',
-    'state', 'formatCompact', 'effectiveCompactTokenUnits', 'currentLocale', `${source}; return sessionPresentationOptions();`)(
+    'state', 'formatCompact', 'effectiveCompactTokenUnits', 'currentLocale', 'formatDetailTokens', 'detailTokenDisplaySignature', `${source}; return sessionPresentationOptions();`)(
     CLIENT_LABELS, clientColors, () => '', () => '', [], (key, params) => localize('zh-TW', key, params),
-    { stats, period: 'month' }, String, () => '', () => 'zh-TW'
+    { stats, settings, period: 'month' }, value => `${value / 1000}K`, () => '', () => 'zh-TW', formatDetailTokens, () => '0:0:western:zh-TW'
   );
 }
+
+test('Auto Review latest count follows exact mode only when compact details are enabled', () => {
+  const summary = { latestValue: 120_000 };
+  const formatExact = value => value.toLocaleString('en-US');
+  const label = settings => incumbentOptions({}, settings, formatExact).backgroundReviews.summaryLabel(summary);
+  assert.equal(label({ detailTokensUseCompactUnits: false }), '120K');
+  assert.equal(label({ detailTokensUseCompactUnits: true }), '120,000');
+});
 
 function renderStatusGroup(group, metric = 'used') {
   const document = { createElement: tag => new Node(tag), createTextNode: text => new Node('text', '', text) };
@@ -168,11 +176,12 @@ function renderStatusGroup(group, metric = 'used') {
   const tooltip = { setDetailTooltip() {} };
   const home = Function('document', 'window', 'state', 'els', 'pluginContent', 'sessionTooltipShouldHoldRender',
     'renderBreakdownChange', 'VIEW_ICON_CLASSES', 't', 'applyHomeListMark', 'iconKindFor', 'clientColors', 'stableColor', 'fallbackModelColors',
-    'bindHoverMarquee', 'formatCompact', 'homeSessionAgo', 'sessionRowsApi', 'limitWindowsView',
+    'bindHoverMarquee', 'formatCompact', 'homeSessionAgo', 'sessionRowsApi', 'limitWindowsView', 'homeModulePreferencesApi',
     `${shellSource}; ${contextSource}; ${homeSource}; return renderHomeSessionModule;`)(
     document, { TokenMonitorEdgeDockPresentation: presentation, TokenMonitorSessionLive: sessionLive },
     state, { homePanel: { children: [], querySelector: () => null } }, null, () => false,
-    () => {}, {}, translate, () => {}, () => '', {}, () => '', [], () => {}, String, () => '', rowApi, tooltip
+    () => {}, {}, translate, () => {}, () => '', {}, () => '', [], () => {}, String, () => '', rowApi, tooltip,
+    require('../../src/electron/renderer/homeModulePreferences')
   )([group]);
   const dockContext = dock.slice(dock.indexOf('function contextNode('), dock.indexOf('// Last activity seen'));
   const dockSource = dock.slice(dock.indexOf('const expandedSessionGroups ='), dock.indexOf('function providerCard('));
@@ -274,7 +283,7 @@ test('recent groups resolve to Sessions detail with incumbent tool names, colors
   assert.notEqual(botDetail.detail, '2 activity records');
 });
 
-test('Home keeps family membership below the title and routes mouse and keyboard activation to the Sessions list', () => {
+test('Home omits family size and routes mouse and keyboard activation to the Sessions list', () => {
   const stats = fixture();
   const opts = incumbentOptions(stats);
   const group = presentation.recentSessionRows(stats, Infinity, opts)[0];
@@ -303,12 +312,9 @@ test('Home keeps family membership below the title and routes mouse and keyboard
     assert.equal(title.textContent, group.title);
     assert.equal(title.children.length, 0, 'membership never consumes title width');
     const description = meta.children[0];
-    const countIndex = description.children.findIndex(node => node.className === 'home-session-member-count');
-    const modelIndex = description.children.findIndex(node => node.className === 'session-model-metadata'
-      && node.children[0]?.textContent === rowApi.sessionModelLabel(group));
-    assert.ok(modelIndex >= 0 && countIndex > modelIndex, 'models precede membership like Sessions');
-    assert.equal(description.children[countIndex].textContent, '2 subagents');
-    assert.equal(description.children.at(-1).textContent, ' · just now');
+    assert.deepEqual(description.children.map(node => node.className), ['session-model-metadata']);
+    assert.equal(description.children[0].children[0].textContent, rowApi.sessionModelLabel(group));
+    assert.equal(meta.children.length, 1, 'a fresh live group shows model information without age or member count');
     assert.equal(row.attributes.role, undefined, 'rows do not create nested navigation buttons');
     assert.equal(row.handlers.click, undefined);
     assert.equal(row.dataset.key, group.key);
@@ -327,16 +333,19 @@ test('Home keeps family membership below the title and routes mouse and keyboard
 
 test('Dock family expansion keeps real member rows and requests the existing native bubble size handshake', () => {
   const group = presentation.recentSessionRows(fixture())[0];
+  group.remoteDevice = { deviceId: 'imac', name: 'imac-m1', deviceKind: 'desktop' };
   const source = dock.slice(dock.indexOf('const expandedSessionGroups ='), dock.indexOf('function providerCard('));
   const payload = { cell: { id: 'sessions' } };
   const resized = [];
   const build = Function('document', 'presentation', 'sessionKey', 'el', 't', 'stateMark', 'overflowText',
     'clientLabel', 'sessionRowsApi', 'relativeAgo', 'limitWindowsView', 'contextNode', 'sessionLive',
-    'formatBreakdownTokens', 'state', 'surface', 'renderBubble', 'markNode', 'appearance', `${source}; return sessionsContainer;`)(
+    'formatBreakdownTokens', 'state', 'surface', 'renderBubble', 'markNode', 'appearance', 'window', `${source}; return sessionsContainer;`)(
     { createTextNode: text => new Node('text', '', text), createElement: tag => new Node(tag) }, presentation, row => row.key,
     (tag, className, text) => new Node(tag, className, text), translate, () => new Node('span'), { bind() {} },
     value => value, rowApi, () => '', { setDetailTooltip() {} }, () => null, sessionLive, String,
-    { payload }, 'bubble', value => resized.push(value), () => new Node('span'), () => ({})
+    { payload }, 'bubble', value => resized.push(value), () => new Node('span'),
+    () => ({ deviceIconScope: 'hub', deviceIconOverrides: { hub: { imac: 'laptop' } } }),
+    { TokenMonitorDeviceIcons: require('../../src/electron/renderer/deviceIcons') }
   );
   const list = build([group]);
   const family = list.children.at(-1).children[0];
@@ -346,16 +355,14 @@ test('Dock family expansion keeps real member rows and requests the existing nat
   assert.equal(summary.attributes.role, 'button');
   assert.equal(summary.attributes['aria-expanded'], 'false');
   const titleLine = summary.children[0];
-  const description = summary.children[2].children[0];
+  const meta = summary.children[2];
+  assert.equal(meta.children[0].className, 'session-source-device');
+  assert.equal(meta.children[0].children[1].textContent, 'imac-m1');
+  assert.equal(meta.children[0].children[0].className, 'device-kind-icon device-kind-laptop');
   assert.equal(titleLine.children.some(node => node.className === 'edge-dock-session-disclosure'), false,
     'group titles retain the ordinary session row layout without an extra arrow column');
-  assert.equal(titleLine.children.some(node => node.className === 'edge-dock-session-member-count'), false);
-  assert.equal(description.className, 'edge-dock-session-description');
-  const countIndex = description.children.findIndex(node => node.className === 'edge-dock-session-member-count');
-  const modelIndex = description.children.findIndex(node => node.className === 'session-model-metadata'
-    && node.children[0]?.textContent === rowApi.sessionModelLabel(group));
-  assert.ok(modelIndex >= 0 && countIndex > modelIndex, 'models precede membership like Sessions');
-  assert.equal(description.children[countIndex].textContent, '2 subagents');
+  assert.ok(meta.children.some(node => node.children[0]?.textContent === rowApi.sessionModelLabel(group)));
+  assert.ok([...titleLine.children, ...meta.children].every(node => node.textContent !== '2 subagents'));
   assert.equal(family.children[1].children.at(-1).children.length, 3, 'members retain individual navigable expansion rows');
   family.open = true;
   family.handlers.toggle();

@@ -15,13 +15,13 @@ Headless agent 就是去掉界面的 widget 采集器。它扫描本机上的 AI
 
 ## 前置条件
 
-- Node.js 22.15.0 或更高版本，以及 npm 和 git。
+- Node.js 22.22.0 或更高版本，以及 npm 和 git。
 - 一个 agent 能访问到的 hub：widget 内置 hub、Node hub 或 Cloudflare Worker（见 [多设备同步](../README.zh-CN.md#多设备同步)），并准备好它的 URL 与共享密钥。
 
 ## 安装
 
 ```bash
-node --version   # 必须是 v22.15.0 或更高
+node --version   # 必须是 v22.22.0 或更高
 git clone https://github.com/Javis603/token-monitor.git
 cd token-monitor
 npm ci

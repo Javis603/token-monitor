@@ -510,3 +510,27 @@ test('a same-day timezone change invalidates the Cursor snapshot context', async
   assert.equal(source.getSnapshot().context, next);
   assert.equal(source.getSnapshot().today.totalTokens, 2);
 });
+
+test('usage moving between native-range days republishes the snapshot and its restart key', async () => {
+  const controller = new AbortController();
+  const withDays = (first, second) => ({ ...snapshot(5), days: {
+    'd2026-10-31': { entries: [{ sessionId: 's', input: first }] },
+    'd2026-10-30': { entries: [{ sessionId: 's', input: second }] }
+  } });
+  const reads = [withDays(3, 2), withDays(2, 3)];
+  const source = createCursorUsageSource({ context, signal: controller.signal,
+    sync: async () => false,
+    read: async () => reads.shift()
+  });
+  await source.refresh({ readOnly: true });
+  const first = source.getSnapshot();
+  await source.refresh({ readOnly: true, force: true });
+  const second = source.getSnapshot();
+  // Today, Month and All Time are unchanged; only the days moved.
+  assert.equal(second.revision, first.revision + 1);
+  assert.notEqual(snapshotUsageKey(second), snapshotUsageKey(first));
+  // A snapshot without days keeps the key earlier versions persisted.
+  const legacy = { ...snapshot(5), revision: 1 };
+  const { days: _days, ...withoutDays } = { ...first };
+  assert.equal(snapshotUsageKey({ ...withoutDays, revision: 1 }), snapshotUsageKey(legacy));
+});

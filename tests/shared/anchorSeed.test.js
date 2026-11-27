@@ -10,7 +10,9 @@ const test = require('node:test');
 
 const { deviceRecordFromAnchor, seedWithColdPreview } = require('../../src/shared/anchorSeed');
 const { collectorAnchorTrust, configFingerprint, collectionCalendarKey } = require('../../src/shared/collector');
-const { aggregateDevices, emptyPeriod } = require('../../src/shared/usage');
+const { attachLocalNativeRanges } = require('../../src/electron/syncDisplayStats');
+const { nativeRangeSnapshot } = require('../../src/electron/renderer/fixedPeriodRanges');
+const { aggregateDevices, emptyPeriod, normalizePeriod } = require('../../src/shared/usage');
 
 const CLIENTS = 'claude,codex';
 const ALL_TIME_SINCE = '2024-01-01';
@@ -136,13 +138,38 @@ test('the seed refuses a Qoder CN anchor that includes the retired SQLite source
   assert.equal(deviceRecordFromAnchor(legacyAnchor, seedOptions(options)), null);
 });
 
-test('the seed carries local-only native Reasonix views when the anchor has them', () => {
-  const nativeSessions = { today: { 'reasonix:session': { client: 'reasonix', totalTokens: 12 } }, month: {}, allTime: {} };
-  const nativeProjects = { today: { 'token monitor': { label: 'Token Monitor', tokens: 12, clients: { reasonix: 12 } } }, month: {}, allTime: {} };
+test('the seed carries local-only native views when the anchor has them', () => {
+  const nativeSessions = { today: { 'codex:session': { client: 'codex', totalTokens: 0, tokenDataUnavailable: true } }, month: {}, allTime: {} };
+  const nativeProjects = { today: { 'token monitor': { label: 'Token Monitor', tokens: 12, clients: { codex: 12 } } }, month: {}, allTime: {} };
   const record = deviceRecordFromAnchor(anchorFixture({ nativeSessions, nativeProjects }), seedOptions());
 
   assert.deepEqual(record.nativeSessions, nativeSessions);
   assert.deepEqual(record.nativeProjects, nativeProjects);
+});
+
+test('an upgrade seed removes Reasonix native views while keeping aggregate usage and Codex rows', () => {
+  const codex = { client: 'codex', sessionId: 'pre-token', tokenDataUnavailable: true };
+  const codexProject = { label: 'Codex project', tokens: 12, clients: { codex: 12 } };
+  const today = periodWith(140);
+  today.clients.reasonix = 140;
+  today.clientCosts.reasonix = 0.12;
+  const saved = anchorFixture({
+    today,
+    nativeSessions: { today: {
+      'reasonix:old': { client: 'reasonix', sessionId: 'reasonix:old' },
+      'codex:pre-token': codex
+    } },
+    nativeProjects: { today: {
+      old: { label: 'Reasonix project', tokens: 140, clients: { reasonix: 140 }, sessionIds: ['reasonix:old'] },
+      codex: codexProject
+    } }
+  });
+  const record = deviceRecordFromAnchor(saved, seedOptions());
+
+  assert.equal(record.today.clients.reasonix, 140);
+  assert.equal(record.today.clientCosts.reasonix, 0.12);
+  assert.deepEqual(record.nativeSessions.today, { 'codex:pre-token': codex });
+  assert.deepEqual(record.nativeProjects.today, { codex: codexProject });
 });
 
 test('the seed removes legacy Reasonix stats paths from ordinary period sessions', () => {
@@ -330,7 +357,7 @@ test('a pricing or tokscale binary change still seeds, but nothing else that mov
 
 test('native views of windows that have ended are dropped from an earlier-day seed', () => {
   // The renderer shows these per window without a date of their own.
-  const nativeSessions = { today: { 'reasonix:a': { client: 'reasonix', totalTokens: 12 } }, month: { 'reasonix:a': { client: 'reasonix', totalTokens: 40 } }, allTime: { 'reasonix:a': { client: 'reasonix', totalTokens: 90 } } };
+  const nativeSessions = { today: { 'codex:a': { client: 'codex', totalTokens: 0 } }, month: { 'codex:a': { client: 'codex', totalTokens: 0 } }, allTime: { 'codex:a': { client: 'codex', totalTokens: 0 } } };
   const nativeProjects = { today: { p: { tokens: 12 } }, month: { p: { tokens: 40 } }, allTime: { p: { tokens: 90 } } };
 
   const yesterday = deviceRecordFromAnchor(
@@ -432,4 +459,55 @@ test('first-scan previews keep the seeded History', () => {
     assert.equal(record.today.totalTokens, 2_000);
     assert.equal(record.history, seed.history);
   });
+});
+
+test('a local cold start restores matching native ranges and keeps them through previews', () => {
+  const week = normalizePeriod({
+    ...periodWith(40),
+    sessions: { 'claude:past': { client: 'claude', sessionId: 'past', totalTokens: 40, title: 'Past session' } }
+  });
+  const nativePastRanges = {
+    todayKey: '2026-08-08',
+    weekStartsOn: 1,
+    starts: { yesterday: '2026-08-07', week: '2026-08-03', last7: '2026-08-02', last30: '2026-07-10' },
+    periods: { yesterday: periodWith(10), week, last7: periodWith(60), last30: periodWith(90) },
+    codexDotsUsage: false
+  };
+  const saved = anchorFixture({ nativePastRanges });
+  const options = seedOptions({ nativeRangesEnabled: true, weekStartsOn: 1 });
+  const record = deviceRecordFromAnchor(saved, options);
+
+  assert.equal(record.nativeRanges?.yesterday?.totalTokens, 10);
+  assert.equal(record.nativeRanges?.week?.totalTokens, 1_040);
+  assert.equal(record.nativeRanges?.last7?.totalTokens, 1_060);
+  assert.equal(record.nativeRanges?.last30?.totalTokens, 1_090);
+  assert.deepEqual(record.nativeRangeWindows.yesterday, { start: '2026-08-07', end: '2026-08-07' });
+  assert.deepEqual(record.nativeRangeWindows.week, { start: '2026-08-03', end: '2026-08-08' });
+
+  const stats = attachLocalNativeRanges(aggregateDevices([record], 0, NOW.getTime()), record);
+  const snapshot = nativeRangeSnapshot('week', stats, { todayKey: '2026-08-08', locale: 'en-GB' });
+  assert.equal(snapshot.period.totalTokens, 1_040);
+  assert.equal(snapshot.period.sessions['claude:past'].title, 'Past session');
+
+  const preview = seedWithColdPreview(record, { today: periodWith(2_000), periodWindows: record.periodWindows });
+  assert.equal(preview.today.totalTokens, 2_000);
+  assert.equal(preview.nativeRanges.week.totalTokens, 1_040);
+
+  assert.equal(deviceRecordFromAnchor(saved, { ...options, nativeRangesEnabled: false }).nativeRanges, undefined);
+  assert.equal(deviceRecordFromAnchor(saved, { ...options, now: new Date(2026, 7, 9, 10) }).nativeRanges, undefined);
+  assert.equal(deviceRecordFromAnchor(saved, { ...options, weekStartsOn: 0 }).nativeRanges, undefined);
+  assert.equal(deviceRecordFromAnchor({ ...saved, wslBundle: { allTime: periodWith(5) } }, options).nativeRanges, undefined);
+  const windows = { ...options, wslSupported: true };
+  const emptyWsl = { today: emptyPeriod(), month: emptyPeriod(), allTime: emptyPeriod() };
+  const withoutWsl = { ...saved, wslBundle: emptyWsl, wslStatus: { state: 'disabled' } };
+  const withoutCoverage = deviceRecordFromAnchor(withoutWsl, windows);
+  assert.equal(withoutCoverage.nativeRanges, undefined);
+  assert.equal(withoutCoverage.today.totalTokens, 1_000);
+  assert.ok(deviceRecordFromAnchor(withoutWsl, { ...windows, wslScanEnabled: false }).nativeRanges);
+  assert.ok(deviceRecordFromAnchor({ ...withoutWsl, wslStatus: { state: 'no-data' } }, windows).nativeRanges);
+  const withDots = { ...saved, nativePastRanges: { ...nativePastRanges, codexDotsUsage: true } };
+  assert.equal(deviceRecordFromAnchor(withDots, options).nativeRanges, undefined);
+  assert.ok(deviceRecordFromAnchor(withDots, { ...options, codexDotsVisible: false }).nativeRanges);
+  const legacy = { ...saved, nativePastRanges: { ...nativePastRanges, codexDotsUsage: undefined } };
+  assert.equal(deviceRecordFromAnchor(legacy, options).nativeRanges, undefined);
 });

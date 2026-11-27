@@ -1,6 +1,6 @@
 'use strict';
 
-const { archivedHistory, collectorAnchorTrust, computePeriodWindows } = require('./collector');
+const { archivedHistory, collectorAnchorTrust, composeNativeRanges, computePeriodWindows, matchingNativePastRanges } = require('./collector');
 const { mergePeriods } = require('./usage');
 const { filterReasonixSyntheticSessions } = require('./providers/reasonix/sessionGuard');
 
@@ -35,6 +35,9 @@ function deviceRecordFromAnchor(saved, options = {}) {
     wslSupported = false,
     hostname = '',
     platform = '',
+    nativeRangesEnabled = false,
+    weekStartsOn = 1,
+    codexDotsVisible = true,
     historyEnabled = true,
     dailyHistoryArchiveEnabled = false,
     dailyHistoryArchiveOptions = {},
@@ -49,9 +52,17 @@ function deviceRecordFromAnchor(saved, options = {}) {
   // window's views are dropped here rather than left to aggregation.
   const currentWindows = computePeriodWindows(now);
   const ended = ['today', 'month'].filter(period => anchorWindows[period].key !== currentWindows[period].key);
-  const nativeView = view => (ended.length && view && typeof view === 'object'
-    ? { ...view, ...Object.fromEntries(ended.map(period => [period, {}])) }
-    : view);
+  // Upgrades can reopen an anchor with Reasonix's retired native rows.
+  // Their Tokscale totals are already in the ordinary periods.
+  const nativeView = (view, cleanMap) => {
+    if (!view || typeof view !== 'object') return view;
+    const periods = Object.fromEntries(Object.entries(view).map(([period, rows]) => [period, cleanMap(rows)]));
+    for (const period of ended) periods[period] = {};
+    return periods;
+  };
+  const cleanNativeProjects = rows => (rows && typeof rows === 'object'
+    ? Object.fromEntries(Object.entries(rows).filter(([, project]) => !Object.hasOwn(project?.clients || {}, 'reasonix')))
+    : rows);
   // The seed's own rule, and the one place it is stricter than the collector.
   // A capture time the collector cannot trust only costs it a full scan, but
   // here that timestamp becomes the record's updatedAt and the instant the
@@ -77,6 +88,23 @@ function deviceRecordFromAnchor(saved, options = {}) {
     : wslScanEnabled !== true
       ? { state: 'disabled', detected: [], withData: [] }
       : (saved.wslStatus || null);
+  const trackedClients = String(clients || '').split(',').filter(Boolean);
+  // An empty WSL bundle captured with scanning disabled does not establish
+  // coverage after the setting is enabled. The regular seed still stands.
+  const wslCoverageKnown = !wslSupported || !wslScanEnabled
+    || Boolean(wsl?.allTime && wslStatus?.state && wslStatus.state !== 'disabled');
+  const pastRanges = nativeRangesEnabled && wslCoverageKnown
+    ? matchingNativePastRanges(saved.nativePastRanges, currentWindows.today.key, weekStartsOn)
+    : null;
+  const nativeRangeSnapshot = composeNativeRanges(pastRanges, saved.today, {
+    allTimeSince,
+    wslAllTime: wsl?.allTime,
+    // Legacy anchors do not say whether the last scan included Dots usage.
+    codexDotsUsage: codexDotsVisible && trackedClients.includes('codex') && pastRanges?.codexDotsUsage !== false
+  });
+  for (const [name, period] of Object.entries(nativeRangeSnapshot?.nativeRanges || {})) {
+    nativeRangeSnapshot.nativeRanges[name] = cleanPeriod(period);
+  }
   const at = new Date(trust.capturedAtMs).toISOString();
   // History waits for `tokscale graph`, which runs after all three windows. The
   // daily archive already holds every day the last graphs saw, so show that in
@@ -100,7 +128,7 @@ function deviceRecordFromAnchor(saved, options = {}) {
     platform,
     updatedAt: at,
     receivedAt: at,
-    trackedClients: String(clients || '').split(',').filter(Boolean),
+    trackedClients,
     // Both drive UI beyond the totals: projectsEnabled decides whether the
     // all-time project breakdown is flagged incomplete, wslStatus feeds the
     // attribution panel. Leaving them off makes the seed a record that looks
@@ -117,8 +145,9 @@ function deviceRecordFromAnchor(saved, options = {}) {
     today: withWsl(saved.today, wsl?.today),
     month: withWsl(saved.month, wsl?.month),
     allTime: withWsl(saved.allTime, wsl?.allTime),
-    ...(Object.prototype.hasOwnProperty.call(saved, 'nativeSessions') ? { nativeSessions: nativeView(saved.nativeSessions) } : {}),
-    ...(Object.prototype.hasOwnProperty.call(saved, 'nativeProjects') ? { nativeProjects: nativeView(saved.nativeProjects) } : {}),
+    ...(Object.prototype.hasOwnProperty.call(saved, 'nativeSessions') ? { nativeSessions: nativeView(saved.nativeSessions, filterReasonixSyntheticSessions) } : {}),
+    ...(Object.prototype.hasOwnProperty.call(saved, 'nativeProjects') ? { nativeProjects: nativeView(saved.nativeProjects, cleanNativeProjects) } : {}),
+    ...nativeRangeSnapshot,
     ...(history ? { historyAvailable: true, history } : {})
   };
 }

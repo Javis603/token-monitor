@@ -260,6 +260,7 @@ function hubPairingFixture(loadPairingQr, mode = 'host') {
     state: {
       settings: { hubMode: mode, hubUrl: url, secret: 'synthetic-client-secret' },
       settingsSections: { sync: true },
+      floatingBubble: { collapsed: false, side: null },
       hubInfo: { listening: true, listeningPort: 17321, lanAddresses: [lan, tailscale] }
     },
     els: {
@@ -274,9 +275,13 @@ function hubPairingFixture(loadPairingQr, mode = 'host') {
     },
     clientConnectionEditing: false, hubSaveBusy: false, hubSaveError: false,
     visiblyOpen: true, hasDraft: false, clientConnectionHasDraft: () => context.hasDraft,
-    document: { activeElement: null, createElement: () => new Element() },
+    document: {
+      activeElement: null, createElement: () => new Element(),
+      documentElement: { classList: { toggle() {} } }, body: { classList: { toggle() {} } }
+    },
+    isRendererWindowHidden: () => false, syncPluginTrayDemand() {}, syncPluginLimitsDemand() {},
     loadPairingQr, renderIcloudStatus() {}, setHoverMarqueeText() {}, syncHubProfileControls() {},
-    syncDevicePanelApi: panelApi, isSettingsSurfaceVisible: () => context.visiblyOpen,
+    syncDevicePanelApi: panelApi, isSettingsSurfaceVisible: () => context.visiblyOpen && !context.state.floatingBubble.collapsed,
     t: (key, values) => values?.url ? `${key} ${values.url}` : key
   });
   const start = appSource.indexOf('let hubAddressesExpanded =');
@@ -285,7 +290,9 @@ function hubPairingFixture(loadPairingQr, mode = 'host') {
   const status = appSource.slice(appSource.indexOf('function renderHubStatus('),
     appSource.indexOf('const SYNC_PANEL_AGE_REFRESH_MS'));
   const connection = functionSource('syncHubConnectionUi', 'syncHubProfileControls');
-  vm.runInContext(status + pairing + connection, context);
+  const bubbleState = appSource.slice(appSource.indexOf('function applyFloatingBubbleState('),
+    appSource.indexOf('const BUBBLE_CONTENT_VALUES'));
+  vm.runInContext(status + pairing + connection + bubbleState, context);
   context.renderHubAddresses = () => {};
   return { url, dialog, context, button, lan, tailscale };
 }
@@ -395,6 +402,20 @@ test('client pairing clears the dialog when its saved connection or surface chan
     assert.equal(dialog.open, true);
     change(context);
     context.syncHubConnectionUi();
+    assert.equal(dialog.open, false);
+    assert.equal(context.els.hubPairingQr.width, 0);
+    assert.equal(context.els.hubPairingAddress.textContent, '');
+  }
+});
+
+test('collapsing the floating bubble closes and clears an open pairing QR', async () => {
+  for (const mode of ['host', 'client']) {
+    const { url, dialog, context } = hubPairingFixture(async () => ({
+      drawHubPairingQr(canvas) { canvas.width = 100; }
+    }), mode);
+    await context.showHubPairingQr(url, { isConnected: true });
+    assert.equal(dialog.open, true);
+    context.applyFloatingBubbleState({ collapsed: true, side: 'left' }, { renderContent: false });
     assert.equal(dialog.open, false);
     assert.equal(context.els.hubPairingQr.width, 0);
     assert.equal(context.els.hubPairingAddress.textContent, '');
