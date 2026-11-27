@@ -168,6 +168,9 @@ test('the renderer copy drops device sessions and projects but keeps their total
   assert.equal(result.devices[1], stats.devices[1], 'a record without periods passes through');
   assert.equal(result.limits, stats.limits);
   assert.deepEqual(stats, snapshot, 'the published snapshot main keeps is not mutated');
+  const dashboard = rendererStats(stats, { dashboard: true });
+  assert.equal(dashboard.devices[0].periods.today.projects, stats.devices[0].periods.today.projects);
+  assert.equal(Object.hasOwn(dashboard.devices[0].periods.today, 'sessions'), false);
 });
 
 test('the all-time session list stays out of the renderer copy in every mode', () => {

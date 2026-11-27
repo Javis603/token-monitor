@@ -4794,7 +4794,8 @@ function sendPush(payload, options = {}) {
     if (wantsRenderer || wantsDashboard) {
       const copy = rendererSnapshots.stamp(latestStats, rendererStats(visibleStats), visibleStats);
       if (wantsDashboard) {
-        dashboardPayload = { ...payload, data: { ...payload.data, stats: copy } };
+        const dashboardStats = { ...rendererStats(visibleStats, { dashboard: true }), snapshot: copy.snapshot };
+        dashboardPayload = { ...payload, data: { ...payload.data, stats: dashboardStats } };
       }
       if (wantsRenderer) {
         const allowDelta = options.deferToRenderer !== true
@@ -6177,7 +6178,8 @@ function sendStatsPresentationToRenderer(options = {}) {
   }
   if (wantsDashboard) {
     try {
-      dashboardWindow.webContents.send('stats:push', message);
+      const dashboardStats = { ...rendererStats(visibleStats, { dashboard: true }), snapshot: copy.snapshot };
+      dashboardWindow.webContents.send('stats:push', { ...message, data: { ...message.data, stats: dashboardStats } });
       delivered = true;
     } catch (_) {}
   }
@@ -8869,6 +8871,9 @@ app.whenReady().then(() => {
     if (event?.sender && mainWindow && !mainWindow.isDestroyed() && event.sender === mainWindow.webContents) {
       const fingerprint = fingerprintStats(copy);
       if (fingerprint) lastRendererStatsFingerprint = fingerprint;
+    }
+    if (dashboardWindow && !dashboardWindow.isDestroyed() && event?.sender === dashboardWindow.webContents) {
+      return { ...rendererStats(visibleStats, { dashboard: true }), snapshot: copy.snapshot };
     }
     return copy;
   });

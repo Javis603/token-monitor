@@ -91,6 +91,7 @@ test('desktop Client reads the fixed-range index and page through the Hub proxy'
   }
   assert.equal(result.detailsAvailable, true);
   assert.equal(result.period.totalTokens, 42);
+  assert.equal(Object.values(result.devices[0].period.projects)[0].tokens, 42);
   assert.equal(result.period.sessions['claude:remote'].sourceDevice.deviceId, 'remote');
 });
 

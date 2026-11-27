@@ -2999,6 +2999,9 @@ function hasUnresolvedSyncedOmissions(stats = state.stats, periodKey = state.per
 }
 
 function reconcileSyncedSessionOwnership(displayedSession, authoritativeSession, { allowAdoptUnowned = false } = {}) {
+  if (displayedSession?.sourceDevice?.ambiguous === true) {
+    return { session: { ...displayedSession, deviceName: '' }, confirmedOwner: false };
+  }
   const localId = String(state.stats?.localDeviceId || state.settings?.deviceId || '').trim();
   const displayedOwnerId = displayedSession?.sourceDevice?.ambiguous === true
     ? ''
@@ -4097,7 +4100,7 @@ function showHeatTooltip(date, day, evOrCell) {
   const missing = Number(day?.unpricedTokens || 0);
   const content = [
     make('tt-head', longDate(date)),
-    row(t('dashboard.heatmap.tokens'), formatCompact(tokens))
+    day ? row(t('dashboard.heatmap.tokens'), formatCompact(tokens)) : make('tt-sub', t('dashboard.noRecord'))
   ];
   if (cost > 0 || missing > 0) content.push(row(t('dashboard.heatmap.cost'), formatCost(cost, missing)));
   if (day?.topClient?.label) {
@@ -4909,19 +4912,22 @@ els.deviceMenu?.addEventListener('keydown', (event) => {
     focusIndex: index => items[index].focus()
   });
 });
-els.deviceMenu?.addEventListener('click', (ev) => {
-  const item = ev.target.closest('.dash-device-menu-item');
-  if (!item) return;
-  ev.stopPropagation();
-  setDeviceMenuOpen(false);
-  els.deviceTrigger.focus({ preventScroll: true });
-  const id = item.dataset.device;
+function selectDashboardDevice(id) {
   if (state.selectedDeviceId === id) return;
   hideTooltip();
   closeDrawer();
   state.selectedDeviceId = id;
   state.motion = 'update';
   render();
+}
+
+els.deviceMenu?.addEventListener('click', (ev) => {
+  const item = ev.target.closest('.dash-device-menu-item');
+  if (!item) return;
+  ev.stopPropagation();
+  setDeviceMenuOpen(false);
+  els.deviceTrigger.focus({ preventScroll: true });
+  selectDashboardDevice(item.dataset.device);
 });
 
 els.topology?.addEventListener('pointerover', (ev) => {
@@ -4972,11 +4978,8 @@ els.topology?.addEventListener('click', (ev) => {
     const device = graph.devices.find((d) => d.id === id);
     if (!device) return;
     if (state.overview?.fleet?.isFleetMode) {
-      hideTooltip();
       clearTopologyFocus();
-      state.selectedDeviceId = state.selectedDeviceId === device.id ? 'all' : device.id;
-      state.motion = 'update';
-      render();
+      selectDashboardDevice(state.selectedDeviceId === device.id ? 'all' : device.id);
       return;
     }
     if (device.raw) openDrawer({ kind: 'machine', machine: device.raw });
@@ -5031,10 +5034,7 @@ els.workPanel?.addEventListener('click', (ev) => {
     const machine = (fleet?.machines || []).find((m) => m.deviceId === devRow.dataset.deviceId);
     if (!machine) return;
     if (fleet?.isFleetMode && state.selectedDeviceId !== machine.deviceId) {
-      hideTooltip();
-      state.selectedDeviceId = machine.deviceId;
-      state.motion = 'update';
-      render();
+      selectDashboardDevice(machine.deviceId);
       return;
     }
     openDrawer({ kind: 'machine', machine });

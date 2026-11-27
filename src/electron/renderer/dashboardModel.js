@@ -1337,12 +1337,17 @@
     const synced = isSyncedStatsContext(stats, options.settings, options.statsMode);
 
     let scopedPeriod = aggregatePeriod;
+    let scopedRollupDevice = null;
     if (selectedDeviceId !== 'all') {
+      const device = (stats?.devices || []).find((/** @type {any} */ item) =>
+        String(item.deviceId || item.id || '') === selectedDeviceId);
+      const deviceProjects = device?.periods?.[periodKey]?.projects;
+      if (Object.keys(deviceProjects || {}).length > 0) scopedRollupDevice = device;
       const filteredSessions = Object.fromEntries(
         Object.entries(aggregatePeriod.sessions || {})
           .filter(([, s]) => resolveOwnedSessionDeviceId(s, { isNativeLocal: false, localId, synced }) === selectedDeviceId)
       );
-      scopedPeriod = { sessions: filteredSessions };
+      scopedPeriod = { sessions: filteredSessions, projects: deviceProjects };
     }
 
     /** @type {Record<string, string>} */
@@ -1420,9 +1425,11 @@
         share: n(row.value) / totalTokens,
         relWidth: n(row.value) / maxTokens,
         activeSessionCount: meta?.activeSessionCount || 0,
-        devices: meta ? Array.from(meta.devices) : [],
-        deviceIds: meta ? Array.from(meta.deviceTokens.keys()) : [],
-        deviceTokens: meta ? Object.fromEntries(meta.deviceTokens) : {},
+        devices: scopedRollupDevice
+          ? [deviceBreakdown?.deviceLabel?.(scopedRollupDevice) || selectedDeviceId]
+          : meta ? Array.from(meta.devices) : [],
+        deviceIds: scopedRollupDevice ? [selectedDeviceId] : meta ? Array.from(meta.deviceTokens.keys()) : [],
+        deviceTokens: scopedRollupDevice ? { [selectedDeviceId]: n(row.value) } : meta ? Object.fromEntries(meta.deviceTokens) : {},
         activeDeviceIds: meta ? Array.from(meta.activeDeviceIds) : []
       };
     });
@@ -2243,7 +2250,7 @@
         }
       }
 
-      // Connect confirmed owning devices referenced by a workspace when no visible session endpoint matched them.
+      // Use the workspace total even when some of its session endpoints are hidden.
       for (const hub of hubs) {
         const confirmedDeviceIds = Array.isArray(hub.raw?.deviceIds) ? hub.raw.deviceIds : [];
         const wsDeviceTokens = hub.raw?.deviceTokens && typeof hub.raw.deviceTokens === 'object' ? hub.raw.deviceTokens : {};
@@ -2252,13 +2259,18 @@
           const matchedDev = deviceById.get(devId);
           if (!matchedDev) continue;
           const edgeKey = `${matchedDev.id}->${hub.id}`;
-          if (!devToHubMap.has(edgeKey)) {
-            const devTokens = Math.max(0, n(wsDeviceTokens[matchedDev.id]));
+          const edge = devToHubMap.get(edgeKey);
+          const hasDeviceTotal = Object.hasOwn(wsDeviceTokens, matchedDev.id);
+          const devTokens = Math.max(0, n(wsDeviceTokens[matchedDev.id]));
+          if (edge) {
+            if (hasDeviceTotal) edge.tokens = devTokens;
+            if (wsActiveDeviceIds.has(matchedDev.id)) edge.active = true;
+          } else {
             devToHubMap.set(edgeKey, {
               id: `d2h:${edgeKey}`,
               from: matchedDev.id,
               to: hub.id,
-              tokens: Object.hasOwn(wsDeviceTokens, matchedDev.id) ? devTokens : Math.round(hub.tokens / Math.max(1, confirmedDeviceIds.length)),
+              tokens: hasDeviceTotal ? devTokens : Math.round(hub.tokens / Math.max(1, confirmedDeviceIds.length)),
               share: 0,
               active: wsActiveDeviceIds.has(matchedDev.id) || (hub.activeSessionCount > 0 && matchedDev.liveTokPerSec > 0),
               liveRate: n(matchedDev.liveTokPerSec),

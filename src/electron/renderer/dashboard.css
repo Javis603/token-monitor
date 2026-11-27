@@ -2698,6 +2698,8 @@ body.flat .dash-drawer {
   outline-offset: 2px;
 }
 
+.dash-period-seg > .seg-btn:focus-visible { outline-offset: -2px; }
+
 .dash-header .dash-settings-trigger { anchor-name: --dashboard-settings; }
 .dash-shortcut-save-error {
   position: fixed;

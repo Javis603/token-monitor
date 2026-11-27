@@ -123,6 +123,29 @@ test('workspace attribution follows each member of a cross-project session group
   ]);
 });
 
+test('selected workspace and Flow use the device rollup when session details are truncated', () => {
+  const session = { client: 'codex', sessionId: 'one', projectLabel: 'Repo', totalTokens: 40, sourceDevice: { deviceId: 'a' } };
+  const stats = {
+    mode: 'sync', localDeviceId: 'a',
+    periods: { today: { totalTokens: 120, sessions: { 'codex:one': session } } },
+    devices: [
+      { deviceId: 'a', periods: { today: { totalTokens: 100, projects: { repo: { label: 'Repo', tokens: 100 } } } } },
+      { deviceId: 'b', periods: { today: { totalTokens: 20 } } }
+    ]
+  };
+  const overview = model.buildScopedOverview({ stats, selectedDeviceId: 'a' });
+  assert.equal(overview.workspaces[0].tokens, 100);
+  assert.equal(overview.topology.devToHub[0].tokens, 100);
+  assert.equal(overview.topology.hubToEnd[0].tokens, 40);
+  const capped = model.buildTopologyGraph({
+    ...overview,
+    sessions: [...overview.sessions, { ...overview.sessions[0], key: 'two', totalTokens: 60 }]
+  }, { maxEndpoints: 1 });
+  assert.equal(capped.endpoints.length, 1);
+  assert.equal(capped.devToHub[0].tokens, 100);
+  assert.equal(capped.hubToEnd[0].tokens, 40);
+});
+
 test('computeTokenAnatomy fails closed on unclassifiedTokens and computes cacheHitRate accurately', () => {
   const exact = model.computeTokenAnatomy({
     totalTokens: 1000,

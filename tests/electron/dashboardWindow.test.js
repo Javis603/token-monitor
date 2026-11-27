@@ -938,6 +938,21 @@ test('showHeatTooltip renders DOM-derived dates and labels as plain text', () =>
   show('<img src=x>', { tokens: 10, cost: 1, topClient: { label: '<svg>', color: '#fff' } }, {});
   assert.equal(tooltip.children[0].textContent, '<img src=x>');
   assert.equal(tooltip.children.at(-1).children.at(-1).textContent, '<svg>');
+  show('2026-11-26', undefined, {});
+  assert.equal(tooltip.children.at(-1).textContent, 'dashboard.noRecord');
+  show('2026-11-26', { tokens: 0 }, {});
+  assert.equal(tooltip.children.at(-1).children.at(-1).textContent, '0');
+});
+
+test('an explicitly ambiguous Dashboard row cannot adopt local transcript ownership', () => {
+  const reconcile = dashboardFunction('reconcileSyncedSessionOwnership', '\nfunction loadSessionDrawerDetail(', {
+    state: { stats: { localDeviceId: 'local' } }
+  });
+  const page = { sourceDevice: { deviceId: 'local' } };
+  const ambiguous = reconcile({ sourceDevice: { ambiguous: true } }, page, { allowAdoptUnowned: true });
+  assert.equal(ambiguous.confirmedOwner, false);
+  assert.equal(ambiguous.session.sourceDevice.ambiguous, true);
+  assert.equal(reconcile({}, page, { allowAdoptUnowned: true }).confirmedOwner, true);
 });
 
 test('dashboard handles session-activity pushes, rejects stale snapshots, and includes required scripts and focus accessibility', async () => {
