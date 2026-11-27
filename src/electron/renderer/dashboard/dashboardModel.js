@@ -427,7 +427,7 @@
    *   liveRatesByDevice?: Record<string, number>,
    *   settings?: any,
    *   statsMode?: string,
-   *   fixedHistorySnapshot?: { devices?: Array<{ deviceId: string, period: any }> } | null,
+   *   fixedHistorySnapshot?: { devices?: Array<{ deviceId: string, period: any }>, zeroDeviceIds?: Set<string> } | null,
    *   nowMs?: number
    * }} options
    */
@@ -498,7 +498,8 @@
           historyAvailable: history?.fixedPeriods?.historyTransportAvailable === true && devHistory?.historyAvailable === true
         });
       const resolvedPeriod = options.fixedHistorySnapshot
-        ? mergedDevice.periods?.[periodKey] || fixedHistoryById.get(deviceId) || null
+        ? mergedDevice.periods?.[periodKey] || fixedHistoryById.get(deviceId)
+          || (options.fixedHistorySnapshot.zeroDeviceIds?.has(deviceId) ? { totalTokens: 0, costUsd: 0 } : null)
         : (localFixed && (deviceId === localId || ids.size === 1) ? livePeriod : null)
           || resolveDevicePeriod(periodKey);
       const todayPeriod = periodKey === 'today' ? resolvedPeriod : resolveDevicePeriod('today');
@@ -562,6 +563,7 @@
         activeWorkspace,
         topClients,
         periodData: resolvedPeriod,
+        accountingStatus: resolvedPeriod ? resolvedPeriod.accountingStatus || 'ready' : 'unavailable',
         accountingExpired: isDevicePeriodExpired(device, periodKey, nowMs),
         todayPeriod,
         historyAvailable: devHistory?.historyAvailable === true || devDaily.length > 0,
@@ -584,6 +586,7 @@
     return {
       isFleetMode: machines.length > 1,
       machines,
+      accountingComplete: machines.every(machine => machine.accountingStatus === 'ready'),
       fleetTotals: {
         tokens: fleetPeriodTokens,
         cost: fleetCost,
@@ -1058,10 +1061,13 @@
     const selectedDevice = selectedDeviceId !== 'all' && (stats?.devices || []).find((/** @type {any} */ item) =>
       String(item.deviceId || item.id || '').trim() === selectedDeviceId);
     const expired = options.accountingExpired === true || isDevicePeriodExpired(selectedDevice, periodKey, nowMs);
+    const nativeDevice = includeNative && (selectedDevice
+      || stats?.devices?.find((/** @type {any} */ device) => String(device.deviceId || device.id || '').trim() === localId)
+      || (!stats?.devices?.length ? stats : null));
     // During rollover, keep live native rows and Today's zero-usage carryovers.
     const collectedSessions = collectPeriodSessionEntries(stats, periodKey, expired ? null : aggregatePeriod, nowMs, {
       includeNative,
-      activeNativeOnly: expired
+      activeNativeOnly: expired || isDevicePeriodExpired(nativeDevice, periodKey, nowMs)
     });
 
     /** @type {Map<string, { name: string, deviceKind: string, isLocal: boolean }>} */
@@ -2039,6 +2045,7 @@
         tokens: Math.max(0, n(m.tokens)),
         cost: Math.max(0, n(m.cost)),
         unpricedTokens: Math.max(0, n(m.unpricedTokens)),
+        accountingStatus: m.accountingStatus,
         share: fleet.accountingExpired ? 0 : Math.max(0, n(m.share)),
         liveTokPerSec: Math.max(0, n(m.liveTokPerSec)),
         activeSessionCount: Math.max(0, n(m.activeSessionCount)),
@@ -2060,6 +2067,7 @@
         tokens: Math.max(0, n(hero.tokens)),
         cost: Math.max(0, n(hero.cost)),
         unpricedTokens: Math.max(0, n(hero.unpricedTokens)),
+        accountingStatus: hero.accountingStatus,
         share: 1,
         liveTokPerSec: Math.max(0, n(hero.liveTokPerSec)),
         activeSessionCount: sessions.filter((s) => s.isActive).length,
@@ -2598,11 +2606,21 @@
         syncedAccounting = mergeFixedPeriodAccounting(syncedAccounting, snapshot.period);
       }
     }
+    let fleetHistorySnapshot = null;
+    if (syncedPage || fixedHistorySnapshot) {
+      const devices = fixedHistorySnapshot?.devices
+        || [...uncoveredSnapshots.values()].flatMap(snapshot => snapshot.devices);
+      const fixedDeviceIds = new Set(devices.map((/** @type {any} */ device) => device.deviceId));
+      // Ready History snapshots omit devices that have no accounting to add.
+      const zeroDeviceIds = new Set(deviceHistorySources
+        .filter(device => !fixedDeviceIds.has(device.deviceId)
+          && (fixedHistorySnapshot?.status === 'ready' || uncoveredSnapshots.get(device.deviceId)?.status === 'ready'))
+        .map(device => device.deviceId));
+      fleetHistorySnapshot = { devices, zeroDeviceIds };
+    }
     const freshness = aggregatePeriodFreshness(stats, periodKey, nowMs);
     const fleet = { ...buildFleetModel({
-      fixedHistorySnapshot: syncedPage
-        ? { devices: [...uncoveredSnapshots.values()].flatMap(snapshot => snapshot.devices) }
-        : fixedHistorySnapshot,
+      fixedHistorySnapshot: fleetHistorySnapshot,
       stats,
       history,
       periodKey,
@@ -2679,16 +2697,19 @@
         });
 
     const selectedHistory = activeMachine ? uncoveredSnapshots.get(activeMachine.deviceId) : null;
-    const accountingStatus = accountingExpired || (fixed && (
-      (selectedHistory && selectedHistory.status !== 'ready')
-      || (!periodData && selectedHistory?.status !== 'ready' && fixedHistorySnapshot?.status !== 'ready')
-    )) ? 'unavailable'
+    const historyReported = activeMachine
+      ? activeMachine.historyAvailable
+      : historyOptions.historyAvailable || scopedHistory.daily.length > 0;
+    const periodFallbackHistory = periodKey === 'allTime' && historyOptions.historyEnabled && historyReported
+      ? scopedHistory : null;
+    const accountingStatus = accountingExpired || (selectedHistory && selectedHistory.status !== 'ready')
+      || (!periodData && !periodFallbackHistory)
+      ? 'unavailable'
       : periodData?.accountingStatus === 'partial'
         || (!activeMachine && [...uncoveredSnapshots.values()].some(snapshot => snapshot.status !== 'ready'))
         ? 'partial'
         : 'ready';
 
-    const periodFallbackHistory = periodKey === 'allTime' ? scopedHistory : null;
     const anatomy = computeTokenAnatomy(periodData, periodFallbackHistory?.daily);
     const totalTokens = periodData ? Math.max(0, n(periodData.totalTokens)) : n(periodFallbackHistory?.summary.totalTokens);
     const totalCost = periodData ? Math.max(0, n(periodData.costUsd ?? periodData.totalCost)) : n(periodFallbackHistory?.summary.totalCost);

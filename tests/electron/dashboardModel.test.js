@@ -353,6 +353,82 @@ test('a native-only session disappears when its live activity expires after roll
   }
 });
 
+test('zero-use local rollover expires native activity without withholding fleet accounting', () => {
+  const endsAt = '2026-12-01T00:00:00Z';
+  const observedAt = '2026-11-30T23:59:40Z';
+  const leaseEnd = Date.parse(observedAt) + 30_000;
+  const today = { totalTokens: 0 };
+  const native = {
+    client: 'antigravity', sessionId: 'acp', native: true, totalTokens: 0, lastUsedAt: observedAt,
+    liveActivity: { state: 'running', observedAt }
+  };
+  const stats = {
+    mode: 'sync', localDeviceId: 'a', periods: { today },
+    nativeSessions: { today: { 'antigravity:acp': native } },
+    devices: [{ deviceId: 'a', periods: { today }, periodWindows: { today: { endsAt } } }]
+  };
+  const options = { stats, periodKey: 'today' };
+  const live = model.buildScopedOverview({ ...options, nowMs: leaseEnd - 1 });
+  assert.equal(live.sessions[0]?.activityState, 'running');
+  const expired = model.buildScopedOverview({ ...options, nowMs: leaseEnd });
+  assert.equal(expired.hero.accountingStatus, 'ready');
+  assert.equal(expired.hero.tokens, 0);
+  assert.deepEqual(expired.sessions, []);
+  assert.deepEqual(expired.topology.endpoints, []);
+});
+
+test('missing device History does not turn a known local aggregate into a device zero', () => {
+  const nowMs = new Date(2026, 10, 27, 12).getTime();
+  const stats = { mode: 'local', localDeviceId: 'a', devices: [{ deviceId: 'a' }] };
+  const daily = [{ date: '2026-11-26', tokens: 100 }];
+  const history = { daily, fixedPeriods: { historyTransportAvailable: true } };
+  const options = { stats, history, nowMs, periodKey: 'yesterday' };
+  const missing = model.buildScopedOverview(options);
+  assert.equal(missing.hero.tokens, 100);
+  assert.equal(missing.hero.accountingStatus, 'ready');
+  assert.equal(missing.fleet.machines[0].accountingStatus, 'unavailable');
+  assert.equal(missing.fleet.accountingComplete, false);
+  assert.equal(missing.topology.devices[0].accountingStatus, 'unavailable');
+  const ready = model.buildScopedOverview({
+    ...options, history: { ...history, deviceHistories: [{ deviceId: 'a', historyAvailable: true, history: { daily } }] }
+  });
+  assert.equal(ready.fleet.machines[0].accountingStatus, 'ready');
+  assert.equal(ready.fleet.machines[0].tokens, 100);
+});
+
+test('verified empty synced History keeps device zeroes available', () => {
+  const devices = [{ deviceId: 'a' }, { deviceId: 'b' }];
+  const view = model.buildScopedOverview({
+    stats: { mode: 'sync', devices },
+    history: {
+      fixedPeriods: { historyTransportAvailable: true },
+      deviceHistories: devices.map(device => ({ ...device, historyAvailable: true, history: { daily: [] } }))
+    },
+    selectedDeviceId: 'a',
+    periodKey: 'yesterday'
+  });
+  assert.equal(view.fleet.accountingComplete, true);
+  assert.equal(view.activeMachine.accountingStatus, 'ready');
+  assert.equal(view.hero.accountingStatus, 'ready');
+  assert.equal(view.hero.tokens, 0);
+});
+
+test('cold native periods withhold accounting until a source confirms a total', () => {
+  for (const periodKey of ['today', 'month', 'allTime']) {
+    const options = { periodKey };
+    assert.equal(model.buildScopedOverview(options).hero.accountingStatus, 'unavailable');
+    const known = model.buildScopedOverview({ ...options, stats: { periods: { [periodKey]: { totalTokens: 0 } } } });
+    assert.equal(known.hero.accountingStatus, 'ready');
+    assert.equal(known.hero.tokens, 0);
+  }
+  const retained = model.buildScopedOverview({
+    periodKey: 'allTime',
+    history: { daily: [{ date: '2026-11-26', tokens: 100 }] }
+  });
+  assert.equal(retained.hero.accountingStatus, 'ready');
+  assert.equal(retained.hero.tokens, 100);
+});
+
 test('computeTokenAnatomy fails closed on unclassifiedTokens and computes cacheHitRate accurately', () => {
   const exact = model.computeTokenAnatomy({
     totalTokens: 1000,
