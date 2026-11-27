@@ -76,6 +76,41 @@ function isImplicitBypassOrigin(origin, platform) {
   }
 }
 
+// A Hub on the user's own network: private and Tailscale ranges, unique local
+// IPv6, and names that only resolve there. A proxy that reaches the internet
+// usually cannot reach these, and Hub sync to them connected directly before
+// Hub requests followed the proxy route, so they stay direct.
+const PRIVATE_NETWORK_HUB_ADDRESSES = new BlockList();
+PRIVATE_NETWORK_HUB_ADDRESSES.addSubnet('10.0.0.0', 8, 'ipv4');
+PRIVATE_NETWORK_HUB_ADDRESSES.addSubnet('172.16.0.0', 12, 'ipv4');
+PRIVATE_NETWORK_HUB_ADDRESSES.addSubnet('192.168.0.0', 16, 'ipv4');
+PRIVATE_NETWORK_HUB_ADDRESSES.addSubnet('100.64.0.0', 10, 'ipv4');
+PRIVATE_NETWORK_HUB_ADDRESSES.addSubnet('fc00::', 7, 'ipv6');
+
+function isPrivateNetworkHubOrigin(origin, platform) {
+  if (isImplicitBypassOrigin(origin, platform)) return true;
+  let host;
+  try {
+    host = new URL(String(origin)).hostname.toLowerCase().replace(/\.$/, '');
+  } catch (_) {
+    return false;
+  }
+  if (host.startsWith('[') && host.endsWith(']')) host = host.slice(1, -1);
+  const family = isIP(host);
+  if (family !== 0) return PRIVATE_NETWORK_HUB_ADDRESSES.check(host, family === 6 ? 'ipv6' : 'ipv4');
+  return Boolean(host) && (!host.includes('.') || host.endsWith('.local') || host.endsWith('.ts.net'));
+}
+
+const directHubAgent = new Agent();
+
+function directHubFetch(url, init) {
+  return globalThis.fetch(url, { ...init, dispatcher: directHubAgent });
+}
+
+function createDesktopHubFetch(proxyFetch, directFetch = directHubFetch, platform = process.platform) {
+  return (url, init) => isPrivateNetworkHubOrigin(url, platform) ? directFetch(url, init) : proxyFetch(url, init);
+}
+
 /**
  * undici dispatcher for the app proxy: local hosts go to a direct Agent, the
  * rest to an EnvHttpProxyAgent built from explicit values only. Every proxy
@@ -404,6 +439,7 @@ function createProxyReadyFetch(fetchImpl, ensureReady) {
 
 module.exports = {
   AppProxyAgent,
+  createDesktopHubFetch,
   createProxyReadyFetch,
   createSessionProxyApplier,
   effectiveAppProxy,

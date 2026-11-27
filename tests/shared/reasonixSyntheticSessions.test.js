@@ -29,7 +29,15 @@ const syntheticSession = {
 };
 const syntheticKey = `reasonix:${syntheticSession.sessionId}`;
 const nativeSessionTime = new Date(2026, 7, 8, 14, 29, 0);
-const nativeSession = {
+const codexNativeSession = {
+  native: true,
+  client: 'codex',
+  sessionId: 'codex:native-id',
+  totalTokens: 0,
+  tokenDataUnavailable: true,
+  lastUsedAt: nativeSessionTime.toISOString()
+};
+const legacyReasonixNativeSession = {
   native: true,
   client: 'reasonix',
   sessionId: 'reasonix:branch-id',
@@ -49,9 +57,9 @@ function periodWithSynthetic(extra = {}) {
 
 function nativeViews() {
   return {
-    today: { [nativeSession.sessionId]: nativeSession },
-    month: { [nativeSession.sessionId]: nativeSession },
-    allTime: { [nativeSession.sessionId]: nativeSession }
+    today: { [codexNativeSession.sessionId]: codexNativeSession },
+    month: { [codexNativeSession.sessionId]: codexNativeSession },
+    allTime: { [codexNativeSession.sessionId]: codexNativeSession }
   };
 }
 
@@ -94,7 +102,7 @@ test('ingestion and hub/display merge never retain Reasonix in period.sessions',
   for (const periodName of ['today', 'month', 'allTime']) {
     assert.deepEqual(display.periods[periodName].sessions, {});
   }
-  assert.ok(display.nativeSessions.today[nativeSession.sessionId]);
+  assert.ok(display.nativeSessions.today[codexNativeSession.sessionId]);
 
   const allTimeView = mergedLocalAllTimeSessions({
     month: { sessions: { [syntheticKey]: syntheticSession } },
@@ -115,9 +123,9 @@ test('legacy archive reads, captures, and applies without resurrecting Reasonix 
       },
       'reasonix:branch-id': {
         client: 'reasonix',
-        sessionId: nativeSession.sessionId,
+        sessionId: legacyReasonixNativeSession.sessionId,
         capturedAt: '2026-08-08T06:30:00.000Z',
-        periods: { allTime: { ...nativeSession } }
+        periods: { allTime: { ...legacyReasonixNativeSession } }
       }
     }
   };
@@ -154,12 +162,12 @@ test('deviceState carry-forward drops old generic Reasonix sessions but keeps na
   for (const periodName of ['today', 'month', 'allTime']) {
     assert.deepEqual(preview[periodName].sessions, {});
   }
-  assert.ok(preview.nativeSessions.today[nativeSession.sessionId]);
+  assert.ok(preview.nativeSessions.today[codexNativeSession.sessionId]);
   assert.equal(records.length, 2);
   assert.doesNotMatch(JSON.stringify(records.at(-1)), /\/Users\/test/);
 });
 
-test('sync and renderer expose only native Reasonix and never serialize the stats path', () => {
+test('sync and renderer drop Reasonix sessions in both ordinary and legacy native maps and never serialize stats paths', () => {
   const payload = syncPayload({
     today: periodWithSynthetic({ sessions: {
       [syntheticKey]: syntheticSession,
@@ -173,28 +181,21 @@ test('sync and renderer expose only native Reasonix and never serialize the stat
   assert.deepEqual(payload.month.sessions, {});
 
   const rows = sessionRowsForPeriod({ sessions: { [syntheticKey]: syntheticSession } }, {
-    nativeSessions: { [nativeSession.sessionId]: nativeSession },
+    nativeSessions: { [legacyReasonixNativeSession.sessionId]: legacyReasonixNativeSession },
     clientLabels: { reasonix: 'Reasonix' },
     clientColors: { reasonix: '#4d6bfe' },
     now: new Date(2026, 7, 8, 14, 30, 0)
   });
-  assert.equal(rows.length, 1);
-  assert.equal(rows[0].client, 'reasonix');
-  assert.equal(rows[0].key, 'session:reasonix:branch-id');
-  assert.equal(rows[0].name, 'Reasonix · deepseek/deepseek-v4-flash');
-  assert.equal(rows[0].subtitle, '14:29 · 2 calls');
-  assert.equal(rows[0].detail, 'branch-id');
-  assert.deepEqual(rows.map((row) => row.client), ['reasonix']);
-  assert.doesNotMatch(JSON.stringify(rows), /\/Users\/test/);
+  assert.deepEqual(rows, []);
   assert.equal(sessionIdLabel(syntheticSession.sessionId), '');
   assert.equal(sessionIdLabel(`reasonix:${syntheticSession.sessionId}`), '');
 });
 
-test('ordinary period normalization still drops all Reasonix forms while native namespace remains explicit', () => {
+test('ordinary period normalization still drops all Reasonix forms', () => {
   const normalized = normalizePeriod({
     sessions: {
       [syntheticKey]: syntheticSession,
-      'reasonix:branch-id': nativeSession,
+      'reasonix:branch-id': legacyReasonixNativeSession,
       'codex:real': { client: 'codex', sessionId: 'real', totalTokens: 5 }
     }
   });

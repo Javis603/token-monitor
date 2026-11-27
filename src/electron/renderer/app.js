@@ -2977,11 +2977,8 @@ function updateRow(row, { name, subtitle, subtitleIdentity, subagentCountLabel, 
   else delete row.dataset.reviewGroup;
   if (sessionGroup) row.dataset.sessionGroup = sessionGroup;
   else delete row.dataset.sessionGroup;
-  if (kind === 'session' && client === 'reasonix') {
-    row.dataset.detailUnavailable = sessionDetailAvailable === true ? 'false' : 'true';
-  } else if (row.hasAttribute('data-detail-unavailable')) {
-    row.removeAttribute('data-detail-unavailable');
-  }
+  if (client === 'reasonix' && kind === 'session') row.dataset.reasonixDetail = String(sessionDetailAvailable === true);
+  else delete row.dataset.reasonixDetail;
   const interactive = Boolean(sessionGroup) || (kind === 'session'
     && sessionRowsApi.sessionRowDetailAvailable({ client, sessionDetailAvailable }));
   const mark = row.querySelector('.row-mark');
@@ -3418,13 +3415,19 @@ function renderRows(rows, { incompleteHint = '', fromSearch = false, reuseToolFi
     rows = sessionRowsApi.filterSessionRows(rows, searchQuery);
   }
   const searchEmpty = Boolean(searchQuery && rows.length === 0);
-  if (rows.length === 0 && (!incompleteHint || searchEmpty)) {
+  const reasonixReadFailed = state.breakdown === 'session' && reasonixSessionList?.failed
+    && !fixedPeriodRangesApi.isDerived(state.period);
+  const hintText = [
+    incompleteHint ? t(incompleteHint) : '',
+    reasonixReadFailed ? t('sessions.reasonixReadFailed') : ''
+  ].filter(Boolean).join(' ');
+  if (rows.length === 0 && (!hintText || searchEmpty)) {
     els.breakdown.replaceChildren();
-    if (incompleteHint) {
+    if (hintText) {
       const hint = document.createElement('p');
       hint.className = 'breakdown-incomplete-hint';
       hint.setAttribute('role', 'status');
-      hint.textContent = t(incompleteHint);
+      hint.textContent = hintText;
       els.breakdown.append(hint);
     }
     if (searchEmpty) els.breakdown.append(sessionSearchEmptyNode(searchQuery));
@@ -3440,7 +3443,6 @@ function renderRows(rows, { incompleteHint = '', fromSearch = false, reuseToolFi
   setSessionSearchStatus(searchQuery, page.total);
   const visibleRows = page.rows;
   const max = barScaleMax(rows);
-  const hintText = incompleteHint ? t(incompleteHint) : '';
   const signature = JSON.stringify([
     state.breakdown,
     hintText,
@@ -3483,7 +3485,7 @@ function renderRows(rows, { incompleteHint = '', fromSearch = false, reuseToolFi
       if (!retainedKeys.has(key)) cancelRowNumberAnimation(row.querySelector('.row-value'));
     }
     const nodes = visibleRows.map((row) => existing.get(row.key) || rowTemplate(row));
-    if (incompleteHint) {
+    if (hintText) {
       const hint = existingHint || document.createElement('p');
       hint.className = 'breakdown-incomplete-hint';
       hint.setAttribute('role', 'status');
@@ -3725,9 +3727,45 @@ function rawSessionRowsForPeriod(period, options = sessionPresentationOptions())
 
 const sessionRowLabelCache = {};
 
+let reasonixSessionList = null;
+
+function loadReasonixSessionList() {
+  if (state.breakdown !== 'session' || !clientRowTracked('reasonix')) {
+    reasonixSessionList = null;
+    return;
+  }
+  // Reuse the list for this visit and local day across ordinary stats repaints.
+  if (state.period && fixedPeriodRangesApi.isDerived(state.period)) return;
+  const key = JSON.stringify([
+    state.settings?.sessionTitlesEnabled !== false,
+    state.settings?.modelAliases,
+    state.settings?.modelAliasGrouping,
+    state.settings?.allTimeSince,
+    fixedPeriodTodayKey()
+  ]);
+  if (state.openSession || reasonixSessionList?.key === key
+    || !window.tokenMonitor.listReasonixSessions) return;
+  const request = { key, titlesEnabled: state.settings?.sessionTitlesEnabled !== false, periods: {}, failed: false };
+  reasonixSessionList = request;
+  window.tokenMonitor.listReasonixSessions().then((periods) => {
+    if (reasonixSessionList !== request) return;
+    request.periods = periods;
+    statsRenderScheduler.request();
+  }, (error) => {
+    if (reasonixSessionList !== request) return;
+    console.log(`[reasonix-sessions] ${error?.message || error}`);
+    request.failed = true;
+    statsRenderScheduler.request();
+  });
+}
+
 function sessionRowsForPeriod(period) {
   const options = sessionPresentationOptions();
-  if (state.breakdown === 'session') options.rowLabelCache = sessionRowLabelCache;
+  if (state.breakdown === 'session') {
+    options.rowLabelCache = sessionRowLabelCache;
+    if (reasonixSessionList?.titlesEnabled === (state.settings?.sessionTitlesEnabled !== false)
+      && clientRowTracked('reasonix')) options.reasonixSessions = reasonixSessionList.periods[state.period];
+  }
   const rows = rawSessionRowsForPeriod(period, options);
   if (rows.length > 0) return sessionRowsApi.sessionListRows(rows, {
     ...options, sortBy: state.sessionSort, sessionTitlesEnabled: state.settings?.sessionTitlesEnabled
@@ -3747,8 +3785,7 @@ function projectRowsForPeriod(period) {
     unknownClientLabel: t('projects.unknownTool'),
     unknownModelLabel: t('projects.unknownModel'),
     allowSessionModelAttribution: !projectRowsApi.projectBreakdownIncomplete(state.stats, state.period),
-    nativeProjects: state.stats?.nativeProjects?.[state.period] || {},
-    nativeSessions: state.stats?.nativeSessions?.[state.period] || {}
+    nativeProjects: state.stats?.nativeProjects?.[state.period] || {}
   });
 }
 
@@ -5719,11 +5756,11 @@ function sessionDetailPeriod() {
   return range ? `range:${range.start}:${range.end}` : state.period;
 }
 
-async function openSessionDetail({ client, sessionId, sessionCost, title, sourceDevice, returnTo = null, titleFollowsSession = false, cloudThreadId = null, cloudOnly = false }) {
+async function openSessionDetail({ client, sessionId, sessionCost, title, sourceDevice, reasonixSessionRef, returnTo = null, titleFollowsSession = false, cloudThreadId = null, cloudOnly = false }) {
   // A review run is headed by model and time; a named group run (a subagent, a
   // Grok Bot record) is headed by its session title and follows title display.
   const fixedGroupHeading = returnTo?.kind === 'session-group' && titleFollowsSession !== true;
-  const request = { kind: 'session', client, sessionId, sessionCost,
+  const request = { kind: 'session', client, sessionId, sessionCost, reasonixSessionRef,
     title: state.settings?.sessionTitlesEnabled === false && !fixedGroupHeading ? '' : title,
     sourceDevice,
     remote: sourceDevice?.ambiguous === true || Boolean(sourceDevice?.deviceId && sourceDevice.deviceId !== state.settings?.deviceId),
@@ -5747,7 +5784,10 @@ async function openSessionDetail({ client, sessionId, sessionCost, title, source
   // off against a response that predates it.
   const liveSignature = sessionDetailLiveSignature();
   try {
-    const detail = await window.tokenMonitor.getSessionDetail({ client, sessionId, period: request.detailPeriod || request.period, sessionCost });
+    const detail = await window.tokenMonitor.getSessionDetail({
+      client, sessionId, period: request.detailPeriod || request.period, sessionCost,
+      ...(reasonixSessionRef ? { reasonixSessionRef } : {})
+    });
     if (state.openSession === request) {
       request.detail = detail;
       request.liveSignature = liveSignature;
@@ -5763,14 +5803,13 @@ async function openSessionDetail({ client, sessionId, sessionCost, title, source
 
 function sessionLiveStatsEntry(request) {
   if (!request) return null;
+  if (request.client === 'reasonix') return null;
   const periodKey = request.period || state.period;
-  return request.client === 'reasonix'
-    ? state.stats?.nativeSessions?.[periodKey]?.[request.sessionId] || null
-    : displayedSessions(periodKey)?.[`${request.client}:${request.sessionId}`] || null;
+  return displayedSessions(periodKey)?.[`${request.client}:${request.sessionId}`] || null;
 }
 
-function sessionLiveCost(entry, client) {
-  return client === 'reasonix' ? Number(entry?.reportedCostUsd || 0) : Number(entry?.costUsd || 0);
+function sessionLiveCost(entry) {
+  return Number(entry?.costUsd || 0);
 }
 
 // The dates a native-range detail reads move with the range (a new day), even
@@ -5786,7 +5825,6 @@ function sessionDetailLiveSignature() {
   return JSON.stringify([
     Number(entry.totalTokens) || 0,
     Number(entry.costUsd) || 0,
-    Number(entry.reportedCostUsd) || 0,
     ...(String(detailPeriod || '').startsWith('range:') ? [detailPeriod] : [])
   ]);
 }
@@ -5936,9 +5974,8 @@ function renderSessionDetail({ detail, loading, error, preserveScroll = false } 
 
   const rows = sessionDetailApi.exchangeRows(detail, { now: new Date(), sortBy: state.detailSort });
   if (rows.length === 0) { container.append(detailNote(t('detailEmpty') || 'No activity in this period.')); return; }
-  if (detail?.tokenDataUnavailable === true) {
-    container.append(detailNote(t('detailTokenDataUnavailable') || 'Token data is unavailable for this session.'));
-  }
+
+  if (detail?.tokenDataUnavailable === true) container.append(detailNote(t('detailTokenDataUnavailable')));
 
   const sort = document.createElement('button');
   sort.className = 'detail-sort';
@@ -5992,9 +6029,7 @@ function sessionDetailTitle() {
   if (request?.returnTo?.kind === 'session-group' && request.titleFollowsSession !== true) return request.title;
   if (state.settings?.sessionTitlesEnabled === false) return '';
   const period = request?.period || state.period;
-  const session = request?.client === 'reasonix'
-    ? state.stats?.nativeSessions?.[period]?.[request.sessionId]
-    : displayedSessions(period)?.[`${request?.client}:${request?.sessionId}`];
+  const session = displayedSessions(period)?.[`${request?.client}:${request?.sessionId}`];
   const syncedRange = state.mode === 'sync' && fixedPeriodRangesApi.isDerived(period);
   return sessionRowsApi.sessionTitleForDisplay({
     client: request?.client, title: session?.title || (syncedRange ? '' : request?.title)
@@ -6123,7 +6158,7 @@ function sessionGroupRunNode(row, max, parent) {
       const sessionId = String(row.key || '').replace(/^session:[^:]+:/, '');
       openSessionDetail({
         client: row.client,
-        sessionId: row.client === 'reasonix' ? `reasonix:${sessionId}` : sessionId,
+        sessionId,
         sessionCost: Number(row.cost || 0),
         title,
         sourceDevice: row.sourceDevice,
@@ -8927,6 +8962,7 @@ function renderAppContent({ fromSearch = false } = {}) {
   // it to re-read - it never decides whether Settings is open itself.
   syncCloudSessionsActivity();
   ensureBreakdownVisible();
+  loadReasonixSessionList();
   syncSessionSearchChrome();
   if (state.breakdown !== 'session' || state.openSession) els.sessionToolFilter.classList.add('hidden');
   const pluginPage = pluginMainPages?.render(pluginPageOptions(), state.breakdown) || false;
@@ -16120,19 +16156,20 @@ els.breakdown.addEventListener('click', (event) => {
   }
   const key = rowEl.dataset.key || '';            // "session:<client>:<sessionId>"
   const client = rowEl.dataset.client || '';
-  if (client !== 'claude' && client !== 'codex' && client !== 'opencode' && client !== 'reasonix' && client !== 'dsh' && client !== 'codebuddy' && client !== 'workbuddy' && client !== 'pi' && client !== 'omp' && client !== 'senpi') return;
-  if (client === 'reasonix' && rowEl.dataset.detailUnavailable === 'true') return;
+  if (!sessionRowsApi.sessionRowDetailAvailable({ client, sessionDetailAvailable: rowEl.dataset.reasonixDetail === 'true' })) return;
   const match = key.match(/^session:([^:]+):(.+)$/);
   if (!match) return;
   const sessionId = client === 'reasonix' ? `reasonix:${match[2]}` : match[2];
   const session = client === 'reasonix'
-    ? state.stats?.nativeSessions?.[state.period]?.[sessionId]
+    ? reasonixSessionList?.periods[state.period]?.[sessionId]
     : displayedSessions(state.period)?.[`${client}:${sessionId}`];
+  if (client === 'reasonix' && !session?.reasonixSessionRef) return;
   const { sourceDevice, sessionDetailHeading } = window.TokenMonitorDomReconcile.data(rowEl) || {};
   openSessionDetail({
     client,
     sessionId,
-    sessionCost: client === 'reasonix' ? Number(session?.reportedCostUsd || 0) : Number(session?.costUsd || 0),
+    reasonixSessionRef: session?.reasonixSessionRef,
+    sessionCost: Number(session?.costUsd || 0),
     sourceDevice,
     title: sessionDetailHeading || rowEl.querySelector('.row-title')?.textContent || '',
     cloudThreadId: rowEl.dataset.cloudThreadId || null
@@ -17136,7 +17173,13 @@ els.refreshButton.addEventListener('click', () => {
   // used all over the settings/account flows, and folding those into it would re-run
   // the expensive `tokscale graph`, plus the Cursor and Antigravity sync subprocesses,
   // on every one of them.
-  else refreshStats({ force: true, forceHistory: true, forceSelfSync: true, feedback: true });
+  else {
+    if (state.breakdown === 'session' && !state.openSession) {
+      reasonixSessionList = null;
+      loadReasonixSessionList();
+    }
+    refreshStats({ force: true, forceHistory: true, forceSelfSync: true, feedback: true });
+  }
 });
 els.minButton.addEventListener('click', (event) => {
   if (event.detail > 0) els.minButton.blur();

@@ -3,58 +3,58 @@
   "modeNote": "\"override\": ensure-vendored-tokscale.js swaps in the pinned fork build described below, and the two verify-vendored-tokscale*.js gates run against it. \"upstream\": ensure-vendored-tokscale.js no-ops (no download or replacement) and the plain npm-installed tokscale is authoritative — but both verify-vendored-tokscale*.js gates keep running, now against that npm-installed binary, so CI still fails if it doesn't actually cover DEFAULT_CLIENTS or regressed DSH parsing. `override` remains required while Token Monitor depends on downstream functionality the installed upstream release does not provide. The upstream scanner and DSH patches may be retired once equivalent fixes ship officially; the session/workspace reporting capability is a persistent Token Monitor requirement, so flipping to `upstream` is correct only when an official release provides an equivalent report surface. Without it the collector still runs (the scan falls back to `client,session,model` and the file-reading resolvers answer), but scan-backed session timestamps and project attribution narrow to the clients that have a resolver. The pin fields (commit/releaseTag/platforms) stay in place either way, so flipping back to \"override\" for a future upstream lag is editing this file again rather than re-adding infrastructure; baseVersion is not one of them — it tracks the installed dependency in both modes (see baseVersionNote). While the client catalog has forkOnly clients (CatPaw, Qoder CN), \"upstream\" fails verify-vendored-tokscale-clients.js by design: the upstream binary does not accept those fork-owned client ids, and failing closed beats silently reporting zero usage for them.",
   "upstream": "junhoyeo/tokscale",
   "fork": "Javis603/tokscale",
-  "commit": "5c260161b307e139da9ff1171cb97772ae134f6c",
-  "commitTitle": "perf(codex): reduce watch scan memory",
+  "commit": "e61e50e7ba1446b1af52ce80a5e17efa42d621a4",
+  "commitTitle": "perf(antigravity): cache unchanged conversation databases",
   "baseVersion": "4.23.1",
   "baseVersionNote": "The npm-installed @tokscale/cli-<platform> package version this manifest is aligned with. It tracks the dependency in BOTH modes, and two gates enforce that: ensure-vendored-tokscale.js refuses to swap under \"override\" when the installed package reports something else, and verify-vendored-tokscale-release.js (plus its real-manifest test, so npm run verify catches it too) rejects any manifest whose baseVersion disagrees with @tokscale/cli optionalDependencies. So a tokscale bump always has to touch this file — either pin a new build or flip the mode — instead of silently leaving a stale override in place.",
   "releaseRepo": "Javis603/tokscale",
-  "releaseTag": "token-monitor-5c260161",
-  "reason": "Retains the fork's session/workspace reports, parent links, performance timing, custom-price authority and fork-only clients on the 4.23.1 npm baseline, based on upstream b265e836. Includes Antigravity protobuf token corrections, BB mirror deduplication, OMP routing attribution and Kimi K3.1 Pro pricing. International Qoder and Qoder CN share upstream transcript assembly and request reconciliation, with independent opt-in source partitions and reported tokens only. Unresolved auto model metadata upgrades from later reported model/provider/pricing identities without changing session IDs. Completed counters, Gemini inclusive prompts and inclusive generated-output envelopes reconcile before cache and reasoning are split; independently reported reasoning remains additive. The CN adapter preserves released JSONL session identities, inclusive-input normalization, bounded reads and last-complete-read fallback while retiring legacy SQLite collection and its database override. JSONL cache snapshots migrate into per-source-root caches; explicit --home scans ignore host overrides, permitting isolated CN WSL collection. Retired database anchors require a fresh scan. User databases and archive files are not deleted. Existing fork source-cache and Claude history boundaries remain intact. Keeps Qoder in one downstream patch, including the inclusive-reasoning snapshot correction. Provider-specific cache generations invalidate prior successful parses and retain compatible last-good JSONL fallback; other clients retain their generic cache wire format. Cross-file international request reconciliation prefers explicitly split input/cache buckets over unsplit copies, matching same-file assembly; per-file cache representation is unchanged. Includes upstream OpenClaw SQLite transcript archives with live/exported transcript deduplication and parser-cache invalidation. Capy remains upstream source only and is not registered as a Token Monitor tracked client. Restores desktop usage sync for Antigravity 2.34.0 and maps known Orchestrator planner and worker IDs to verified model pricing for local estimates. Reads relocated MiniMax Code stores through TOKSCALE_EXTRA_DIRS and deduplicates usage shared with the original store. Includes upstream Pi session names, Zed native ChatGPT subscription usage, Kimi native response timing and GPT-6.2 long-context pricing. Preserves Pi saved-name clears across report windows and live refreshes. Reports several date windows from one scan, so a full tick reads Today, Month and All Time in one call. Date-limited Codex reports skip cached history that cannot affect the report, and oversized compressed rollouts are checked before allocating discarded usage rows. This reduces watch scan memory while preserving deduplication, attribution, and source diagnostics.",
+  "releaseTag": "token-monitor-e61e50e7",
+  "reason": "Retains the fork's session/workspace reports, parent links, performance timing, custom-price authority and fork-only clients on the 4.23.1 npm baseline, based on upstream b265e836. Includes Antigravity protobuf token corrections, BB mirror deduplication, OMP routing attribution and Kimi K3.1 Pro pricing. International Qoder and Qoder CN share upstream transcript assembly and request reconciliation, with independent opt-in source partitions and reported tokens only. Unresolved auto model metadata upgrades from later reported model/provider/pricing identities without changing session IDs. Completed counters, Gemini inclusive prompts and inclusive generated-output envelopes reconcile before cache and reasoning are split; independently reported reasoning remains additive. The CN adapter preserves released JSONL session identities, inclusive-input normalization, bounded reads and last-complete-read fallback while retiring legacy SQLite collection and its database override. JSONL cache snapshots migrate into per-source-root caches; explicit --home scans ignore host overrides, permitting isolated CN WSL collection. Retired database anchors require a fresh scan. User databases and archive files are not deleted. Existing fork source-cache and Claude history boundaries remain intact. Keeps Qoder in one downstream patch, including the inclusive-reasoning snapshot correction. Provider-specific cache generations invalidate prior successful parses and retain compatible last-good JSONL fallback; other clients retain their generic cache wire format. Cross-file international request reconciliation prefers explicitly split input/cache buckets over unsplit copies, matching same-file assembly; per-file cache representation is unchanged. Includes upstream OpenClaw SQLite transcript archives with live/exported transcript deduplication and parser-cache invalidation. Capy remains upstream source only and is not registered as a Token Monitor tracked client. Restores desktop usage sync for Antigravity 2.34.0 and maps known Orchestrator planner and worker IDs to verified model pricing for local estimates. Reads relocated MiniMax Code stores through TOKSCALE_EXTRA_DIRS and deduplicates usage shared with the original store. Includes upstream Pi session names, Zed native ChatGPT subscription usage, Kimi native response timing and GPT-6.2 long-context pricing. Preserves Pi saved-name clears across report windows and live refreshes. Reports several date windows from one scan, so a full tick reads Today, Month and All Time in one call. Date-limited Codex reports skip cached history that cannot affect the report, and oversized compressed rollouts are checked before allocating discarded usage rows. This reduces watch scan memory while preserving deduplication, attribution, and source diagnostics. Reuses unchanged Antigravity CLI and IDE conversation DB snapshots in model reports, including T3 Code ACP roots scanned by the CLI adapter. Active WAL databases still receive a full scan; Graph and submission retain source recounts.",
   "platforms": {
     "android-arm64": {
       "package": "@tokscale/cli-android-arm64",
       "asset": "tokscale-android-arm64",
-      "sha256": "65abd81c4534d7f704f36a6aca199ce96c949858ef56a59c5603830c863daea2"
+      "sha256": "9886d7b5d8d1495552903b52ba60e2204956c8401831a19dcb7f0ec2a85345d8"
     },
     "darwin-arm64": {
       "package": "@tokscale/cli-darwin-arm64",
       "asset": "tokscale-darwin-arm64",
-      "sha256": "5df9a18bee00eba904f77dacdf4502b3b1ca96b494442082822a5d16603f3ab0"
+      "sha256": "7ee739cba18e4df2dbe5e16a71459cc51c296ef8a4c6933a9a63a82882c14b52"
     },
     "darwin-x64": {
       "package": "@tokscale/cli-darwin-x64",
       "asset": "tokscale-darwin-x64",
-      "sha256": "31a0fbef5b068feb3fc71cb8146af149f8611a307a05c3c7c0f317a86205cc2c"
+      "sha256": "6c770799a03283811eff708b227a261ca8a02b9101eedb0d73abdf3f95553759"
     },
     "linux-arm64": {
       "package": "@tokscale/cli-linux-arm64-gnu",
       "asset": "tokscale-linux-arm64",
-      "sha256": "544df2ad96ce9244b75244d361b4ffe3e768a560f202507f297254346d20e869"
+      "sha256": "b681628243a5fa4df30b36ebfd2010ddb45d6203908bbdda8d18acd38c08913f"
     },
     "linux-arm64-musl": {
       "package": "@tokscale/cli-linux-arm64-musl",
       "asset": "tokscale-linux-arm64-musl",
-      "sha256": "df3ebc37ff83dccc5b7f9e57225659e667e3c12211841aae40bdd369dda490dc"
+      "sha256": "980ad755bafa4fbc1a393bc631627a57d223d9a5048cf021cc16198723f8d24c"
     },
     "linux-x64": {
       "package": "@tokscale/cli-linux-x64-gnu",
       "asset": "tokscale-linux-x64",
-      "sha256": "8b08ed9b417414d59d9c4d90ca6d7ea4f9bdc6b4a59a477d0c04b0d5e8a8e5f1"
+      "sha256": "2ed5da6512fca69a01f14cc08dda62c66f73e8a46fe7953a4cd6f11d00cef42a"
     },
     "linux-x64-musl": {
       "package": "@tokscale/cli-linux-x64-musl",
       "asset": "tokscale-linux-x64-musl",
-      "sha256": "c4dcc59fd2ae614ba3d67e05699c36e13059fe8db18f69a0268fce798f1eef05"
+      "sha256": "0a023612ce509d853df1155cba14831790a54c1b5bb099b5e6bc17ae5a596d52"
     },
     "win32-arm64": {
       "package": "@tokscale/cli-win32-arm64-msvc",
       "asset": "tokscale-win32-arm64.exe",
-      "sha256": "01f08f46d1842398b063bee144263081361a8b4ec06e05030ae56233aec24bf2"
+      "sha256": "4fa544304c9f0e40b5077f2d2e328729a92baf2518aca76f225524ac8073bfd9"
     },
     "win32-x64": {
       "package": "@tokscale/cli-win32-x64-msvc",
       "asset": "tokscale-win32-x64.exe",
-      "sha256": "48e01332430ef405728a07dba901e8b198f6f416d5ae2fca3ce3182706554599"
+      "sha256": "8e2b86eafe3d591034b74c672a5a1d4d28aadfd158510eda1d7946aa6a6f103d"
     }
   }
 }

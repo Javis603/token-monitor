@@ -1,46 +1,39 @@
 ---
-summary: "Reasonix provider notes: Tokscale aggregate authority, local-only native sessions, bounded sidecar replay and privacy guards."
+summary: "Reasonix provider notes: Tokscale aggregate authority, on-demand local session browsing, and privacy guards."
 ids: [reasonix]
 read_when:
   - Changing Reasonix source paths, tokscale normalization or watcher roots
-  - Changing Reasonix native session/project views or Session Detail replay
+  - Changing local Reasonix Sessions or Session Detail
   - Changing serialization, sync, history or synthetic-session filtering for Reasonix
 ---
 
 # Reasonix
 
-Reasonix deliberately has two views with different authorities:
+## Identity and ids
 
-- tokscale owns aggregate token, model and cost totals;
-- Token Monitor's native adapter owns richer local session/project presentation.
+`reasonix` is a tracked client with no limits provider. Reasonix upstream stopped maintenance on 2026-11-12 (archived; final release v2.61.0).
 
-Never add native values into aggregate periods. That would double count the same activity.
+## Data sources
+
+Tokscale `stats/*.jsonl` is the sole authority for Reasonix token, model and cost totals across Today, Month, Total, History/Trends and Hub sync. Open Sessions to read local session metadata, telemetry, and bounded events for Today, Month, or Total. Reopen Sessions or use Refresh to read the files again. Selecting a session with a readable transcript opens Session Detail. Per-turn data is shown only where the transcript supplies it. Cumulative telemetry is never allocated to individual turns.
+
+Native session files are outside the collector and watcher loop. Their rows are local to the Sessions view and do not enter Projects, the tray, or device records. Sessions routed under `projects/*/sessions/` remain readable.
 
 ## Paths and portability
 
-The state root resolves `REASONIX_STATE_HOME`, then `REASONIX_HOME`, then the platform default. Environment references, home shorthand, relative paths and separators follow Reasonix's own cleaning semantics. `paths.js` stays free of Node built-ins because the source check and resolver enter the Worker shared closure even though filesystem reading remains local.
+The state root resolves `REASONIX_STATE_HOME`, then `REASONIX_HOME`, then the platform default (`%APPDATA%\reasonix` on Windows, `~/.reasonix` elsewhere), appending `stats` for `resolveReasonixStatsDir()`. Environment references, home shorthand, relative paths and separators follow Reasonix's own cleaning semantics. `paths.js` stays free of Node built-ins because the `reasonix-stats` source check id and resolver enter the Worker shared closure even though filesystem reading remains local.
 
-Reasonix is not scanned through WSL discovery. Its native state and watcher roots are host-local.
+Reasonix is excluded from WSL discovery (`WSL_EXCLUDED_CLIENTS`): Tokscale's Windows `PathRoot::ReasonixHome` conflicts with Linux-default `.reasonix/stats` paths inside WSL.
 
-## Aggregate versus native sessions
+## Invariants and privacy guards
 
-`stats/*.jsonl` remains tokscale's aggregate authority. Sidecar telemetry and official event logs produce `native: true` rows for local UI only. Native rows may expose titles, projects, current messages and cumulative official telemetry without claiming period totals the source cannot prove.
-
-Native sessions never enter ordinary `period.sessions`, history, archive or sync payloads. `sessionGuard.js` removes every Reasonix-shaped ordinary session fail-closed, including legacy stats-path ids that could leak a local path. Hub/device normalization must preserve that guard.
-
-Cumulative telemetry is reliable only where the adapter can attribute it. A metadata rename or update must not move an old session into today. `allTimeSince` excludes a session conservatively when its trustworthy creation boundary predates the configured start. Native project totals omit unavailable or period-ambiguous token data.
-
-## Bounded file handling
-
-Metadata reads are regular-file and size bounded. A large telemetry sidecar is projected from its final `usage` field without materializing the preceding `ReadFiles` array. Candidate failures are negative-cached only while their fingerprints remain unchanged; root and sidecar discovery must recover when files appear, change or are deleted.
-
-Official event replay accepts only supported schemas and event transitions. It keeps the last trusted state across a torn tail, but fails closed on unsupported schemas, illegal appends, unknown event types or resource-limit breaches. Legacy typed events remain compatibility input, not authority for new schema behavior.
-
-Session Detail uses the same bounded replay and positive allowlist as compact rows. Missing/corrupt identity, telemetry or transcript files produce no detail rather than a partially trusted reconstruction.
+- **Disjoint reasoning and request counts.** Reasonix folds `reasoning` into the public `outputTokens` bucket (`TOKSCALE_DISJOINT_REASONING_CLIENTS`), while History zeroes `messages` for Reasonix because Tokscale's counter reflects provider requests rather than user turns.
+- **Scoped model normalization.** `normalizeModelNameForClient()` strips `deepseek/` and `deepseek-flash/` prefixes only when given explicit `reasonix` client context.
+- **Fail-closed session guard.** Reasonix session rows never enter ordinary `period.sessions`, archives, History, or sync. `sessionGuard.js` (`isReasonixSyntheticSession` / `filterReasonixSyntheticSessions`) removes every Reasonix-shaped ordinary session fail-closed — including legacy `reasonix-stats:` path IDs that could leak a local path — across usage normalization, delta application, session usage archives, anchor seeding, local session merging, sync payloads, renderer `sessionRows.js`, and Hub/Worker ingestion. `sessionRows.js` also drops any stale Reasonix entries in `nativeSessions` and strips `reasonix-stats:` prefixes in `sessionIdLabel()`.
 
 ## Verification
 
-Run the Reasonix path, aggregate, native-session and replay tests when changing this note's scope:
+Run the Reasonix path, aggregate and synthetic-session guard tests when changing this note's scope:
 
 ```bash
 node --test tests/shared/reasonix*.test.js
