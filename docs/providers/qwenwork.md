@@ -9,7 +9,7 @@ read_when:
 
 # QwenWork
 
-`qwenwork` is a limits-only provider, without a tracked-client usage source. QwenWork reports plan credits, not per-request token counters, and its desktop app does not persist input/output token counts locally. Adding a usage client would require QwenWork to write usage-bearing transcripts or expose a token-usage API; the credit windows here do not substitute for token accounting.
+`qwenwork` is a limits-only provider. It reads plan credits from the QwenWork gateway for AI Tool Limits.
 
 ## Identity and ids
 
@@ -45,7 +45,6 @@ Requests use the injected transport, `credentials: 'omit'`, `redirect: 'error'`,
 
 ## Invariants and known gaps
 
-- No token components, message counts or per-session billing are reported. QwenWork does not expose them locally.
 - Existing provider selections and custom Home orders are preserved on upgrade. Browser sign-in adds QwenWork to the provider selection and enables Limits if that selection was empty. With an existing selection, sign-in preserves the Limits switch.
 - With no stored session and no fallback token it reports `notConfigured` and performs no network request. The Settings connection card lists OAuth and local Magpie credentials. The environment token remains available as a fallback.
 - Allowance meters use consumed credits divided by the total. Usage above the allowance fills the meter.
