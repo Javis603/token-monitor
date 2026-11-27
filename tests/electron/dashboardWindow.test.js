@@ -2086,6 +2086,7 @@ test('dashboard binds deferred drawer ownership to supplying period and invalida
   await new Promise((r) => setTimeout(r, 0));
   assert.equal(detailCalls.length, 1);
   assert.equal(detailCalls[0].sessionId, 'carried');
+  assert.equal(detailCalls[0].period, 'today', 'Month confirms ownership, but the carried row shows Today usage');
   pendingPages.clear();
 
   // 3. Hub A deferred drawer must not be resolved by Hub B's page for the same session key

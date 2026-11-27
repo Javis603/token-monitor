@@ -1739,14 +1739,22 @@ test('activity-only uncovered History uses the device calendar or marks activity
       { date: '2026-11-23', tokens: 100, messages: 3, activeTimeMs: 1000 }
     ] } }, tokyo
   ] };
-  const activity = selectedDeviceId => {
-    const { hero } = model.buildScopedOverview({ stats, history, periodKey: 'yesterday', selectedDeviceId,
+  const activity = (selectedDeviceId, snapshot = stats) => {
+    const { hero } = model.buildScopedOverview({ stats: snapshot, history, periodKey: 'yesterday', selectedDeviceId,
       nowMs: Date.parse('2026-11-24T18:00:00Z') });
     return [hero.messages, hero.activeTimeMs];
   };
   assert.deepEqual(activity('tokyo'), [7, 4000]);
   assert.deepEqual(activity('all'), [10, 5000]);
+  const cold = { mode: 'sync', devices: [], periods: {} };
+  history.deviceHistories[0].periodWindows = { today: { key: '2026-11-24', endsAt: '2026-11-25T00:00:00Z' } };
+  assert.deepEqual(activity('tokyo', cold), [7, 4000]);
+  assert.deepEqual(activity('all', cold), [10, 5000]);
+
   delete tokyo.periodWindows;
+  assert.deepEqual(activity('tokyo', cold), [null, null]);
+  assert.deepEqual(activity('all', cold), [null, null]);
+  assert.deepEqual(activity('utc', cold), [3, 1000]);
   assert.deepEqual(activity('tokyo'), [null, null]);
   assert.deepEqual(activity('all'), [null, null]);
   assert.deepEqual(activity('utc'), [3, 1000]);

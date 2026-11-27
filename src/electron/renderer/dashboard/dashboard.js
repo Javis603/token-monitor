@@ -3051,7 +3051,8 @@ function reconcileSyncedSessionOwnership(displayedSession, authoritativeSession,
 
 function loadSessionDrawerDetail(s, token, baseGrid) {
   if (typeof window.tokenMonitor?.getSessionDetail !== 'function') return;
-  const periodKey = s.sourcePeriodKey || state.periodKey;
+  // A carried row keeps its previous ownership period, but its usage is for Today.
+  const periodKey = s.resumedFromPriorPeriod ? 'today' : s.sourcePeriodKey || state.periodKey;
   const owner = String(s.sourceDevice?.deviceId || state.stats?.localDeviceId || state.settings?.deviceId || '');
   const deviceWindows = state.stats?.syncedFixedPeriodDeviceWindows?.[periodKey];
   const nativeWindow = deviceWindows ? (Object.hasOwn(deviceWindows, owner) ? deviceWindows[owner] : null)
