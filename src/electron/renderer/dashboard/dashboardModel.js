@@ -2047,8 +2047,8 @@
       if (e.active) link(`hub:${e.from}`, `endpoint:${e.to}`);
     }
 
-    /** @type {Array<{ anchor: string, nodes: string[] }>} */
-    const components = [];
+    /** @type {Map<string, number>} */
+    const nodePhase = new Map();
     /** @type {Set<string>} */
     const visited = new Set();
     /** @param {string} key */
@@ -2076,17 +2076,14 @@
           }
         }
       }
-      components.push({ anchor: bestAnchor, nodes });
+      // An unrelated path entering or leaving must not change this path's phase.
+      let hash = 2166136261;
+      for (let i = 0; i < bestAnchor.length; i++) {
+        hash = Math.imul(hash ^ bestAnchor.charCodeAt(i), 16777619);
+      }
+      const phase = -1 - ((hash >>> 0) % 10000) / 10000;
+      for (const nodeKey of nodes) nodePhase.set(nodeKey, phase);
     }
-
-    components.sort((a, b) => a.anchor.localeCompare(b.anchor));
-    /** @type {Map<string, number>} */
-    const nodePhase = new Map();
-    const count = components.length;
-    components.forEach((comp, idx) => {
-      const phase = idx === 0 || count <= 1 ? 0 : -Number((1 + idx / count).toFixed(4));
-      for (const nodeKey of comp.nodes) nodePhase.set(nodeKey, phase);
-    });
 
     for (const d of graph.devices) d.flowPhase = nodePhase.get(`device:${d.id}`) ?? 0;
     for (const h of graph.hubs) h.flowPhase = nodePhase.get(`hub:${h.id}`) ?? 0;
