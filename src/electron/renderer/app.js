@@ -7367,9 +7367,11 @@ function renderViewSwitcher({ focusMenu = false, focusDisclosure = false } = {})
   const currentLabel = viewLabelById(currentId);
   const nextId = nextBreakdown(currentId);
   const nextLabel = viewLabelById(nextId);
+  const hasDashboardLauncher = typeof window !== 'undefined' && typeof window.tokenMonitor?.openDashboard === 'function';
   const renderKey = JSON.stringify([currentId, order.map(id => [id, viewLabelById(id)]),
     pluginPageOptions().map(page => [page.id, page.icon, page.identityIcon]),
-    t('views.switcher.choose'), t('views.switcher.next', { view: nextLabel })]);
+    t('views.switcher.choose'), t('views.switcher.next', { view: nextLabel }),
+    hasDashboardLauncher ? t('dashboard.menuLabel') : '']);
   // Usage pushes repaint the page without changing navigation. Keep the same
   // popover/rows so hover, focus, scroll and its entry animation survive them.
   if (renderKey === viewSwitcherRenderKey && updateViewSwitcherOpenState({ focusMenu, focusDisclosure })) return;
@@ -7456,6 +7458,32 @@ function renderViewSwitcher({ focusMenu = false, focusDisclosure = false } = {})
       else renderBreakdownChange(id);
     });
     menu.append(item);
+  }
+  if (hasDashboardLauncher) {
+    const separator = document.createElement('div');
+    separator.className = 'view-switcher-menu-separator';
+    separator.setAttribute('role', 'separator');
+    menu.append(separator);
+
+    const dashItem = document.createElement('button');
+    dashItem.type = 'button';
+    dashItem.className = 'view-switcher-menu-item view-switcher-menu-action';
+    dashItem.dataset.action = 'open-dashboard';
+    dashItem.setAttribute('role', 'menuitem');
+    dashItem.tabIndex = -1;
+    const dashExt = document.createElement('span');
+    dashExt.className = 'view-switcher-icon view-switcher-menu-ext';
+    dashExt.setAttribute('aria-hidden', 'true');
+    const dashLabel = document.createElement('span');
+    dashLabel.className = 'view-switcher-menu-label';
+    dashLabel.textContent = t('dashboard.menuLabel');
+    dashItem.append(dashExt, dashLabel);
+    dashItem.addEventListener('click', () => {
+      state.viewSwitcherOpen = false;
+      updateViewSwitcherOpenState();
+      window.tokenMonitor.openDashboard();
+    });
+    menu.append(dashItem);
   }
   menu.addEventListener('keydown', (event) => {
     const items = Array.from(menu.querySelectorAll('.view-switcher-menu-item'));

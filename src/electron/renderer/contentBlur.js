@@ -7,7 +7,8 @@
 })(typeof window !== 'undefined' ? window : null, function () {
   const SURFACES = '.view-switcher-menu, .select-control-popup, .plugin-menu, .settings-help-popover, '
     + '.app-update-popover, .sync-content-dialog, .plugin-catalog-dialog, .custom-pricing-help, '
-    + '.tray-composer-popover, .tray-composer-picker-menu, .limit-detail-tooltip';
+    + '.tray-composer-popover, .tray-composer-picker-menu, .limit-detail-tooltip, '
+    + '.dash-tooltip, .dash-device-menu, .dash-drawer';
   const NS = 'http://www.w3.org/2000/svg';
   let nextId = 0;
 

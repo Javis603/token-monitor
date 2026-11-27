@@ -393,6 +393,11 @@ test('a summary never normalizes the local all-time sessions', () => {
   const localOnly = composeLocalOnlySummary(local, (stats) => stats, { nowMs });
   assert.equal(reads.count, 0);
 
+  const accountingTime = new Date(nowMs).toISOString();
+  for (const stats of [summary, localOnly]) {
+    assert.equal(stats.updatedAt, accountingTime);
+    assert.equal(completeLocalSyncStats(stats).updatedAt, accountingTime);
+  }
   assert.equal(Object.keys(completeLocalSyncStats(summary).periods.allTime.sessions).length, 1);
   assert.equal(Object.keys(completeLocalSyncStats(localOnly).periods.allTime.sessions).length, 1);
   assert.ok(reads.count > 0, 'the completions normalize them');

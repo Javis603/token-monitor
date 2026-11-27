@@ -27,6 +27,7 @@ function fixture() {
   const history = deferred();
   const calls = [];
   const context = {
+    AbortSignal,
     deviceRuntimeHandle: {
       refreshLimits: (...args) => { calls.push(['limits', ...args]); return limits.promise; },
       tick: (...args) => { calls.push(['usage', ...args]); return usage.promise; }

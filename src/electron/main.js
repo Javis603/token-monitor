@@ -647,6 +647,12 @@ function defaultSettings() {
     compactTokenUnits: 'western',
     tokenRateMode: 'speed',
     heatmapMetric: 'cost',
+    dashboardHeatmapMetric: null,
+    dashboardStageView: 'flow',
+    dashboardFollowPeriodTabs: false,
+    dashboardVisiblePeriods: [],
+    dashboardShowVelocity: true,
+    dashboardShowQuotas: true,
     modelRankingMetric: 'tokens',
     homeActiveDaysWindow: 'all',
     showExactHomeTrendTokens: false,
@@ -825,6 +831,16 @@ function defaultSettings() {
       dismissedVersion: null
     }
   };
+}
+
+function normalizeDashboardStageView(value) {
+  return value === '2d' || value === '3d' ? value : 'flow';
+}
+
+function normalizeDashboardPeriods(value) {
+  return Array.isArray(value)
+    ? fixedPeriodRangesApi.PERIOD_TAB_OPTIONS.filter(period => value.includes(period))
+    : [];
 }
 
 function resettableSettingsDefaults() {
@@ -2203,6 +2219,12 @@ function readSettings() {
     merged.collectionIntervalMs = normalizeCollectionIntervalMs(merged.collectionIntervalMs);
     merged.syncUploadIntervalMs = normalizeSyncUploadIntervalMs(merged.syncUploadIntervalMs);
     merged.heatmapMetric = normalizeHeatmapMetric(merged.heatmapMetric);
+    merged.dashboardHeatmapMetric = merged.dashboardHeatmapMetric == null ? null : normalizeHeatmapMetric(merged.dashboardHeatmapMetric);
+    merged.dashboardStageView = normalizeDashboardStageView(merged.dashboardStageView);
+    merged.dashboardVisiblePeriods = normalizeDashboardPeriods(merged.dashboardVisiblePeriods);
+    merged.dashboardFollowPeriodTabs = parseBoolean(merged.dashboardFollowPeriodTabs, false);
+    merged.dashboardShowVelocity = parseBoolean(merged.dashboardShowVelocity, true);
+    merged.dashboardShowQuotas = parseBoolean(merged.dashboardShowQuotas, true);
     merged.modelRankingMetric = normalizeRankingMetric(merged.modelRankingMetric);
     merged.homeActiveDaysWindow = normalizeHomeActiveDaysWindow(merged.homeActiveDaysWindow);
     merged.showExactHomeTrendTokens = parseBoolean(merged.showExactHomeTrendTokens, false);
@@ -2835,16 +2857,28 @@ function rendererAllTimeSessions(stats) {
     const devices = hubSnapshot?.localDevice
       ? [...(complete.devices || []).filter(device => device.deviceId !== hubSnapshot.localDevice.deviceId), hubSnapshot.localDevice]
       : complete.devices;
-    const sourced = projectSessionDeviceSessions(sessions, devices, ['month', 'allTime']);
+    const unstamped = Object.fromEntries(Object.entries(sessions).map(([id, { sourceDevice: _owner, ...session }]) => [id, session]));
+    const sourced = projectSessionDeviceSessions(unstamped, devices, ['month', 'allTime']);
     const inline = projectModelAliasSessions(stats, settings?.sessionTitlesEnabled === false ? withoutSessionTitles(sourced) : sourced, aliases, { grouping });
-    if (!stats.sessionDetailsOmitted?.month || !Object.keys(stats.fixedRangeRevisions || {}).length) return inline;
+    if (!stats.sessionDetailsOmitted?.month) return inline;
+
+    const withoutConfirmedOwners = rows => Object.fromEntries(Object.entries(rows).map(([id, session]) => [
+      id, { ...session, sourceDevice: { ambiguous: true } }
+    ]));
+    if (!Object.keys(stats.fixedRangeRevisions || {}).length) return withoutConfirmedOwners(inline);
     return resolveSyncedPeriodForStats(stats, hubModeGeneration, 'month').then(paged => {
-      if (!paged?.period?.sessions) return inline;
+      const pagedSessions = paged?.period?.sessions || {};
       const local = hubSnapshot?.localDevice?.allTime?.sessions || {};
-      return {
-        ...inline,
-        ...Object.fromEntries(Object.entries(paged.period.sessions).filter(([id]) => !Object.hasOwn(local, id)))
-      };
+      const merged = { ...inline };
+      for (const [id, session] of Object.entries(pagedSessions)) {
+        if (!Object.hasOwn(local, id)) {
+          merged[id] = session;
+        } else if (!merged[id]?.sourceDevice || session.sourceDevice?.ambiguous
+          || session.sourceDevice?.deviceId !== hubSnapshot.localDevice.deviceId) {
+          merged[id] = { ...merged[id], sourceDevice: { ambiguous: true } };
+        }
+      }
+      return paged?.detailsAvailable === true ? merged : withoutConfirmedOwners(merged);
     });
   });
 }
@@ -4682,7 +4716,7 @@ function publishLocalSessionActivity(patch) {
   const previousDevice = lastCollectedDevice;
   lastCollectedDevice = projectLocalActivity(lastCollectedDevice, patch);
   if (localDevice) localDevice = localDevice === previousDevice ? lastCollectedDevice : applyActivityPatch(localDevice, patch);
-  if (!latestStats) return;
+  if (!latestStatsMatchCurrentSource()) return;
   const previous = latestStats;
   latestStats = projectLocalActivity(previous, patch);
   const localSnapshot = snapshotLocalDevices.get(previous);
@@ -4704,6 +4738,11 @@ function publishLocalSessionActivity(patch) {
   pluginRuntime?.publishStats(activityStats, latestStats);
   updateEdgeDockCells(activityStats);
   sendPush({ event: 'session-activity', data: { patch: visiblePatch, snapshot } });
+}
+
+function latestStatsMatchCurrentSource() {
+  return latestStats && latestStatsSource?.generation === hubModeGeneration
+    && latestStatsSource.identity === currentHubStatsIdentity();
 }
 
 // Two options, both for the cold-start seed and neither for live stats.
@@ -4731,7 +4770,9 @@ function mainWindowStatsPushWanted() {
 function sendPush(payload, options = {}) {
   const previousHistoryRevision = statsHistoryRevision(latestStats);
   const wantsRenderer = options.deferToRenderer === true || mainWindowStatsPushWanted();
+  const wantsDashboard = dashboardStatsPushWanted();
   let rendererPayload = payload;
+  let dashboardPayload = payload;
   let rendererFingerprint = null;
   if (payload?.data?.stats) {
     payload.data.stats = injectLocalDeviceStatus(payload.data.stats);
@@ -4750,21 +4791,27 @@ function sendPush(payload, options = {}) {
     getLimitsHistoryStore().record(currentHubStatsIdentity(), visibleStats.limits);
     limitsHistoryController?.refresh();
     migrateCodexAdditionalLimits(visibleStats);
-    if (wantsRenderer) {
+    if (wantsRenderer || wantsDashboard) {
       const copy = rendererSnapshots.stamp(latestStats, rendererStats(visibleStats), visibleStats);
-      const allowDelta = options.deferToRenderer !== true
-        && payload.data.reason !== 'read'
-        && payload.data.reason !== 'presentation';
-      const built = allowDelta
-        ? buildStatsDelta(lastRendererStatsFingerprint, copy)
-        : { delta: null, fingerprint: fingerprintStats(copy) };
-      rendererFingerprint = built.fingerprint;
-      if (built.delta) {
-        const data = { ...payload.data };
-        delete data.stats;
-        rendererPayload = { ...payload, data: { ...data, statsDelta: built.delta } };
-      } else {
-        rendererPayload = { ...payload, data: { ...payload.data, stats: copy } };
+      if (wantsDashboard) {
+        const dashboardStats = { ...rendererStats(visibleStats, { dashboard: true }), snapshot: copy.snapshot };
+        dashboardPayload = { ...payload, data: { ...payload.data, stats: dashboardStats } };
+      }
+      if (wantsRenderer) {
+        const allowDelta = options.deferToRenderer !== true
+          && payload.data.reason !== 'read'
+          && payload.data.reason !== 'presentation';
+        const built = allowDelta
+          ? buildStatsDelta(lastRendererStatsFingerprint, copy)
+          : { delta: null, fingerprint: fingerprintStats(copy) };
+        rendererFingerprint = built.fingerprint;
+        if (built.delta) {
+          const data = { ...payload.data };
+          delete data.stats;
+          rendererPayload = { ...payload, data: { ...data, statsDelta: built.delta } };
+        } else {
+          rendererPayload = { ...payload, data: { ...payload.data, stats: copy } };
+        }
       }
     }
     scheduleMacWidgetSnapshot(visibleStats, options.widgetProducerOwner);
@@ -4797,6 +4844,9 @@ function sendPush(payload, options = {}) {
       }
     }
   }
+  if (wantsDashboard && !options.deferToRenderer && dashboardWindow && !dashboardWindow.isDestroyed()) {
+    try { dashboardWindow.webContents.send('stats:push', dashboardPayload); } catch (_) {}
+  }
   if (payload?.data?.stats) {
     const nextHistoryRevision = statsHistoryRevision(payload.data.stats);
     if (nextHistoryRevision !== previousHistoryRevision && dashboardWindow && !dashboardWindow.isDestroyed()) {
@@ -4804,6 +4854,14 @@ function sendPush(payload, options = {}) {
     }
     maybeAdoptSharedSubscriptionRevision(payload.data.stats);
   }
+}
+
+function dashboardStatsPushWanted() {
+  return Boolean(dashboardWindow
+    && dashboardWindowReady
+    && !dashboardWindow.isDestroyed()
+    && dashboardWindow.isVisible()
+    && !dashboardWindow.isMinimized());
 }
 
 function statsHistoryRevision(stats) {
@@ -6097,22 +6155,35 @@ function syncDockSurfaces(rendererSettings) {
 }
 
 function sendStatsPresentationToRenderer(options = {}) {
-  if (!latestStats || !mainWindow || mainWindow.isDestroyed()) return false;
-  if (options.force !== true && !mainWindowStatsPushWanted()) return false;
+  if (!latestStatsMatchCurrentSource()) return false;
+  const wantsMain = Boolean(mainWindow && !mainWindow.isDestroyed() && (options.force === true || mainWindowStatsPushWanted()));
+  const wantsDashboard = dashboardStatsPushWanted();
+  if (!wantsMain && !wantsDashboard) return false;
   const visibleStats = electronPresentationStats(latestStats);
   const copy = rendererSnapshots.stamp(latestStats, rendererStats(visibleStats), visibleStats);
-  try {
-    mainWindow.webContents.send('stats:push', {
-      event: 'stats',
-      data: { type: 'stats', reason: 'presentation', mode, stats: copy }
-    });
-    const fingerprint = fingerprintStats(copy);
-    if (fingerprint) lastRendererStatsFingerprint = fingerprint;
-    return true;
-  } catch (_) {
-    lastRendererStatsFingerprint = null;
-    return false;
+  const message = {
+    event: 'stats',
+    data: { type: 'stats', reason: 'presentation', mode, stats: copy }
+  };
+  let delivered = false;
+  if (wantsMain) {
+    try {
+      mainWindow.webContents.send('stats:push', message);
+      const fingerprint = fingerprintStats(copy);
+      if (fingerprint) lastRendererStatsFingerprint = fingerprint;
+      delivered = true;
+    } catch (_) {
+      lastRendererStatsFingerprint = null;
+    }
   }
+  if (wantsDashboard) {
+    try {
+      const dashboardStats = { ...rendererStats(visibleStats, { dashboard: true }), snapshot: copy.snapshot };
+      dashboardWindow.webContents.send('stats:push', { ...message, data: { ...message.data, stats: dashboardStats } });
+      delivered = true;
+    } catch (_) {}
+  }
+  return delivered;
 }
 
 function refreshLimitStatsPresentation() {
@@ -6876,7 +6947,10 @@ async function fetchStats(options = {}) {
     }
   }
   const url = `${hubUrl.replace(/\/$/, '')}/api/stats`;
-  const response = await fetchFromHub(url, { headers: secret ? { authorization: `Bearer ${secret}` } : {} });
+  const response = await fetchFromHub(url, {
+    headers: secret ? { authorization: `Bearer ${secret}` } : {},
+    signal: AbortSignal.timeout(15_000)
+  });
   if (!response.ok) throw new Error(`Hub ${response.status}: ${(await response.text()).slice(0, 200)}`);
   const stats = await response.json();
   if (!hubModeRequestIsCurrent(requestGeneration, 'client', requestHubIdentity)) {
@@ -7710,10 +7784,10 @@ function createDashboardWindow() {
     return dashboardWindow;
   }
   const windowOptions = {
-    width: 920,
-    height: 620,
-    minWidth: 560,
-    minHeight: 420,
+    width: 1180,
+    height: 760,
+    minWidth: 720,
+    minHeight: 520,
     frame: false,
     transparent: true,
     show: false,
@@ -7760,7 +7834,7 @@ function createDashboardWindow() {
       dashboardWindowReady = false;
     }
   });
-  win.loadFile(path.join(__dirname, 'renderer', 'dashboard.html'))
+  win.loadFile(path.join(__dirname, 'renderer', 'dashboard', 'dashboard.html'))
     .catch((error) => discardFailedDashboardWindow(win, `load failed: ${error.message}`));
   return win;
 }
@@ -8277,6 +8351,14 @@ app.whenReady().then(() => {
     if (patch.collectionIntervalMs !== undefined) normalizedPatch.collectionIntervalMs = normalizeCollectionIntervalMs(patch.collectionIntervalMs, settings.collectionIntervalMs);
     if (patch.syncUploadIntervalMs !== undefined) normalizedPatch.syncUploadIntervalMs = normalizeSyncUploadIntervalMs(patch.syncUploadIntervalMs, settings.syncUploadIntervalMs);
     if (patch.heatmapMetric !== undefined) normalizedPatch.heatmapMetric = normalizeHeatmapMetric(patch.heatmapMetric, settings.heatmapMetric);
+    if (patch.dashboardHeatmapMetric !== undefined) {
+      normalizedPatch.dashboardHeatmapMetric = patch.dashboardHeatmapMetric === null ? null : normalizeHeatmapMetric(patch.dashboardHeatmapMetric);
+    }
+    if (patch.dashboardStageView !== undefined) normalizedPatch.dashboardStageView = normalizeDashboardStageView(patch.dashboardStageView);
+    if (patch.dashboardVisiblePeriods !== undefined) normalizedPatch.dashboardVisiblePeriods = normalizeDashboardPeriods(patch.dashboardVisiblePeriods);
+    for (const key of ['dashboardFollowPeriodTabs', 'dashboardShowVelocity', 'dashboardShowQuotas']) {
+      if (patch[key] !== undefined) normalizedPatch[key] = parseBoolean(patch[key], settings[key]);
+    }
     if (patch.homeActiveDaysWindow !== undefined) normalizedPatch.homeActiveDaysWindow = normalizeHomeActiveDaysWindow(patch.homeActiveDaysWindow, settings.homeActiveDaysWindow);
     if (patch.sessionContextMetric !== undefined) normalizedPatch.sessionContextMetric = normalizeSessionContextMetric(patch.sessionContextMetric, settings.sessionContextMetric);
     settings = normalizeWindowBehaviorSettings({
@@ -8764,8 +8846,6 @@ app.whenReady().then(() => {
   ipcMain.handle('stats:get', async (event, options) => {
     if (options?.deltaResync === true) {
       if (!mainWindow || mainWindow.isDestroyed() || event.sender !== mainWindow.webContents) return null;
-      if (latestStatsSource?.generation !== hubModeGeneration
-        || latestStatsSource.identity !== currentHubStatsIdentity()) return null;
       // Send the full snapshot on the same channel as subsequent deltas.
       // An invoke reply can arrive after a newer push and roll the view back.
       sendStatsPresentationToRenderer({ force: true });
@@ -8792,6 +8872,9 @@ app.whenReady().then(() => {
       const fingerprint = fingerprintStats(copy);
       if (fingerprint) lastRendererStatsFingerprint = fingerprint;
     }
+    if (dashboardWindow && !dashboardWindow.isDestroyed() && event?.sender === dashboardWindow.webContents) {
+      return { ...rendererStats(visibleStats, { dashboard: true }), snapshot: copy.snapshot };
+    }
     return copy;
   });
   ipcMain.handle('devices:delete', async (_event, deviceId) => {
@@ -8802,7 +8885,11 @@ app.whenReady().then(() => {
       throw new Error(error.code || error.message, { cause: error });
     }
   });
-  ipcMain.handle('stats:allTimeSessions', (_event, snapshotId) => rendererAllTimeSessions(rendererSnapshots.get(snapshotId)));
+  ipcMain.handle('stats:allTimeSessions', async (_event, snapshotId) => {
+    const source = hubModeGeneration;
+    const sessions = await rendererAllTimeSessions(rendererSnapshots.get(snapshotId, source));
+    return source === hubModeGeneration ? sessions : null;
+  });
   // While a headless agent owns host or sync collection, this app's record stops
   // updating and the agent applies its own archive, so there is no count to show.
   ipcMain.handle('stats:archivedSessionCount', () => (
@@ -8850,7 +8937,8 @@ app.whenReady().then(() => {
     ]));
   });
   ipcMain.handle('session:getDetail', (_event, args) => {
-    const { client, sessionId, period, sessionCost, reasonixSessionRef } = args || {};
+    const { client, sessionId, period, sessionCost, reasonixSessionRef, snapshotSource } = args || {};
+    if (snapshotSource != null && snapshotSource !== hubModeGeneration) return null;
     return readSessionDetailForPlatform({ client, sessionId, period, sessionCost, reasonixSessionRef }, {
       lookupModelPricing, getPricingRevision: () => pricingFingerprint({ pricingPath: customPricingPath() })
     });
@@ -9174,6 +9262,9 @@ app.whenReady().then(() => {
     if (process.platform === 'darwin') win.setBackgroundColor('#00000000');
     dashboardWindowReady = true;
     showDashboardWindow(win);
+  });
+  ipcMain.on('dashboard:openAppSettings', (event) => {
+    if (event.sender === dashboardWindow?.webContents && event.senderFrame === event.sender.mainFrame) openSettingsFromTray();
   });
   ipcMain.on('dashboard:minimize', (event) => { BrowserWindow.fromWebContents(event.sender)?.minimize(); });
   ipcMain.on('dashboard:close', (event) => { BrowserWindow.fromWebContents(event.sender)?.close(); });

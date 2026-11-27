@@ -190,7 +190,8 @@ function composeLocalSyncStats(hubStats, localDevice, options = {}) {
   const summarize = (record) => (record === localDevice
     ? normalizedLocalSummary(localDevice)
     : withoutAllTimeSessions(normalizedHubRecord(record)));
-  const aggregate = aggregateDevices(devices, hubStaleAfterMs ?? 0, options.nowMs, {
+  const nowMs = options.nowMs ?? Date.now();
+  const aggregate = aggregateDevices(devices, hubStaleAfterMs ?? 0, nowMs, {
     normalizeRecord: options.allTimeSessions === false ? summarize : normalize,
     copyNormalizedMonthSessions: true
   });
@@ -217,7 +218,7 @@ function composeLocalSyncStats(hubStats, localDevice, options = {}) {
 
   const displayStats = {
     ...(hubStats || {}),
-    updatedAt: aggregate.updatedAt,
+    updatedAt: new Date(nowMs).toISOString(),
     periods: aggregate.periods,
     devices: aggregate.devices,
     projectsIncomplete: aggregate.projectsIncomplete,
@@ -281,9 +282,13 @@ function composeLocalSyncSummary(hubStats, localDevice, options = {}) {
 // to its completion when that is asked for.
 function composeLocalOnlySummary(localDevice, finish, options = {}) {
   const nowMs = options.nowMs ?? Date.now();
-  const compose = (normalizeRecord) => finish(aggregateDevices([localDevice], 0, nowMs, {
-    normalizeRecord, copyNormalizedMonthSessions: true
-  }));
+  const compose = (normalizeRecord) => {
+    const aggregate = aggregateDevices([localDevice], 0, nowMs, {
+      normalizeRecord, copyNormalizedMonthSessions: true
+    });
+    aggregate.updatedAt = new Date(nowMs).toISOString();
+    return finish(aggregate);
+  };
   const summary = compose(normalizedLocalSummary);
   completions.set(summary, { compose: () => compose(normalizedLocalRecord), complete: null });
   return summary;

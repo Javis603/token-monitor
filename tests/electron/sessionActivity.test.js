@@ -25,7 +25,8 @@ test('host and iCloud activity snapshots retain the captured local history for T
       liveActivity: { state: 'waiting', observedAt: new Date().toISOString() } }],
       nativeSessions: { today: {}, month: {}, allTime: {} } };
     const context = {
-      settings: {}, latestStats: previous, localStats: previous, lastCollectedDevice: local, localDevice: local,
+      settings: {}, latestStats: previous, latestStatsSource: { generation: 1, identity: mode },
+      hubModeGeneration: 1, currentHubStatsIdentity: () => mode, localStats: previous, lastCollectedDevice: local, localDevice: local,
       ownsUsageRuntime: () => true, ...syncDisplay, ...projection, ...require('../../src/electron/sessionDeviceSources'),
       snapshotLocalDevices: snapshots, rendererSnapshots: publisher.createRendererSnapshots({ source: () => mode }),
       presentationCache: publisher.createStatsPresentationCache(), allTimeSessionsCache: publisher.createStatsPresentationCache(),
@@ -113,7 +114,7 @@ function mainActivityHarness(hubMode, externalAgent = false) {
   const pushes = [];
   let get;
   const context = {
-    console, Date, settings: { hubMode }, mode: 'sync', hubModeGeneration: 1,
+    console, Date, AbortSignal, settings: { hubMode }, mode: 'sync', hubModeGeneration: 1,
     lastCollectedDevice: local, localDevice: null, localStats: null, latestStats: null, statsPushSource: null,
     statsPushRevision: 0, lastExportAt: 0, edgeDockManualStats: null, deviceRuntimeHandle: {},
     ...projection, ...syncDisplay, rendererStats: publisher.rendererStats,
@@ -295,4 +296,51 @@ test('a new Hub local collector batch cannot attribute the old Hub push revision
     assert.equal(result.snapshot.source, 'B');
     assert.equal(result.snapshot.id, f.pushes.at(-1).data.stats.snapshot.id);
   }
+});
+
+test('All Time summaries deny local ownership on incomplete Month pages or a paged owner collision', async () => {
+  const source = fs.readFileSync(path.join(__dirname, '../../src/electron/main.js'), 'utf8');
+  const start = source.indexOf('function rendererAllTimeSessions(');
+  const end = source.indexOf('\nlet codexPresentationPendingSince', start);
+  const id = 'claude:shared';
+  const localSession = { client: 'claude', sessionId: 'shared', totalTokens: 500 };
+  const localDevice = { deviceId: 'local', allTime: { sessions: { [id]: localSession } } };
+  const owner = deviceId => ({ deviceId });
+  const context = {
+    settings: {}, hubModeGeneration: 1, snapshotLocalDevices: new WeakMap(),
+    mergedLocalAllTimeSessions, ...projection, completeLocalSyncStats: stats => stats,
+    allTimeSessionsCache: publisher.createStatsPresentationCache(),
+    projectModelAliasSessions: (_stats, sessions) => sessions,
+    ...require('../../src/electron/sessionDeviceSources')
+  };
+  vm.runInNewContext(source.slice(start, end), context);
+  for (const [detailsAvailable, pagedOwner, expectedLocal] of [
+    [false, 'local', false],
+    [true, 'remote', false],
+    [true, 'local', true]
+  ]) {
+    const stats = { periods: {}, sessionDetailsOmitted: { month: 1 }, fixedRangeRevisions: { remote: 'revision' } };
+    context.snapshotLocalDevices.set(stats, { localDevice });
+    context.resolveSyncedPeriodForStats = async () => ({
+      detailsAvailable,
+      period: { sessions: { [id]: { ...localSession, sourceDevice: owner(pagedOwner) } } }
+    });
+    const sessions = await context.rendererAllTimeSessions(stats);
+    assert.equal(sessions[id].totalTokens, 500);
+    assert.equal(sessions[id].sourceDevice.deviceId === 'local', expectedLocal);
+    assert.equal(sessions[id].sourceDevice.ambiguous === true, !expectedLocal);
+  }
+});
+
+
+test('local activity is kept for collection without re-stamping stats from a previous Hub', () => {
+  const f = mainActivityHarness('client');
+  f.context.sendPush({ event: 'stats', data: { stats: f.aggregate() } });
+  const previous = f.context.latestStats;
+  f.context.hubModeGeneration++;
+  f.context.publishLocalSessionActivity(f.patch('waiting'));
+  assert.equal(f.context.latestStats, previous);
+  assert.equal(f.pushes.length, 1);
+  const { sessionWithActivity } = require('../../src/shared/sessionLive');
+  assert.equal(sessionWithActivity(f.context.lastCollectedDevice.month, 'claude:live').liveActivity.state, 'waiting');
 });

@@ -100,12 +100,12 @@ test('the components that animate out keep their box', () => {
 // The dashboard window links styles.css before its own sheet, so it is covered
 // by both rules above and must not grow a second copy of either.
 test('the dashboard window inherits the base rules rather than repeating them', () => {
-  const html = readRendererFile('dashboard.html');
+  const html = readRendererFile('dashboard/dashboard.html');
   assert.ok(
-    html.indexOf('href="styles.css"') < html.indexOf('href="dashboard.css"'),
+    html.indexOf('href="../styles.css"') < html.indexOf('href="dashboard.css"'),
     'dashboard.css should load after styles.css'
   );
-  const css = readRendererFile('dashboard.css');
+  const css = readRendererFile('dashboard/dashboard.css');
   assert.deepEqual(rules(css).filter((r) => r.selector.includes('.hidden')).map((r) => r.selector), []);
   assert.doesNotMatch(css, /\nbody \{[^}]*font-size/);
 });

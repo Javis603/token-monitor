@@ -422,8 +422,8 @@
       activeControls.get(document)?.close();
       trigger.focus({ preventScroll: true });
       active = initialIndex();
-      // A body-level popup is inert while a modal dialog owns this control.
-      const host = select.closest('dialog') || document.body;
+      // Keep the picker within the overlay that owns its trigger.
+      const host = select.closest('dialog, [popover]') || document.body;
       if (popup.parentElement !== host) host.append(popup);
       popup.showPopover();
       opened = true;
@@ -511,7 +511,7 @@
     }
 
     select.after(trigger);
-    (select.closest('dialog') || document.body).append(popup);
+    (select.closest('dialog, [popover]') || document.body).append(popup);
     // Keep labels on the hidden source: only the visible trigger activates the
     // picker. Its accessible name is copied separately by syncName().
     select.hidden = true;
