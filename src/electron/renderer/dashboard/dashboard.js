@@ -1221,14 +1221,20 @@ function renderDeviceSelector(fleet) {
   if (state.deviceMenuOpen) renderDeviceMenu(fleet);
 }
 
+function formatAccountingValue(status, text) {
+  if (status === 'unavailable') return '—';
+  return status === 'partial' ? `${text} · ${t('dashboard.accounting.partial')}` : text;
+}
+
 function renderDeviceMenu(fleet) {
   const machines = fleet.machines;
   const allSelected = state.selectedDeviceId === 'all';
-  const fleetUnavailable = fleet.accountingExpired || fleet.accountingComplete === false;
+  const aggregate = fleet.aggregateAccounting;
+  const hasFleetShares = aggregate?.hasShares ?? (!fleet.accountingExpired && fleet.fleetTotals.tokens > 0);
   const allItem = `<button type="button" class="dash-device-menu-item is-all${allSelected ? ' is-selected' : ''}" data-device="all" data-key="all" role="menuitemradio" aria-checked="${allSelected}">`
     + `<span class="dash-device-menu-meta"><span class="dash-device-menu-name">${escapeHtml(t('dashboard.fleet.all'))}</span><span class="dash-device-menu-sub">${escapeHtml(t('settings.sync.panel.onlineCount', { online: fleet.fleetTotals.onlineCount, total: machines.length }))}</span></span>`
-    + `<span class="dash-device-menu-val">${fleetUnavailable ? '—' : escapeHtml(formatCompact(fleet.fleetTotals.tokens))}</span>`
-    + `<span class="dash-device-menu-share">${fleetUnavailable ? '—' : '100%'}</span>`
+    + `<span class="dash-device-menu-val">${escapeHtml(formatAccountingValue(aggregate?.accountingStatus, formatCompact(aggregate?.tokens ?? fleet.fleetTotals.tokens)))}</span>`
+    + `<span class="dash-device-menu-share">${hasFleetShares ? '100%' : '—'}</span>`
     + `</button>`;
 
   const machineItems = machines.map((m) => {
@@ -1238,11 +1244,11 @@ function renderDeviceMenu(fleet) {
     if (m.liveTokPerSec > 0) subParts.push(`${Math.round(m.liveTokPerSec)} tok/s`);
     else if (m.activeWorkspace) subParts.push(m.activeWorkspace);
     else if (m.platformLabel) subParts.push(m.platformLabel);
-    const pct = !fleetUnavailable && fleet.fleetTotals.tokens > 0 ? `${Math.round(m.share * 100)}%` : '—';
+    const pct = hasFleetShares ? `${Math.round(m.share * 100)}%` : '—';
     return `<button type="button" class="dash-device-menu-item${selected ? ' is-selected' : ''}" data-device="${escapeHtml(m.deviceId)}" data-key="${escapeHtml(m.deviceId)}" role="menuitemradio" aria-checked="${selected}">`
       + `<span class="device-kind-icon device-kind-${escapeHtml(m.deviceKind)}" aria-hidden="true"></span>`
       + `<span class="dash-device-menu-meta"><span class="dash-device-menu-name">${escapeHtml(m.name)}</span><span class="dash-device-menu-sub">${escapeHtml(subParts.join(' · ') || '—')}</span></span>`
-      + `<span class="dash-device-menu-val">${escapeHtml(m.accountingStatus === 'unavailable' ? '—' : formatCompact(m.tokens))}</span>`
+      + `<span class="dash-device-menu-val">${escapeHtml(formatAccountingValue(m.accountingStatus, formatCompact(m.tokens)))}</span>`
       + `<span class="dash-device-menu-share">${escapeHtml(pct)}</span>`
       + `</button>`;
   }).join('');
@@ -1941,7 +1947,8 @@ function renderWorkPanel(overview) {
   if (state.workMode === 'devices') {
     const fleet = overview?.fleet;
     const machines = fleet?.machines || [];
-    const hasFleetShares = !fleet?.accountingExpired && fleet?.accountingComplete !== false && fleet?.fleetTotals?.tokens > 0;
+    const hasFleetShares = fleet?.aggregateAccounting?.hasShares
+      ?? (!fleet?.accountingExpired && fleet?.fleetTotals?.tokens > 0);
     if (machines.length === 0) {
       lastWorkStructureSig = '';
       els.workPanel.innerHTML = `<div class="dash-quotas-empty">${escapeHtml(t('dashboard.empty'))}</div>`;
@@ -1971,7 +1978,7 @@ function renderWorkPanel(overview) {
           fillEl.setAttribute('data-w', relW);
           fillEl.style.setProperty('--bar-scale', relW);
         }
-        if (tokEl) tokEl.textContent = m.accountingStatus === 'unavailable' ? '—' : formatCompact(m.tokens);
+        if (tokEl) tokEl.textContent = formatAccountingValue(m.accountingStatus, formatCompact(m.tokens));
         if (costEl) costEl.textContent = pct;
       });
       return;
@@ -2006,7 +2013,7 @@ function renderWorkPanel(overview) {
           + `<div class="dash-project-bar"><div class="dash-project-bar-fill" data-w="${relW}" data-c="var(--accent, #b7ead4)"></div></div>`
           + `</div>`
           + `<div class="dash-session-metrics">`
-          + `<span class="dash-row-tokens">${escapeHtml(m.accountingStatus === 'unavailable' ? '—' : formatCompact(m.tokens))}</span>`
+          + `<span class="dash-row-tokens">${escapeHtml(formatAccountingValue(m.accountingStatus, formatCompact(m.tokens)))}</span>`
           + `<span class="dash-row-cost">${escapeHtml(pct)}</span>`
           + `</div>`
           + `</div>`;
@@ -2244,8 +2251,8 @@ function showTopologyTooltip(kind, id, anchorEl) {
     const d = graph.devices?.find((item) => item.id === id);
     if (!d) return;
     head = d.name;
-    rows.push([t('dashboard.hero.tokens'), d.accountingStatus === 'unavailable' ? '—' : formatCompact(d.tokens)]);
-    rows.push([t('dashboard.hero.cost'), d.accountingStatus === 'unavailable' ? '—' : formatCost(d.cost, d.unpricedTokens)]);
+    rows.push([t('dashboard.hero.tokens'), formatAccountingValue(d.accountingStatus, formatCompact(d.tokens))]);
+    rows.push([t('dashboard.hero.cost'), formatAccountingValue(d.accountingStatus, formatCost(d.cost, d.unpricedTokens))]);
     if (d.liveTokPerSec > 0) rows.push([t('dashboard.hero.liveRate'), `${Math.round(d.liveTokPerSec)} tok/s`]);
     if (d.activeWorkspace) rows.push([t('dashboard.work.workspaces'), d.activeWorkspace]);
   } else if (kind === 'hub') {
@@ -2441,11 +2448,11 @@ function renderTopology(overview) {
       ? `<span class="topo-live-rate is-rate">${Math.round(d.liveTokPerSec)} tok/s</span>`
       : escapeHtml(d.activeWorkspace || (d.isLocal ? t('dashboard.devices.you') : ''));
     const subRight = d.activeSessionCount > 0 ? t('dashboard.fleet.activeAgents', { count: d.activeSessionCount }) : '';
-    const shareScale = d.accountingStatus === 'unavailable' ? '0' : Math.max(0.03, Math.min(1, d.share || 0)).toFixed(3);
+    const shareScale = Math.min(1, d.share || 0).toFixed(3);
     return `<div class="${cls}" data-topo-kind="device" data-topo-id="${escapeHtml(d.id)}" data-key="device:${escapeHtml(d.id)}" data-node-accent="${accent}" tabindex="0" role="button">`
       + `<div class="topo-node-top">`
       + `<span class="topo-node-ident"><span class="device-kind-icon device-kind-${escapeHtml(d.deviceKind)}" aria-hidden="true"></span><span class="topo-node-title">${escapeHtml(d.name)}</span></span>`
-      + `<span class="topo-node-val">${escapeHtml(d.accountingStatus === 'unavailable' ? '—' : formatCompact(d.tokens))}</span>`
+      + `<span class="topo-node-val">${escapeHtml(formatAccountingValue(d.accountingStatus, formatCompact(d.tokens)))}</span>`
       + `</div>`
       + `<div class="topo-node-sub"><span class="topo-node-sub-text">${subLeft}</span><span>${escapeHtml(subRight)}</span></div>`
       + `<div class="topo-mini-bar"><div class="topo-mini-bar-fill" data-w="${shareScale}" data-c="${barColor}"></div></div>`
@@ -3115,8 +3122,8 @@ function openDrawer(payload) {
       `<div class="dash-bd-row"><span class="dash-bd-name"><span class="dash-bd-swatch" data-c="${displayColor(c.color)}"></span><span class="dash-bd-name-text">${escapeHtml(c.label)}</span></span><div class="dash-bd-bar-bg"><div class="dash-bd-bar-fill" data-w="${(m.tokens > 0 ? c.tokens / m.tokens : 0).toFixed(4)}" data-c="${displayColor(c.color)}"></div></div><span class="dash-bd-val">${escapeHtml(formatCompact(c.tokens))}</span><span class="dash-bd-pct"></span></div>`
     ).join('');
     els.drawerBody.innerHTML = drawerStatGrid([
-      [t('dashboard.hero.tokens'), m.accountingStatus === 'unavailable' ? '—' : formatCompact(m.tokens)],
-      [t('dashboard.hero.cost'), m.accountingStatus === 'unavailable' ? '—' : formatCost(m.cost, m.unpricedTokens)],
+      [t('dashboard.hero.tokens'), formatAccountingValue(m.accountingStatus, formatCompact(m.tokens))],
+      [t('dashboard.hero.cost'), formatAccountingValue(m.accountingStatus, formatCost(m.cost, m.unpricedTokens))],
       [t('dashboard.hero.liveRate'), m.liveTokPerSec > 0 ? `${Math.round(m.liveTokPerSec)} tok/s` : '—'],
       [t('dashboard.work.sessions'), String(m.sessionCount || 0)]
     ]) + (toolsHtml ? `<div><div class="dash-drawer-section-title">${escapeHtml(t('dashboard.stack.client'))}</div>${toolsHtml}</div>` : '');
@@ -3902,6 +3909,25 @@ function applyIncomingStats(nextStats, { expectedPushSeq = null, fromPush = fals
   return true;
 }
 
+function closeRolledOverAccountingDrawer(previous, current) {
+  const drawer = state.drawer;
+  if (!previous || !current || previous.periodKey !== current.periodKey
+    || !['session', 'workspace', 'machine', 'client', 'model'].includes(drawer?.kind)) return;
+  const selectedDeviceId = current.activeMachine?.deviceId;
+  if (previous.activeMachine?.deviceId !== selectedDeviceId) return;
+  const deviceId = selectedDeviceId || drawer.machine?.deviceId
+    || (!drawer.session?.groupRows?.length ? drawer.session?.sourceDevice?.deviceId : undefined);
+  for (const [id, window] of current.accountingWindows || []) {
+    if (deviceId && deviceId !== id) continue;
+    const prior = previous.accountingWindows?.get(id);
+    if (prior && ((!prior.expired && window.expired)
+      || (prior.endsAt !== window.endsAt && Date.now() >= prior.endsAt))) {
+      closeDrawer({ restoreFocus: false });
+      return;
+    }
+  }
+}
+
 function renderNow() {
   const nextFixedPeriodExpiryAt = revalidateSyncedPeriodOnRender();
   const sample = deviceRateTracker?.getSample?.() || null;
@@ -3937,6 +3963,7 @@ function renderNow() {
   }) || null;
   if (overview) overview.nextFixedPeriodExpiryAt = nextFixedPeriodExpiryAt;
   const justExpired = overview?.fleet?.accountingExpired && !state.overview?.fleet?.accountingExpired;
+  closeRolledOverAccountingDrawer(state.overview, overview);
   state.overview = overview;
   if (justExpired) void refreshAfterAccountingRollover();
   if (overview?.fleet && state.selectedDeviceId !== 'all') {

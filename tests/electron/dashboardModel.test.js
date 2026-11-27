@@ -353,6 +353,31 @@ test('a native-only session disappears when its live activity expires after roll
   }
 });
 
+test('fleet keeps the verified aggregate when a zero-use device crosses its own boundary', () => {
+  const endsAt = '2026-12-01T00:00:00Z';
+  const nowMs = Date.parse(endsAt);
+  for (const periodKey of ['today', 'month']) {
+    const stats = {
+      mode: 'sync', updatedAt: '2026-11-30T23:59:00Z', periods: { [periodKey]: { totalTokens: 100 } },
+      devices: [
+        { deviceId: 'mac', periods: { [periodKey]: { totalTokens: 0 } }, periodWindows: { [periodKey]: { endsAt } } },
+        { deviceId: 'pc', periods: { [periodKey]: { totalTokens: 100 } },
+          periodWindows: { [periodKey]: { endsAt: '2026-12-01T08:00:00Z' } } }
+      ]
+    };
+    const all = model.buildScopedOverview({ stats, periodKey, nowMs });
+    const mac = model.buildScopedOverview({ stats, periodKey, nowMs, selectedDeviceId: 'mac' });
+    assert.equal(all.hero.accountingStatus, 'ready');
+    assert.equal(all.hero.tokens, 100);
+    assert.deepEqual(all.fleet.aggregateAccounting, { accountingStatus: 'ready', tokens: 100, hasShares: false });
+    assert.deepEqual(mac.fleet.aggregateAccounting, all.fleet.aggregateAccounting);
+    assert.equal(mac.hero.accountingStatus, 'unavailable');
+    assert.equal(all.accountingWindows.get('mac').expired, true);
+    assert.equal(all.accountingWindows.get('pc').expired, false);
+    assert.ok(all.topology.devices.every(device => device.share === 0));
+  }
+});
+
 test('zero-use local rollover expires native activity without withholding fleet accounting', () => {
   const endsAt = '2026-12-01T00:00:00Z';
   const observedAt = '2026-11-30T23:59:40Z';

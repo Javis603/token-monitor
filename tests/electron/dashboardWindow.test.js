@@ -2848,7 +2848,8 @@ test('dashboard groups subagent hierarchies and review groups in Work Panel, Top
     }
   };
 
-  const slice = js.slice(js.indexOf('function sessionGroupBadgeLabel('), js.indexOf('\nfunction dismissSkylineHint('))
+  const slice = js.slice(js.indexOf('function formatAccountingValue('), js.indexOf('function renderDeviceMenu('))
+    + js.slice(js.indexOf('function sessionGroupBadgeLabel('), js.indexOf('\nfunction dismissSkylineHint('))
     + '\n'
     + js.slice(js.indexOf('function closeDrawer('), js.indexOf('\nfunction renderNow('))
     + '\n'
@@ -3058,7 +3059,7 @@ test('dashboard Trends and device selector recover to All Devices when selected 
     + '\n'
     + js.slice(js.indexOf('function renderDeviceSelector('), js.indexOf('\nfunction animateMetricText('))
     + '\n'
-    + js.slice(js.indexOf('function renderNow('), js.indexOf('\nconst dashboardRenderScheduler'));
+    + js.slice(js.indexOf('function closeRolledOverAccountingDrawer('), js.indexOf('\nconst dashboardRenderScheduler'));
   vm.runInNewContext(snippet, context);
 
   context.renderNow();
@@ -4031,6 +4032,65 @@ test('Local Dashboard repaints Yesterday at local midnight without a Stats push'
   assert.equal(context.drawerRequestToken, 2);
 });
 
+test('native accounting rollover closes only drawers affected by the displayed period', () => {
+  let closed = 0;
+  const state = { drawer: { kind: 'workspace' } };
+  const close = dashboardFunction('closeRolledOverAccountingDrawer', '\nfunction renderNow', {
+    state, Date: { now: () => 1000 },
+    closeDrawer(options) { assert.equal(options.restoreFocus, false); closed++; }
+  });
+  const windows = (endsAt, expired = false) => new Map([
+    ['mac', { endsAt, expired }],
+    ['pc', { endsAt: 4000, expired: false }]
+  ]);
+  for (const periodKey of ['today', 'month']) {
+    const previous = { periodKey, accountingWindows: windows(1000) };
+    const before = closed;
+    close(previous, { ...previous, accountingWindows: windows(1000) });
+    close({ ...previous, activeMachine: { deviceId: 'pc' } }, {
+      ...previous, activeMachine: { deviceId: 'pc' }, accountingWindows: windows(1000, true)
+    });
+    assert.equal(closed, before);
+    close(previous, { ...previous, accountingWindows: windows(1000, true) });
+    close(previous, { ...previous, accountingWindows: windows(3000) });
+    assert.equal(closed, before + 2);
+  }
+  state.drawer = { kind: 'day' };
+  close({ periodKey: 'today', accountingWindows: windows(1000) },
+    { periodKey: 'today', accountingWindows: windows(3000) });
+  assert.equal(closed, 4);
+});
+
+test('All Devices menu shows the overview aggregate and labels partial metrics', () => {
+  const js = read('src', 'electron', 'renderer', 'dashboard', 'dashboard.js');
+  let html;
+  const context = {
+    state: { selectedDeviceId: 'all' },
+    els: { deviceMenu: {} },
+    t: key => key === 'dashboard.accounting.partial' ? 'Partial totals' : key,
+    escapeHtml: String, formatCompact: String,
+    patchDashboardMarkup(_menu, markup) { html = markup; }
+  };
+  vm.runInNewContext(js.slice(js.indexOf('function formatAccountingValue('), js.indexOf('function animateMetricText(')), context);
+  const fleet = {
+    accountingComplete: false,
+    aggregateAccounting: { accountingStatus: 'ready', tokens: 100, hasShares: false },
+    fleetTotals: { tokens: 30, onlineCount: 2 },
+    machines: [
+      { deviceId: 'mac', accountingStatus: 'unavailable', tokens: 0 },
+      { deviceId: 'pc', accountingStatus: 'partial', tokens: 30 }
+    ]
+  };
+  context.renderDeviceMenu(fleet);
+  assert.match(html, /data-device="all".*?dash-device-menu-val">100</);
+  assert.match(html, /data-device="mac".*?dash-device-menu-val">—</);
+  assert.match(html, /data-device="pc".*?dash-device-menu-val">30 · Partial totals</);
+  assert.doesNotMatch(html, />100%</);
+  fleet.aggregateAccounting.accountingStatus = 'partial';
+  context.renderDeviceMenu(fleet);
+  assert.match(html, /data-device="all".*?dash-device-menu-val">100 · Partial totals</);
+});
+
 test('Dashboard repaints when the displayed accounting period expires', () => {
   let now = 1_000;
   let timer;
@@ -4256,6 +4316,7 @@ test('Work Panel refreshes renamed device labels and preserves its row for metri
   const render = dashboardFunction('renderWorkPanel', '\nfunction topologyLineage(', {
     els: { workPanel: panel }, state: { workMode: 'devices', locale: 'en', selectedDeviceId: 'all' },
     lastWorkStructureSig: '', t: String, escapeHtml: String, formatCompact: String,
+    formatAccountingValue: dashboardFunction('formatAccountingValue', '\nfunction renderDeviceMenu', { t: String }),
     captureListSnapshot() {}, animateListSnapshot() {}, applySwatchColors() {},
     withPreservedFocus(_root, _selector, _key, update) { rebuilds++; update(); },
     findByDataset: (_root, _selector, match) => match(row) ? row : null

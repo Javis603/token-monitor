@@ -72,27 +72,33 @@
   function aggregatePeriodFreshness(stats, periodKey, nowMs) {
     let expired = false;
     let nextExpiryAt = 0;
-    if (periodKey !== 'today' && periodKey !== 'month') return { expired, nextExpiryAt };
+    const windows = new Map();
+    const nativePeriod = periodKey === 'today' || periodKey === 'month';
+    if (!nativePeriod) return { expired, nextExpiryAt, windows };
     const publishedAt = Date.parse(stats?.updatedAt || '');
     const devices = stats?.devices?.length ? stats.devices : stats?.periodWindows ? [stats] : [];
     for (const device of devices) {
       const period = device.periods?.[periodKey];
       if (!period) continue;
-      // A newer publication has already excluded devices expired at its clock.
-      if (Number.isFinite(publishedAt) && isDevicePeriodExpired(device, periodKey, publishedAt)) continue;
-      if (isDevicePeriodExpired(device, periodKey, nowMs)) {
-        expired ||= periodHasUsage(period);
-        continue;
-      }
       let endsAt = Date.parse(device.periodWindows?.[periodKey]?.endsAt || '');
       if (!(endsAt > 0)) {
         const date = new Date(device.updatedAt || device.receivedAt || '');
         date.setUTCHours(0, 0, 0, 0);
         endsAt = periodKey === 'today' ? date.setUTCDate(date.getUTCDate() + 1) : date.setUTCMonth(date.getUTCMonth() + 1, 1);
       }
+      const deviceExpired = isDevicePeriodExpired(device, periodKey, nowMs);
+      const id = String(device.deviceId || device.id || '');
+      if (endsAt > 0) windows.set(id, { endsAt, expired: deviceExpired });
+      // A newer publication has already excluded devices expired at its clock.
+      if (deviceExpired) {
+        if (!Number.isFinite(publishedAt) || !isDevicePeriodExpired(device, periodKey, publishedAt)) {
+          expired ||= periodHasUsage(period);
+        }
+        continue;
+      }
       if (endsAt > nowMs && (!nextExpiryAt || endsAt < nextExpiryAt)) nextExpiryAt = endsAt;
     }
-    return { expired, nextExpiryAt };
+    return { expired, nextExpiryAt, windows };
   }
 
   /** @param {any} device @param {string} periodKey */
@@ -2046,7 +2052,7 @@
         cost: Math.max(0, n(m.cost)),
         unpricedTokens: Math.max(0, n(m.unpricedTokens)),
         accountingStatus: m.accountingStatus,
-        share: fleet.accountingExpired ? 0 : Math.max(0, n(m.share)),
+        share: fleet.aggregateAccounting?.hasShares === false ? 0 : Math.max(0, n(m.share)),
         liveTokPerSec: Math.max(0, n(m.liveTokPerSec)),
         activeSessionCount: Math.max(0, n(m.activeSessionCount)),
         activeWorkspace: String(m.activeWorkspace || ''),
@@ -2683,32 +2689,40 @@
     );
 
     const scopedHistory = selectScopedHistory(history, activeMachine ? activeMachine.deviceId : 'all');
-    const periodData = accountingExpired ? null : activeMachine
-      ? activeMachine.periodData
-      : syncedPage
-        ? syncedAccounting
-        : fixedHistorySnapshot ? fixedHistorySnapshot.period : resolvePeriodData(stats, scopedHistory.daily, periodKey, {
-          locale: synced ? settings.locale : settings.calendarLocale || settings.locale,
-          todayKey,
-          historyAvailable: historyOptions.historyAvailable,
-          historyEnabled: historyOptions.historyEnabled,
-          nowMs,
-          synced
-        });
-
-    const selectedHistory = activeMachine ? uncoveredSnapshots.get(activeMachine.deviceId) : null;
-    const historyReported = activeMachine
-      ? activeMachine.historyAvailable
-      : historyOptions.historyAvailable || scopedHistory.daily.length > 0;
-    const periodFallbackHistory = periodKey === 'allTime' && historyOptions.historyEnabled && historyReported
-      ? scopedHistory : null;
-    const accountingStatus = accountingExpired || (selectedHistory && selectedHistory.status !== 'ready')
-      || (!periodData && !periodFallbackHistory)
+    const aggregatePeriod = freshness.expired ? null : syncedPage
+      ? syncedAccounting
+      : fixedHistorySnapshot ? fixedHistorySnapshot.period : resolvePeriodData(stats, history?.daily, periodKey, {
+        locale: synced ? settings.locale : settings.calendarLocale || settings.locale,
+        todayKey,
+        historyAvailable: historyOptions.historyAvailable,
+        historyEnabled: historyOptions.historyEnabled,
+        nowMs,
+        synced
+      });
+    const usesAllTimeHistory = periodKey === 'allTime' && historyOptions.historyEnabled;
+    const aggregateHistory = !aggregatePeriod && usesAllTimeHistory
+      && (historyOptions.historyAvailable || history?.daily?.length > 0)
+      ? (activeMachine ? selectScopedHistory(history) : scopedHistory) : null;
+    const aggregateStatus = freshness.expired || (!aggregatePeriod && !aggregateHistory)
       ? 'unavailable'
-      : periodData?.accountingStatus === 'partial'
-        || (!activeMachine && [...uncoveredSnapshots.values()].some(snapshot => snapshot.status !== 'ready'))
+      : aggregatePeriod?.accountingStatus === 'partial'
+        || [...uncoveredSnapshots.values()].some(snapshot => snapshot.status !== 'ready')
         ? 'partial'
         : 'ready';
+    const aggregateAccounting = {
+      accountingStatus: aggregateStatus,
+      hasShares: aggregateStatus === 'ready' && fleet.accountingComplete && fleet.fleetTotals.tokens > 0,
+      tokens: aggregatePeriod ? Math.max(0, n(aggregatePeriod.totalTokens)) : n(aggregateHistory?.summary.totalTokens)
+    };
+    const periodData = activeMachine ? (accountingExpired ? null : activeMachine.periodData) : aggregatePeriod;
+    const periodFallbackHistory = activeMachine
+      ? (usesAllTimeHistory && activeMachine.historyAvailable ? scopedHistory : null)
+      : aggregateHistory;
+    const selectedHistory = activeMachine ? uncoveredSnapshots.get(activeMachine.deviceId) : null;
+    const accountingStatus = activeMachine
+      ? (accountingExpired || (selectedHistory && selectedHistory.status !== 'ready') || (!periodData && !periodFallbackHistory)
+        ? 'unavailable' : periodData?.accountingStatus || 'ready')
+      : aggregateStatus;
 
     const anatomy = computeTokenAnatomy(periodData, periodFallbackHistory?.daily);
     const totalTokens = periodData ? Math.max(0, n(periodData.totalTokens)) : n(periodFallbackHistory?.summary.totalTokens);
@@ -2793,13 +2807,14 @@
       });
 
     const baseOverview = {
-      fleet,
+      fleet: { ...fleet, aggregateAccounting },
       activeMachine,
       scopedHistory,
       periodData,
       periodKey,
       accountingExpired,
       nextAccountingExpiryAt: freshness.nextExpiryAt,
+      accountingWindows: freshness.windows,
       isSynced: synced,
       omittedSessionCount,
       sessionsIncomplete,
