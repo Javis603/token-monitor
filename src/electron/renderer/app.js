@@ -19813,6 +19813,10 @@ function createLegacyAccountOwners() {
  Object.defineProperty(state, 'thirdPartyAccountExpanded', { configurable: true, get: () => owners.thirdparty.state.thirdPartyAccountExpanded, set: value => { owners.thirdparty.state.thirdPartyAccountExpanded = value; } });
  owners.qwenwork = window.TokenMonitorQwenworkAccountOwner.create({
    document, bridge: window.tokenMonitor.qwenwork, accountShellApi, limitProviderPresentationApi,
+   accountSlotsPanel: window.TokenMonitorAccountSlotsPanel,
+   getAccountContext: () => limitAccountContext('qwenwork'),
+   maskEmail: value => state.settings?.maskLimitAccountEmails === true ? accountIdentityApi.maskEmailAddress(value) : value,
+   preserveScroll: preserveSettingsPanelScroll,
    getSettings: () => state.settings,
    getReading: () => strictLocalProviderStatuses('qwenwork')[0],
    isEnabled: () => limitProviderEnabled('qwenwork'),

@@ -1164,12 +1164,8 @@
                 </span>
               </button>
               <div id="qwenworkSettingsDetails" class="cursor-settings-details hidden">
-                <div class="settings-actions">
-                  <button id="qwenworkSignInButton" data-i18n="settings.qwenwork.signIn">Sign in with QwenWork</button>
-                  <button id="qwenworkCancelSignInButton" class="hidden" data-i18n="settings.common.cancel">Cancel</button>
-                  <button id="qwenworkLogoutButton" class="hidden" data-i18n="settings.qwenwork.logout">Sign out</button>
-                  <button id="qwenworkRefreshButton" data-i18n="settings.common.refresh">Refresh</button>
-                </div>
+                <div id="qwenworkAccountList" class="managed-account-list"></div>
+                <button id="qwenworkCancelSignInButton" type="button" class="hidden" data-i18n="settings.common.cancel">Cancel</button>
                 <pre id="qwenworkLoginStatus" class="codex-login-output hidden" role="status" aria-live="polite"></pre>
                 <div id="qwenworkErrorMessage" class="settings-note error hidden" role="alert"></div>
               </div>

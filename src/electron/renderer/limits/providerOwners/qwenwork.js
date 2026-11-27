@@ -13,6 +13,8 @@ function create(host) {
   let cancelable = false;
   let progress = '';
   let error = '';
+  /** @type {any} */
+  let accounts;
 
   const element = (/** @type {string} */ name) => document.getElementById(`qwenwork${name}`);
   function refreshReadings() {
@@ -44,10 +46,15 @@ function create(host) {
       progress: element('LoginStatus'),
       progressText: progress && t(progress)
     });
-    element('SignInButton').classList.toggle('hidden', Boolean(flowId) || (stored && reading?.status === 'ok'));
+    const sourceId = stored ? 'oauth' : settings?.qwenworkSessionSource === 'environment' ? 'api' : 'local';
+    const current = reading?.source === sourceId ? reading : null;
+    const slots = configured ? [{
+      id: sourceId, sourceId, enabled: true, accountKey: current?.accountKey,
+      accountName: current?.accountName || t('settings.qwenwork.title'), accountEmail: current?.accountEmail
+    }] : [];
+    accounts?.update(slots, current ? [current] : [], host.getAccountContext());
+    accounts?.element.querySelector('.slot-add')?.classList.toggle('hidden', stored);
     element('CancelSignInButton').classList.toggle('hidden', !flowId || !cancelable);
-    element('LogoutButton').classList.toggle('hidden', !configured || !stored || Boolean(flowId));
-    element('RefreshButton').classList.toggle('hidden', !enabled || !configured || Boolean(flowId));
   }
 
   function clearFlow() {
@@ -103,19 +110,37 @@ function create(host) {
     const toggle = element('SettingsToggle');
     if (!toggle || !bridge) return;
     toggle.addEventListener('click', () => host.setExpanded(toggle.getAttribute('aria-expanded') !== 'true'));
-    element('SignInButton').addEventListener('click', signIn);
-    element('CancelSignInButton').addEventListener('click', cancel);
-    element('LogoutButton').addEventListener('click', async () => {
-      try {
-        await bridge.signOut();
-        error = '';
-        await host.refreshStats();
-      } catch (cause) {
-        error = cause instanceof Error ? cause.message : t('settings.qwenwork.loginFailed');
+    accounts = host.accountSlotsPanel.createPanel({
+      form: { id: 'qwenwork', fields: [] },
+      label: 'QwenWork', document, t, onAdd: signIn, customEditor: signIn,
+      maskEmail: host.maskEmail,
+      preserveScroll: host.preserveScroll, isBusy: () => Boolean(flowId),
+      capabilities: (/** @type {any} */ slot) => ({
+        rename: false, move: false, replace: slot?.id === 'oauth', setEnabled: false, remove: slot?.id === 'oauth'
+      }),
+      extraActions: () => [{
+        label: t('settings.common.refresh'),
+        visible: () => host.isEnabled() && !flowId,
+        run: () => host.refreshQuota()
+      }],
+      ipc: {
+        remove: async () => {
+          try {
+            await bridge.signOut();
+            error = '';
+            await host.refreshStats();
+            return { ok: true };
+          } catch (cause) {
+            error = cause instanceof Error ? cause.message : t('settings.qwenwork.loginFailed');
+            return { ok: false };
+          } finally {
+            refreshReadings();
+          }
+        }
       }
-      refreshReadings();
     });
-    element('RefreshButton').addEventListener('click', host.refreshQuota);
+    element('AccountList').append(accounts.element);
+    element('CancelSignInButton').addEventListener('click', cancel);
     bridge.onLoginStatus((/** @type {{flowId?: string, phase?: string, error?: string}} */ status) => {
       if (!flowId || status?.flowId !== flowId) return;
       if (status.phase === 'authorize' || status.phase === 'polling') progress = 'settings.qwenwork.loginWaiting';

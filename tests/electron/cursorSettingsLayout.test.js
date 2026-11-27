@@ -3271,13 +3271,24 @@ function qwenworkAccountOwner({ source = 'settings', enabled = true, readStatus 
   const handlers = new Map();
   const output = {};
   let finishSignIn;
+  let panel;
+  let accounts;
+  const sourceId = { settings: 'oauth', environment: 'api', magpie: 'local' }[source];
   const owner = create({
     document: { getElementById: id => ({
       classList: { toggle: (_name, value) => hidden.set(id, value) },
-      addEventListener: (_name, fn) => handlers.set(id, fn)
+      addEventListener: (_name, fn) => handlers.set(id, fn), append() {}
     }) },
     getSettings: () => ({ qwenworkSessionConfigured: true, qwenworkSessionSource: source }),
-    getReading: () => ({ status: 'ok' }),
+    getReading: () => ({ status: 'ok', source: sourceId }),
+    getAccountContext: () => ({ providerEnabled: enabled }),
+    accountSlotsPanel: { createPanel(options) {
+      panel = options;
+      return {
+        element: { querySelector: () => ({ classList: { toggle: (_name, value) => hidden.set('add', value) } }) },
+        update: rows => { accounts = rows; }
+      };
+    } },
     isEnabled: () => enabled,
     accountShellApi: { render: value => Object.assign(output, value) },
     limitProviderPresentationApi: { apiKeyAccountStatus: () => readStatus },
@@ -3286,23 +3297,23 @@ function qwenworkAccountOwner({ source = 'settings', enabled = true, readStatus 
     refreshQuota() {}
   });
   owner.setup();
-  return { hidden, handlers, output, finish: () => finishSignIn({ ok: false }) };
+  return { hidden, handlers, output, panel, accounts, finish: () => finishSignIn({ ok: false }) };
 }
 
 test('QwenWork keeps sign-out reachable and hides refresh when Limits is off', () => {
   for (const enabled of [true, false]) {
-    const { hidden } = qwenworkAccountOwner({ enabled });
-    assert.equal(hidden.get('qwenworkRefreshButton'), !enabled);
-    assert.equal(hidden.get('qwenworkLogoutButton'), false);
+    const { accounts, panel } = qwenworkAccountOwner({ enabled });
+    assert.equal(panel.extraActions()[0].visible(), enabled);
+    assert.equal(panel.capabilities(accounts[0]).remove, true);
   }
 });
 
 test('QwenWork fallback accounts can start and cancel a stored browser sign-in', async () => {
   for (const source of ['environment', 'magpie', 'settings']) {
-    const { hidden, handlers, finish } = qwenworkAccountOwner({ source });
-    assert.equal(hidden.get('qwenworkSignInButton'), source === 'settings');
+    const { hidden, handlers, finish, panel } = qwenworkAccountOwner({ source });
+    assert.equal(hidden.get('add'), source === 'settings');
     if (source === 'settings') continue;
-    const signIn = handlers.get('qwenworkSignInButton')();
+    const signIn = panel.onAdd();
     assert.equal(hidden.get('qwenworkCancelSignInButton'), false);
     await handlers.get('qwenworkCancelSignInButton')();
     assert.equal(hidden.get('qwenworkCancelSignInButton'), true);
@@ -3382,13 +3393,13 @@ test('QwenWork account status reports disabled, unchecked and failed states dist
 
 test('QwenWork cancel keeps the flow cancelable when the cancel request fails', async () => {
   let attempts = 0;
-  const { hidden, handlers, output, finish } = qwenworkAccountOwner({
+  const { hidden, handlers, output, finish, panel } = qwenworkAccountOwner({
     source: 'magpie',
     cancelSignIn: async () => {
       if (++attempts === 1) throw new Error('cancel IPC failed');
     }
   });
-  const signIn = handlers.get('qwenworkSignInButton')();
+  const signIn = panel.onAdd();
   await handlers.get('qwenworkCancelSignInButton')();
   assert.equal(hidden.get('qwenworkCancelSignInButton'), false);
   assert.match(output.errorText, /cancel IPC failed/);
