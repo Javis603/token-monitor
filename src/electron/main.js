@@ -411,6 +411,7 @@ const {
 const {
   describeWindowBehavior,
   floatingAlwaysOnTopLevel,
+  normalizeWindowBehavior,
   normalizeWindowBehaviorSettings,
   windowBehaviorSelection
 } = require('./windowBehavior');
@@ -649,11 +650,14 @@ function defaultSettings() {
     heatmapMetric: 'cost',
     dashboardHeatmapMetric: null,
     dashboardStageView: 'flow',
+    dashboardBackdrop: 'inherit',
+    dashboardWindowBehavior: 'normal',
     dashboardFlowMode: 'sync',
     dashboardFollowPeriodTabs: false,
     dashboardVisiblePeriods: [],
     dashboardShowVelocity: true,
     dashboardShowQuotas: true,
+    dashboardQuotaProviderOrder: '',
     modelRankingMetric: 'tokens',
     homeActiveDaysWindow: 'all',
     showExactHomeTrendTokens: false,
@@ -2226,11 +2230,16 @@ function readSettings() {
     merged.heatmapMetric = normalizeHeatmapMetric(merged.heatmapMetric);
     merged.dashboardHeatmapMetric = merged.dashboardHeatmapMetric == null ? null : normalizeHeatmapMetric(merged.dashboardHeatmapMetric);
     merged.dashboardStageView = normalizeDashboardStageView(merged.dashboardStageView);
+    merged.dashboardBackdrop = normalizeDashboardBackdrop(saved.dashboardBackdrop ?? (saved.dashboardFlat === true ? 'solid' : 'inherit'));
+    merged.dashboardWindowBehavior = normalizeWindowBehavior(merged.dashboardWindowBehavior, 'normal');
     merged.dashboardFlowMode = normalizeDashboardFlowMode(merged.dashboardFlowMode);
     merged.dashboardVisiblePeriods = normalizeDashboardPeriods(merged.dashboardVisiblePeriods);
     merged.dashboardFollowPeriodTabs = parseBoolean(merged.dashboardFollowPeriodTabs, false);
     merged.dashboardShowVelocity = parseBoolean(merged.dashboardShowVelocity, true);
     merged.dashboardShowQuotas = parseBoolean(merged.dashboardShowQuotas, true);
+    merged.dashboardQuotaProviderOrder = require('./plugins/limits').desktopProviderPreference(
+      merged.dashboardQuotaProviderOrder ?? '', parseLimitProviders
+    );
     merged.modelRankingMetric = normalizeRankingMetric(merged.modelRankingMetric);
     merged.homeActiveDaysWindow = normalizeHomeActiveDaysWindow(merged.homeActiveDaysWindow);
     merged.showExactHomeTrendTokens = parseBoolean(merged.showExactHomeTrendTokens, false);
@@ -2644,13 +2653,44 @@ function nativeBlurEnabled(source = settings) {
   return floatingBubbleNativeGlassEnabled(source);
 }
 
+function normalizeDashboardBackdrop(value, platform = process.platform) {
+  if (value === 'solid') return value;
+  if (platform === 'darwin' && (value === 'vibrancy' || isLiquidGlassBackdrop(value))) return value;
+  if (platform === 'win32' && ['acrylic', 'mica', 'mica-alt', 'accent'].includes(value)) return value;
+  return 'inherit';
+}
+
+function dashboardMaterialSettings(source) {
+  const mode = normalizeDashboardBackdrop(source.dashboardBackdrop);
+  if (mode === 'inherit') return source;
+  if (mode === 'solid') return { ...source, systemGlass: false };
+  return process.platform === 'darwin'
+    ? { ...source, systemGlass: true, macBackdrop: mode }
+    : { ...source, systemGlass: true, windowsBackdrop: mode };
+}
+
+function applyDashboardWindowBehavior(win, source = settings) {
+  if (!win || win.isDestroyed()) return;
+  const mode = normalizeWindowBehavior(source.dashboardWindowBehavior, 'normal');
+  const behavior = describeWindowBehavior({ windowBehavior: mode });
+  win.setAlwaysOnTop(behavior.alwaysOnTop, floatingAlwaysOnTopLevel());
+  win.setMovable(behavior.draggable);
+  win.setResizable(behavior.resizable);
+}
+
+function syncDashboardWindowsBackdrop(win, source = settings) {
+  const effective = dashboardMaterialSettings(source);
+  syncWindowsBackdrop(win, { enabled: nativeBlurEnabled(effective), mode: effective.windowsBackdrop });
+}
+
 function nativeMaterialOptions(source = settings, dashboard = false) {
+  if (dashboard) source = dashboardMaterialSettings(source);
   return {
     enabled: nativeBlurEnabled(source),
     liquidGlass: isLiquidGlassBackdrop(source.macBackdrop),
     style: liquidGlassStyle(source.macBackdrop),
     tintOpacity: liquidGlassTint(source),
-    opaque: dashboard && source.dashboardFlat === true,
+    opaque: dashboard && source.dashboardBackdrop === 'solid',
     reducedTransparency: nativeTheme.prefersReducedTransparency === true,
     highContrast: nativeTheme.shouldUseHighContrastColors === true,
     dark: !isLightHex(source.themeColors?.bg),
@@ -2664,7 +2704,7 @@ function applyNativeMaterial(source = settings) {
   const windowsMaterial = { enabled: nativeBlurEnabled(source), mode: source.windowsBackdrop };
   const hadAccent = windowsAccentActive(mainWindow);
   syncWindowsBackdrop(mainWindow, windowsMaterial);
-  syncWindowsBackdrop(dashboardWindow, windowsMaterial);
+  syncDashboardWindowsBackdrop(dashboardWindow, source);
   limitsHistoryController?.syncMaterial();
   return hadAccent !== windowsAccentActive(mainWindow);
 }
@@ -7812,7 +7852,8 @@ function createDashboardWindow() {
   dashboardWindowReady = false;
   applyWindowsChrome(win, { round: true });
   suppressLinuxSystemContextMenu(win);
-  syncWindowsBackdrop(win, { enabled: nativeBlurEnabled(), mode: settings.windowsBackdrop });
+  applyDashboardWindowBehavior(win);
+  syncDashboardWindowsBackdrop(win);
   attachNativeMaterialVisibility(win, () => nativeMaterialOptions(settings, true));
   syncNativeMaterialVisibility(win, nativeMaterialOptions(settings, true));
   win.webContents.setWindowOpenHandler(({ url }) => {
@@ -8360,8 +8401,17 @@ app.whenReady().then(() => {
     if (patch.dashboardHeatmapMetric !== undefined) {
       normalizedPatch.dashboardHeatmapMetric = patch.dashboardHeatmapMetric === null ? null : normalizeHeatmapMetric(patch.dashboardHeatmapMetric);
     }
+    if (patch.dashboardWindowBehavior !== undefined) {
+      normalizedPatch.dashboardWindowBehavior = normalizeWindowBehavior(patch.dashboardWindowBehavior, 'normal');
+    }
+    if (patch.dashboardBackdrop !== undefined) normalizedPatch.dashboardBackdrop = normalizeDashboardBackdrop(patch.dashboardBackdrop);
     if (patch.dashboardStageView !== undefined) normalizedPatch.dashboardStageView = normalizeDashboardStageView(patch.dashboardStageView);
     if (patch.dashboardFlowMode !== undefined) normalizedPatch.dashboardFlowMode = normalizeDashboardFlowMode(patch.dashboardFlowMode);
+    if (patch.dashboardQuotaProviderOrder !== undefined) {
+      normalizedPatch.dashboardQuotaProviderOrder = require('./plugins/limits').desktopProviderPreference(
+        patch.dashboardQuotaProviderOrder ?? '', parseLimitProviders
+      );
+    }
     if (patch.dashboardVisiblePeriods !== undefined) normalizedPatch.dashboardVisiblePeriods = normalizeDashboardPeriods(patch.dashboardVisiblePeriods);
     for (const key of ['dashboardFollowPeriodTabs', 'dashboardShowVelocity', 'dashboardShowQuotas']) {
       if (patch[key] !== undefined) normalizedPatch[key] = parseBoolean(patch[key], settings[key]);
@@ -8621,6 +8671,9 @@ app.whenReady().then(() => {
       || settings.language !== previousLanguage
     ) && latestStats) updateDiscordRpcDisplay(latestStats);
     applyWindowSettings();
+    if (settings.dashboardWindowBehavior !== previousSettingsState.dashboardWindowBehavior) {
+      applyDashboardWindowBehavior(dashboardWindow);
+    }
     syncFloatingBubbleAvailability();
     syncDockSurfaces();
     applyNativeMaterial();

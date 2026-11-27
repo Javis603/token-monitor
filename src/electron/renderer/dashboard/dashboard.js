@@ -38,7 +38,6 @@ const els = {
   deviceTrigger: document.getElementById('dashDeviceTrigger'),
   deviceMenu: document.getElementById('dashDeviceMenu'),
   periodSelect: document.getElementById('periodSelect'),
-  themeToggle: document.getElementById('themeToggle'),
   refreshBtn: document.getElementById('refreshBtn'),
   minBtn: document.getElementById('minBtn'),
   closeBtn: document.getElementById('closeBtn'),
@@ -128,15 +127,22 @@ const dashboardSettings = {
   follow: document.getElementById('dashFollowPeriods'),
   velocity: document.getElementById('dashShowVelocity'),
   quotas: document.getElementById('dashShowQuotas'),
-  stage: document.getElementById('dashDefaultStage'),
+  main: document.getElementById('dashSettingsMain'),
+  backdrop: document.getElementById('dashBackdrop'),
+  windowBehavior: document.getElementById('dashWindowBehavior'),
+  quotaOrder: document.getElementById('dashQuotaOrder'),
+  quotaOrderOpen: document.getElementById('dashQuotaOrderOpen'),
+  quotaOrderBack: document.getElementById('dashQuotaOrderBack'),
+  quotaOrderList: document.getElementById('dashQuotaOrderList'),
+  quotaOrderReset: document.getElementById('dashQuotaOrderReset'),
   flowMode: document.getElementById('dashFlowMode'),
-  metric: document.getElementById('dashDefaultMetric'),
   error: document.getElementById('dashSettingsError'),
   shortcutError: document.getElementById('dashShortcutSaveError')
 };
 let dashboardSettingsSave = Promise.resolve();
 let queuedDashboardPeriods = null;
 let periodTabsSignature = '';
+let dashboardBackdropOptionsMarkup = '';
 const RANGES = ['7', '30', '90', '365', 'all'];
 const state = {
   tab: 'activity',
@@ -156,7 +162,6 @@ const state = {
   breakdownMode: 'both',
   workMode: 'sessions',
   soloKey: null,
-  flat: false,
   locale: 'en',
   currency: 'USD',
   compactTokenUnits: 'western',
@@ -506,7 +511,8 @@ function applyAppearance(settings) {
   applyFontSettings(settings);
   applyThemeColors(settings?.themeColors);
   applyVendorColorOverrides(settings?.vendorColors);
-  els.body.classList.toggle('flat', state.flat);
+  els.body.classList.toggle('flat', settings?.dashboardBackdrop === 'solid');
+  els.body.classList.toggle('desktop-mode', settings?.dashboardWindowBehavior === 'desktop');
   skylineController?.refreshTheme?.();
 }
 
@@ -636,9 +642,10 @@ function syncDashboardSettings(settings) {
   dashboardSettings.follow.checked = settings.dashboardFollowPeriodTabs === true;
   dashboardSettings.velocity.checked = settings.dashboardShowVelocity !== false;
   dashboardSettings.quotas.checked = settings.dashboardShowQuotas !== false;
-  dashboardSettings.stage.value = state.stageView;
   if (dashboardSettings.flowMode) dashboardSettings.flowMode.value = state.flowMode;
-  dashboardSettings.metric.value = state.heatmapMetric;
+  if (dashboardSettings.quotaOrder?.classList.contains('hidden') === false) renderDashboardQuotaOrder(settings);
+  if (dashboardSettings.backdrop) renderDashboardBackdrop(settings);
+  if (dashboardSettings.windowBehavior) dashboardSettings.windowBehavior.value = settings.dashboardWindowBehavior || 'normal';
   const displayed = dashboardSettings.follow.checked ? dashboardPeriodTabs(settings) : visible;
   for (const button of dashboardSettings.choices.querySelectorAll('button')) {
     const selected = displayed.includes(button.value);
@@ -4617,8 +4624,11 @@ async function boot() {
       glassRenderingApi.applyNativeMaterialClasses(nativeMaterialState);
     }
   } catch (_) {}
-  let initialSettings;
-  try { initialSettings = await window.tokenMonitor.getSettings(); } catch (_) {}
+  const [initialSettings, appInfo] = await Promise.all([
+    window.tokenMonitor.getSettings().catch(() => null),
+    window.tokenMonitor.getAppInfo?.().catch(() => null)
+  ]);
+  state.platform = appInfo?.platform;
   const settings = { ...initialSettings, ...state.settings };
   state.locale = i18n.resolveLocale(settings.locale || settings.language, navigator.languages);
   state.settings = settings;
@@ -4627,7 +4637,6 @@ async function boot() {
   if (settings.currencyRatesEffective && window.TokenMonitorCurrency?.configureRates) {
     window.TokenMonitorCurrency.configureRates(settings.currencyRatesEffective);
   }
-  state.flat = settings.dashboardFlat === true;
   state.heatmapMetric = settings.dashboardHeatmapMetric || settings.heatmapMetric || 'cost';
   state.stageView = settings.dashboardStageView === '2d' || settings.dashboardStageView === '3d' || settings.dashboardStageView === 'flow'
     ? settings.dashboardStageView
@@ -4670,10 +4679,6 @@ window.tokenMonitor.onSettingsPush?.((next) => {
     latestBaseStats = null;
     allTimeSessions?.invalidate?.();
     resetDashboardSource();
-  }
-  if ('dashboardFlat' in next) {
-    state.flat = next.dashboardFlat === true;
-    els.body.classList.toggle('flat', state.flat);
   }
   // applyAppearance applies the motion preference itself; remember the old one
   // so a changed preference still repaints below.
@@ -4858,7 +4863,8 @@ window.tokenMonitor.onSettingsPush?.((next) => {
   }
   if (typeof syncDashboardSettings === 'function') syncDashboardSettings(state.settings);
   if (next.dashboardShowVelocity !== undefined && next.dashboardShowVelocity !== previousSettings?.dashboardShowVelocity
-    || next.dashboardShowQuotas !== undefined && next.dashboardShowQuotas !== previousSettings?.dashboardShowQuotas) needsRender = true;
+    || next.dashboardShowQuotas !== undefined && next.dashboardShowQuotas !== previousSettings?.dashboardShowQuotas
+    || next.dashboardQuotaProviderOrder !== undefined && next.dashboardQuotaProviderOrder !== previousSettings?.dashboardQuotaProviderOrder) needsRender = true;
   if (needsRender) render();
 });
 
@@ -4962,10 +4968,121 @@ els.trendMetricBtns.forEach((b) => b.addEventListener('click', () => {
   render();
 }));
 
-const dashboardSelectControls = [dashboardSettings.stage, dashboardSettings.flowMode, dashboardSettings.metric].map(select =>
+const dashboardQuotaOrderDrag = window.TokenMonitorRowDragController?.createRowDragController({
+  dragSort: window.TokenMonitorVerticalDragSort,
+  getList: () => dashboardSettings.quotaOrderList,
+  getScrollPanel: () => dashboardSettings.popover,
+  rowSelector: '[data-quota-provider]',
+  idKey: 'quotaProvider',
+  dragStartSelector: '.preference-order-handle',
+  applyOrder: applyDashboardQuotaOrder,
+  persistOrder: order => void saveDashboardQuotaOrder(order),
+  requestRender: () => renderDashboardQuotaOrder(state.settings)
+});
+
+function dashboardQuotaOrderRows() {
+  return Array.from(dashboardSettings.quotaOrderList.querySelectorAll('[data-quota-provider]'));
+}
+
+function applyDashboardQuotaOrder(order) {
+  const list = dashboardSettings.quotaOrderList;
+  const rows = new Map(dashboardQuotaOrderRows().map(row => [row.dataset.quotaProvider, row]));
+  const focused = list.contains(document.activeElement) ? document.activeElement : null;
+  for (const id of order) list.append(rows.get(id));
+  renderedMarkup.delete(list);
+  focused?.focus({ preventScroll: true });
+}
+
+function saveDashboardQuotaOrder(order) {
+  return saveDashboardSettings(() => {
+    const options = order.map(id => ({ id }));
+    const value = window.TokenMonitorLimitProviderOrder
+      .preserveAbsentPluginOrder(state.settings.dashboardQuotaProviderOrder, order, options).join(',');
+    return { dashboardQuotaProviderOrder: value };
+  });
+}
+
+function renderDashboardQuotaOrder(settings) {
+  if (dashboardQuotaOrderDrag?.deferRender()) return;
+  const list = dashboardSettings.quotaOrderList;
+  const options = modelApi.dashboardQuotaProviders(state.stats, settings);
+  dashboardSettings.quotaOrderReset.disabled = !settings.dashboardQuotaProviderOrder;
+  const changed = patchDashboardMarkup(list, options.map(({ id, label }) =>
+    `<div class="home-limit-provider-row" data-key="${escapeHtml(id)}" data-quota-provider="${escapeHtml(id)}">`
+    + `<span class="tool-preference-name">${escapeHtml(label)}</span>`
+    + `<button type="button" class="preference-order-handle" aria-label="${escapeHtml(t('settings.views.reorderView', { name: label }))}" aria-keyshortcuts="ArrowUp ArrowDown Home End"${options.length < 2 ? ' disabled' : ''}></button></div>`
+  ).join(''));
+  if (!changed) return;
+  for (const row of dashboardQuotaOrderRows()) {
+    row.onpointerdown = event => dashboardQuotaOrderDrag?.startRowDrag(event, row.dataset.quotaProvider);
+  }
+}
+
+function renderDashboardBackdrop(settings) {
+  const options = [
+    ['inherit', 'settings.edgeDock.macBackdropInherit'],
+    ['solid', 'dashboard.settings.backdropSolid']
+  ];
+  if (state.platform === 'darwin') {
+    options.push(['vibrancy', 'settings.appearance.macBackdropVibrancy']);
+    if (nativeMaterialState.liquidGlassSupported) {
+      options.push(['liquid-glass', 'settings.appearance.macBackdropLiquidGlass'],
+        ['liquid-glass-clear', 'settings.appearance.macBackdropLiquidGlassClear']);
+    }
+  } else if (state.platform === 'win32') {
+    options.push(['acrylic', 'settings.appearance.windowsBackdropAcrylic'],
+      ['mica', 'settings.appearance.windowsBackdropMica'],
+      ['mica-alt', 'settings.appearance.windowsBackdropMicaAlt'],
+      ['accent', 'settings.appearance.windowsBackdropAccent']);
+  }
+  const select = dashboardSettings.backdrop;
+  const markup = options.map(([mode, key]) => `<option value="${mode}">${escapeHtml(t(key))}</option>`).join('');
+  if (markup !== dashboardBackdropOptionsMarkup) {
+    select.innerHTML = markup;
+    dashboardBackdropOptionsMarkup = markup;
+  }
+  const mode = settings?.dashboardBackdrop || 'inherit';
+  select.value = options.some(([value]) => value === mode)
+    ? mode : (state.platform === 'darwin' && mode.startsWith('liquid-glass') ? 'vibrancy' : 'inherit');
+}
+
+function showDashboardQuotaOrder(open, { focus = true } = {}) {
+  dashboardSettings.main.classList.toggle('hidden', open);
+  dashboardSettings.quotaOrder.classList.toggle('hidden', !open);
+  dashboardSettings.popover.setAttribute('aria-labelledby', open ? 'dashQuotaOrderTitle' : 'dashSettingsTitle');
+  dashboardSettings.popover.scrollTop = 0;
+  if (open) renderDashboardQuotaOrder(state.settings);
+  if (focus) (open ? dashboardSettings.quotaOrderBack : dashboardSettings.quotaOrderOpen).focus();
+}
+
+dashboardSettings.quotaOrderOpen?.addEventListener('click', () => showDashboardQuotaOrder(true));
+dashboardSettings.quotaOrderBack?.addEventListener('click', () => showDashboardQuotaOrder(false));
+dashboardSettings.quotaOrderReset?.addEventListener('click', () => {
+  void saveDashboardSettings({ dashboardQuotaProviderOrder: '' });
+});
+dashboardSettings.quotaOrderList?.addEventListener('keydown', event => {
+  const handle = event.target.closest('.preference-order-handle');
+  if (!handle) return;
+  const order = dashboardQuotaOrderRows().map(row => row.dataset.quotaProvider);
+  const id = handle.closest('[data-quota-provider]').dataset.quotaProvider;
+  const from = order.indexOf(id);
+  const to = { ArrowUp: from - 1, ArrowDown: from + 1, Home: 0, End: order.length - 1 }[event.key];
+  if (to === undefined) return;
+  event.preventDefault();
+  if (to < 0 || to >= order.length || from === to) return;
+  order.splice(from, 1);
+  order.splice(to, 0, id);
+  applyDashboardQuotaOrder(order);
+  void saveDashboardQuotaOrder(order);
+});
+
+const dashboardSelectControls = [dashboardSettings.flowMode, dashboardSettings.backdrop, dashboardSettings.windowBehavior].map(select =>
   window.TokenMonitorSelectControl?.enhance(select, { align: 'end' }));
 dashboardSettings.popover?.addEventListener('toggle', event => {
-  if (event.newState === 'closed') dashboardSelectControls.forEach(control => control?.close());
+  if (event.newState === 'closed') {
+    dashboardSelectControls.forEach(control => control?.close());
+    showDashboardQuotaOrder(false, { focus: false });
+  }
 });
 dashboardSettings.choices?.addEventListener('click', event => {
   const button = event.target.closest('.period-tab-chip');
@@ -4987,12 +5104,12 @@ dashboardSettings.popover?.addEventListener('change', (event) => {
     void saveDashboardSettings({ dashboardShowVelocity: input.checked });
   } else if (input === dashboardSettings.quotas) {
     void saveDashboardSettings({ dashboardShowQuotas: input.checked });
-  } else if (input === dashboardSettings.stage) {
-    void saveDashboardSettings({ dashboardStageView: input.value });
+  } else if (input === dashboardSettings.windowBehavior) {
+    void saveDashboardSettings({ dashboardWindowBehavior: input.value });
+  } else if (input === dashboardSettings.backdrop) {
+    void saveDashboardSettings({ dashboardBackdrop: input.value });
   } else if (input === dashboardSettings.flowMode) {
     void saveDashboardSettings({ dashboardFlowMode: input.value });
-  } else if (input === dashboardSettings.metric) {
-    void saveDashboardSettings({ dashboardHeatmapMetric: input.value });
   }
 });
 document.getElementById('dashOpenAppSettings')?.addEventListener('click', () => {
@@ -5261,9 +5378,6 @@ window.addEventListener('keydown', (ev) => {
   }
 });
 
-els.themeToggle.addEventListener('click', () => {
-  void saveDashboardSettings(() => ({ dashboardFlat: !state.flat }), { shortcut: true });
-});
 els.refreshBtn.addEventListener('click', () => { void manualRefresh(); });
 els.minBtn.addEventListener('click', () => window.tokenMonitor.dashboard.minimize());
 els.closeBtn.addEventListener('click', () => window.tokenMonitor.dashboard.close());

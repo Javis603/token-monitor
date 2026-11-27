@@ -43,6 +43,9 @@ function dashboardWindowFixture(platform = 'win32', settings = {}) {
     focus() { this.calls.push('focus'); }
     setBackgroundColor(color) { this.calls.push(['background', color]); }
     restore() { this.minimized = false; this.calls.push('restore'); }
+    setAlwaysOnTop(value) { this.alwaysOnTop = value; }
+    setMovable(value) { this.movable = value; }
+    setResizable(value) { this.resizable = value; }
     loadFile(file) { this.loadedFile = file; this.calls.push('load'); return Promise.resolve(); }
     destroy() { this.destroyed = true; this.emit('closed'); }
     static fromWebContents(sender) { return windows.find(win => win.webContents === sender); }
@@ -56,13 +59,18 @@ function dashboardWindowFixture(platform = 'win32', settings = {}) {
     },
     windowsAccentActive: win => backdrops.get(win) === 'accent',
     nativeBlurEnabled: (source = settings) => source.systemGlass !== false,
+    ...require('../../src/electron/windowBehavior'),
     attachNativeMaterialVisibility() {}, syncNativeMaterialVisibility() {},
-    nativeMaterialOptions: () => ({}), limitsHistoryController: null, settings,
+    isLiquidGlassBackdrop: require('../../src/electron/macBackdropMode').isLiquidGlassBackdrop,
+    liquidGlassStyle: require('../../src/electron/macBackdropMode').liquidGlassStyle,
+    liquidGlassTint: require('../../src/electron/macBackdropMode').liquidGlassTint,
+    nativeTheme: {}, floatingBubbleState: {}, isLightHex: () => false,
+    limitsHistoryController: null, settings,
     isAllowedExternalUrl: () => false, console: { log() {} },
     ipcMain: { on: (name, handler) => handlers.set(name, handler) }
   });
   const main = read('src', 'electron', 'main.js');
-  vm.runInContext(main.slice(main.indexOf('function applyNativeMaterial('), main.indexOf('function withHistoryPreview(')), context);
+  vm.runInContext(main.slice(main.indexOf('function normalizeDashboardBackdrop('), main.indexOf('function withHistoryPreview(')), context);
   vm.runInContext(main.slice(main.indexOf('function discardFailedDashboardWindow('), main.indexOf('async function getDashboardHistory(')), context);
   vm.runInContext(main.slice(main.indexOf("ipcMain.on('dashboard:ready'"), main.indexOf("ipcMain.on('dashboard:minimize'")), context);
   const app = new EventEmitter();
@@ -72,6 +80,8 @@ function dashboardWindowFixture(platform = 'win32', settings = {}) {
   return {
     windows, backdrops, open: () => context.createDashboardWindow(),
     applyNativeMaterial: () => context.applyNativeMaterial(),
+    applyWindowBehavior: win => context.applyDashboardWindowBehavior(win),
+    materialOptions: () => context.nativeMaterialOptions(settings, true),
     ready: win => handlers.get('dashboard:ready')({ sender: win.webContents }),
     crash(win) {
       const details = { reason: 'crashed' };
@@ -96,7 +106,43 @@ test('Windows Dashboard uses the widget backdrop on open and when appearance cha
   settings.systemGlass = false;
   f.applyNativeMaterial();
   assert.equal(f.backdrops.get(win), 'transparent');
+  settings.dashboardBackdrop = 'mica';
+  f.applyNativeMaterial();
+  assert.equal(f.backdrops.get(win), 'mica');
+  assert.equal(settings.windowsBackdrop, 'accent');
+  settings.dashboardBackdrop = 'solid';
+  f.applyNativeMaterial();
+  assert.equal(f.backdrops.get(win), 'transparent');
   assert.equal(f.open(), win);
+});
+
+test('Dashboard display mode applies on open and changes without affecting the main window mode', () => {
+  const settings = { windowBehavior: 'floating' };
+  const f = dashboardWindowFixture('darwin', settings);
+  const win = f.open();
+  assert.deepEqual([win.alwaysOnTop, win.movable, win.resizable], [false, true, true]);
+
+  settings.dashboardWindowBehavior = 'floating';
+  f.applyWindowBehavior(win);
+  assert.deepEqual([win.alwaysOnTop, win.movable, win.resizable], [true, true, true]);
+
+  settings.dashboardWindowBehavior = 'desktop';
+  f.applyWindowBehavior(win);
+  assert.deepEqual([win.alwaysOnTop, win.movable, win.resizable], [false, false, false]);
+  assert.equal(settings.windowBehavior, 'floating');
+});
+
+test('macOS Dashboard can override inherited glass or use a solid background', () => {
+  const settings = { systemGlass: true, macBackdrop: 'liquid-glass', macClearGlassTint: 20 };
+  const f = dashboardWindowFixture('darwin', settings);
+  assert.equal(f.materialOptions().style, 'regular');
+  settings.dashboardBackdrop = 'liquid-glass-clear';
+  assert.equal(f.materialOptions().style, 'clear');
+  assert.equal(f.materialOptions().tintOpacity, 0.2);
+  assert.equal(settings.macBackdrop, 'liquid-glass');
+  settings.dashboardBackdrop = 'solid';
+  assert.equal(f.materialOptions().opaque, true);
+  assert.equal(f.materialOptions().enabled, false);
 });
 
 test('macOS Dashboard restores its transparent canvas before reveal and after reload', () => {
@@ -303,7 +349,8 @@ test('dashboard.js fetches history over IPC and renders both tabs', () => {
   assert.match(js, /charts\.candleChartSvg/);
   assert.match(js, /charts\.heatmapSvg/);
   assert.match(js, /modelApi\.isometricHeatmapSvg/);
-  assert.match(js, /saveDashboardSettings\(\(\) => \(\{ dashboardFlat: !state\.flat \}\), \{ shortcut: true \}\)/);
+  assert.doesNotMatch(html, /id="themeToggle"/);
+  assert.match(js, /saveDashboardSettings\(\{ dashboardBackdrop: input.value \}\)/);
   assert.match(js, /dashboard\.minimize\(\)/);
   assert.match(js, /dashboard\.ready\(\)/);
   assert.match(js, /onDashboardHistoryChanged\?\.\(handleDashboardHistoryChanged\)/);

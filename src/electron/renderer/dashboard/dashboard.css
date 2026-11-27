@@ -72,6 +72,8 @@ html.native-high-contrast .dash-drawer {
   background: transparent;
 }
 
+body.desktop-mode .dash-header { -webkit-app-region: no-drag; }
+
 .dash-header-brand {
   display: flex;
   align-items: center;
@@ -2809,10 +2811,21 @@ body.flat .dash-drawer {
   max-height: none;
   padding: 0;
 }
-.dash-settings .period-tab-settings { margin-top: 0; }
+.dash-settings-group + .dash-settings-group {
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: 1px solid var(--dash-card-border);
+}
+.dash-settings-group .settings-group-header { margin: 0; }
+.dash-settings-group .main-view-link { justify-content: space-between; width: 100%; }
 .dash-settings .period-tab-chip { cursor: pointer; touch-action: auto; }
 .dash-settings .period-tab-chip[aria-pressed="false"] { color: var(--muted); background: transparent; }
 .dash-settings .period-tab-chip:disabled { cursor: default; opacity: 0.55; }
+#dashSettingsMain { display: grid; gap: 10px; }
+#dashQuotaOrder { gap: 8px; }
+#dashQuotaOrder .main-view-back { justify-self: start; margin: 0; }
+#dashQuotaOrderList { margin: 0; padding: 0; border: 0; }
+#dashQuotaOrderList .home-limit-provider-row { grid-template-columns: minmax(0, 1fr) 22px; }
 .dash-band-single { grid-template-columns: minmax(0, 1fr); }
 
 .dash-skyline-canvas:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
