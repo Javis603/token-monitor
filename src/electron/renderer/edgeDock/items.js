@@ -7,7 +7,8 @@
 // `edgeDockItems` is either null — the automatic default, which follows the
 // connected limit providers — or an ordered list the user composed:
 //   { type: 'limit', provider, hiddenAccounts: [accountKey], showUsage,
-//     accountMode: 'active' | 'lowest' | 'specific', accountKey?, windowKey: '' | limitWindowKey(window) }
+//     accountMode: 'active' | 'lowest' | 'specific', accountKey?,
+//     windowKey: '' | limitWindowKey(window) | antigravityGroupKey(window) }
 //   { type: 'stat', metric }   metric: a usage period, 'liveRate', 'sessions',
 //                              or 'cacheHit'
 //                              ('sessions' additionally carries runningOnly
@@ -19,11 +20,12 @@
   const api = factory(
     node ? require('../../../shared/limits/providers') : root?.TokenMonitorLimitProviders,
     node ? require('../../../shared/limits/usageItems') : root?.TokenMonitorLimitUsageItems,
-    node ? require('../../../shared/plugins/placements') : root?.TokenMonitorPluginPlacements
+    node ? require('../../../shared/plugins/placements') : root?.TokenMonitorPluginPlacements,
+    node ? require('../providers/antigravity/presentation') : root?.TokenMonitorProviderPresentationPolicies?.antigravity
   );
   if (node) module.exports = api;
   if (root) root.TokenMonitorEdgeDockItems = api;
-})(typeof window !== 'undefined' ? window : null, function createEdgeDockItems(limitProviders, usageItems, pluginPlacements) {
+})(typeof window !== 'undefined' ? window : null, function createEdgeDockItems(limitProviders, usageItems, pluginPlacements, antigravity) {
   // Usage readouts follow the widget's own period choices; each shows tokens
   // with its cost beneath, so tokens and cost are no longer separate items.
   const USAGE_PERIODS = Object.freeze(['today', 'week', 'last7', 'last30', 'month', 'allTime']);
@@ -55,6 +57,21 @@
 
   // A pinned window and a hidden usage item name a row the same way.
   const { limitWindowKey, limitWindowKeys, normalizeWindowKey } = usageItems;
+
+  function antigravityGroupKey(window) {
+    const label = antigravity.antigravityQuotaWindow(window)?.groupLabel;
+    return label ? JSON.stringify(['group', label]) : '';
+  }
+
+  function antigravityGroupLabel(key) {
+    if (typeof key !== 'string' || key.length > 400 || !key.startsWith('["group",')) return '';
+    try {
+      const parts = JSON.parse(key);
+      return parts.length === 2 && typeof parts[1] === 'string' ? parts[1].trim() : '';
+    } catch (_) {
+      return '';
+    }
+  }
 
   function selectableLimitWindows(provider, options = {}) {
     return (provider?.windows || []).filter((window) => (
@@ -93,6 +110,7 @@ const SESSION_CELL_DETAILS = Object.freeze(['clients', 'rate']);
     if (raw.type === 'limit') {
       const provider = normalizedId(raw.provider);
       if (!provider || (PROVIDER_IDS.size && !PROVIDER_IDS.has(provider) && !limitProviders.isPluginLimitModuleId(provider))) return null;
+      const groupLabel = provider === 'antigravity' ? antigravityGroupLabel(raw.windowKey) : '';
       const hiddenAccounts = Array.isArray(raw.hiddenAccounts)
         ? [...new Set(raw.hiddenAccounts.map((key) => String(key || '').trim()).filter((key) => key && key.length <= 200))]
           .slice(0, MAX_HIDDEN_ACCOUNTS)
@@ -103,7 +121,7 @@ const SESSION_CELL_DETAILS = Object.freeze(['clients', 'rate']);
         hiddenAccounts,
         showUsage: raw.showUsage !== false,
         showSessions: raw.showSessions !== false,
-        windowKey: normalizeWindowKey(raw.windowKey),
+        windowKey: groupLabel ? JSON.stringify(['group', groupLabel]) : normalizeWindowKey(raw.windowKey),
         // Codex has a meaningful local "current account", so its glance value
         // follows that account unless the user explicitly asks for the tightest
         // visible account. Other providers have no local-login identity.
@@ -193,6 +211,8 @@ const SESSION_CELL_DETAILS = Object.freeze(['clients', 'rate']);
     itemId,
     limitWindowKey,
     limitWindowKeys,
+    antigravityGroupKey,
+    antigravityGroupLabel,
     selectableLimitWindows,
     selectedLimitWindow,
     normalizeEdgeDockItems,
