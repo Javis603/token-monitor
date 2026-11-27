@@ -46,7 +46,7 @@ Requests use the injected transport, `credentials: 'omit'`, `redirect: 'error'`,
 ## Invariants and known gaps
 
 - No token components, message counts or per-session billing are reported. QwenWork does not expose them locally.
-- Existing provider selections and custom Home orders are preserved on upgrade. Selecting QwenWork or signing in enables it through the ordinary provider settings flow; browser sign-in selects the provider and enables limits without changing saved display orders.
+- Existing provider selections and custom Home orders are preserved on upgrade. Browser sign-in adds QwenWork to the provider selection and enables Limits if that selection was empty. With an existing selection, sign-in preserves the Limits switch.
 - With no stored session and no fallback token it reports `notConfigured` and performs no network request. Settings offers browser sign-in and shows the active source for this device in the provider’s connection card.
 - The gateway reports percentages as fractions (`0.9893` for 98.93%). Parsing multiplies only when the value matches the raw fraction, so a genuine sub-1% percentage survives.
 - Credit resets are visible only as the plan window's `resetsAt`; a reset does not create historical token rows.

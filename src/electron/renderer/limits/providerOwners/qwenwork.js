@@ -47,7 +47,7 @@ function create(host) {
     element('SignInButton').classList.toggle('hidden', Boolean(flowId) || (stored && reading?.status === 'ok'));
     element('CancelSignInButton').classList.toggle('hidden', !flowId || !cancelable);
     element('LogoutButton').classList.toggle('hidden', !configured || !stored || Boolean(flowId));
-    element('RefreshButton').classList.toggle('hidden', !configured || Boolean(flowId));
+    element('RefreshButton').classList.toggle('hidden', !enabled || !configured || Boolean(flowId));
   }
 
   function clearFlow() {

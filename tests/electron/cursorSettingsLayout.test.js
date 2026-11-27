@@ -3265,7 +3265,7 @@ test('Alibaba CLI readings keep saved Cookie setup reachable while web readings 
 });
 
 
-function qwenworkAccountOwner({ source = 'settings', readStatus = 'linked', cancelSignIn = async () => {} } = {}) {
+function qwenworkAccountOwner({ source = 'settings', enabled = true, readStatus = 'linked', cancelSignIn = async () => {} } = {}) {
   const { create } = require('../../src/electron/renderer/limits/providerOwners/qwenwork');
   const hidden = new Map();
   const handlers = new Map();
@@ -3278,7 +3278,7 @@ function qwenworkAccountOwner({ source = 'settings', readStatus = 'linked', canc
     }) },
     getSettings: () => ({ qwenworkSessionConfigured: true, qwenworkSessionSource: source }),
     getReading: () => ({ status: 'ok' }),
-    isEnabled: () => true,
+    isEnabled: () => enabled,
     accountShellApi: { render: value => Object.assign(output, value) },
     limitProviderPresentationApi: { apiKeyAccountStatus: () => readStatus },
     bridge: { signIn: () => new Promise(resolve => { finishSignIn = resolve; }), cancelSignIn, onLoginStatus() {} },
@@ -3288,6 +3288,14 @@ function qwenworkAccountOwner({ source = 'settings', readStatus = 'linked', canc
   owner.setup();
   return { hidden, handlers, output, finish: () => finishSignIn({ ok: false }) };
 }
+
+test('QwenWork keeps sign-out reachable and hides refresh when Limits is off', () => {
+  for (const enabled of [true, false]) {
+    const { hidden } = qwenworkAccountOwner({ enabled });
+    assert.equal(hidden.get('qwenworkRefreshButton'), !enabled);
+    assert.equal(hidden.get('qwenworkLogoutButton'), false);
+  }
+});
 
 test('QwenWork fallback accounts can start and cancel a stored browser sign-in', async () => {
   for (const source of ['environment', 'magpie', 'settings']) {
@@ -3303,31 +3311,35 @@ test('QwenWork fallback accounts can start and cancel a stored browser sign-in',
   }
 });
 
-test('QwenWork login reconfigures the newly enabled provider before invalidation', async () => {
+test('QwenWork login preserves disabled limits with an existing provider selection', async () => {
   const main = fs.readFileSync(path.join(rendererDir, '..', 'main.js'), 'utf8');
   const start = main.indexOf("  ipcMain.handle('qwenwork:signIn'");
   const end = main.indexOf("  ipcMain.handle('qwenwork:cancelSignIn'", start);
-  const settings = { limitsEnabled: false, limitProviders: 'claude', limitProviderOrder: 'codex,claude', homeLimitProviderOrder: 'codex' };
-  const calls = [];
-  let handler;
-  vm.runInNewContext(main.slice(start, end), {
-    ipcMain: { handle: (_name, fn) => { handler = fn; } },
-    initialLimitProvidersPending: true, qwenworkLoginController: null, qwenworkLoginFlowId: '', AbortController,
-    runQwenworkDeviceFlowLogin: async () => ({ session: { access: 'fixture' } }),
-    qwenworkAuthBaseUrl: () => '', qwenworkBaseUrl: () => '', process: { env: {} },
-    shell: { openExternal() {} }, electronLimitsFetch() {}, settings,
-    providerSelectionIncluding: require('../../src/electron/limits/credentialCommands').providerSelectionIncluding,
-    saveSettings() {}, pushSettingsToRenderer() {},
-    deviceRuntimeHandle: { reconfigureLimits: config => calls.push(['config', config.limitProviders]) },
-    electronLimitsConfig: () => ({ limitProviders: settings.limitProviders }),
-    queueLimitInvalidation: () => { calls.push(['invalidate']); }
-  });
-  const result = await handler({ sender: { isDestroyed: () => false, send() {} } }, { flowId: 'fixture' });
-  assert.equal(result.ok, true);
-  assert.deepEqual(calls, [['config', 'claude,qwenwork'], ['invalidate']]);
-  assert.equal(settings.limitsEnabled, true);
-  assert.equal(settings.limitProviderOrder, 'codex,claude');
-  assert.equal(settings.homeLimitProviderOrder, 'codex');
+  for (const selection of ['claude', 'plugin:sample-plugin:one', 'claude,plugin:sample-plugin:one']) {
+    const settings = { limitsEnabled: false, limitProviders: selection, limitProviderOrder: 'codex,claude', homeLimitProviderOrder: 'codex' };
+    const calls = [];
+    let handler;
+    vm.runInNewContext(main.slice(start, end), {
+      ipcMain: { handle: (_name, fn) => { handler = fn; } },
+      initialLimitProvidersPending: true, qwenworkLoginController: null, qwenworkLoginFlowId: '', AbortController,
+      runQwenworkDeviceFlowLogin: async () => ({ session: { access: 'fixture' } }),
+      qwenworkAuthBaseUrl: () => '', qwenworkBaseUrl: () => '', process: { env: {} },
+      shell: { openExternal() {} }, electronLimitsFetch() {}, settings,
+      migrateLimitProviders: value => require('../../src/electron/plugins/limits').desktopProviderPreference(
+        value, require('../../src/shared/limits/collector').parseLimitProviders
+      ),
+      saveSettings() {}, pushSettingsToRenderer() {},
+      deviceRuntimeHandle: { reconfigureLimits: config => calls.push(['config', config.limitProviders]) },
+      electronLimitsConfig: () => ({ limitProviders: settings.limitProviders }),
+      queueLimitInvalidation: () => { calls.push(['invalidate']); }
+    });
+    const result = await handler({ sender: { isDestroyed: () => false, send() {} } }, { flowId: 'fixture' });
+    assert.equal(result.ok, true);
+    assert.deepEqual(calls, [['config', selection + ',qwenwork'], ['invalidate']]);
+    assert.equal(settings.limitsEnabled, false);
+    assert.equal(settings.limitProviderOrder, 'codex,claude');
+    assert.equal(settings.homeLimitProviderOrder, 'codex');
+  }
 });
 
 test('QwenWork sign-in consumes the pending first-run provider seed only after the save', async () => {
@@ -3340,8 +3352,10 @@ test('QwenWork sign-in consumes the pending first-run provider seed only after t
       initialLimitProvidersPending: true, qwenworkLoginController: null, qwenworkLoginFlowId: '', AbortController,
       runQwenworkDeviceFlowLogin: async () => ({ session: { access: 'fixture' } }),
       qwenworkAuthBaseUrl: () => '', qwenworkBaseUrl: () => '', process: { env: {} },
-      shell: { openExternal() {} }, electronLimitsFetch() {}, settings: { limitProviders: 'claude' },
-      providerSelectionIncluding: require('../../src/electron/limits/credentialCommands').providerSelectionIncluding,
+      shell: { openExternal() {} }, electronLimitsFetch() {}, settings: { limitsEnabled: false, limitProviders: '' },
+      migrateLimitProviders: value => require('../../src/electron/plugins/limits').desktopProviderPreference(
+        value, require('../../src/shared/limits/collector').parseLimitProviders
+      ),
       saveSettings: () => { if (saveFails) throw new Error('disk'); },
       pushSettingsToRenderer() {}, deviceRuntimeHandle: null,
       electronLimitsConfig: () => ({}), queueLimitInvalidation: () => {}
@@ -3350,6 +3364,7 @@ test('QwenWork sign-in consumes the pending first-run provider seed only after t
     const result = await context.handler({ sender: { isDestroyed: () => false, send() {} } }, { flowId: 'fixture' });
     assert.equal(result.ok, expectedOk);
     assert.equal(context.initialLimitProvidersPending, expectedPending);
+    if (!saveFails) assert.equal(context.settings.limitsEnabled, true);
   }
 });
 

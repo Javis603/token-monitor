@@ -207,7 +207,7 @@ const ACCOUNT_SLOT_PROVIDER_IDS = new Set(LIMIT_PROVIDER_REGISTRY.filter(entry =
 const { normalizeAccountPresentation } = require('./limits/accountPresentation');
 const { applyAccountOrder } = require('./renderer/limits/accountSlotsPanel');
 let accountSlotService;
-const { createCredentialCommands, providerSelectionIncluding } = require('./limits/credentialCommands');
+const { createCredentialCommands } = require('./limits/credentialCommands');
 const { createCopilotAccounts } = require('./providers/copilot/accounts');
 const { createMinimaxApiKeys } = require('./providers/minimax/apiKeys');
 const { createClaudeManagedAccounts, claudeAccountChangeScope } = require('./providers/claude/managedAccounts');
@@ -9186,8 +9186,10 @@ app.whenReady().then(() => {
       if (qwenworkLoginController !== controller) {
         return { ok: false, error: 'QwenWork sign-in cancelled.', flowId };
       }
-      settings.limitProviders = providerSelectionIncluding(settings.limitProviders, 'qwenwork');
-      settings.limitsEnabled = true;
+      const selected = migrateLimitProviders(settings.limitProviders).split(',').filter(Boolean);
+      if (!selected.length) settings.limitsEnabled = true;
+      if (!selected.includes('qwenwork')) selected.push('qwenwork');
+      settings.limitProviders = selected.join(',');
       settings.qwenworkSession = result.session;
       saveSettings({ throwOnError: true });
       // An explicit sign-in is a user selection: the first-run seed must not
@@ -9234,7 +9236,7 @@ app.whenReady().then(() => {
     settings.qwenworkSession = '';
     saveSettings({ throwOnError: true });
     pushSettingsToRenderer();
-    void queueLimitInvalidation({ provider: 'qwenwork' }, 'logout', { clear: true });
+    void queueLimitInvalidation({ provider: 'qwenwork' }, 'credential-change', { clear: true });
     return { ok: true };
   });
   ipcMain.on('window:minimize', (event) => {
