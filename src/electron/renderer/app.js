@@ -18451,12 +18451,12 @@ function trayDataUrlForMode(mode, size = 44, colors, options = {}) {
 }
 
 async function maybeUpdateBarsIcon(options = {}) {
-  syncTrayProviderIconDemand();
   if (options.refreshComposers !== false && isSettingsSurfaceVisible()) {
     refreshTrayComposers();
     if (edgeDockAvailable() && state.settings?.edgeDockEnabled === true) edgeDockComposer?.render();
     if (state.appInfo?.platform === 'darwin' && state.settings?.notchEnabled === true) notchItemsComposer?.render();
   } else {
+    syncTrayProviderIconDemand();
     syncCustomTrayClockTimer();
   }
   const mode = state.settings?.trayContent;
@@ -18782,6 +18782,7 @@ function syncCustomTrayClockTimer() {
 }
 
 function refreshTrayComposers() {
+  if (isSettingsSurfaceVisible()) syncTrayProviderIconDemand();
   const surfaces = [
     { id: 'tray', root: els.trayComposer, visible: true },
     { id: 'floatingBubble', root: els.floatingBubbleComposer, visible: true },
@@ -18872,6 +18873,9 @@ function trayProviderIconDemand() {
     layouts: ['trayCustomLayout', 'floatingBubbleCustomLayout', 'notchCustomLayout']
       .map((key) => state.settings?.[key])
   });
+  if (isSettingsSurfaceVisible()) {
+    for (const { provider } of statsForTrayComposer().limits.providers) demand.add(provider);
+  }
   return [...demand].filter((id) => trayIconProviderIds.has(id));
 }
 
@@ -18930,11 +18934,11 @@ async function deliverTrayProviderIcons(showBadge = state.settings?.showTrayProv
     }
   }
   if (!trayProviderIconDeliveryGuard.isCurrent(deliveryId)) return;
-  if (Object.keys(icons).length) await window.tokenMonitor.setTrayIcons(icons);
+  // Drop absent built-in bitmaps so main can use its fallback until a fresh
+  // mark arrives, even if it changes providers while the renderer is hidden.
+  const cleared = Object.fromEntries([...trayIconProviderIds].map((id) => [id, null]));
+  await window.tokenMonitor.setTrayIcons({ ...cleared, ...icons });
   if (!trayProviderIconDeliveryGuard.isCurrent(deliveryId)) return;
-  // Main keeps every bitmap it was sent, including ones drawn for an earlier
-  // theme or badge setting. Only the marks this delivery covered are current,
-  // so a provider that left demand is delivered again when it returns.
   trayProviderIconsRequested.clear();
   for (const id of [...Object.keys(icons), ...failed]) trayProviderIconsRequested.add(id);
   trayProviderIconsLoading = new Set();

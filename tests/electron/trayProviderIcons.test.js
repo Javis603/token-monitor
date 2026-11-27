@@ -206,13 +206,23 @@ test('tray icon demand stays empty without data or layouts', () => {
 
 function trayMarkDeliveryFixture(loadImage) {
   const app = fs.readFileSync(path.resolve(__dirname, '..', '..', 'src', 'electron', 'renderer', 'app.js'), 'utf8');
+  const refreshStart = app.indexOf('function refreshTrayComposers() {');
+  const refreshEnd = app.indexOf('\nfunction loadImage(', refreshStart);
   const start = app.indexOf('function trayProviderIconDemand() {');
   const end = app.indexOf('\nfunction setAccountGroupExpanded(', start);
-  assert.ok(start >= 0 && end > start);
+  assert.ok(refreshStart >= 0 && refreshEnd > refreshStart && start >= 0 && end > start);
   const context = {
     state: { settings: {}, stats: null, pluginCatalog: { limits: { modules: [] } } },
-    window: { tokenMonitor: { setTrayIcons: async () => {} }, TokenMonitorTrayProviderIcons: require('../../src/electron/renderer/trayProviderIcons') },
-    trayIconProviderIds: new Set(['claude-brand', 'chatgpt']),
+    window: {
+      tokenMonitor: { setTrayIcons: async () => {} },
+      TokenMonitorTrayProviderIcons: require('../../src/electron/renderer/trayProviderIcons'),
+      TokenMonitorTrayComposer: { syncTrayComposerSurfaces() {} }
+    },
+    els: {},
+    trayComposers: {},
+    createTrayComposer() {},
+    syncCustomTrayClockTimer() {},
+    trayIconProviderIds: new Set(['claude-brand', 'chatgpt', 'codex', 'claude']),
     trayProviderImages: {},
     trayProviderImageIds: new WeakMap(),
     trayProviderImageOpticalSamples: new WeakMap(),
@@ -222,16 +232,31 @@ function trayMarkDeliveryFixture(loadImage) {
     loadImage,
     providerImageOpticalSample: () => ({ canvas: {} }),
     providerImageToPngDataUrl: () => 'bitmap',
+    isSettingsSurfaceVisible: () => false,
+    statsForTrayComposer: () => ({ limits: { providers: [{ provider: 'codex' }, { provider: 'claude' }] } }),
     maybeUpdateBarsIcon() {},
     renderFloatingBubbleContent() {}
   };
   vm.createContext(context);
+  vm.runInContext(app.slice(refreshStart, refreshEnd), context);
   vm.runInContext(app.slice(start, end), context);
   const pick = (provider) => {
     context.state.settings = { trayCustomLayout: { items: [{ type: 'icon', source: { provider } }] } };
   };
   return { context, pick };
 }
+
+test('opening the tray composer requests the providers used by its quota preview', async () => {
+  const { context } = trayMarkDeliveryFixture(() => Promise.resolve({}));
+  await context.deliverTrayProviderIcons();
+  assert.deepEqual(Object.keys(context.trayProviderImages), ['app']);
+
+  context.isSettingsSurfaceVisible = () => true;
+  context.refreshTrayComposers();
+  await new Promise((resolve) => setImmediate(resolve));
+
+  assert.deepEqual(Object.keys(context.trayProviderImages).sort(), ['app', 'claude', 'codex']);
+});
 
 test('a mark dropped by a superseded delivery is requested again when it returns to demand', async () => {
   let finishBrand;
@@ -263,7 +288,9 @@ test('a mark loaded by a superseded delivery is sent once it returns to demand',
     if (source.endsWith('tray-token-monitor.png') && !finishApp) return new Promise((resolve) => { finishApp = resolve; });
     return Promise.resolve({});
   });
-  context.window.tokenMonitor.setTrayIcons = async (icons) => { sent.push(...Object.keys(icons)); };
+  context.window.tokenMonitor.setTrayIcons = async (icons) => {
+    for (const [id, bitmap] of Object.entries(icons)) if (bitmap !== null) sent.push(id);
+  };
   pick('claude-brand');
   const superseded = context.deliverTrayProviderIcons();
   await new Promise((resolve) => setImmediate(resolve));
@@ -285,7 +312,12 @@ test('a mark left out of a theme redelivery is drawn for the new theme when it r
   let theme = 'dark';
   const held = {};
   context.providerImageToPngDataUrl = () => `bitmap-${theme}`;
-  context.window.tokenMonitor.setTrayIcons = async (icons) => { Object.assign(held, icons); };
+  context.window.tokenMonitor.setTrayIcons = async (icons) => {
+    for (const [id, bitmap] of Object.entries(icons)) {
+      if (bitmap === null) delete held[id];
+      else held[id] = bitmap;
+    }
+  };
   pick('claude-brand');
   await context.deliverTrayProviderIcons();
   assert.equal(held['claude-brand'], 'bitmap-dark');
@@ -293,7 +325,7 @@ test('a mark left out of a theme redelivery is drawn for the new theme when it r
   pick('chatgpt');
   theme = 'light';
   await context.deliverTrayProviderIcons();
-  assert.equal(held['claude-brand'], 'bitmap-dark', 'main still holds the old-theme bitmap');
+  assert.equal(held['claude-brand'], undefined, 'main drops the old-theme bitmap');
 
   pick('claude-brand');
   context.syncTrayProviderIconDemand();
