@@ -3987,7 +3987,10 @@ test('Local Dashboard repaints Yesterday at local midnight without a Stats push'
     nativeRangeWindows: { yesterday: { start: '2026-11-25', end: '2026-11-25' } },
     periods: { yesterday: { totalTokens: 100 } }
   };
-  const history = { daily: [{ date: '2026-11-25', tokens: 100 }, { date: '2026-11-26', tokens: 50 }] };
+  const history = {
+    fixedPeriods: { historyTransportAvailable: true },
+    daily: [{ date: '2026-11-25', tokens: 100 }, { date: '2026-11-26', tokens: 50 }]
+  };
   const model = require('../../src/electron/renderer/dashboard/dashboardModel');
   const context = {
     state, Date: Clock, latestBaseStats: stats, renderedFixedCalendar: null, drawerRequestToken: 0,

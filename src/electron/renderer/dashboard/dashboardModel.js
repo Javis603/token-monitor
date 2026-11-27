@@ -76,11 +76,12 @@
     const publishedAt = Date.parse(stats?.updatedAt || '');
     const devices = stats?.devices?.length ? stats.devices : stats?.periodWindows ? [stats] : [];
     for (const device of devices) {
-      if (!periodHasUsage(device.periods?.[periodKey])) continue;
+      const period = device.periods?.[periodKey];
+      if (!period) continue;
       // A newer publication has already excluded devices expired at its clock.
       if (Number.isFinite(publishedAt) && isDevicePeriodExpired(device, periodKey, publishedAt)) continue;
       if (isDevicePeriodExpired(device, periodKey, nowMs)) {
-        expired = true;
+        expired ||= periodHasUsage(period);
         continue;
       }
       let endsAt = Date.parse(device.periodWindows?.[periodKey]?.endsAt || '');
@@ -256,7 +257,7 @@
    * @param {any} source
    * @param {any[]} historyDaily
    * @param {string} periodKey
-   * @param {{ locale?: string, todayKey?: string, synced?: boolean }} [options]
+   * @param {{ locale?: string, todayKey?: string, synced?: boolean, historyAvailable?: boolean, historyEnabled?: boolean, nowMs?: number }} [options]
    */
   function resolvePeriodData(source, historyDaily, periodKey, options = {}) {
     const todayKey = options.todayKey || fixedPeriodRanges?.localDayKey?.() || '';
@@ -267,17 +268,31 @@
 
     const daily = Array.isArray(historyDaily) ? historyDaily : [];
 
-    if (fixedPeriodRanges?.isDerived?.(periodKey) && (daily.length > 0 || source?.periods?.today || source?.today)) {
+    if (fixedPeriodRanges?.isDerived?.(periodKey)) {
+      const liveTodayKey = source?.periodWindows?.today?.key || todayKey;
+      const todayPeriod = liveTodayKey === todayKey && !isDevicePeriodExpired(source, 'today', options.nowMs ?? Date.now())
+        ? source?.periods?.today || source?.today || null
+        : null;
+      const rangeOptions = { todayKey, liveTodayKey, todayPeriod, locale: options.locale || 'en' };
       const snapshot = fixedPeriodRanges.fixedPeriodSnapshot(periodKey, {
-        historyAvailable: true,
-        daily,
-        todayKey,
-        liveTodayKey: source?.periodWindows?.today?.key || todayKey,
-        todayPeriod: source?.periods?.today || source?.today || null,
-        locale: options.locale || 'en'
+        ...rangeOptions,
+        historyAvailable: options.historyAvailable === true,
+        historyEnabled: options.historyEnabled,
+        daily
       });
-      if (snapshot?.status === 'ready' && snapshot.period) {
+      if (snapshot.status === 'ready') {
         return { ...snapshot.period, derivedFromHistory: true };
+      }
+
+      // Today Stats can confirm one day even when History cannot cover the range.
+      const range = fixedPeriodRanges.rangeForSelection(periodKey, rangeOptions);
+      if (todayPeriod && range && todayKey >= range.start && todayKey <= range.end) {
+        const rows = fixedPeriodRanges.dailyForRange([], { start: todayKey, end: todayKey }, rangeOptions);
+        return {
+          ...fixedPeriodRanges.derivePeriod(rows, range),
+          derivedFromHistory: true,
+          accountingStatus: 'partial'
+        };
       }
     }
 
@@ -445,6 +460,8 @@
     const rangeOptions = {
       locale: synced ? settings.locale : settings.calendarLocale || settings.locale,
       todayKey: fixedPeriodRanges?.localDayKey(nowMs),
+      historyEnabled: settings.historyEnabled !== false,
+      nowMs,
       synced
     };
     const localFixed = !synced && fixedPeriodRanges?.isDerived(periodKey);
@@ -476,7 +493,10 @@
       /** @param {string} key */
       const resolveDevicePeriod = (key) => isDevicePeriodExpired(device, key, nowMs)
         ? null
-        : resolvePeriodData(mergedDevice, devDaily, key, rangeOptions);
+        : resolvePeriodData(mergedDevice, devDaily, key, {
+          ...rangeOptions,
+          historyAvailable: history?.fixedPeriods?.historyTransportAvailable === true && devHistory?.historyAvailable === true
+        });
       const resolvedPeriod = options.fixedHistorySnapshot
         ? mergedDevice.periods?.[periodKey] || fixedHistoryById.get(deviceId) || null
         : (localFixed && (deviceId === localId || ids.size === 1) ? livePeriod : null)
@@ -542,6 +562,7 @@
         activeWorkspace,
         topClients,
         periodData: resolvedPeriod,
+        accountingExpired: isDevicePeriodExpired(device, periodKey, nowMs),
         todayPeriod,
         historyAvailable: devHistory?.historyAvailable === true || devDaily.length > 0,
         history: devHistory?.history || null
@@ -2594,7 +2615,7 @@
     const activeMachine = fleet.isFleetMode && selectedDeviceId !== 'all'
       ? fleet.machines.find((m) => m.deviceId === selectedDeviceId) || null
       : null;
-    const accountingExpired = !activeMachine && freshness.expired;
+    const accountingExpired = activeMachine ? activeMachine.accountingExpired : freshness.expired;
 
     const todayKey = fixedPeriodRanges.localDayKey(nowMs);
     /** @param {string} day */
@@ -2651,6 +2672,9 @@
         : fixedHistorySnapshot ? fixedHistorySnapshot.period : resolvePeriodData(stats, scopedHistory.daily, periodKey, {
           locale: synced ? settings.locale : settings.calendarLocale || settings.locale,
           todayKey,
+          historyAvailable: historyOptions.historyAvailable,
+          historyEnabled: historyOptions.historyEnabled,
+          nowMs,
           synced
         });
 
@@ -2659,7 +2683,8 @@
       (selectedHistory && selectedHistory.status !== 'ready')
       || (!periodData && selectedHistory?.status !== 'ready' && fixedHistorySnapshot?.status !== 'ready')
     )) ? 'unavailable'
-      : !activeMachine && [...uncoveredSnapshots.values()].some(snapshot => snapshot.status !== 'ready')
+      : periodData?.accountingStatus === 'partial'
+        || (!activeMachine && [...uncoveredSnapshots.values()].some(snapshot => snapshot.status !== 'ready'))
         ? 'partial'
         : 'ready';
 

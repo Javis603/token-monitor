@@ -310,6 +310,10 @@ test('aggregate Today and Month wait for a fresh publication after a contributin
       if (devices.length > 1) {
         const selected = model.buildScopedOverview({ stats, periodKey, selectedDeviceId: 'b', nowMs: boundary });
         assert.equal(selected.hero.tokens, 25);
+        assert.equal(selected.hero.accountingStatus, 'ready');
+        const expiredDevice = model.buildScopedOverview({ stats, periodKey, selectedDeviceId: 'a', nowMs: boundary });
+        assert.equal(expiredDevice.hero.accountingStatus, 'unavailable');
+        assert.equal(expiredDevice.periodData, null);
       }
       const nextPeriod = devices.length > 1 ? fresh : { totalTokens: 0 };
       const next = model.buildScopedOverview({
@@ -1946,7 +1950,11 @@ test('local fixed ranges reject carried periods after rollover and use the curre
   const daily = [{ date: '2026-11-22', tokens: 100 }, { date: '2026-11-23', tokens: 40 }];
   const view = model.buildScopedOverview({
     stats, periodKey: 'week', nowMs, settings: { locale: 'en-US', calendarLocale: 'en-GB' },
-    history: { daily, deviceHistories: [{ deviceId: 'local', history: { daily } }] }
+    history: {
+      daily,
+      fixedPeriods: { historyTransportAvailable: true },
+      deviceHistories: [{ deviceId: 'local', historyAvailable: true, history: { daily } }]
+    }
   });
   assert.equal(view.hero.tokens, 40);
   assert.equal(view.fleet.machines[0].tokens, 40);
@@ -1963,6 +1971,34 @@ test('local fixed ranges reject carried periods after rollover and use the curre
   assert.equal(fresh.fleet.machines[0].tokens, 900);
   assert.equal(fresh.sessions[0].sessionId, 'stale');
   assert.equal(fresh.sessionsIncomplete, false);
+});
+
+test('local fixed fallback needs History coverage and retains only confirmed Today accounting when unavailable', () => {
+  const nowMs = new Date(2026, 10, 27, 12).getTime();
+  const today = { totalTokens: 100, costUsd: 2 };
+  const stats = {
+    mode: 'local', localDeviceId: 'local',
+    periods: { today },
+    devices: [{ deviceId: 'local', periods: { today } }]
+  };
+  const view = (periodKey, overrides = {}) => model.buildScopedOverview({ stats, periodKey, nowMs, ...overrides });
+  assert.equal(view('yesterday').hero.accountingStatus, 'unavailable');
+
+  const failedHistory = { fixedPeriods: { historyTransportAvailable: false }, daily: [] };
+  const partial = view('last7', { history: failedHistory });
+  assert.equal(partial.hero.accountingStatus, 'partial');
+  assert.equal(partial.hero.tokens, 100);
+  assert.equal(partial.hero.cost, 2);
+  assert.equal(partial.fleet.machines[0].tokens, 100);
+  assert.deepEqual(partial.sessions, []);
+  assert.equal(view('yesterday', { settings: { historyEnabled: false } }).hero.accountingStatus, 'unavailable');
+
+  const verified = view('yesterday', { history: { fixedPeriods: { historyTransportAvailable: true }, daily: [] } });
+  assert.equal(verified.hero.accountingStatus, 'ready');
+  assert.equal(verified.hero.tokens, 0);
+
+  const stale = { ...stats, periodWindows: { today: { key: '2026-11-26' } } };
+  assert.equal(view('last7', { stats: stale }).hero.accountingStatus, 'unavailable');
 });
 
 test('device flow accents use confirmed active tools even when their endpoints are offscreen', () => {
