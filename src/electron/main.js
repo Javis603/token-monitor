@@ -649,6 +649,7 @@ function defaultSettings() {
     heatmapMetric: 'cost',
     dashboardHeatmapMetric: null,
     dashboardStageView: 'flow',
+    dashboardFlowMode: 'sync',
     dashboardFollowPeriodTabs: false,
     dashboardVisiblePeriods: [],
     dashboardShowVelocity: true,
@@ -835,6 +836,10 @@ function defaultSettings() {
 
 function normalizeDashboardStageView(value) {
   return value === '2d' || value === '3d' ? value : 'flow';
+}
+
+function normalizeDashboardFlowMode(value) {
+  return value === 'stagger' ? 'stagger' : 'sync';
 }
 
 function normalizeDashboardPeriods(value) {
@@ -2221,6 +2226,7 @@ function readSettings() {
     merged.heatmapMetric = normalizeHeatmapMetric(merged.heatmapMetric);
     merged.dashboardHeatmapMetric = merged.dashboardHeatmapMetric == null ? null : normalizeHeatmapMetric(merged.dashboardHeatmapMetric);
     merged.dashboardStageView = normalizeDashboardStageView(merged.dashboardStageView);
+    merged.dashboardFlowMode = normalizeDashboardFlowMode(merged.dashboardFlowMode);
     merged.dashboardVisiblePeriods = normalizeDashboardPeriods(merged.dashboardVisiblePeriods);
     merged.dashboardFollowPeriodTabs = parseBoolean(merged.dashboardFollowPeriodTabs, false);
     merged.dashboardShowVelocity = parseBoolean(merged.dashboardShowVelocity, true);
@@ -8355,6 +8361,7 @@ app.whenReady().then(() => {
       normalizedPatch.dashboardHeatmapMetric = patch.dashboardHeatmapMetric === null ? null : normalizeHeatmapMetric(patch.dashboardHeatmapMetric);
     }
     if (patch.dashboardStageView !== undefined) normalizedPatch.dashboardStageView = normalizeDashboardStageView(patch.dashboardStageView);
+    if (patch.dashboardFlowMode !== undefined) normalizedPatch.dashboardFlowMode = normalizeDashboardFlowMode(patch.dashboardFlowMode);
     if (patch.dashboardVisiblePeriods !== undefined) normalizedPatch.dashboardVisiblePeriods = normalizeDashboardPeriods(patch.dashboardVisiblePeriods);
     for (const key of ['dashboardFollowPeriodTabs', 'dashboardShowVelocity', 'dashboardShowQuotas']) {
       if (patch[key] !== undefined) normalizedPatch[key] = parseBoolean(patch[key], settings[key]);

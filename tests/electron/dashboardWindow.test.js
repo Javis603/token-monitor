@@ -4503,3 +4503,90 @@ test('2D heatmap assigns one tab stop across recorded dates and retains the sele
   assert.equal(document.activeElement, latest);
   assert.equal(focusCalls, 1);
 });
+
+test('Live Flow configures sync/stagger flowMode and applies workspace-gradient and flowPhase via CSSOM without inline style', () => {
+  const js = read('src', 'electron', 'renderer', 'dashboard', 'dashboard.js');
+  const html = read('src', 'electron', 'renderer', 'dashboard', 'dashboard.html');
+  const mainJs = read('src', 'electron', 'main.js');
+  const props = new Map();
+  const makeNode = (attr, value) => ({
+    attributes: new Map([[attr, value]]),
+    getAttribute(name) { return this.attributes.get(name) ?? null; },
+    style: {
+      setProperty(k, v) { props.set(`${attr}:${k}`, v); }
+    }
+  });
+  const gradientNode = makeNode('data-workspace-gradient', 'linear-gradient(115deg, red, blue)');
+  const phaseNode = makeNode('data-flow-phase', '-1.5');
+  const applySwatch = dashboardFunction('applySwatchColors', '\nfunction findByDataset(', {});
+  applySwatch({
+    querySelectorAll(sel) {
+      if (sel === '[data-workspace-gradient]') return [gradientNode];
+      if (sel === '[data-flow-phase]') return [phaseNode];
+      return [];
+    }
+  });
+  assert.equal(props.get('data-workspace-gradient:--workspace-gradient'), 'linear-gradient(115deg, red, blue)');
+  assert.equal(props.get('data-flow-phase:--topo-flow-phase'), '-1.5');
+  assert.doesNotMatch(js, /style="[^"]*(?:--workspace-gradient|--topo-flow-phase)/);
+
+  const syncClock = dashboardFunction('syncTopologyAnimationClock', '\nfunction layoutTopologyLinks(', {});
+  const topoAligned = { animationName: 'topoBeamTravel', startTime: 0 };
+  const topoLate = { animationName: 'topoWorkspaceSweep', startTime: 1450 };
+  const other = { animationName: 'fadeIn', startTime: 800 };
+  syncClock({
+    getAnimations(opts) {
+      assert.equal(opts?.subtree, true);
+      return [topoAligned, topoLate, other];
+    }
+  });
+  assert.equal(topoAligned.startTime, 0);
+  assert.equal(topoLate.startTime, 0);
+  assert.equal(other.startTime, 800);
+
+  assert.match(mainJs, /dashboardFlowMode:\s*'sync'/);
+  const start = mainJs.indexOf('function normalizeDashboardFlowMode(');
+  const end = mainJs.indexOf('\nfunction normalizeDashboardPeriods(', start);
+  const ctx = {};
+  vm.runInNewContext(mainJs.slice(start, end), ctx);
+  assert.equal(ctx.normalizeDashboardFlowMode('stagger'), 'stagger');
+  assert.equal(ctx.normalizeDashboardFlowMode('sync'), 'sync');
+  assert.equal(ctx.normalizeDashboardFlowMode('unexpected'), 'sync');
+  assert.equal(ctx.normalizeDashboardFlowMode(undefined), 'sync');
+
+  assert.match(html, /<select id="dashFlowMode">[\s\S]*?<option value="sync"[^>]*>[\s\S]*?<option value="stagger"[^>]*>/);
+});
+
+test('returning to Live Flow requests clock sync even when its topology is retained', () => {
+  let hidden = true;
+  const reveals = [];
+  const context = {
+    state: { stageView: 'flow', settings: { dashboardShowVelocity: false, dashboardShowQuotas: false } },
+    lastRenderedTab: 'activity',
+    els: {
+      topology: { classList: {
+        contains: () => hidden,
+        toggle(_name, value) { hidden = value; }
+      } },
+      cards: { querySelectorAll: () => [], querySelector: () => null }
+    },
+    charts: { statsCards: () => [], statsCardsHtml: () => '' },
+    t: key => key,
+    heatmapMotionGeneration: 0,
+    renderHeatLegend() {},
+    balanceStatCards() {},
+    renderHero() {},
+    renderWorkPanel() {},
+    renderBreakdown() {},
+    renderTopology(_overview, revealed) {
+      assert.equal(hidden, false);
+      reveals.push(revealed);
+    }
+  };
+  const renderActivity = dashboardFunction('renderActivity', '\nfunction drawerStatGrid(', context);
+  renderActivity({});
+  renderActivity({});
+  context.lastRenderedTab = 'trends';
+  renderActivity({});
+  assert.deepEqual(reveals, [true, false, true]);
+});

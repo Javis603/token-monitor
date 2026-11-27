@@ -2008,6 +2008,100 @@
   }
 
   /**
+   * Computes deterministic animation `flowPhase` offsets per connected component of active topology nodes.
+   * Nodes and edges in the same connected path stay phase-locked; disjoint active components stagger
+   * smoothly so separate workflows do not pulse in mechanical unison.
+   *
+   * @param {{ devices: any[], hubs: any[], endpoints: any[], devToHub: any[], hubToEnd: any[] } & Record<string, any>} graph
+   */
+  function assignTopologyFlowPhases(graph) {
+    /** @type {Set<string>} */
+    const activeNodes = new Set();
+    /** @type {Map<string, Set<string>>} */
+    const adj = new Map();
+    /** @param {string} a @param {string} b */
+    const link = (a, b) => {
+      activeNodes.add(a);
+      activeNodes.add(b);
+      if (!adj.has(a)) adj.set(a, new Set());
+      if (!adj.has(b)) adj.set(b, new Set());
+      adj.get(a)?.add(b);
+      adj.get(b)?.add(a);
+    };
+
+    for (const d of graph.devices) {
+      if ((d.activeToolColors && d.activeToolColors.length > 0) || d.liveTokPerSec > 0) {
+        activeNodes.add(`device:${d.id}`);
+      }
+    }
+    for (const h of graph.hubs) {
+      if (h.activeSessionCount > 0) activeNodes.add(`hub:${h.id}`);
+    }
+    for (const ep of graph.endpoints) {
+      if (ep.isActive) activeNodes.add(`endpoint:${ep.id}`);
+    }
+    for (const e of graph.devToHub) {
+      if (e.active) link(`device:${e.from}`, `hub:${e.to}`);
+    }
+    for (const e of graph.hubToEnd) {
+      if (e.active) link(`hub:${e.from}`, `endpoint:${e.to}`);
+    }
+
+    /** @type {Map<string, number>} */
+    const nodePhase = new Map();
+    /** @type {Set<string>} */
+    const visited = new Set();
+    /** @param {string} key */
+    const anchorPriorityKey = (key) => {
+      if (key.startsWith('device:')) return `0:${key}`;
+      if (key.startsWith('hub:')) return `1:${key}`;
+      return `2:${key}`;
+    };
+
+    for (const start of activeNodes) {
+      if (visited.has(start)) continue;
+      const queue = [start];
+      const nodes = [];
+      let bestAnchor = anchorPriorityKey(start);
+      visited.add(start);
+      while (queue.length > 0) {
+        const cur = /** @type {string} */ (queue.shift());
+        nodes.push(cur);
+        const cand = anchorPriorityKey(cur);
+        if (cand < bestAnchor) bestAnchor = cand;
+        for (const next of adj.get(cur) || []) {
+          if (!visited.has(next)) {
+            visited.add(next);
+            queue.push(next);
+          }
+        }
+      }
+      // An unrelated path entering or leaving must not change this path's phase.
+      let hash = 2166136261;
+      for (let i = 0; i < bestAnchor.length; i++) {
+        hash = Math.imul(hash ^ bestAnchor.charCodeAt(i), 16777619);
+      }
+      const phase = -1 - ((hash >>> 0) % 10000) / 10000;
+      for (const nodeKey of nodes) nodePhase.set(nodeKey, phase);
+    }
+
+    for (const d of graph.devices) d.flowPhase = nodePhase.get(`device:${d.id}`) ?? 0;
+    for (const h of graph.hubs) h.flowPhase = nodePhase.get(`hub:${h.id}`) ?? 0;
+    for (const ep of graph.endpoints) ep.flowPhase = nodePhase.get(`endpoint:${ep.id}`) ?? 0;
+    for (const e of graph.devToHub) {
+      e.flowPhase = e.active
+        ? (nodePhase.get(`device:${e.from}`) ?? nodePhase.get(`hub:${e.to}`) ?? 0)
+        : 0;
+    }
+    for (const e of graph.hubToEnd) {
+      e.flowPhase = e.active
+        ? (nodePhase.get(`hub:${e.from}`) ?? nodePhase.get(`endpoint:${e.to}`) ?? 0)
+        : 0;
+    }
+    return graph;
+  }
+
+  /**
    * Builds a 3-tier Live Neural Flow graph linking Devices -> Workspaces/Tools -> Sessions/Models.
    * Uses workspace/session data when available and falls back to Tools -> Models.
    *
@@ -2024,10 +2118,12 @@
    * @param {{
    *   maxDevices?: number,
    *   maxHubs?: number,
-   *   maxEndpoints?: number
+   *   maxEndpoints?: number,
+   *   flowMode?: 'sync' | 'stagger'
    * }} [options]
    */
   function buildTopologyGraph(overview = {}, options = {}) {
+    const flowMode = options.flowMode === 'stagger' ? 'stagger' : 'sync';
     const fleet = overview?.fleet || {};
     const hero = overview?.hero || {};
     const tools = Array.isArray(overview?.tools) ? overview.tools : [];
@@ -2194,6 +2290,7 @@
               barBackground: String(ws?.barBackground || ''),
               clients: Array.isArray(ws?.clients) ? ws.clients : [],
               color: member.color || '#6ab4f0',
+              activeToolColors: /** @type {string[]} */ ([]),
               sessionTokens: 0,
               activeCount: 0,
               raw: ws || null
@@ -2201,10 +2298,17 @@
             candidateHubs.set(hubId, hub);
           }
           hub.sessionTokens += Math.max(0, n(member.totalTokens));
-          if (member.isActive && !activeHubs.has(hubId)) {
-            activeHubs.add(hubId);
-            hub.activeCount += 1;
-            if (!ws) hub.activeSessionCount += 1;
+          if (member.isActive) {
+            const client = canonicalClientKey(member.client);
+            if (client) {
+              const color = clientColor(client);
+              if (!hub.activeToolColors.includes(color)) hub.activeToolColors.push(color);
+            }
+            if (!activeHubs.has(hubId)) {
+              activeHubs.add(hubId);
+              hub.activeCount += 1;
+              if (!ws) hub.activeSessionCount += 1;
+            }
           }
           if (!ws) {
             hub.tokens += Math.max(0, n(member.totalTokens));
@@ -2233,6 +2337,7 @@
             barBackground: String(ws.barBackground || ''),
             clients: Array.isArray(ws.clients) ? ws.clients : [],
             color: '#6ab4f0',
+            activeToolColors: [],
             sessionTokens: 0,
             activeCount: 0,
             raw: ws
@@ -2248,6 +2353,7 @@
           || (b.sessionTokens - a.sessionTokens)
         );
       const hubs = sortedHubs.slice(0, maxHubs);
+      for (const hub of hubs) hub.activeToolColors.sort();
       const visibleHubSet = new Set(hubs.map((h) => h.id));
 
       /** @param {any} session */
@@ -2405,8 +2511,9 @@
       for (const edge of devToHub) edge.share = edge.tokens / maxD2H;
 
       const activeEdges = devToHub.filter((e) => e.active).length + hubToEnd.filter((e) => e.active).length;
-      return {
+      const graph = {
         mode: 'sessions',
+        flowMode,
         devices,
         hubs,
         endpoints,
@@ -2429,6 +2536,7 @@
           endpoints: Math.max(0, sessions.length - endpoints.length)
         }
       };
+      return flowMode === 'stagger' ? assignTopologyFlowPhases(graph) : graph;
     }
 
     // Fallback without workspace or session data: Devices -> Tools -> Models.
@@ -2520,8 +2628,9 @@
     }
 
     const activeEdges = devToHub.filter((e) => e.active).length;
-    return {
+    const graph = {
       mode: 'tools',
+      flowMode,
       devices,
       hubs,
       endpoints,
@@ -2544,6 +2653,7 @@
         endpoints: Math.max(0, models.length - endpoints.length)
       }
     };
+    return flowMode === 'stagger' ? assignTopologyFlowPhases(graph) : graph;
   }
 
   /** @param {any} exact @param {any} history */
@@ -2587,7 +2697,7 @@
    *   syncedPagesLoaded?: boolean,
    *   rateMode?: 'speed' | 'burn',
    *   sessionLabels?: any,
-   *   topology?: { maxDevices?: number, maxHubs?: number, maxEndpoints?: number },
+   *   topology?: { maxDevices?: number, maxHubs?: number, maxEndpoints?: number, flowMode?: 'sync' | 'stagger' },
    *   nowMs?: number
    * }} options
    */
@@ -2855,9 +2965,13 @@
       dailyLedger
     };
 
+    const flowMode = options.topology?.flowMode === 'stagger'
+      || (!options.topology?.flowMode && settings.dashboardFlowMode === 'stagger')
+      ? 'stagger'
+      : 'sync';
     return {
       ...baseOverview,
-      topology: buildTopologyGraph(baseOverview, options.topology)
+      topology: buildTopologyGraph(baseOverview, { ...options.topology, flowMode })
     };
   }
 
