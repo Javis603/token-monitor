@@ -1015,6 +1015,12 @@ function renderBreakdown(overview) {
         const valEl = rowEl.querySelector('.dash-bd-val');
         const pctEl = rowEl.querySelector('.dash-bd-pct');
         const w = row.relWidth.toFixed(4);
+        const color = displayColor(row.color);
+        for (const el of [fill, rowEl.querySelector('.dash-bd-swatch')]) {
+          if (!el || el.getAttribute('data-c') === color) continue;
+          el.setAttribute('data-c', color);
+          el.style.background = color;
+        }
         if (fill) {
           fill.setAttribute('data-w', w);
           fill.style.setProperty('--bar-scale', w);
@@ -2155,9 +2161,8 @@ function topologyLineage(graph, kind, id) {
       relatedNodes.add(`hub:${edge.to}`);
     }
     for (const edge of graph.hubToEnd || []) {
-      const ep = graph.endpoints?.find((item) => item.id === edge.to);
       const matchesDev = graph.mode === 'sessions'
-        ? (ep?.deviceId === id || (Array.isArray(ep?.memberDeviceIds) && ep.memberDeviceIds.includes(id)))
+        ? edge.deviceIds?.includes(id)
         : relatedNodes.has(`hub:${edge.from}`);
       if (matchesDev && relatedNodes.has(`hub:${edge.from}`)) {
         relatedEdges.add(edge.id);
@@ -2176,21 +2181,16 @@ function topologyLineage(graph, kind, id) {
       relatedNodes.add(`endpoint:${edge.to}`);
     }
   } else if (kind === 'endpoint') {
-    const ep = graph.endpoints?.find((item) => item.id === id);
-    const epHasMemberDevs = Array.isArray(ep?.memberDeviceIds) && ep.memberDeviceIds.length > 0;
-    const matchedHubs = new Set();
+    const matchedHubs = new Map();
     for (const edge of graph.hubToEnd || []) {
       if (edge.to !== id) continue;
       relatedEdges.add(edge.id);
       relatedNodes.add(`hub:${edge.from}`);
-      matchedHubs.add(edge.from);
+      matchedHubs.set(edge.from, edge.deviceIds);
     }
     for (const edge of graph.devToHub || []) {
       if (!matchedHubs.has(edge.to)) continue;
-      if (graph.mode !== 'sessions'
-        || (!ep?.deviceId && !epHasMemberDevs)
-        || ep?.deviceId === edge.from
-        || (epHasMemberDevs && ep.memberDeviceIds.includes(edge.from))) {
+      if (graph.mode !== 'sessions' || matchedHubs.get(edge.to)?.includes(edge.from)) {
         relatedEdges.add(edge.id);
         relatedNodes.add(`device:${edge.from}`);
       }
@@ -4364,8 +4364,8 @@ let silentStatsRequest = null;
 
 async function pullDashboardData({ manual = false } = {}) {
   const pullPushSeq = typeof statsPushSeq === 'number' ? statsPushSeq : null;
-  const pullSource = state.stats?.snapshot?.source ?? null;
-  const pullSourceGen = typeof statsSourceGeneration === 'number' ? statsSourceGeneration : 0;
+  let pullSource = state.stats?.snapshot?.source ?? null;
+  let pullSourceGen = typeof statsSourceGeneration === 'number' ? statsSourceGeneration : 0;
   let stats = null;
   let statsAccepted = false;
   let statsError;
@@ -4379,6 +4379,10 @@ async function pullDashboardData({ manual = false } = {}) {
       if (typeof applyIncomingStats === 'function') {
         if (statsSourceGeneration === pullSourceGen) {
           statsAccepted = applyIncomingStats(stats, { expectedPushSeq: pullPushSeq });
+          if (manual && statsAccepted) {
+            pullSource = state.stats?.snapshot?.source ?? null;
+            pullSourceGen = statsSourceGeneration;
+          }
         }
       } else {
         state.stats = stats;
@@ -4599,6 +4603,10 @@ window.tokenMonitor.onSettingsPush?.((next) => {
   }
   if (['syncWeekStartsOn', 'modelAliases', 'modelAliasGrouping', 'projectsEnabled'].some(key =>
     key in next && JSON.stringify(next[key]) !== JSON.stringify(previousSettings?.[key]))) {
+    if (state.periodKey === 'week' && state.drawer
+      && next.syncWeekStartsOn !== undefined && next.syncWeekStartsOn !== previousSettings?.syncWeekStartsOn) {
+      closeDrawer();
+    }
     syncedSessionPagesByPeriod.clear();
     syncedSessionPagesRequests.clear();
     if (latestBaseStats) state.stats = applyLocalSessionActivity(allTimeSessions ? allTimeSessions.attach(latestBaseStats) : latestBaseStats);

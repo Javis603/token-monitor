@@ -105,6 +105,22 @@ test('selectScopedHistory and buildScopedOverview isolate a selected machine wit
   assert.deepEqual(scoped.workspaces[0].devices, ['Workstation']);
   assert.equal(scoped.scopedHistory.daily.length, 1);
   assert.equal(scoped.scopedHistory.daily[0].tokens, 2000);
+  const historyOnly = model.buildFleetModel({ history });
+  assert.equal(historyOnly.machines.length, 2);
+  assert.equal(historyOnly.fleetTotals.onlineCount, 0);
+});
+
+test('workspace attribution follows each member of a cross-project session group', () => {
+  const first = { projectLabel: 'First', totalTokens: 120, sourceDevice: { deviceId: 'a', name: 'Mac' } };
+  const second = { projectLabel: 'Second', totalTokens: 60, sourceDevice: { deviceId: 'b', name: 'PC' } };
+  const rows = model.buildWorkspaceList({
+    statsMode: 'sync',
+    periodData: { sessions: { first, second } },
+    sessions: [{ groupRows: [first, second] }]
+  });
+  assert.deepEqual(rows.map(row => [row.name, row.deviceIds, row.devices]), [
+    ['First', ['a'], ['Mac']], ['Second', ['b'], ['PC']]
+  ]);
 });
 
 test('computeTokenAnatomy fails closed on unclassifiedTokens and computes cacheHitRate accurately', () => {
@@ -250,7 +266,9 @@ test('buildActivityInsights computes weekday rhythm, busiest day, and peak days 
   const sampleDaily = [
     // 2026-11-23 is Monday, 2026-11-24 is Tuesday, 2026-11-25 is Wednesday
     { date: '2026-11-16', tokens: 1000, cost: 1.0, perClient: { codex: { tokens: 1000, cost: 1.0 } } },
-    { date: '2026-11-23', tokens: 3000, cost: 3.0, perClient: { claude: { tokens: 3000, cost: 3.0 } } },
+    { date: '2026-11-23', tokens: 3000, cost: 3.0, perClient: {
+      claude: { tokens: 1000, cost: 3.0 }, codex: { tokens: 2000, cost: 0 }
+    } },
     { date: '2026-11-24', tokens: 5000, cost: 2.0, perClient: { antigravity: { tokens: 5000, cost: 2.0 } } },
     { date: '2026-11-25', tokens: 0, cost: 0 }
   ];
@@ -1278,6 +1296,21 @@ test('buildScopedOverview keeps mixed-device subagent group unowned and splits L
   assert.equal(pcEdge?.tokens, 900, 'PC-to-workspace edge should attribute only PC member tokens');
 
   assert.deepEqual(overview.workspaces[0]?.devices?.slice().sort(), ['Mac', 'PC']);
+
+  stats.periods.today.sessions['codex:c1'].projectLabel = 'Second';
+  const split = model.buildScopedOverview({ stats, periodKey: 'today', nowMs: now });
+  const expected = [['ws:second', 900, true], ['ws:token monitor', 100, false]];
+  assert.deepEqual(split.topology.devToHub.map(e => [e.to, e.tokens, e.active]).sort(), expected);
+  assert.deepEqual(split.topology.hubToEnd.map(e => [e.from, e.tokens, e.active]).sort(), expected);
+  assert.deepEqual(split.topology.hubToEnd.map(e => [e.from, e.deviceIds]).sort(), [
+    ['ws:second', ['dev-pc']], ['ws:token monitor', ['dev-mac']]
+  ]);
+  assert.deepEqual(split.workspaces.map(w => [w.name, w.activeSessionCount]).sort(), [
+    ['Second', 1], ['Token Monitor', 0]
+  ]);
+  assert.deepEqual(split.topology.hubs.map(w => [w.id, w.activeSessionCount]).sort(), [
+    ['ws:second', 1], ['ws:token monitor', 0]
+  ]);
 });
 
 test('buildScopedOverview ignores stale selectedDeviceId when fleet shrinks to one surviving device', () => {
@@ -1588,14 +1621,15 @@ test('device flow accents use confirmed active tools even when their endpoints a
     sessions: [
       { ...session('group', 'codex', 'mac'), groupRows: [
         session('codex', 'codex', 'mac'),
-        session('claude', 'claude', 'mac'),
-        session('gemini', 'gemini', 'pc')
+        session('claude', 'claude', 'mac')
       ] },
+      session('gemini', 'gemini', 'pc'),
       session('history', 'gemini', 'mac', false),
       { ...session('ambiguous', 'claude', 'pc'), sourceDevice: { ambiguous: true } }
     ]
   }, { maxEndpoints: 1 });
   const devices = Object.fromEntries(graph.devices.map(device => [device.id, device.activeToolColors]));
+  assert.deepEqual(graph.endpoints.map(endpoint => endpoint.id), ['group']);
   assert.equal(devices.mac.length, 2);
   assert.equal(devices.pc.length, 1);
   assert.notEqual(devices.mac[0], devices.mac[1]);

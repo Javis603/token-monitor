@@ -3819,6 +3819,29 @@ test('Dashboard manual refresh never reports success for History discarded durin
   }
 });
 
+test('Dashboard manual scan can accept History from the source it committed', async () => {
+  const js = read('src', 'electron', 'renderer', 'dashboard.js');
+  const previous = { snapshot: { id: 1, source: 1 } };
+  const incoming = { snapshot: { id: 1, source: 2 } };
+  const history = { daily: [{ tokens: 12 }] };
+  const context = {
+    statsSourceGeneration: 1, latestAcceptedSnapshot: previous.snapshot,
+    state: { stats: previous, history: null },
+    window: { tokenMonitor: { getStats: async () => incoming, getDashboardHistory: async () => history } },
+    applyIncomingStats(stats) {
+      context.statsSourceGeneration++;
+      context.latestAcceptedSnapshot = stats.snapshot;
+      context.state.stats = stats;
+      return true;
+    },
+    render() {}
+  };
+  vm.runInNewContext(js.slice(js.indexOf('function shouldAcceptPulledHistory('), js.indexOf('function applyIncomingStats('))
+    + js.slice(js.indexOf('let historyRequestSeq'), js.indexOf('async function manualRefresh(')), context);
+  assert.equal(await context.pullDashboardData({ manual: true }), true);
+  assert.equal(context.state.history, history);
+});
+
 test('Dashboard shortcuts share the settings queue and report a rejected write outside the popover', async () => {
   const js = read('src', 'electron', 'renderer', 'dashboard.js');
   const alert = () => {
@@ -3861,6 +3884,28 @@ test('Dashboard shortcuts share the settings queue and report a rejected write o
 });
 
 
+test('Live Flow highlights only the device paths leading to each workspace contribution', () => {
+  const lineage = dashboardFunction('topologyLineage', '\nfunction applyTopologyFocus(', {});
+  const graph = {
+    mode: 'sessions',
+    devToHub: [
+      { id: 'mac-a', from: 'mac', to: 'a' },
+      { id: 'pc-b', from: 'pc', to: 'b' },
+      { id: 'mac-b', from: 'mac', to: 'b' }
+    ],
+    hubToEnd: [
+      { id: 'a-group', from: 'a', to: 'group', deviceIds: ['mac'] },
+      { id: 'b-group', from: 'b', to: 'group', deviceIds: ['pc'] },
+      { id: 'b-other', from: 'b', to: 'other', deviceIds: ['mac'] }
+    ],
+    endpoints: [{ id: 'group', memberDeviceIds: ['mac', 'pc'] }, { id: 'other', deviceId: 'mac' }]
+  };
+  assert.deepEqual([...lineage(graph, 'endpoint', 'group').relatedEdges].sort(),
+    ['a-group', 'b-group', 'mac-a', 'pc-b']);
+  assert.deepEqual([...lineage(graph, 'device', 'mac').relatedEdges].sort(),
+    ['a-group', 'b-other', 'mac-a', 'mac-b']);
+});
+
 test('Work Panel refreshes renamed device labels and preserves its row for metrics-only pushes', () => {
   const tokens = { textContent: '' };
   const row = {
@@ -3886,11 +3931,14 @@ test('Work Panel refreshes renamed device labels and preserves its row for metri
   assert.equal(tokens.textContent, '20');
   assert.equal(rebuilds, 1);
   device.name = 'New name';
-  device.isLocal = true;
   update();
   assert.match(panel.innerHTML, /New name/);
-  assert.match(panel.innerHTML, /dashboard.devices.you/);
+  assert.doesNotMatch(panel.innerHTML, /dashboard.devices.you/);
   assert.equal(rebuilds, 2);
+  device.isLocal = true;
+  update();
+  assert.match(panel.innerHTML, /dashboard.devices.you/);
+  assert.equal(rebuilds, 3);
 });
 
 

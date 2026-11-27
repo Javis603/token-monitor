@@ -531,7 +531,16 @@ html.native-high-contrast .dash-stage {
 }
 
 .dash-activity-col[data-stage="flow"] .dash-heatmap-title-group {
-  visibility: hidden;
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+.dash-activity-col[data-stage="flow"] .dash-activity-controls {
+  margin-inline-start: auto;
 }
 
 .dash-activity-controls {
@@ -1746,7 +1755,6 @@ html.native-liquid-glass .dash-skyline-reset-btn {
 
 /* Exact .heat.lvl-0..4 fill parity with styles.css (tested by tests/electron/homeOverview.test.js) */
 .heat { stroke: none; stroke-width: 0; cursor: pointer; transition: fill 260ms ease, stroke 140ms ease; }
-.heat[role="button"]:focus-visible { stroke: var(--accent); stroke-width: 2px; outline: none; }
 .heat.lvl-0 { fill: rgba(var(--overlay-rgb), 0.03); }
 .heat.lvl-1 { fill: rgba(var(--chart-heat-1-rgb), 0.18); }
 .heat.lvl-2 { fill: rgba(var(--chart-heat-2-rgb), 0.45); }
@@ -1771,6 +1779,8 @@ html.native-liquid-glass .dash-skyline-reset-btn {
   stroke: rgba(var(--line-rgb), 0.9);
   stroke-width: 1;
 }
+
+.dash-heatmap-wrap .heat[role="button"]:focus-visible { stroke: var(--accent); stroke-width: 2px; outline: none; }
 
 /* 3D Isometric Skyline Layer */
 .iso-base-plate {
@@ -1920,7 +1930,7 @@ html.native-liquid-glass .dash-skyline-reset-btn {
   max-width: 100%;
 }
 
-.dash-card-v-text {
+.dash-card-v-text[data-token-number-animation="roll"] {
   display: inline-block;
 }
 

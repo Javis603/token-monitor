@@ -477,7 +477,7 @@
           || (!synced && !localId && ids.size === 1)
         ),
         stale: mergedDevice.stale === true,
-        online: mergedDevice.stale !== true && ids.size > 0,
+        online: deviceMap.has(deviceId) && mergedDevice.stale !== true,
         updatedAt: mergedDevice.updatedAt || '',
         tokens,
         cost,
@@ -1366,18 +1366,22 @@
     const sessionSource = Array.isArray(options.sessions) && options.sessions.length > 0
       ? options.sessions
       : Object.values(scopedPeriod?.sessions || {});
-    for (const s of sessionSource) {
-      const labelKey = String(s?.projectLabel || '').trim().toLowerCase();
-      if (!labelKey) continue;
+    /** @param {string} labelKey */
+    const metaFor = (labelKey) => {
       let meta = metaByProject.get(labelKey);
       if (!meta) {
         meta = { activeSessionCount: 0, devices: new Set(), deviceTokens: new Map(), activeDeviceIds: new Set() };
         metaByProject.set(labelKey, meta);
       }
-      const act = s?.activityState || sessionLive?.sessionActivityState?.(s, Date.now());
-      if (act === 'running' || act === 'waiting') meta.activeSessionCount += 1;
+      return meta;
+    };
+    for (const s of sessionSource) {
+      const activeWorkspaces = new Set();
       /** @param {any} entry */
       const recordMemberDevice = (entry) => {
+        const memberLabel = String(entry?.projectLabel || '').trim().toLowerCase();
+        if (!memberLabel) return;
+        const meta = metaFor(memberLabel);
         const confirmedDevId = resolveOwnedSessionDeviceId(entry, {
           isNativeLocal: entry?.isNativeLocal === true,
           localId,
@@ -1391,10 +1395,11 @@
         if (confirmedDevName) meta.devices.add(confirmedDevName);
         if (confirmedDevId) {
           meta.deviceTokens.set(confirmedDevId, (meta.deviceTokens.get(confirmedDevId) || 0) + Math.max(0, n(entry?.totalTokens)));
-          const entryAct = entry?.activityState || sessionLive?.sessionActivityState?.(entry, Date.now());
-          if (entry?.isActive === true || entryAct === 'running' || entryAct === 'waiting') {
-            meta.activeDeviceIds.add(confirmedDevId);
-          }
+        }
+        const entryAct = entry?.activityState || sessionLive?.sessionActivityState?.(entry, Date.now());
+        if (entry?.isActive === true || entryAct === 'running' || entryAct === 'waiting') {
+          activeWorkspaces.add(memberLabel);
+          if (confirmedDevId) meta.activeDeviceIds.add(confirmedDevId);
         }
       };
       if (Array.isArray(s?.groupRows) && s.groupRows.length > 0) {
@@ -1402,6 +1407,7 @@
       } else {
         recordMemberDevice(s);
       }
+      for (const workspace of activeWorkspaces) metaFor(workspace).activeSessionCount += 1;
     }
 
     const maxTokens = rows[0]?.value || 1;
@@ -1809,12 +1815,12 @@
         bucket.count += 1;
       }
 
-      let topClient = row?.topClient || null;
+      let topClient = metric === 'cost' ? null : row?.topClient || null;
       if (!topClient && row?.perClient && typeof row.perClient === 'object') {
         const rawMetricMap = Object.fromEntries(
           Object.entries(row.perClient).map(([k, v]) => {
             const entry = /** @type {any} */ (v);
-            const metricVal = metric === 'cost' && n(entry?.cost) > 0 ? n(entry.cost) : n(entry?.tokens);
+            const metricVal = metric === 'cost' ? n(entry?.cost) : n(entry?.tokens);
             return [k, metricVal];
           })
         );
@@ -2044,38 +2050,44 @@
       /** @type {Map<string, any>} */
       const candidateHubs = new Map();
       for (const s of sessions) {
-        const hubId = sessionHubKey(s);
-        if (!hubId) continue;
-        const label = String(s?.projectLabel || '').trim();
-        const ws = label ? wsLookup.get(label.toLowerCase()) : null;
-        let hub = candidateHubs.get(hubId);
-        if (!hub) {
-          hub = {
-            id: hubId,
-            name: ws?.name || label || '',
-            isGeneral: !label,
-            tokens: ws ? n(ws.tokens) : 0,
-            cost: ws ? n(ws.cost) : 0,
-            unpricedTokens: ws ? n(ws.unpricedTokens) : 0,
-            activeSessionCount: ws ? n(ws.activeSessionCount) : 0,
-            barBackground: String(ws?.barBackground || ''),
-            clients: Array.isArray(ws?.clients) ? ws.clients : [],
-            color: s.color || '#6ab4f0',
-            sessionTokens: 0,
-            activeCount: 0,
-            raw: ws || null
-          };
-          candidateHubs.set(hubId, hub);
-        }
-        hub.sessionTokens += Math.max(0, n(s.totalTokens));
-        if (s.isActive) hub.activeCount += 1;
-        if (!ws) {
-          hub.tokens += Math.max(0, n(s.totalTokens));
-          hub.cost += Math.max(0, n(s.costUsd));
-        }
-        if (!ws && s.isActive) hub.activeSessionCount += 1;
-        if (s.clientLabel && !hub.clients.includes(s.clientLabel)) {
-          hub.clients = [...hub.clients, s.clientLabel];
+        const activeHubs = new Set();
+        for (const member of s.groupRows?.length ? s.groupRows : [s]) {
+          const hubId = sessionHubKey(member);
+          if (!hubId) continue;
+          const label = String(member?.projectLabel || '').trim();
+          const ws = label ? wsLookup.get(label.toLowerCase()) : null;
+          let hub = candidateHubs.get(hubId);
+          if (!hub) {
+            hub = {
+              id: hubId,
+              name: ws?.name || label || '',
+              isGeneral: !label,
+              tokens: ws ? n(ws.tokens) : 0,
+              cost: ws ? n(ws.cost) : 0,
+              unpricedTokens: ws ? n(ws.unpricedTokens) : 0,
+              activeSessionCount: ws ? n(ws.activeSessionCount) : 0,
+              barBackground: String(ws?.barBackground || ''),
+              clients: Array.isArray(ws?.clients) ? ws.clients : [],
+              color: member.color || '#6ab4f0',
+              sessionTokens: 0,
+              activeCount: 0,
+              raw: ws || null
+            };
+            candidateHubs.set(hubId, hub);
+          }
+          hub.sessionTokens += Math.max(0, n(member.totalTokens));
+          if (member.isActive && !activeHubs.has(hubId)) {
+            activeHubs.add(hubId);
+            hub.activeCount += 1;
+            if (!ws) hub.activeSessionCount += 1;
+          }
+          if (!ws) {
+            hub.tokens += Math.max(0, n(member.totalTokens));
+            hub.cost += Math.max(0, n(member.costUsd));
+          }
+          if (member.clientLabel && !hub.clients.includes(member.clientLabel)) {
+            hub.clients = [...hub.clients, member.clientLabel];
+          }
         }
       }
 
@@ -2113,11 +2125,10 @@
       const hubs = sortedHubs.slice(0, maxHubs);
       const visibleHubSet = new Set(hubs.map((h) => h.id));
 
+      /** @param {any} session */
+      const memberHubKeys = (session) => (session.groupRows?.length ? session.groupRows : [session]).map(sessionHubKey);
       const endpoints = sessions
-        .filter((s) => {
-          const hubId = sessionHubKey(s);
-          return !hubId || visibleHubSet.has(hubId);
-        })
+        .filter((s) => memberHubKeys(s).some(/** @param {string} key */ key => !key || visibleHubSet.has(key)))
         .slice(0, maxEndpoints)
         .map((s) => {
           const epDeviceId = resolveSessionDeviceId(s);
@@ -2126,7 +2137,7 @@
             : (epDeviceId ? [epDeviceId] : []);
           return {
             id: String(s.key),
-            hubId: sessionHubKey(s),
+            hubId: memberHubKeys(s).find(/** @param {string} key */ key => visibleHubSet.has(key)) || '',
             deviceId: epDeviceId,
             memberDeviceIds,
             title: String(s.title || s.sessionId || s.key),
@@ -2194,27 +2205,41 @@
         }
       };
 
+      const hubToEnd = [];
       for (const ep of endpoints) {
-        if (!ep.hubId) continue;
-        if (ep.deviceId) {
-          addDevToHubEdge(ep.deviceId, ep.hubId, ep.totalTokens, ep.color, ep.isActive, 1);
-        } else if (Array.isArray(ep.raw?.groupRows) && ep.raw.groupRows.length > 0) {
-          /** @type {Set<string>} */
-          const seenMemberDevs = new Set();
-          for (const member of ep.raw.groupRows) {
-            const memberDevId = resolveSessionDeviceId(member);
-            if (!memberDevId) continue;
-            const countIncrement = seenMemberDevs.has(memberDevId) ? 0 : 1;
-            seenMemberDevs.add(memberDevId);
-            addDevToHubEdge(
-              memberDevId,
-              ep.hubId,
-              Math.max(0, n(member.totalTokens)),
-              String(member.color || ep.color || '#6ab4f0'),
-              Boolean(member.isActive),
-              countIncrement
-            );
+        const seenDeviceEdges = new Set();
+        const endpointEdges = new Map();
+        for (const member of ep.raw.groupRows?.length ? ep.raw.groupRows : [ep.raw]) {
+          const hubId = sessionHubKey(member);
+          if (!visibleHubSet.has(hubId)) continue;
+          const devId = resolveSessionDeviceId(member);
+          const tokens = Math.max(0, n(member.totalTokens));
+          const color = String(member.color || ep.color);
+          if (devId) {
+            const key = `${devId}->${hubId}`;
+            addDevToHubEdge(devId, hubId, tokens, color, Boolean(member.isActive), seenDeviceEdges.has(key) ? 0 : 1);
+            seenDeviceEdges.add(key);
           }
+          let edge = endpointEdges.get(hubId);
+          if (!edge) {
+            edge = {
+              id: `h2e:${hubId}->${ep.id}`, from: hubId, to: ep.id,
+              tokens: 0, share: 0, active: false, state: 'idle', liveRate: 0, color: ep.color,
+              deviceIds: []
+            };
+            endpointEdges.set(hubId, edge);
+          }
+          edge.tokens += tokens;
+          if (devId && !edge.deviceIds.includes(devId)) edge.deviceIds.push(devId);
+          if (member.isActive) {
+            edge.active = true;
+            edge.state = member.activityState || ep.activityState;
+            edge.liveRate = Math.max(1, edge.liveRate, n(deviceById.get(devId)?.liveTokPerSec));
+          }
+        }
+        for (const edge of endpointEdges.values()) {
+          edge.share = edge.tokens / totalEndTokens;
+          hubToEnd.push(edge);
         }
       }
 
@@ -2247,26 +2272,6 @@
       const devToHub = Array.from(devToHubMap.values());
       const maxD2H = devToHub.reduce((mx, e) => Math.max(mx, e.tokens), 0) || 1;
       for (const edge of devToHub) edge.share = edge.tokens / maxD2H;
-
-      const hubToEnd = endpoints.filter((ep) => ep.hubId).map((ep) => {
-        const devIds = ep.deviceId ? [ep.deviceId] : (ep.memberDeviceIds || []);
-        const maxLiveRate = devIds.reduce(
-          /** @param {number} mx @param {string} dId */
-          (mx, dId) => Math.max(mx, n(deviceById.get(dId)?.liveTokPerSec)),
-          0
-        );
-        return {
-          id: `h2e:${ep.hubId}->${ep.id}`,
-          from: ep.hubId,
-          to: ep.id,
-          tokens: ep.totalTokens,
-          share: ep.totalTokens / totalEndTokens,
-          active: ep.isActive,
-          state: ep.activityState,
-          liveRate: ep.isActive ? Math.max(1, maxLiveRate) : 0,
-          color: ep.color
-        };
-      });
 
       const activeEdges = devToHub.filter((e) => e.active).length + hubToEnd.filter((e) => e.active).length;
       return {
