@@ -3,7 +3,7 @@
 const assert = require('node:assert/strict');
 const test = require('node:test');
 
-const skyline = require('../../src/electron/renderer/activitySkyline3d');
+const skyline = require('../../src/electron/renderer/dashboard/activitySkyline3d');
 
 test('clampCamera normalizes yaw into [-pi, pi] and clamps pitch, zoom, and pan', () => {
   const clamped = skyline.clampCamera({ yaw: Math.PI * 2.5, pitch: 9, zoom: 0.1, panX: 999, panY: -999 });

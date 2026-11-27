@@ -12,7 +12,7 @@ const read = (...p) => fs.readFileSync(path.join(rootDir, ...p), 'utf8');
 const { usageConfigFromSettings } = require('../../src/electron/runtimeConfig');
 
 function dashboardFunction(name, endMarker, context) {
-  const source = read('src', 'electron', 'renderer', 'dashboard.js');
+  const source = read('src', 'electron', 'renderer', 'dashboard', 'dashboard.js');
   const asyncStart = source.indexOf(`async function ${name}(`);
   const start = asyncStart >= 0 ? asyncStart : source.indexOf(`function ${name}(`);
   const body = source.slice(start, source.indexOf(endMarker));
@@ -43,13 +43,13 @@ function dashboardWindowFixture(platform = 'win32', settings = {}) {
     focus() { this.calls.push('focus'); }
     setBackgroundColor(color) { this.calls.push(['background', color]); }
     restore() { this.minimized = false; this.calls.push('restore'); }
-    loadFile() { this.calls.push('load'); return Promise.resolve(); }
+    loadFile(file) { this.loadedFile = file; this.calls.push('load'); return Promise.resolve(); }
     destroy() { this.destroyed = true; this.emit('closed'); }
     static fromWebContents(sender) { return windows.find(win => win.webContents === sender); }
   }
   const context = vm.createContext({
     dashboardWindow: null, dashboardWindowReady: false, mainWindow: null, lastRendererStatsFingerprint: null,
-    BrowserWindow: Window, process: { platform }, path, __dirname: rootDir,
+    BrowserWindow: Window, process: { platform }, path, __dirname: path.join(rootDir, 'src', 'electron'),
     appWindowIcon: () => ({}), applyWindowsChrome() {}, suppressLinuxSystemContextMenu() {},
     syncWindowsBackdrop(win, { enabled, mode = 'acrylic' }) {
       if (platform === 'win32' && win) backdrops.set(win, enabled ? mode : 'transparent');
@@ -102,6 +102,8 @@ test('Windows Dashboard uses the widget backdrop on open and when appearance cha
 test('macOS Dashboard restores its transparent canvas before reveal and after reload', () => {
   const f = dashboardWindowFixture('darwin');
   const win = f.open();
+  assert.equal(win.loadedFile, path.join(rootDir, 'src', 'electron', 'renderer', 'dashboard', 'dashboard.html'));
+  assert.ok(fs.existsSync(win.loadedFile));
   f.ready({ webContents: {} });
   assert.deepEqual(win.calls, ['load']);
   f.ready(win);
@@ -250,18 +252,18 @@ test('headless agent leaves Claude Web credentials to the widget transport', () 
 });
 
 test('dashboard.html wires the shared modules and the two panels', () => {
-  const html = read('src', 'electron', 'renderer', 'dashboard.html');
-  assert.match(html, /<link rel="stylesheet" href="styles\.css" \/>/);
+  const html = read('src', 'electron', 'renderer', 'dashboard', 'dashboard.html');
+  assert.match(html, /<link rel="stylesheet" href="\.\.\/styles\.css" \/>/);
   assert.match(html, /<link rel="stylesheet" href="dashboard\.css" \/>/);
-  assert.match(html, /<script src="usageCharts\.js"><\/script>/);
-  assert.match(html, /<script src="i18n\.js"><\/script>/);
-  assert.match(html, /<script src="\.\.\/\.\.\/shared\/currency\.js"><\/script>/);
-  assert.match(html, /<script src="\.\.\/\.\.\/shared\/compactMoney\.js"><\/script>/);
+  assert.match(html, /<script src="\.\.\/usageCharts\.js"><\/script>/);
+  assert.match(html, /<script src="\.\.\/i18n\.js"><\/script>/);
+  assert.match(html, /<script src="\.\.\/\.\.\/\.\.\/shared\/currency\.js"><\/script>/);
+  assert.match(html, /<script src="\.\.\/\.\.\/\.\.\/shared\/compactMoney\.js"><\/script>/);
   assert.match(html, /<script src="dashboard\.js"><\/script>/);
   const scriptOrder = [
-    '<script src="../../shared/compactTokens.js"></script>',
-    '<script src="../../shared/currency.js"></script>',
-    '<script src="../../shared/compactMoney.js"></script>',
+    '<script src="../../../shared/compactTokens.js"></script>',
+    '<script src="../../../shared/currency.js"></script>',
+    '<script src="../../../shared/compactMoney.js"></script>',
     '<script src="dashboard.js"></script>'
   ].map((script) => html.indexOf(script));
   assert.ok(scriptOrder.every((index) => index >= 0), 'dashboard should include every compact money dependency');
@@ -280,7 +282,7 @@ test('dashboard.html wires the shared modules and the two panels', () => {
 });
 
 test('dashboard.css declares chart classes and a flat theme override', () => {
-  const css = read('src', 'electron', 'renderer', 'dashboard.css');
+  const css = read('src', 'electron', 'renderer', 'dashboard', 'dashboard.css');
   assert.match(css, /\.candle-up/);
   assert.match(css, /\.candle-down/);
   assert.match(css, /\.heat\.lvl-4/);
@@ -291,10 +293,10 @@ test('dashboard.css declares chart classes and a flat theme override', () => {
 });
 
 test('dashboard.js fetches history over IPC and renders both tabs', () => {
-  const html = read('src', 'electron', 'renderer', 'dashboard.html');
-  const css = read('src', 'electron', 'renderer', 'dashboard.css');
-  const js = read('src', 'electron', 'renderer', 'dashboard.js');
-  const modelJs = read('src', 'electron', 'renderer', 'dashboardModel.js');
+  const html = read('src', 'electron', 'renderer', 'dashboard', 'dashboard.html');
+  const css = read('src', 'electron', 'renderer', 'dashboard', 'dashboard.css');
+  const js = read('src', 'electron', 'renderer', 'dashboard', 'dashboard.js');
+  const modelJs = read('src', 'electron', 'renderer', 'dashboard', 'dashboardModel.js');
   const contentBlurJs = read('src', 'electron', 'renderer', 'contentBlur.js');
   assert.match(js, /window\.tokenMonitor\.getDashboardHistory\(\{\s*includeDevices:\s*true\s*\}\)/);
   assert.match(js, /charts\.barsChartSvg/);
@@ -306,15 +308,15 @@ test('dashboard.js fetches history over IPC and renders both tabs', () => {
   assert.match(js, /dashboard\.ready\(\)/);
   assert.match(js, /onDashboardHistoryChanged\?\.\(handleDashboardHistoryChanged\)/);
   assert.match(js, /onStatsPush\?\.\(/);
-  assert.match(html, /<script src="rowIconMasks\.js"><\/script>/);
-  assert.match(html, /<script src="limits\/homeMotion\.js"><\/script>/);
-  assert.match(html, /<script src="\.\.\/tokenNumberAnimation\.js"><\/script>/);
-  assert.match(html, /<script src="contentBlur\.js"><\/script>/);
-  assert.match(html, /<script src="accountIdentity\.js"><\/script>/);
+  assert.match(html, /<script src="\.\.\/rowIconMasks\.js"><\/script>/);
+  assert.match(html, /<script src="\.\.\/limits\/homeMotion\.js"><\/script>/);
+  assert.match(html, /<script src="\.\.\/\.\.\/tokenNumberAnimation\.js"><\/script>/);
+  assert.match(html, /<script src="\.\.\/contentBlur\.js"><\/script>/);
+  assert.match(html, /<script src="\.\.\/accountIdentity\.js"><\/script>/);
   assert.match(html, /<script src="dashboardModel\.js"><\/script>/);
   assert.match(html, /<script src="activitySkyline3d\.js"><\/script>/);
   assert.match(js, /TokenMonitorContentBlur/);
-  const skylineJs = read('src', 'electron', 'renderer', 'activitySkyline3d.js');
+  const skylineJs = read('src', 'electron', 'renderer', 'dashboard', 'activitySkyline3d.js');
   assert.match(html, /id="dashDeviceMenu"[^>]*popover="manual"/);
   assert.match(html, /id="dashDrawer"[^>]*popover="manual"/);
   assert.match(html, /id="dashTooltip"[^>]*popover="manual"/);
@@ -392,7 +394,7 @@ test('Dashboard Trends renders the selected calendar range and labels unrecorded
   // the range and removed those days from the chart. The Trends tab must build
   // the calendar window instead, keep the slots hoverable, and say "no record"
   // rather than claiming a measured zero.
-  const js = read('src', 'electron', 'renderer', 'dashboard.js');
+  const js = read('src', 'electron', 'renderer', 'dashboard', 'dashboard.js');
   const trends = /function renderTrends\(\) \{([\s\S]*?)\n\}\n\nfunction renderBreakdown/.exec(js);
   assert.ok(trends, 'renderTrends exists');
   assert.match(trends[1], /charts\.dailyWindow\(state\.history\?\.daily \|\| \[\],\s*\{\s*days: state\.range === 'all' \? 0 : Number\(state\.range\)\s*\}\)/);
@@ -454,9 +456,9 @@ test('Dashboard 3D heatmap passes only recorded days to the tooltip', () => {
 });
 
 test('dashboard reuses the shared scheduler to defer hidden render work', () => {
-  const html = read('src', 'electron', 'renderer', 'dashboard.html');
-  const js = read('src', 'electron', 'renderer', 'dashboard.js');
-  const schedulerScript = html.indexOf('<script src="statsRenderScheduler.js"></script>');
+  const html = read('src', 'electron', 'renderer', 'dashboard', 'dashboard.html');
+  const js = read('src', 'electron', 'renderer', 'dashboard', 'dashboard.js');
+  const schedulerScript = html.indexOf('<script src="../statsRenderScheduler.js"></script>');
   const dashboardScript = html.indexOf('<script src="dashboard.js"></script>');
 
   assert.ok(schedulerScript >= 0 && schedulerScript < dashboardScript);
@@ -575,7 +577,7 @@ test('an in-flight Dashboard refresh preserves a hidden invalidation for restore
     get refreshQueued() { return refreshQueued; },
     set refreshQueued(value) { refreshQueued = value; }
   };
-  const js = read('src', 'electron', 'renderer', 'dashboard.js');
+  const js = read('src', 'electron', 'renderer', 'dashboard', 'dashboard.js');
   vm.runInNewContext(js.slice(js.indexOf('let historyRequestSeq'), js.indexOf('async function manualRefresh(')), context);
   const refresh = dashboardFunction('refresh', '\nasync function boot(', context);
 
@@ -588,8 +590,8 @@ test('an in-flight Dashboard refresh preserves a hidden invalidation for restore
 
 test('heatmap metric preserves the legacy cost default and normalizes settings', () => {
   const main = read('src', 'electron', 'main.js');
-  const js = read('src', 'electron', 'renderer', 'dashboard.js');
-  const html = read('src', 'electron', 'renderer', 'dashboard.html');
+  const js = read('src', 'electron', 'renderer', 'dashboard', 'dashboard.js');
+  const html = read('src', 'electron', 'renderer', 'dashboard', 'dashboard.html');
   assert.match(main, /heatmapMetric:\s*'cost'/);
   assert.match(main, /merged\.heatmapMetric = normalizeHeatmapMetric\(merged\.heatmapMetric\)/);
   assert.match(main, /normalizedPatch\.heatmapMetric = normalizeHeatmapMetric\(patch\.heatmapMetric, settings\.heatmapMetric\)/);
@@ -616,8 +618,8 @@ test('Home configures heatmap color in Settings while keeping token tooltips', (
 });
 
 test('dashboard motion is data-scoped and respects reduced-motion preferences', () => {
-  const js = read('src', 'electron', 'renderer', 'dashboard.js');
-  const css = read('src', 'electron', 'renderer', 'dashboard.css');
+  const js = read('src', 'electron', 'renderer', 'dashboard', 'dashboard.js');
+  const css = read('src', 'electron', 'renderer', 'dashboard', 'dashboard.css');
   assert.match(js, /prefers-reduced-motion: reduce/);
   assert.match(js, /function animateChartGeometry/);
   assert.match(js, /function animateCandles/);
@@ -645,7 +647,7 @@ test('dashboard repains on a rate-only settings push, not just a currency-code c
   // currency code identical, so the render() inside the code-change branch
   // never fires. configureRates mutates module state but the already-rendered
   // costs would stay stale unless render() also runs on the rate path.
-  const js = read('src', 'electron', 'renderer', 'dashboard.js');
+  const js = read('src', 'electron', 'renderer', 'dashboard', 'dashboard.js');
   const handler = /window\.tokenMonitor\.onSettingsPush\?\.\(\(next\)\s*=>\s*\{([\s\S]*?)\n\}\);/.exec(js);
   assert.ok(handler, 'dashboard should subscribe to onSettingsPush for rate updates');
   assert.match(handler[1], /configureRates\(next\.currencyRatesEffective\)/);
@@ -655,11 +657,11 @@ test('dashboard repains on a rate-only settings push, not just a currency-code c
 });
 
 test('dashboard shares localized token units and repaints when the setting or language changes', () => {
-  const js = read('src', 'electron', 'renderer', 'dashboard.js');
-  const html = read('src', 'electron', 'renderer', 'dashboard.html');
+  const js = read('src', 'electron', 'renderer', 'dashboard', 'dashboard.js');
+  const html = read('src', 'electron', 'renderer', 'dashboard', 'dashboard.html');
   const handler = /window\.tokenMonitor\.onSettingsPush\?\.\(\(next\)\s*=>\s*\{([\s\S]*?)\n\}\);/.exec(js);
   assert.ok(handler, 'dashboard should subscribe to settings pushes');
-  assert.match(html, /<script src="\.\.\/\.\.\/shared\/compactTokens\.js"><\/script>/);
+  assert.match(html, /<script src="\.\.\/\.\.\/\.\.\/shared\/compactTokens\.js"><\/script>/);
   assert.match(js, /const compactMoneyApi = window\.TokenMonitorCompactMoney/);
   assert.match(js, /const compactTokenApi = window\.TokenMonitorCompactTokens/);
   assert.match(js, /compactTokenApi\.formatCompactTokens\(value, effectiveCompactTokenUnits\(\), state\.locale\)/);
@@ -673,7 +675,7 @@ test('dashboard shares localized token units and repaints when the setting or la
 test('dashboard repaints when a settings push changes the motion preference', () => {
   // applyAppearance applies reduceMotion itself, so the change check must
   // compare against the value captured before it runs or it never fires.
-  const js = read('src', 'electron', 'renderer', 'dashboard.js');
+  const js = read('src', 'electron', 'renderer', 'dashboard', 'dashboard.js');
   const handler = /window\.tokenMonitor\.onSettingsPush\?\.\(\(next\)\s*=>\s*\{([\s\S]*?)\n\}\);/.exec(js);
   assert.ok(handler, 'dashboard should subscribe to settings pushes');
   assert.match(handler[1], /const previousReduceMotion = state\.reduceMotion;\s*(?:\/\/[^\n]*\n\s*)*applyAppearance\(state\.settings\)/);
@@ -758,8 +760,8 @@ test('main forwards live stats:push snapshots to a ready visible dashboard windo
 });
 
 test('dashboard tooltips stay anchored above pointer and survive live renderNow refreshes', () => {
-  const js = read('src', 'electron', 'renderer', 'dashboard.js');
-  const css = read('src', 'electron', 'renderer', 'dashboard.css');
+  const js = read('src', 'electron', 'renderer', 'dashboard', 'dashboard.js');
+  const css = read('src', 'electron', 'renderer', 'dashboard', 'dashboard.css');
   const renderNowBody = /function renderNow\(\)\s*\{([\s\S]*?)\n\}\n\nconst dashboardRenderScheduler/.exec(js);
   assert.ok(renderNowBody, 'renderNow exists');
   assert.doesNotMatch(renderNowBody[1], /\bhideTooltip\(\)/, 'live refreshes must not unconditionally dismiss active hover tooltips');
@@ -797,9 +799,9 @@ test('widget bottom-left viewSwitcherMenu offers Usage Dashboard launcher', () =
 });
 
 test('dashboard refresh button reuses native stationary spinner markup and invokes full manual rescan', async () => {
-  const html = read('src', 'electron', 'renderer', 'dashboard.html');
-  const css = read('src', 'electron', 'renderer', 'dashboard.css');
-  const js = read('src', 'electron', 'renderer', 'dashboard.js');
+  const html = read('src', 'electron', 'renderer', 'dashboard', 'dashboard.html');
+  const css = read('src', 'electron', 'renderer', 'dashboard', 'dashboard.css');
+  const js = read('src', 'electron', 'renderer', 'dashboard', 'dashboard.js');
 
   assert.match(html, /id="refreshBtn"[^>]*class="icon-button refresh-button"[^>]*><span class="refresh-button-icon"[^>]*><\/span><span class="refresh-button-spinner"/);
   assert.doesNotMatch(css, /dashRefreshSpin|\.icon-button\.is-refreshing/);
@@ -869,9 +871,9 @@ test('dashboard refresh button reuses native stationary spinner markup and invok
 });
 
 test('dashboard hero removes redundant streak, aligns borderless active status, and stabilizes switching controls', () => {
-  const html = read('src', 'electron', 'renderer', 'dashboard.html');
-  const css = read('src', 'electron', 'renderer', 'dashboard.css');
-  const js = read('src', 'electron', 'renderer', 'dashboard.js');
+  const html = read('src', 'electron', 'renderer', 'dashboard', 'dashboard.html');
+  const css = read('src', 'electron', 'renderer', 'dashboard', 'dashboard.css');
+  const js = read('src', 'electron', 'renderer', 'dashboard', 'dashboard.js');
 
   assert.doesNotMatch(html, /dashHeroStreak|dashboard\.hero\.streak/);
   assert.doesNotMatch(js, /heroStreak|hero\.streak/);
@@ -922,7 +924,7 @@ test('dashboard hero removes redundant streak, aligns borderless active status, 
 });
 
 test('dashboard quota motion keys contain no NUL bytes and stay stable across updates', () => {
-  const js = read('src', 'electron', 'renderer', 'dashboard.js');
+  const js = read('src', 'electron', 'renderer', 'dashboard', 'dashboard.js');
   const context = {};
   vm.runInNewContext(js.slice(js.indexOf('function quotaMotionKey'), js.indexOf('\nfunction renderQuotas')), context);
   const key = context.quotaMotionKey({ key: 'codex:a', name: 'Personal' }, { label: 'Session', windowKey: 'primary' });
@@ -974,9 +976,9 @@ test('an explicitly ambiguous Dashboard row cannot adopt local transcript owners
 });
 
 test('dashboard handles session-activity pushes, rejects stale snapshots, and includes required scripts and focus accessibility', async () => {
-  const html = read('src', 'electron', 'renderer', 'dashboard.html');
-  const css = read('src', 'electron', 'renderer', 'dashboard.css');
-  const js = read('src', 'electron', 'renderer', 'dashboard.js');
+  const html = read('src', 'electron', 'renderer', 'dashboard', 'dashboard.html');
+  const css = read('src', 'electron', 'renderer', 'dashboard', 'dashboard.css');
+  const js = read('src', 'electron', 'renderer', 'dashboard', 'dashboard.js');
 
   for (const script of [
     'limits/windowLabels.js',
@@ -1126,7 +1128,7 @@ test('dashboard handles session-activity pushes, rejects stale snapshots, and in
 });
 
 test('remote sessions never read local transcripts, delayed Hub A history is fenced, and open drawer title redacts immediately', async () => {
-  const js = read('src', 'electron', 'renderer', 'dashboard.js');
+  const js = read('src', 'electron', 'renderer', 'dashboard', 'dashboard.js');
   const sessionTitleDisplay = require('../../src/electron/sessionTitleDisplay');
 
   // 1. Remote session guard + openDrawer + title redaction on settings push + Hub A/B history race
@@ -1246,7 +1248,7 @@ test('remote sessions never read local transcripts, delayed Hub A history is fen
 });
 
 test('renderQuotas renders expired plan status without meter, hover refresh handles quotes, rate expiry clears idle topology rates, and ledger matches chart range and focus', async () => {
-  const js = read('src', 'electron', 'renderer', 'dashboard.js');
+  const js = read('src', 'electron', 'renderer', 'dashboard', 'dashboard.js');
   const charts = require('../../src/electron/renderer/usageCharts');
   const tokenRate = require('../../src/electron/renderer/tokenRatePresentation');
 
@@ -1409,8 +1411,8 @@ test('renderQuotas renders expired plan status without meter, hover refresh hand
 });
 
 test('dashboard guards synced ambiguous transcripts, native activity redaction, source-switch refresh, and aggregate rate fallback', async () => {
-  const js = read('src', 'electron', 'renderer', 'dashboard.js');
-  const dashboardModel = require('../../src/electron/renderer/dashboardModel');
+  const js = read('src', 'electron', 'renderer', 'dashboard', 'dashboard.js');
+  const dashboardModel = require('../../src/electron/renderer/dashboard/dashboardModel');
   const { projectSessionDeviceStats } = require('../../src/electron/sessionDeviceSources');
   const sessionTitleDisplay = require('../../src/electron/sessionTitleDisplay');
   const sessionActivityProjection = require('../../src/shared/sessionActivityProjection');
@@ -1848,8 +1850,8 @@ test('dashboard guards synced ambiguous transcripts, native activity redaction, 
 });
 
 test('dashboard binds deferred drawer ownership to supplying period and invalidates pending drawer across source changes', async () => {
-  const js = read('src', 'electron', 'renderer', 'dashboard.js');
-  const dashboardModel = require('../../src/electron/renderer/dashboardModel');
+  const js = read('src', 'electron', 'renderer', 'dashboard', 'dashboard.js');
+  const dashboardModel = require('../../src/electron/renderer/dashboard/dashboardModel');
   const { resolveSyncedSessionPeriod } = require('../../src/electron/syncedFixedPeriod');
 
   const detailCalls = [];
@@ -2650,8 +2652,8 @@ test('dashboard binds deferred drawer ownership to supplying period and invalida
 });
 
 test('dashboard groups subagent hierarchies and review groups in Work Panel, Topology, and interactive group drawer', () => {
-  const js = read('src', 'electron', 'renderer', 'dashboard.js');
-  const dashboardModel = require('../../src/electron/renderer/dashboardModel');
+  const js = read('src', 'electron', 'renderer', 'dashboard', 'dashboard.js');
+  const dashboardModel = require('../../src/electron/renderer/dashboard/dashboardModel');
   const charts = require('../../src/electron/renderer/usageCharts');
   const nowIso = new Date().toISOString();
 
@@ -2876,8 +2878,8 @@ test('dashboard groups subagent hierarchies and review groups in Work Panel, Top
 });
 
 test('dashboard Trends and device selector recover to All Devices when selected device disappears from fleet', () => {
-  const js = read('src', 'electron', 'renderer', 'dashboard.js');
-  const dashboardModel = require('../../src/electron/renderer/dashboardModel');
+  const js = read('src', 'electron', 'renderer', 'dashboard', 'dashboard.js');
+  const dashboardModel = require('../../src/electron/renderer/dashboard/dashboardModel');
   const charts = require('../../src/electron/renderer/usageCharts');
 
   const today = new Date().toISOString().slice(0, 10);
@@ -3077,8 +3079,8 @@ test('dashboard Trends and device selector recover to All Devices when selected 
 });
 
 test('dashboard open group drawer revalidates member ownership on click and preserves redacted Back title across delayed detail responses', async () => {
-  const js = read('src', 'electron', 'renderer', 'dashboard.js');
-  const dashboardModel = require('../../src/electron/renderer/dashboardModel');
+  const js = read('src', 'electron', 'renderer', 'dashboard', 'dashboard.js');
+  const dashboardModel = require('../../src/electron/renderer/dashboard/dashboardModel');
   const { projectSessionDeviceStats } = require('../../src/electron/sessionDeviceSources');
   const nowIso = new Date().toISOString();
 
@@ -3389,8 +3391,8 @@ test('dashboard open group drawer revalidates member ownership on click and pres
 });
 
 test('dashboard resolves synced fixed periods (yesterday, week, last7, last30) with sessions, workspaces, and Live Flow in aggregate and device scope', async () => {
-  const js = read('src', 'electron', 'renderer', 'dashboard.js');
-  const dashboardModel = require('../../src/electron/renderer/dashboardModel');
+  const js = read('src', 'electron', 'renderer', 'dashboard', 'dashboard.js');
+  const dashboardModel = require('../../src/electron/renderer/dashboard/dashboardModel');
   const { resolveSyncedFixedPeriod } = require('../../src/electron/syncedFixedPeriod');
   const { normalizePeriod } = require('../../src/shared/usage');
   const now = new Date(2026, 10, 25, 12);
@@ -3637,7 +3639,7 @@ test('dashboard resolves synced fixed periods (yesterday, week, last7, last30) w
 });
 
 test('renderWorkPanel updates running group subagent badge in place and rebuilds on 0-to-1 transition', () => {
-  const js = read('src', 'electron', 'renderer', 'dashboard.js');
+  const js = read('src', 'electron', 'renderer', 'dashboard', 'dashboard.js');
 
   const makeBadgeRow = ({ withInitialBadge = true } = {}) => {
     const badgeEl = withInitialBadge ? { textContent: '1 subagents' } : null;
@@ -3736,7 +3738,7 @@ test('renderWorkPanel updates running group subagent badge in place and rebuilds
 
 
 test('Dashboard applies Stats without History and fences older successful History responses', async () => {
-  const js = read('src', 'electron', 'renderer', 'dashboard.js');
+  const js = read('src', 'electron', 'renderer', 'dashboard', 'dashboard.js');
   const reads = [];
   let snapshot = 0;
   const context = {
@@ -3843,7 +3845,7 @@ test('Dashboard queues a rollover refresh after pre-boundary Stats and History r
       return reads === 1 ? new Promise(resolve => { finishHistory = resolve; }) : Promise.resolve();
     }
   };
-  const js = read('src', 'electron', 'renderer', 'dashboard.js');
+  const js = read('src', 'electron', 'renderer', 'dashboard', 'dashboard.js');
   vm.runInNewContext(js.slice(js.indexOf('let refreshRunning = false;'), js.indexOf('\nasync function boot()')), context);
   const oldRefresh = context.refresh();
   const boundaryRefresh = context.refreshAfterAccountingRollover();
@@ -3858,7 +3860,7 @@ test('Dashboard queues a rollover refresh after pre-boundary Stats and History r
 
 
 test('Dashboard can reveal History while a silent Stats request is pending', async () => {
-  const js = read('src', 'electron', 'renderer', 'dashboard.js');
+  const js = read('src', 'electron', 'renderer', 'dashboard', 'dashboard.js');
   const pendingStats = [];
   const context = {
     statsSourceGeneration: 1,
@@ -3893,7 +3895,7 @@ test('Dashboard can reveal History while a silent Stats request is pending', asy
 
 
 test('Dashboard manual refresh never reports success for History discarded during a source change', async () => {
-  const js = read('src', 'electron', 'renderer', 'dashboard.js');
+  const js = read('src', 'electron', 'renderer', 'dashboard', 'dashboard.js');
   for (const stage of ['Stats', 'History']) {
     let finish;
     const held = new Promise(resolve => { finish = resolve; });
@@ -3925,7 +3927,7 @@ test('Dashboard manual refresh never reports success for History discarded durin
 });
 
 test('Dashboard manual scan can accept History from the source it committed', async () => {
-  const js = read('src', 'electron', 'renderer', 'dashboard.js');
+  const js = read('src', 'electron', 'renderer', 'dashboard', 'dashboard.js');
   const previous = { snapshot: { id: 1, source: 1 } };
   const incoming = { snapshot: { id: 1, source: 2 } };
   const history = { daily: [{ tokens: 12 }] };
@@ -3948,7 +3950,7 @@ test('Dashboard manual scan can accept History from the source it committed', as
 });
 
 test('Dashboard shortcuts share the settings queue and report a rejected write outside the popover', async () => {
-  const js = read('src', 'electron', 'renderer', 'dashboard.js');
+  const js = read('src', 'electron', 'renderer', 'dashboard', 'dashboard.js');
   const alert = () => {
     const element = { hidden: true };
     element.classList = { add() { element.hidden = true; }, remove() { element.hidden = false; } };
@@ -4076,7 +4078,7 @@ test('Work Panel updates workspace tool attribution without replacing a retained
 
 
 test('reduced motion reveals mounted heatmap cells and invalidates the pending frame', () => {
-  const js = read('src', 'electron', 'renderer', 'dashboard.js');
+  const js = read('src', 'electron', 'renderer', 'dashboard', 'dashboard.js');
   const cellAttributes = new Set(['data-motion-hidden', 'opacity', 'data-d']);
   const classes = new Set(['is-motion-pending']);
   const context = {
@@ -4109,7 +4111,7 @@ test('Dashboard date labels format UTC calendar keys independently of the deskto
       }
     }
   };
-  const js = read('src', 'electron', 'renderer', 'dashboard.js');
+  const js = read('src', 'electron', 'renderer', 'dashboard', 'dashboard.js');
   vm.runInNewContext(js.slice(js.indexOf('function monthLabel('), js.indexOf('function chartSize(')), context);
   assert.equal(context.monthLabel('2026-11'), 'Nov');
   assert.equal(context.longDate('2026-11-26'), 'Nov 26');
@@ -4128,7 +4130,7 @@ test('2D heatmap assigns one tab stop across recorded dates and retains the sele
     };
   };
   const [earlier, unrecorded, latest] = ['2026-11-24', '2026-11-25', '2026-11-26'].map(cell);
-  const js = read('src', 'electron', 'renderer', 'dashboard.js');
+  const js = read('src', 'electron', 'renderer', 'dashboard', 'dashboard.js');
   const state = { locale: 'en-US', dayMap: new Map([['2026-11-24', {}], ['2026-11-26', {}]]) };
   const context = { state, els: { heatmap: { querySelectorAll: () => [earlier, unrecorded, latest] } } };
   vm.runInNewContext(js.slice(js.indexOf('const HEATMAP_DAY_SELECTOR'), js.indexOf('function setHeatmapMarkup(')), context);

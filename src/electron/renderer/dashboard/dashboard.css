@@ -130,8 +130,8 @@ html.native-high-contrast .dash-drawer {
   flex: none;
   background: currentColor;
   opacity: 0.65;
-  -webkit-mask: url("icons/actions/chevron-down.svg") center / contain no-repeat;
-  mask: url("icons/actions/chevron-down.svg") center / contain no-repeat;
+  -webkit-mask: url("../icons/actions/chevron-down.svg") center / contain no-repeat;
+  mask: url("../icons/actions/chevron-down.svg") center / contain no-repeat;
   transition: transform 160ms cubic-bezier(0.22, 1, 0.36, 1);
 }
 
@@ -684,9 +684,9 @@ html.native-high-contrast .dash-stage {
   mask: var(--hero-metric-icon) center / contain no-repeat;
 }
 
-.dash-hero-metric-time { --hero-metric-icon: url("icons/actions/clock.svg"); }
-.dash-hero-metric-messages { --hero-metric-icon: url("icons/views/session.svg"); }
-.dash-hero-metric-cache { --hero-metric-icon: url("icons/actions/zap.svg"); }
+.dash-hero-metric-time { --hero-metric-icon: url("../icons/actions/clock.svg"); }
+.dash-hero-metric-messages { --hero-metric-icon: url("../icons/views/session.svg"); }
+.dash-hero-metric-cache { --hero-metric-icon: url("../icons/actions/zap.svg"); }
 
 .dash-hero-meta-item {
   display: inline-flex;

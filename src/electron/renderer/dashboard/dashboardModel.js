@@ -6,23 +6,23 @@
   /** @type {any} */
   const win = root;
   const api = factory(
-    isNode ? require('./usageCharts') : win?.TokenMonitorUsageCharts,
-    isNode ? require('../../shared/vendorPresentation') : win?.TokenMonitorVendorPresentation,
-    isNode ? require('../../shared/deviceKind') : win?.TokenMonitorDeviceKind,
-    isNode ? require('./deviceBreakdown') : win?.TokenMonitorDeviceBreakdown,
-    isNode ? require('./projectRows') : win?.TokenMonitorProjectRows,
-    isNode ? require('./homeOverview') : win?.TokenMonitorHomeOverview,
-    isNode ? require('../../shared/limits/balanceDisplay') : win?.TokenMonitorLimitBalanceDisplay,
-    isNode ? require('../../shared/sessionLive') : win?.TokenMonitorSessionLive,
-    isNode ? require('../../shared/clientCatalog') : win?.TokenMonitorClientCatalog,
-    isNode ? require('./fixedPeriodRanges') : win?.TokenMonitorFixedPeriodRanges,
-    isNode ? require('../../shared/limits/providers') : win?.TokenMonitorLimitProviders,
-    isNode ? require('../../shared/limits/usageItems') : win?.TokenMonitorLimitUsageItems,
-    isNode ? require('./limits/providerOrder') : win?.TokenMonitorLimitProviderOrder,
-    isNode ? require('./tokenRatePresentation') : win?.TokenMonitorTokenRate,
-    isNode ? require('./accountIdentity') : win?.TokenMonitorAccountIdentity,
-    isNode ? require('./sessionRows') : win?.TokenMonitorSessionRows,
-    isNode ? require('../../shared/providers/reasonix/sessionGuard') : win?.TokenMonitorReasonixSessionGuard
+    isNode ? require('../usageCharts') : win?.TokenMonitorUsageCharts,
+    isNode ? require('../../../shared/vendorPresentation') : win?.TokenMonitorVendorPresentation,
+    isNode ? require('../../../shared/deviceKind') : win?.TokenMonitorDeviceKind,
+    isNode ? require('../deviceBreakdown') : win?.TokenMonitorDeviceBreakdown,
+    isNode ? require('../projectRows') : win?.TokenMonitorProjectRows,
+    isNode ? require('../homeOverview') : win?.TokenMonitorHomeOverview,
+    isNode ? require('../../../shared/limits/balanceDisplay') : win?.TokenMonitorLimitBalanceDisplay,
+    isNode ? require('../../../shared/sessionLive') : win?.TokenMonitorSessionLive,
+    isNode ? require('../../../shared/clientCatalog') : win?.TokenMonitorClientCatalog,
+    isNode ? require('../fixedPeriodRanges') : win?.TokenMonitorFixedPeriodRanges,
+    isNode ? require('../../../shared/limits/providers') : win?.TokenMonitorLimitProviders,
+    isNode ? require('../../../shared/limits/usageItems') : win?.TokenMonitorLimitUsageItems,
+    isNode ? require('../limits/providerOrder') : win?.TokenMonitorLimitProviderOrder,
+    isNode ? require('../tokenRatePresentation') : win?.TokenMonitorTokenRate,
+    isNode ? require('../accountIdentity') : win?.TokenMonitorAccountIdentity,
+    isNode ? require('../sessionRows') : win?.TokenMonitorSessionRows,
+    isNode ? require('../../../shared/providers/reasonix/sessionGuard') : win?.TokenMonitorReasonixSessionGuard
   );
   if (isNode) module.exports = api;
   if (win) win.TokenMonitorDashboardModel = api;

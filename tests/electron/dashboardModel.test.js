@@ -3,7 +3,7 @@
 const assert = require('node:assert/strict');
 const test = require('node:test');
 
-const model = require('../../src/electron/renderer/dashboardModel');
+const model = require('../../src/electron/renderer/dashboard/dashboardModel');
 const usageCharts = require('../../src/electron/renderer/usageCharts');
 
 test('buildFleetModel detects single-device vs multi-device fleet and computes active workspace & shares', () => {

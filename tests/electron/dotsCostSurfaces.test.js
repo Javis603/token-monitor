@@ -81,8 +81,8 @@ test('Dashboard heat tooltip distinguishes known cost, missing price and a genui
     currencyApi: { normalizeCurrency: () => 'USD', formatCurrencyFromUsd: (cost) => `$${cost.toFixed(2)}` },
     t: (key, params) => params ? `${params.tokens} excluded` : key, positionTooltip() {}
   };
-  vm.runInNewContext(functionSource('dashboard.js', 'formatCost', 'function formatCostCompact(')
-    + functionSource('dashboard.js', 'showHeatTooltip', '\nlet refreshRunning'), context);
+  vm.runInNewContext(functionSource('dashboard/dashboard.js', 'formatCost', 'function formatCostCompact(')
+    + functionSource('dashboard/dashboard.js', 'showHeatTooltip', '\nlet refreshRunning'), context);
   const view = dotsView(['unknown']);
   const history = normalizeHistory(parseGraphResult(view.graph), { todayKey: '2026-10-07' });
   context.showHeatTooltip('2026-10-07', history.daily[0], {});

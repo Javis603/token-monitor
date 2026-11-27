@@ -7834,7 +7834,7 @@ function createDashboardWindow() {
       dashboardWindowReady = false;
     }
   });
-  win.loadFile(path.join(__dirname, 'renderer', 'dashboard.html'))
+  win.loadFile(path.join(__dirname, 'renderer', 'dashboard', 'dashboard.html'))
     .catch((error) => discardFailedDashboardWindow(win, `load failed: ${error.message}`));
   return win;
 }
