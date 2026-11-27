@@ -191,6 +191,9 @@ test('session detail renders its heading before loading, errors and empty result
   let invalidations = 0;
   let pulls = 0;
   context.tokenNumberAnimationApi = require('../../src/electron/tokenNumberAnimation');
+  context.detailTokenDisplayApi = { reset() {} };
+  context.currentLocale = () => 'en';
+  context.settleRowNumberAnimations = () => {};
   context.allTimeSessions = { invalidate: () => { invalidations += 1; }, ensure: () => { pulls += 1; } };
   const settingsStart = rendererSource.indexOf('let localSessionActivity = null;');
   const settingsEnd = rendererSource.indexOf('\nfunction render(', settingsStart);

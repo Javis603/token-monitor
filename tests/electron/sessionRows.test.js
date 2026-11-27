@@ -707,7 +707,7 @@ function groupMemberRenderer(onOpen = () => {}) {
   const source = fs.readFileSync(path.join(__dirname, '../../src/electron/renderer/app.js'), 'utf8');
   const body = source.slice(source.indexOf('function sessionGroupRunNode('), source.indexOf('function renderSessionGroupDetail('));
   const api = require('../../src/electron/renderer/sessionRows');
-  return Function('rowTemplate', 'updateRow', 'sessionRowsApi', 't', 'openSessionDetail', 'window',
+  return Function('rowTemplate', 'updateRow', 'sessionRowsApi', 't', 'formatDetailTokens', 'openSessionDetail', 'window',
     `${body}\nreturn sessionGroupRunNode;`)(
     data => ({ data, dataset: {}, events: {}, classes: new Set(['row']),
       classList: { add() {} },
@@ -717,7 +717,7 @@ function groupMemberRenderer(onOpen = () => {}) {
     }),
     (node, data) => { node.data = data; node.interactive = api.sessionRowDetailAvailable(data); },
     api, key => ({ 'sessions.mainSession': '主會話', 'sessions.subagent': '子代理',
-      'sessions.backgroundReviews': 'Codex Auto Review' })[key] || key, onOpen, { TokenMonitorDomReconcile: require('../../src/electron/renderer/domReconcile') }
+      'sessions.backgroundReviews': 'Codex Auto Review' })[key] || key, String, onOpen, { TokenMonitorDomReconcile: require('../../src/electron/renderer/domReconcile') }
   );
 }
 
@@ -1226,18 +1226,21 @@ test('Grok group rows expose usage without an unsupported transcript action', ()
 test('group sections keep main continuations above children without changing usage or counting runs as agents', () => {
   const source = fs.readFileSync(path.join(__dirname, '../../src/electron/renderer/app.js'), 'utf8');
   const body = source.slice(source.indexOf('function sessionDetailBackArrow('), source.indexOf('function sessionDetailBack(')) + source.slice(source.indexOf('function renderSessionGroupDetail('), source.indexOf('function detailNote('));
-  const node = () => ({ children: [], dataset: {}, get childNodes() { return this.children; }, selectors: new Map(), classList: { add() {}, remove() {} },
-    replaceChildren(...items) { this.children = items; }, append(...items) { this.children.push(...items); },
+  const node = () => ({ children: [], dataset: {}, _text: '', get childNodes() { return this.children; },
+    get textContent() { return this.children.length ? this.children.map(child => child.textContent).join('') : this._text; },
+    set textContent(value) { this._text = String(value ?? ''); this.children = []; },
+    selectors: new Map(), classList: { add() {}, remove() {} },
+    replaceChildren(...items) { this.children = items; this._text = ''; }, append(...items) { this.children.push(...items); },
     setAttribute() {}, addEventListener() {}, querySelector(selector) {
-      if (!this.selectors.has(selector)) this.selectors.set(selector, {});
+      if (!this.selectors.has(selector)) this.selectors.set(selector, node());
       return this.selectors.get(selector);
     }
   });
   const els = { sessionToolFilter: node(), breakdown: node(), sessionDetail: node(), sessionDetailHead: node() };
   const render = Function('els', 'document', 't', 'closeSessionDetail', 'bindHoverMarquee',
-    'detailNote', 'formatNumber', 'formatCost', 'sessionGroupRunNode', 'rendererDom', `${body}\nreturn renderSessionGroupDetail;`)(
+    'detailNote', 'formatNumber', 'formatDetailTokens', 'decorateDetailTokenElement', 'formatCost', 'sessionGroupRunNode', 'rendererDom', `${body}\nreturn renderSessionGroupDetail;`)(
     els, { createElement: node }, key => ({ 'sessions.mainSession': '主會話', 'sessions.subagent': '子代理' })[key] || key,
-    () => {}, () => {}, node, String, String, (row, max) => ({ row, max }), rendererDom);
+    () => {}, () => {}, node, String, String, () => {}, String, (row, max) => ({ row, max }), rendererDom);
   const main = { key: 'main-1', groupRole: 'main', value: 40 };
   const continuation = { key: 'main-2', groupRole: 'main', value: 30 };
   const child = { key: 'child-1', groupRole: 'subagent', value: 20 };

@@ -188,6 +188,7 @@ const subscriptionApi = window.TokenMonitorSubscriptionDisplay;
 // cannot describe one record two ways.
 const subscriptionText = window.TokenMonitorSubscriptionText;
 const compactTokenApi = window.TokenMonitorCompactTokens;
+const detailTokenDisplayApi = window.TokenMonitorDetailTokenDisplay;
 const trayLayoutApi = window.TokenMonitorTrayLayout;
 const sessionRowsApi = window.TokenMonitorSessionRows;
 const breakdownRenderPolicyApi = window.TokenMonitorBreakdownRenderPolicy;
@@ -407,7 +408,7 @@ state.sessionRowsCache = null;
 let directBreakdownOverride = null;
 state.homeActivitySettingsExpanded = false;
 state.settingsSections = Object.fromEntries(SETTINGS_SECTION_IDS.map((id) => [id, false]));
-const defaultAppearance = { glassOpacity: 68, glassBlur: 32, backgroundImageOpacity: 28, zoomFactor: 1, systemGlass: true, windowsBackdrop: 'acrylic', macBackdrop: 'vibrancy', reduceMotion: 'system', tokenNumberAnimation: 'roll', showLiveDot: true, showToolIcons: true, titleIconOnly: true, showCompactTotalTokens: false, showLiveTokenRate: false, liveTokenRateScope: 'all', compactTokenUnits: 'western', settingsInTitlebar: false };
+const defaultAppearance = { glassOpacity: 68, glassBlur: 32, backgroundImageOpacity: 28, zoomFactor: 1, systemGlass: true, windowsBackdrop: 'acrylic', macBackdrop: 'vibrancy', reduceMotion: 'system', tokenNumberAnimation: 'roll', showLiveDot: true, showToolIcons: true, titleIconOnly: true, showCompactTotalTokens: false, detailTokensUseCompactUnits: false, showLiveTokenRate: false, liveTokenRateScope: 'all', compactTokenUnits: 'western', settingsInTitlebar: false };
 const nativeGlassTintSettings = [['macGlassTint', 'liquid-glass'], ['macClearGlassTint', 'liquid-glass-clear']];
 let nativeMaterialState = glassRenderingApi.normalizeNativeMaterialState();
 let nativeMaterialRevision = 0;
@@ -612,6 +613,7 @@ Object.assign(els, {
   titleIconInput: document.getElementById('titleIconInput'),
   tokenNumberAnimationInput: document.getElementById('tokenNumberAnimationInput'),
   showCompactTotalTokensInput: document.getElementById('showCompactTotalTokensInput'),
+  detailTokensUseCompactUnitsInput: document.getElementById('detailTokensUseCompactUnitsInput'),
   showLiveTokenRateInput: document.getElementById('showLiveTokenRateInput'),
   liveTokenRateScopeRow: document.getElementById('liveTokenRateScopeRow'),
   liveTokenRateScopeInput: document.getElementById('liveTokenRateScopeInput'),
@@ -708,9 +710,11 @@ function toggleAccordionRow(row) {
   const isExpanded = row.classList.contains('expanded');
   document.querySelectorAll('.row.expanded').forEach((other) => {
     other.classList.remove('expanded');
+    other.querySelector('.row-accordion-inner').inert = true;
     other.querySelector('.row-head')?.setAttribute('aria-expanded', 'false');
   });
   if (!isExpanded) {
+    row.querySelector('.row-accordion-inner').inert = false;
     row.classList.add('expanded');
     row.querySelector('.row-head')?.setAttribute('aria-expanded', 'true');
     renderActiveToolDetail();
@@ -720,12 +724,13 @@ function toggleAccordionRow(row) {
 }
 
 document.addEventListener('click', (event) => {
-  if (event.target.closest('button, a, input, select, textarea')) return;
+  if (event.target.closest('button, a, input, select, textarea, [data-detail-token-toggle="true"]')) return;
   const row = event.target.closest('.row.has-accordion');
   if (row) toggleAccordionRow(row);
 });
 
 document.addEventListener('keydown', (event) => {
+  if (event.target.closest('[data-detail-token-toggle="true"]')) return;
   const row = event.target.closest('.row-head')?.closest('.row.has-accordion');
   if (!row || (event.key !== 'Enter' && event.key !== ' ')) return;
   event.preventDefault();
@@ -1077,6 +1082,74 @@ function hideTotalCompact() {
   els.totalTokensCompact.textContent = '';
   els.totalTokensCompact.classList.add('hidden');
 }
+function isDetailCompactEnabled() {
+  return state.settings?.detailTokensUseCompactUnits === true;
+}
+function formatDetailTokens(value) {
+  return detailTokenDisplayApi.formatDetailTokens(value);
+}
+function detailTokenDisplaySignature() {
+  return detailTokenDisplayApi.stateSignature();
+}
+function captureDetailTokenFocus() {
+  const active = document.activeElement;
+  if (!active || active.dataset?.detailTokenToggle !== 'true') return null;
+  const host = state.openSession ? els.sessionDetail : els.breakdown;
+  if (!host || !host.contains?.(active)) return null;
+  const row = active.closest?.('.row[data-key]');
+  if (row) {
+    const tokens = Array.from(row.querySelectorAll('[data-detail-token-toggle="true"]'));
+    const index = tokens.indexOf(active);
+    if (index >= 0) return { host, rowKey: row.dataset.key, index };
+  }
+  const tokens = Array.from(host.querySelectorAll('[data-detail-token-toggle="true"]'));
+  const index = tokens.indexOf(active);
+  return index >= 0 ? { host, rowKey: '', index } : null;
+}
+function restoreDetailTokenFocus(anchor) {
+  if (!anchor) return;
+  const scope = anchor.rowKey
+    ? Array.from(anchor.host.querySelectorAll('.row[data-key]')).find((row) => row.dataset.key === anchor.rowKey)
+    : anchor.host;
+  const target = scope?.querySelectorAll('[data-detail-token-toggle="true"]')?.[anchor.index];
+  if (target && document.activeElement !== target) {
+    target.focus?.({ preventScroll: true });
+  }
+}
+function refreshDetailTokenViews() {
+  const focusAnchor = captureDetailTokenFocus();
+  settleRowNumberAnimations();
+  if (state.openSession?.kind === 'session-group') {
+    renderSessionGroupDetail(state.openSession);
+    restoreDetailTokenFocus(focusAnchor);
+    return;
+  }
+  if (state.openSession?.detail) {
+    renderSessionDetail({ detail: state.openSession.detail, preserveScroll: true });
+    restoreDetailTokenFocus(focusAnchor);
+    return;
+  }
+  if (state.stats && ['tool', 'model', 'project', 'device', 'session'].includes(state.breakdown)) {
+    render();
+    restoreDetailTokenFocus(focusAnchor);
+  }
+}
+function decorateDetailTokenElement(el, value, options = {}) {
+  const exactText = options.exactText !== undefined ? String(options.exactText) : formatNumber(value);
+  detailTokenDisplayApi.decorateTokenElement(el, exactText, {
+    ...(options.enabled !== undefined ? { enabled: options.enabled } : {}),
+    exactHint: t('detail.tokens.clickForExact'),
+    compactHint: t('detail.tokens.clickForCompact')
+  });
+}
+detailTokenDisplayApi.configure({
+  isEnabled: isDetailCompactEnabled,
+  getUnitSystem: effectiveCompactTokenUnits,
+  getLocale: currentLocale,
+  formatExact: formatNumber,
+  formatCompact: (value, unitSystem, locale) => formatCompact(value, unitSystem, locale),
+  onToggle: refreshDetailTokenViews
+});
 function currentTokenRateValue() {
   const period = state.stats?.periods?.[state.period];
   const burn = state.settings?.tokenRateMode === 'burn';
@@ -2236,7 +2309,7 @@ function settleRowNumberAnimations() {
     cancelAnimationFrame(motion.handle);
     motion.settleRoll?.();
     const target = Number(motion.target ?? el.dataset.motionTarget ?? el.dataset.motionValue ?? 0);
-    el.textContent = formatNumber(target);
+    el.textContent = formatDetailTokens(target);
     el.dataset.motionValue = String(target);
     delete el.dataset.motionTarget;
   }
@@ -2290,7 +2363,7 @@ function animateRowNumber(el, from, to, duration = 420, capturedRoll = null, { s
   }
   const startValue = Number.isFinite(previous?.value) ? previous.value : from;
   if (!Number.isFinite(startValue) || !Number.isFinite(to) || startValue === to || prefersReducedMotion()) {
-    el.textContent = formatNumber(to);
+    el.textContent = formatDetailTokens(to);
     el.dataset.motionValue = String(Number(to) || 0);
     delete el.dataset.motionTarget;
     rowNumberAnimations.delete(el);
@@ -2302,17 +2375,17 @@ function animateRowNumber(el, from, to, duration = 420, capturedRoll = null, { s
   if (rolling) {
     duration = tokenNumberAnimationApi.duration;
     motion.value = to;
-    motion.settleRoll = tokenNumberAnimationApi.beginRoll(el, formatNumber(startValue), formatNumber(to), to > startValue, null, rollSnapshot,
+    motion.settleRoll = tokenNumberAnimationApi.beginRoll(el, formatDetailTokens(startValue), formatDetailTokens(to), to > startValue, null, rollSnapshot,
       { period: synchronized, whole: synchronized });
   } else {
-    el.textContent = formatNumber(startValue);
+    el.textContent = formatDetailTokens(startValue);
   }
   el.dataset.motionValue = String(motion.value);
   el.dataset.motionTarget = String(to);
   function frame(now) {
     if (prefersReducedMotion()) {
       motion.settleRoll?.();
-      el.textContent = formatNumber(to);
+      el.textContent = formatDetailTokens(to);
       el.dataset.motionValue = String(Number(to) || 0);
       delete el.dataset.motionTarget;
       if (rowNumberAnimations.get(el) === motion) rowNumberAnimations.delete(el);
@@ -2321,7 +2394,7 @@ function animateRowNumber(el, from, to, duration = 420, capturedRoll = null, { s
     const progress = Math.min(1, (now - startedAt) / duration);
     if (!rolling) {
       motion.value = startValue + delta * easeOutQuart(progress);
-      el.textContent = formatNumber(motion.value);
+      el.textContent = formatDetailTokens(motion.value);
       el.dataset.motionValue = String(motion.value);
     }
     if (progress < 1) {
@@ -2352,7 +2425,7 @@ function settleOffscreenBreakdownNumbers() {
   for (const [el, motion] of rowNumberAnimations) {
     if (visible.has(el)) continue;
     cancelRowNumberAnimation(el);
-    el.textContent = formatNumber(motion.target);
+    el.textContent = formatDetailTokens(motion.target);
     el.dataset.motionValue = String(motion.target);
   }
 }
@@ -2372,7 +2445,7 @@ function animateBreakdownFrom(snapshot, { duration = 420, synchronized = false }
   for (const [el, motion] of rowNumberAnimations) {
     if (animatedValues.has(el)) continue;
     cancelRowNumberAnimation(el);
-    el.textContent = formatNumber(motion.target);
+    el.textContent = formatDetailTokens(motion.target);
     el.dataset.motionValue = String(motion.target);
   }
   let enteringIndex = 0;
@@ -2670,6 +2743,7 @@ function createDeviceRemoveButton(deviceId, deleteText, deleteConfirmText) {
 function renderDeviceAccordion(accordionInner, deviceDetail) {
   const signature = JSON.stringify([
     toolIconsEnabled(state.settings?.showToolIcons),
+    detailTokenDisplaySignature(),
     deviceDetail.emptyText,
     deviceDetail.metaParts,
     deviceDetail.tools.map((tool) => [
@@ -2713,7 +2787,8 @@ function renderDeviceAccordion(accordionInner, deviceDetail) {
       label.append(mark, name, percent);
       const metrics = document.createElement('span');
       metrics.className = 'device-tool-metrics';
-      metrics.textContent = formatNumber(tool.value);
+      metrics.textContent = formatDetailTokens(tool.value);
+      decorateDetailTokenElement(metrics, tool.value);
       head.append(label, metrics);
       toolGroup.append(head);
 
@@ -2728,7 +2803,8 @@ function renderDeviceAccordion(accordionInner, deviceDetail) {
           modelName.textContent = model.name;
           const modelValue = document.createElement('span');
           modelValue.className = 'device-model-value';
-          modelValue.textContent = formatCompact(model.value);
+          modelValue.textContent = isDetailCompactEnabled() ? formatDetailTokens(model.value) : formatCompact(model.value);
+          decorateDetailTokenElement(modelValue, model.value);
           modelRow.append(modelName, modelValue);
           modelList.append(modelRow);
         }
@@ -2747,7 +2823,7 @@ function renderDeviceAccordion(accordionInner, deviceDetail) {
   accordionInner.dataset.signature = signature;
 }
 
-function appendAccordionMetricRow(content, labelText, valueText, percent = null, className = '') {
+function appendAccordionMetricRow(content, labelText, valueText, percent = null, className = '', tokenValue = null) {
   const item = document.createElement('div');
   item.className = `accordion-row${className ? ` ${className}` : ''}`;
   const label = document.createElement('div');
@@ -2765,6 +2841,7 @@ function appendAccordionMetricRow(content, labelText, valueText, percent = null,
   const metric = document.createElement('div');
   metric.className = 'accordion-value';
   metric.textContent = valueText;
+  if (tokenValue !== null) decorateDetailTokenElement(metric, tokenValue);
   item.append(label, metric);
   content.append(item);
 }
@@ -2795,6 +2872,7 @@ function renderToolDetailAccordion(accordionInner, detail) {
     detail.name,
     detail.value,
     mode,
+    detailTokenDisplaySignature(),
     labels,
     tokenParts,
     modelRows.map((model) => [model.key, model.value, model.cost, Math.round(model.percent)])
@@ -2806,19 +2884,19 @@ function renderToolDetailAccordion(accordionInner, detail) {
 
   if (mode === 'tokens' && hasTokenDetails) {
     const inputPercentages = toolDetailsApi.tokenInputPercentages(tokenParts);
-    appendAccordionMetricRow(content, labels.cacheHit, formatNumber(tokenParts.cacheRead), inputPercentages.hit);
-    appendAccordionMetricRow(content, labels.cacheMiss, formatNumber(tokenParts.cacheMiss), inputPercentages.miss);
-    appendAccordionMetricRow(content, labels.output, formatNumber(tokenParts.output));
+    appendAccordionMetricRow(content, labels.cacheHit, formatDetailTokens(tokenParts.cacheRead), inputPercentages.hit, '', tokenParts.cacheRead);
+    appendAccordionMetricRow(content, labels.cacheMiss, formatDetailTokens(tokenParts.cacheMiss), inputPercentages.miss, '', tokenParts.cacheMiss);
+    appendAccordionMetricRow(content, labels.output, formatDetailTokens(tokenParts.output), null, '', tokenParts.output);
     if (tokenParts.unclassified > 0) {
-      appendAccordionMetricRow(content, labels.unclassified, formatNumber(tokenParts.unclassified));
+      appendAccordionMetricRow(content, labels.unclassified, formatDetailTokens(tokenParts.unclassified), null, '', tokenParts.unclassified);
     }
   }
 
   if (mode === 'models' && hasModels) {
     for (const model of modelRows) {
-      const metric = model.value > 0 ? formatNumber(model.value) : formatCost(model.cost);
+      const metric = model.value > 0 ? formatDetailTokens(model.value) : formatCost(model.cost);
       const label = model.unattributed === true ? labels.unclassified : model.name;
-      appendAccordionMetricRow(content, label, metric, model.value > 0 ? model.percent : null, 'tool-model-row');
+      appendAccordionMetricRow(content, label, metric, model.value > 0 ? model.percent : null, 'tool-model-row', model.value > 0 ? model.value : null);
     }
   }
 
@@ -3075,11 +3153,13 @@ function updateRow(row, { name, subtitle, subtitleIdentity, subagentCountLabel, 
   setHoverMarqueeText(detailEl, shownDetail);
   detailEl.classList.toggle('hidden', !shownDetail);
   const valueEl = row.querySelector('.row-value');
-  const tokenLabel = formatNumber(value);
+  const exactTokenLabel = formatNumber(value);
+  const tokenLabel = formatDetailTokens(value);
   if (tokenDataUnavailable === true) {
     row.dataset.tokenDataUnavailable = 'true';
     cancelRowNumberAnimation(valueEl);
     valueEl.textContent = tokenLabel;
+    decorateDetailTokenElement(valueEl, value, { enabled: false });
   } else {
     delete row.dataset.tokenDataUnavailable;
     // Metadata-only updates must not replace the glyphs of a matching roll.
@@ -3088,6 +3168,7 @@ function updateRow(row, { name, subtitle, subtitleIdentity, subagentCountLabel, 
       cancelRowNumberAnimation(valueEl);
       valueEl.textContent = tokenLabel;
     }
+    decorateDetailTokenElement(valueEl, value);
   }
   valueEl.dataset.motionValue = String(Number(value) || 0);
   row.dataset.motionValue = String(Number(value) || 0);
@@ -3111,7 +3192,10 @@ function updateRow(row, { name, subtitle, subtitleIdentity, subagentCountLabel, 
     row.classList.add('has-accordion');
     if (isExpanded) row.classList.add('expanded');
   } else if (Array.isArray(accordionRows) && accordionRows.length > 0) {
-    const accordionSignature = JSON.stringify(accordionRows.map((tool) => [tool.name, tool.value, Math.round(tool.percent), tool.color]));
+    const accordionSignature = JSON.stringify([
+      detailTokenDisplaySignature(),
+      accordionRows.map((tool) => [tool.name, tool.value, Math.round(tool.percent), tool.color])
+    ]);
     if (accordionInner.dataset.signature !== accordionSignature) {
       const content = document.createElement('div');
       content.className = 'accordion-content project-tool-breakdown';
@@ -3131,7 +3215,8 @@ function updateRow(row, { name, subtitle, subtitleIdentity, subagentCountLabel, 
         label.append(mark, text, percent);
         const tokens = document.createElement('span');
         tokens.className = 'accordion-value';
-        tokens.textContent = formatNumber(tool.value);
+        tokens.textContent = formatDetailTokens(tool.value);
+        decorateDetailTokenElement(tokens, tool.value);
         item.append(label, tokens);
         content.append(item);
       }
@@ -3166,13 +3251,14 @@ function updateRow(row, { name, subtitle, subtitleIdentity, subagentCountLabel, 
   }
   const rowHead = row.querySelector('.row-head');
   const hasAccordion = row.classList.contains('has-accordion');
+  accordionInner.inert = !row.classList.contains('expanded');
   const costLabel = `, ${t('dashboard.stat.totalCost')}: ${costLabelText}`;
   sessionRowsApi.applyBreakdownRowSemantics(row, rowHead, {
     interactive,
     hasAccordion,
     expanded: row.classList.contains('expanded'),
     ariaLabel: hasAccordion
-      ? `${name}, ${t('dashboard.stat.totalTokens')}: ${tokenLabel}${costLabel}`
+      ? `${name}, ${t('dashboard.stat.totalTokens')}: ${exactTokenLabel}${costLabel}`
       : name
   });
 }
@@ -3455,6 +3541,7 @@ function renderRows(rows, { incompleteHint = '', fromSearch = false, reuseToolFi
     currency: currentCurrency(),
     currencyRatesEffective: state.settings?.currencyRatesEffective || null,
     locale: currentLocale(),
+    detailTokenDisplay: detailTokenDisplaySignature(),
     showToolIcons: toolIconsEnabled(state.settings?.showToolIcons),
     deviceIconOverrides: state.settings?.deviceIconOverrides,
     deviceIconScope: state.settings?.deviceIconScope,
@@ -3668,6 +3755,7 @@ function modelRowsForPeriod(period, rankingMetric = state.settings?.modelRanking
 }
 
 function sessionPresentationOptions() {
+  const formatReviewTokens = state.settings?.detailTokensUseCompactUnits === true ? formatDetailTokens : formatCompact;
   const localDevice = state.stats?.devices?.find(device => device.deviceId === state.settings?.deviceId);
   return {
     localDeviceId: state.settings?.deviceId,
@@ -3680,6 +3768,8 @@ function sessionPresentationOptions() {
     subagentLabel: t('sessions.subagent'),
     latestModelLabel: t('session.latestModel'),
     unattributedLabel: t('dashboard.tooltip.unclassified'),
+    formatTokens: formatDetailTokens,
+    formatTokensKey: detailTokenDisplaySignature(),
     sourcePeriods: state.stats?.periods,
     grokBotSessionIds: state.stats?.grokBotSessionIds,
     nativeSessions: state.stats?.nativeSessions?.[state.period] || {},
@@ -3688,14 +3778,15 @@ function sessionPresentationOptions() {
     subagents: {
       countLabel: (count) => t('sessions.subagentCount', { count }),
       latestModelLabel: t('session.latestModel'),
-      unattributedLabel: t('dashboard.tooltip.unclassified')
+      unattributedLabel: t('dashboard.tooltip.unclassified'),
+      formatTokens: formatDetailTokens
     },
     backgroundReviews: {
       label: t('sessions.backgroundReviews'),
       countLabel: (count) => t('sessions.backgroundReviewCount', { count }),
       summaryLabel: ({ latestTime, latestValue }) => [
         latestTime ? t('sessions.backgroundReviewLatest', { time: latestTime }) : '',
-        latestValue > 0 ? formatCompact(latestValue, effectiveCompactTokenUnits(), currentLocale()) : ''
+        latestValue > 0 ? formatReviewTokens(latestValue) : ''
       ].filter(Boolean).join(' · ')
     },
     grokBot: {
@@ -5736,6 +5827,7 @@ function applySessionDetailResult(request, options) {
     return;
   }
   request.renderOptions = null;
+  request.pendingDisplayRefresh = false;
   renderSessionDetail(options);
 }
 
@@ -6106,6 +6198,16 @@ function sessionGroupRunNode(row, max, parent) {
   // Group members are still session rows. Share the template, metrics, tooltip
   // and activity rendering; exchange rows belong only to the actual transcript.
   const member = { ...row, name: title, titleModelLabel: namedGroup ? undefined : row.modelLabel };
+  if (row.modelTokens) {
+    member.modelTooltipEntries = sessionRowsApi.sessionModelTooltipEntries(
+      { models: row.modelTokens, totalTokens: row.value, latestModel: row.latestModel },
+      {
+        latestModelLabel: t('session.latestModel'),
+        unattributedLabel: t('dashboard.tooltip.unclassified'),
+        formatTokens: formatDetailTokens
+      }
+    );
+  }
   if (subagentGroup) {
     member.subtitle = [row.clientLabel, sessionRowsApi.sessionModelMetadataLabel(row)].filter(Boolean).join(' · ');
     member.activity = row.activitySummary;
@@ -6174,7 +6276,15 @@ function renderSessionGroupDetail(request) {
   overview.innerHTML = '<span class="session-group-count"></span><span class="session-group-totals"></span>';
   overview.querySelector('.session-group-count').textContent = request.summary.subagentGroup
     ? t('dashboard.stat.totalTokens') : request.summary.groupDetail || request.summary.detail;
-  overview.querySelector('.session-group-totals').textContent = `${formatNumber(request.summary.value)} · ${formatCost(request.summary.cost || 0, request.summary.unpricedTokens)}`;
+  const groupTotals = overview.querySelector('.session-group-totals');
+  const groupTokens = document.createElement('span');
+  groupTokens.className = 'session-group-tokens';
+  groupTokens.textContent = formatDetailTokens(request.summary.value);
+  decorateDetailTokenElement(groupTokens, request.summary.value);
+  const groupCost = document.createElement('span');
+  groupCost.className = 'session-group-cost';
+  groupCost.textContent = ` · ${formatCost(request.summary.cost || 0, request.summary.unpricedTokens)}`;
+  groupTotals.replaceChildren(groupTokens, groupCost);
   container.append(overview);
 
   const max = Math.max(1, ...rows.map((row) => Number(row.value) || 0));
@@ -6234,9 +6344,11 @@ function exchangeNode(row, max, expanded = false) {
   bindHoverMarquee(exTitle);
   wrap.querySelector('.detail-ex-sub').textContent = row.subtitle;
   const tokensAvailable = row.tokensAvailable !== false;
-  wrap.querySelector('.detail-ex-value').textContent = tokensAvailable
-    ? formatNumber(row.value)
+  const exValueEl = wrap.querySelector('.detail-ex-value');
+  exValueEl.textContent = tokensAvailable
+    ? formatDetailTokens(row.value)
     : (t('detailTokenUnavailable') || 'Unavailable');
+  decorateDetailTokenElement(exValueEl, row.value, { enabled: tokensAvailable && isDetailCompactEnabled() });
   wrap.querySelector('.detail-ex-cost').textContent = tokensAvailable ? formatCost(row.cost, row.unpricedTokens) : '';
   applyBarScale(wrap.querySelector('.bar-fill'), rowWidth(row.value, max) / 100);
 
@@ -6265,19 +6377,26 @@ function turnNode(turn) {
   // "cache" folds cache reads + cache writes (Claude's cache_creation) into one bucket so the
   // in/out/cache breakdown sums to the turn total; reason is an informational subset of out.
   const cache = (tk.cacheRead || 0) + (tk.cacheWrite || 0);
-  const split = `in ${formatNumber(tk.input || 0)} · out ${formatNumber(tk.output || 0)} · cache ${formatNumber(cache)}`
+  const split = `in ${formatDetailTokens(tk.input || 0)} · out ${formatDetailTokens(tk.output || 0)} · cache ${formatDetailTokens(cache)}`
+    + (tk.reasoning ? ` · reason ${formatDetailTokens(tk.reasoning)}` : '');
+  const exactSplit = `in ${formatNumber(tk.input || 0)} · out ${formatNumber(tk.output || 0)} · cache ${formatNumber(cache)}`
     + (tk.reasoning ? ` · reason ${formatNumber(tk.reasoning)}` : '');
   el.innerHTML = '<div class="detail-turn-label"><span class="detail-turn-title"></span><span class="detail-turn-split"></span><span class="detail-turn-tools"></span></div>'
     + '<div class="detail-turn-metrics"><span class="detail-turn-value"></span><span class="detail-turn-cost"></span></div>';
   el.querySelector('.detail-turn-title').textContent = `AI ${turn.label}`;
   const tokensAvailable = turn.tokensAvailable !== false;
-  el.querySelector('.detail-turn-split').textContent = tokensAvailable
+  const splitEl = el.querySelector('.detail-turn-split');
+  splitEl.textContent = tokensAvailable
     ? split
     : (t('detailTokenUnavailable') || 'Unavailable');
+  const toggleEnabled = tokensAvailable && isDetailCompactEnabled();
+  decorateDetailTokenElement(splitEl, 0, { exactText: exactSplit, enabled: toggleEnabled });
   el.querySelector('.detail-turn-tools').textContent = turn.tools ? `⊢ ${turn.tools}` : '';
-  el.querySelector('.detail-turn-value').textContent = tokensAvailable
-    ? formatNumber(turn.value)
+  const turnValueEl = el.querySelector('.detail-turn-value');
+  turnValueEl.textContent = tokensAvailable
+    ? formatDetailTokens(turn.value)
     : (t('detailTokenUnavailable') || 'Unavailable');
+  decorateDetailTokenElement(turnValueEl, turn.value, { enabled: toggleEnabled });
   el.querySelector('.detail-turn-cost').textContent = tokensAvailable ? formatCost(turn.cost, turn.unpricedTokens) : '';
   return el;
 }
@@ -8859,11 +8978,22 @@ function setRendererSettings(next) {
   const animationChanged = tokenNumberAnimationApi.normalize(state.settings?.tokenNumberAnimation)
     !== tokenNumberAnimationApi.normalize(next.tokenNumberAnimation);
   const restoringPeriodTabs = state.settings?.periodTabOrder?.length && !next.periodTabOrder?.length;
+  const previousLocale = currentLocale();
+  const detailCompactChanged = (state.settings?.detailTokensUseCompactUnits === true) !== (next.detailTokensUseCompactUnits === true);
+  const detailUnitsChanged = (state.settings?.compactTokenUnits === 'localized') !== (next.compactTokenUnits === 'localized');
   state.settings = next;
+  const localeChanged = previousLocale !== currentLocale();
   if (next.periodTabOrder?.length) ensureVisiblePeriod(next.periodTabOrder);
   else if (restoringPeriodTabs && fixedPeriodRangesApi.slotForSelection(state.period) === 'month') {
     const defaultPeriod = fixedPeriodRangesApi.normalizeMonthMode(next.periodMonthMode);
     if (state.period !== defaultPeriod && setPeriod(defaultPeriod)) followOpenSessionToPeriod();
+  }
+  if (next.detailTokensUseCompactUnits !== true) detailTokenDisplayApi.reset();
+  if (detailCompactChanged || detailUnitsChanged || localeChanged) {
+    settleRowNumberAnimations();
+    if (state.openSession?.kind === 'session' && state.openSession.detail) {
+      state.openSession.pendingDisplayRefresh = true;
+    }
   }
   if (animationChanged) {
     pluginViewHost?.refreshMotion();
@@ -9074,7 +9204,11 @@ function renderAppContent({ fromSearch = false } = {}) {
     if (state.openSession.renderOptions) {
       const options = state.openSession.renderOptions;
       state.openSession.renderOptions = null;
+      state.openSession.pendingDisplayRefresh = false;
       renderSessionDetail(options);
+    } else if (state.openSession.pendingDisplayRefresh && state.openSession.detail) {
+      state.openSession.pendingDisplayRefresh = false;
+      renderSessionDetail({ detail: state.openSession.detail, preserveScroll: true });
     }
     void refreshOpenSessionDetail();
   } else {
@@ -10283,6 +10417,7 @@ function appearancePatchFromControls() {
     showToolIcons: Boolean(els.toolIconsInput.checked),
     titleIconOnly: Boolean(els.titleIconInput.checked),
     showCompactTotalTokens: Boolean(els.showCompactTotalTokensInput.checked),
+    detailTokensUseCompactUnits: Boolean(els.detailTokensUseCompactUnitsInput?.checked),
     showLiveTokenRate: Boolean(els.showLiveTokenRateInput.checked),
     liveTokenRateScope: els.liveTokenRateScopeInput?.value === 'device' ? 'device' : 'all',
     compactTokenUnits: els.compactTokenUnitsInput?.value === 'localized' ? 'localized' : 'western',
@@ -11686,6 +11821,9 @@ function syncSettingsForm() {
     els.tokenNumberAnimationInput.value = tokenNumberAnimationApi.normalize(state.settings.tokenNumberAnimation);
   }
   els.showCompactTotalTokensInput.checked = state.settings.showCompactTotalTokens === true;
+  if (els.detailTokensUseCompactUnitsInput) {
+    els.detailTokensUseCompactUnitsInput.checked = state.settings.detailTokensUseCompactUnits === true;
+  }
   els.showLiveTokenRateInput.checked = state.settings.showLiveTokenRate === true;
   if (els.liveTokenRateScopeInput) {
     els.liveTokenRateScopeInput.value = state.settings.liveTokenRateScope === 'device' ? 'device' : 'all';
@@ -16076,6 +16214,7 @@ document.addEventListener('keydown', (event) => {
 
 els.breakdown.addEventListener('scroll', settleOffscreenBreakdownNumbers, { passive: true });
 els.breakdown.addEventListener('click', (event) => {
+  if (event.target?.dataset?.detailTokenToggle === 'true') return;
   if (state.breakdown !== 'session') return;
   const rowEl = event.target.closest('.row');
   if (!rowEl) return;
@@ -16685,6 +16824,9 @@ els.toolIconsInput.addEventListener('change', async () => {
 els.titleIconInput.addEventListener('change', saveAppearanceFromControls);
 els.tokenNumberAnimationInput?.addEventListener('change', saveAppearanceFromControls);
 els.showCompactTotalTokensInput.addEventListener('change', async () => {
+  await saveAppearanceFromControls();
+});
+els.detailTokensUseCompactUnitsInput?.addEventListener('change', async () => {
   await saveAppearanceFromControls();
 });
 els.showLiveTokenRateInput.addEventListener('change', async () => {

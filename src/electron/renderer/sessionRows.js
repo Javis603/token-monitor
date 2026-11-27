@@ -344,6 +344,7 @@
 
   function handleBreakdownRowKeydown(event) {
     if (event?.key !== 'Enter' && event?.key !== ' ') return false;
+    if (event.target?.dataset?.detailTokenToggle === 'true') return false;
     const row = event.target?.closest?.('.row[role="button"]');
     if (!row) return false;
     event.preventDefault();
@@ -542,7 +543,9 @@
       name: sessionTitle || titleParts.join(' · '),
       modelLabel,
       modelTooltipEntries: sessionModelTooltipEntries(session, {
-        unattributedLabel: options.unattributedLabel, latestModelLabel: options.latestModelLabel
+        unattributedLabel: options.unattributedLabel,
+        latestModelLabel: options.latestModelLabel,
+        formatTokens: options.formatTokens
       }),
       subtitle: (sessionTitle ? titleParts : subtitleParts).join(' · '),
       activity: sessionTitle ? subtitleParts.join(' · ') : undefined,
@@ -588,7 +591,8 @@
       session.client, clientLabel, id, session.models, session.latestModel, session.reasoningEffort,
       session.title, session.totalTokens, session.messageCount, session.cacheReadTokens,
       session.cacheWriteTokens, session.cacheReported, session.inputTokens, session.outputTokens,
-      session.timedOutputTokens, session.timedDurationMs, options.unattributedLabel, options.latestModelLabel
+      session.timedOutputTokens, session.timedDurationMs, options.unattributedLabel, options.latestModelLabel,
+      options.formatTokensKey ?? ''
     ]);
     const cached = previous?.get(key);
     if (cached && cached.signature === signature) {
@@ -604,7 +608,9 @@
       tokenRate: tokenRateLabel(session),
       usageMetrics: sessionUsageMetrics(session),
       modelTooltipEntries: sessionModelTooltipEntries(session, {
-        unattributedLabel: options.unattributedLabel, latestModelLabel: options.latestModelLabel
+        unattributedLabel: options.unattributedLabel,
+        latestModelLabel: options.latestModelLabel,
+        formatTokens: options.formatTokens
       })
     };
     if (next) next.set(key, { signature, data });
@@ -890,7 +896,11 @@
       name: display.titled ? display.name : titleParts,
       modelLabel,
       modelTooltipEntries: options.includeModelTooltip === false ? []
-        : sessionModelTooltipEntries(group, { unattributedLabel: options.unattributedLabel, latestModelLabel: options.latestModelLabel }),
+        : sessionModelTooltipEntries(group, {
+          unattributedLabel: options.unattributedLabel,
+          latestModelLabel: options.latestModelLabel,
+          formatTokens: options.formatTokens
+        }),
       modelTokens: models,
       // Keep the tool/model reading order; the renderer reserves space for the
       // count while the preceding text can shrink in a narrow window.
