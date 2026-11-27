@@ -141,6 +141,7 @@ const dashboardSettings = {
 };
 let dashboardSettingsSave = Promise.resolve();
 let queuedDashboardPeriods = null;
+let queuedDashboardQuotaOrder = null;
 let periodTabsSignature = '';
 let dashboardBackdropOptionsMarkup = '';
 const RANGES = ['7', '30', '90', '365', 'all'];
@@ -682,6 +683,10 @@ function saveDashboardSettings(patchOrRead, { shortcut = false } = {}) {
     } finally {
       if (patch.dashboardVisiblePeriods && queuedDashboardPeriods === patch.dashboardVisiblePeriods) {
         queuedDashboardPeriods = null;
+        syncDashboardSettings(state.settings);
+      }
+      if (patch === queuedDashboardQuotaOrder) {
+        queuedDashboardQuotaOrder = null;
         syncDashboardSettings(state.settings);
       }
     }
@@ -4629,6 +4634,7 @@ async function boot() {
     window.tokenMonitor.getAppInfo?.().catch(() => null)
   ]);
   state.platform = appInfo?.platform;
+  state.osRelease = appInfo?.osRelease;
   const settings = { ...initialSettings, ...state.settings };
   state.locale = i18n.resolveLocale(settings.locale || settings.language, navigator.languages);
   state.settings = settings;
@@ -4976,7 +4982,7 @@ const dashboardQuotaOrderDrag = window.TokenMonitorRowDragController?.createRowD
   idKey: 'quotaProvider',
   dragStartSelector: '.preference-order-handle',
   applyOrder: applyDashboardQuotaOrder,
-  persistOrder: order => void saveDashboardQuotaOrder(order),
+  mirrorOrder: order => void saveDashboardQuotaOrder(order),
   requestRender: () => renderDashboardQuotaOrder(state.settings)
 });
 
@@ -4994,19 +5000,25 @@ function applyDashboardQuotaOrder(order) {
 }
 
 function saveDashboardQuotaOrder(order) {
-  return saveDashboardSettings(() => {
-    const options = order.map(id => ({ id }));
-    const value = window.TokenMonitorLimitProviderOrder
-      .preserveAbsentPluginOrder(state.settings.dashboardQuotaProviderOrder, order, options).join(',');
-    return { dashboardQuotaProviderOrder: value };
-  });
+  let value = '';
+  if (order) {
+    const current = queuedDashboardQuotaOrder?.dashboardQuotaProviderOrder
+      ?? state.settings.dashboardQuotaProviderOrder;
+    const full = [...new Set([...(current || '').split(',').filter(Boolean), ...order])];
+    value = window.TokenMonitorSettingsListFilter.mergeSubsetOrder(full, order).join(',');
+  }
+  queuedDashboardQuotaOrder = { dashboardQuotaProviderOrder: value };
+  dashboardSettings.quotaOrderReset.disabled = !value;
+  if (!order) renderDashboardQuotaOrder(state.settings);
+  return saveDashboardSettings(queuedDashboardQuotaOrder);
 }
 
 function renderDashboardQuotaOrder(settings) {
   if (dashboardQuotaOrderDrag?.deferRender()) return;
   const list = dashboardSettings.quotaOrderList;
-  const options = modelApi.dashboardQuotaProviders(state.stats, settings);
-  dashboardSettings.quotaOrderReset.disabled = !settings.dashboardQuotaProviderOrder;
+  const order = queuedDashboardQuotaOrder?.dashboardQuotaProviderOrder ?? settings.dashboardQuotaProviderOrder;
+  const options = modelApi.dashboardQuotaProviders(state.stats, { ...settings, dashboardQuotaProviderOrder: order });
+  dashboardSettings.quotaOrderReset.disabled = !order;
   const changed = patchDashboardMarkup(list, options.map(({ id, label }) =>
     `<div class="home-limit-provider-row" data-key="${escapeHtml(id)}" data-quota-provider="${escapeHtml(id)}">`
     + `<span class="tool-preference-name">${escapeHtml(label)}</span>`
@@ -5030,10 +5042,12 @@ function renderDashboardBackdrop(settings) {
         ['liquid-glass-clear', 'settings.appearance.macBackdropLiquidGlassClear']);
     }
   } else if (state.platform === 'win32') {
-    options.push(['acrylic', 'settings.appearance.windowsBackdropAcrylic'],
-      ['mica', 'settings.appearance.windowsBackdropMica'],
-      ['mica-alt', 'settings.appearance.windowsBackdropMicaAlt'],
-      ['accent', 'settings.appearance.windowsBackdropAccent']);
+    options.push(['acrylic', 'settings.appearance.windowsBackdropAcrylic']);
+    if (window.TokenMonitorWindowsBackdropMode.supportsWindowsMica(state.osRelease)) {
+      options.push(['mica', 'settings.appearance.windowsBackdropMica'],
+        ['mica-alt', 'settings.appearance.windowsBackdropMicaAlt']);
+    }
+    options.push(['accent', 'settings.appearance.windowsBackdropAccent']);
   }
   const select = dashboardSettings.backdrop;
   const markup = options.map(([mode, key]) => `<option value="${mode}">${escapeHtml(t(key))}</option>`).join('');
@@ -5043,7 +5057,10 @@ function renderDashboardBackdrop(settings) {
   }
   const mode = settings?.dashboardBackdrop || 'inherit';
   select.value = options.some(([value]) => value === mode)
-    ? mode : (state.platform === 'darwin' && mode.startsWith('liquid-glass') ? 'vibrancy' : 'inherit');
+    ? mode
+    : state.platform === 'darwin' && mode.startsWith('liquid-glass') ? 'vibrancy'
+      : state.platform === 'win32' && (mode === 'mica' || mode === 'mica-alt') ? 'acrylic'
+        : 'inherit';
 }
 
 function showDashboardQuotaOrder(open, { focus = true } = {}) {
@@ -5058,7 +5075,7 @@ function showDashboardQuotaOrder(open, { focus = true } = {}) {
 dashboardSettings.quotaOrderOpen?.addEventListener('click', () => showDashboardQuotaOrder(true));
 dashboardSettings.quotaOrderBack?.addEventListener('click', () => showDashboardQuotaOrder(false));
 dashboardSettings.quotaOrderReset?.addEventListener('click', () => {
-  void saveDashboardSettings({ dashboardQuotaProviderOrder: '' });
+  void saveDashboardQuotaOrder(null);
 });
 dashboardSettings.quotaOrderList?.addEventListener('keydown', event => {
   const handle = event.target.closest('.preference-order-handle');

@@ -4354,7 +4354,7 @@ test('Dashboard shortcuts share the settings queue and report a rejected write o
   const pending = [];
   const state = { settings: { dashboardStageView: 'flow' }, stageView: 'flow' };
   const context = {
-    state, dashboardSettingsSave: Promise.resolve(),
+    state, dashboardSettingsSave: Promise.resolve(), queuedDashboardQuotaOrder: null,
     dashboardSettings: { error, shortcutError, popover: { matches: () => false } },
     window: { tokenMonitor: { updateSettings: patch => new Promise((resolve, reject) => pending.push({ patch, resolve, reject })) } },
     syncDashboardSettings() {
@@ -4381,6 +4381,66 @@ test('Dashboard shortcuts share the settings queue and report a rejected write o
   assert.equal(shortcutError.hidden, true);
   pending[2].resolve();
   await retry;
+});
+
+test('Dashboard queues quota drops before resets and keeps the newest order through older acknowledgements', async () => {
+  const js = read('src', 'electron', 'renderer', 'dashboard', 'dashboard.js');
+  const pending = [];
+  const reset = {};
+  const seenOrders = [];
+  let drag;
+  const context = {
+    state: { settings: { dashboardQuotaProviderOrder: 'claude,codex,opencode' } },
+    queuedDashboardQuotaOrder: null, dashboardSettingsSave: Promise.resolve(),
+    dashboardSettings: { quotaOrderReset: reset, error: { classList: { add() {} } }, shortcutError: { classList: { add() {} } } },
+    applyDashboardQuotaOrder() {},
+    renderDashboardQuotaOrder() { seenOrders.push(context.queuedDashboardQuotaOrder?.dashboardQuotaProviderOrder); },
+    syncDashboardSettings() { context.renderDashboardQuotaOrder(); },
+    window: {
+      TokenMonitorSettingsListFilter: require('../../src/electron/renderer/settingsListFilter'),
+      TokenMonitorRowDragController: { createRowDragController(config) { drag = config; } },
+      tokenMonitor: { updateSettings: patch => new Promise(resolve => pending.push({ patch, resolve })) }
+    }
+  };
+  vm.runInNewContext(js.slice(js.indexOf('function saveDashboardSettings('), js.indexOf('function populatePeriodSelect('))
+    + js.slice(js.indexOf('const dashboardQuotaOrderDrag ='), js.indexOf('function dashboardQuotaOrderRows('))
+    + js.slice(js.indexOf('function saveDashboardQuotaOrder('), js.indexOf('function renderDashboardQuotaOrder(')), context);
+  const first = context.saveDashboardQuotaOrder(['opencode', 'codex']);
+  await Promise.resolve();
+  assert.equal(pending[0].patch.dashboardQuotaProviderOrder, 'claude,opencode,codex');
+  drag.mirrorOrder(['codex', 'opencode']);
+  const last = context.saveDashboardQuotaOrder(null);
+  assert.equal(seenOrders.at(-1), '');
+  context.state.settings.dashboardQuotaProviderOrder = pending[0].patch.dashboardQuotaProviderOrder;
+  pending[0].resolve();
+  await first;
+  await Promise.resolve();
+  assert.equal(context.queuedDashboardQuotaOrder.dashboardQuotaProviderOrder, '');
+  assert.equal(pending[1].patch.dashboardQuotaProviderOrder, 'claude,codex,opencode');
+  pending[1].resolve();
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(pending[2].patch.dashboardQuotaProviderOrder, '');
+  pending[2].resolve();
+  await last;
+  assert.equal(context.queuedDashboardQuotaOrder, null);
+});
+
+test('Dashboard offers Mica only on supported Windows builds and shows Acrylic for a saved Mica fallback', () => {
+  const select = {};
+  const context = {
+    state: { platform: 'win32', osRelease: '10.0.22000' },
+    dashboardSettings: { backdrop: select }, dashboardBackdropOptionsMarkup: '',
+    window: { TokenMonitorWindowsBackdropMode: require('../../src/electron/windowsBackdropMode') },
+    t: value => value, escapeHtml: value => value
+  };
+  const render = dashboardFunction('renderDashboardBackdrop', '\nfunction showDashboardQuotaOrder(', context);
+  render({ dashboardBackdrop: 'mica-alt' });
+  assert.doesNotMatch(select.innerHTML, /value="mica/);
+  assert.equal(select.value, 'acrylic');
+  context.state.osRelease = '10.0.22621';
+  render({ dashboardBackdrop: 'mica-alt' });
+  assert.match(select.innerHTML, /value="mica-alt"/);
+  assert.equal(select.value, 'mica-alt');
 });
 
 
