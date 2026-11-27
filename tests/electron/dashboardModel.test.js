@@ -146,6 +146,48 @@ test('selected workspace and Flow use the device rollup when session details are
   assert.equal(capped.hubToEnd[0].tokens, 40);
 });
 
+test('selected-device workspace totals use recovered sessions when the project rollup is incomplete', () => {
+  const session = (id, projectLabel, totalTokens) => ({
+    sessionId: id, client: 'codex', projectLabel, totalTokens, sourceDevice: { deviceId: 'a' }
+  });
+  const sessions = { 'codex:inline': session('inline', 'Inline', 40), 'codex:paged': session('paged', 'Paged', 60) };
+  const projects = { inline: { label: 'Inline', tokens: 40 } };
+  const period = { totalTokens: 100, projects };
+  const stats = {
+    mode: 'sync',
+    periods: { month: { totalTokens: 100, sessions }, allTime: { totalTokens: 100, sessions } },
+    devices: [
+      {
+        deviceId: 'a', periodProjectsOmitted: { month: 1 }, allTimeProjectsIncomplete: true,
+        periods: { month: period, allTime: period }
+      },
+      { deviceId: 'b' }
+    ]
+  };
+  for (const periodKey of ['month', 'allTime']) {
+    const overview = model.buildScopedOverview({ stats, selectedDeviceId: 'a', periodKey, syncedPagesLoaded: true });
+    assert.deepEqual(overview.workspaces.map(row => [row.name, row.tokens]), [['Paged', 60], ['Inline', 40]]);
+  }
+});
+
+test('selected-device workspace rollups respect both stamped and legacy native period expiry', () => {
+  const nowMs = Date.parse('2026-11-27T00:00:00Z');
+  const period = { totalTokens: 100, projects: { repo: { label: 'Repo', tokens: 100 } } };
+  const device = { deviceId: 'a', updatedAt: '2026-10-31T23:30:00Z', periods: { today: period, month: period } };
+  const stats = { mode: 'sync', periods: { today: {}, month: {} }, devices: [device, { deviceId: 'b' }] };
+  const workspaces = (periodKey) => model.buildScopedOverview({ stats, selectedDeviceId: 'a', periodKey, nowMs }).workspaces;
+  for (const periodKey of ['today', 'month']) assert.deepEqual(workspaces(periodKey), []);
+
+  device.periodWindows = {
+    today: { endsAt: '2026-11-27T00:00:00Z' },
+    month: { endsAt: '2026-12-01T00:00:00Z' }
+  };
+  device.updatedAt = '2026-11-27T00:00:00Z';
+  assert.deepEqual(workspaces('today'), []);
+  device.updatedAt = '2026-10-31T23:30:00Z';
+  assert.deepEqual(workspaces('month').map(row => [row.name, row.tokens]), [['Repo', 100]]);
+});
+
 test('computeTokenAnatomy fails closed on unclassifiedTokens and computes cacheHitRate accurately', () => {
   const exact = model.computeTokenAnatomy({
     totalTokens: 1000,

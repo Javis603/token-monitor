@@ -56,6 +56,25 @@
     return n(period?.totalTokens) > 0 || n(period?.costUsd ?? period?.totalCost) > 0;
   }
 
+  /** @param {any} device @param {string} periodKey @param {number} nowMs */
+  function deviceProjectRollup(device, periodKey, nowMs) {
+    const projects = device?.periods?.[periodKey]?.projects;
+    if (!projects || Object.keys(projects).length === 0) return undefined;
+    if (n(device.periodProjectsOmitted?.[periodKey]) > 0) return undefined;
+    if (periodKey === 'allTime' && (device.allTimeProjectsOmitted || device.allTimeProjectsIncomplete)) return undefined;
+    if (periodKey === 'today' || periodKey === 'month') {
+      // Match aggregateDevices' expiry rules for both stamped and legacy snapshots.
+      const endsAt = Date.parse(device.periodWindows?.[periodKey]?.endsAt || '');
+      if (endsAt > 0) return nowMs < endsAt ? projects : undefined;
+      const recordedAt = new Date(device.updatedAt || device.receivedAt || '');
+      if (Number.isFinite(recordedAt.getTime())) {
+        const length = periodKey === 'today' ? 10 : 7;
+        if (recordedAt.toISOString().slice(0, length) !== new Date(nowMs).toISOString().slice(0, length)) return undefined;
+      }
+    }
+    return projects;
+  }
+
   /** @param {string} client */
   function canonicalClientKey(client) {
     return client === 'antigravity-cli' ? 'antigravity' : String(client || '');
@@ -1323,6 +1342,7 @@
    *   sessions?: any[],
    *   settings?: any,
    *   statsMode?: string,
+   *   nowMs?: number,
    *   colorFor?: (id: string) => string
    * }} options
    */
@@ -1330,6 +1350,7 @@
     const stats = options.stats || null;
     const periodKey = options.periodKey || 'today';
     const selectedDeviceId = options.selectedDeviceId || 'all';
+    const nowMs = options.nowMs ?? Date.now();
     const aggregatePeriod = stats?.periods?.[periodKey] || options.periodData || null;
     if (!aggregatePeriod || !projectRowsApi?.projectRowsForPeriod) return [];
 
@@ -1341,8 +1362,8 @@
     if (selectedDeviceId !== 'all') {
       const device = (stats?.devices || []).find((/** @type {any} */ item) =>
         String(item.deviceId || item.id || '') === selectedDeviceId);
-      const deviceProjects = device?.periods?.[periodKey]?.projects;
-      if (Object.keys(deviceProjects || {}).length > 0) scopedRollupDevice = device;
+      const deviceProjects = deviceProjectRollup(device, periodKey, nowMs);
+      if (deviceProjects) scopedRollupDevice = device;
       const filteredSessions = Object.fromEntries(
         Object.entries(aggregatePeriod.sessions || {})
           .filter(([, s]) => resolveOwnedSessionDeviceId(s, { isNativeLocal: false, localId, synced }) === selectedDeviceId)
@@ -1401,7 +1422,7 @@
         if (confirmedDevId) {
           meta.deviceTokens.set(confirmedDevId, (meta.deviceTokens.get(confirmedDevId) || 0) + Math.max(0, n(entry?.totalTokens)));
         }
-        const entryAct = entry?.activityState || sessionLive?.sessionActivityState?.(entry, Date.now());
+        const entryAct = entry?.activityState || sessionLive?.sessionActivityState?.(entry, nowMs);
         if (entry?.isActive === true || entryAct === 'running' || entryAct === 'waiting') {
           activeWorkspaces.add(memberLabel);
           if (confirmedDevId) meta.activeDeviceIds.add(confirmedDevId);
@@ -2569,7 +2590,8 @@
       selectedDeviceId: activeMachine ? activeMachine.deviceId : 'all',
       settings,
       statsMode,
-      sessions
+      sessions,
+      nowMs
     });
     const quotas = buildQuotaAccounts(stats, settings, nowMs);
 

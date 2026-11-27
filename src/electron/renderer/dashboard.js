@@ -2540,7 +2540,7 @@ function ensureSkylineController() {
       const date = hit.cell?.date;
       if (!date) return;
       activeHover = { kind: 'skyline', date };
-      showHeatTooltip(date, state.dayMap?.get(date) || hit.cell, hit.anchorRect);
+      showHeatTooltip(date, state.dayMap?.get(date), hit.anchorRect);
     },
     onSelect(cell) {
       if (!cell?.date) return;
@@ -3873,6 +3873,7 @@ function renderNow() {
   if (overview?.fleet && state.selectedDeviceId !== 'all') {
     const hasSelected = overview.fleet.isFleetMode && Boolean(overview.activeMachine);
     if (!hasSelected) {
+      if (state.drawer) closeDrawer({ restoreFocus: false });
       state.selectedDeviceId = 'all';
     }
   }

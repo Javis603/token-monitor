@@ -435,6 +435,24 @@ test('Dashboard tooltips distinguish unrecorded days and buckets from recorded z
   assert.match(tooltip.innerHTML, />L<.*>0</);
 });
 
+test('Dashboard 3D heatmap passes only recorded days to the tooltip', () => {
+  let onHover;
+  const zeroDay = { tokens: 0 };
+  const calls = [];
+  const context = {
+    state: { stageView: '3d', tab: 'activity', dayMap: new Map([['2026-10-24', zeroDay]]) },
+    els: { skylineCanvasHost: {} },
+    skylineController: null,
+    skylineApi: { createSkylineController(_host, handlers) { onHover = handlers.onHover; return {}; } },
+    activeHover: null,
+    showHeatTooltip: (...args) => calls.push(args)
+  };
+  dashboardFunction('ensureSkylineController', '\nfunction renderSkylineToolLegend', context)();
+  const anchorRect = {};
+  for (const date of ['2026-10-23', '2026-10-24']) onHover({ cell: { date, tokens: 0 }, anchorRect });
+  assert.deepEqual(calls, [['2026-10-23', undefined, anchorRect], ['2026-10-24', zeroDay, anchorRect]]);
+});
+
 test('dashboard reuses the shared scheduler to defer hidden render work', () => {
   const html = read('src', 'electron', 'renderer', 'dashboard.html');
   const js = read('src', 'electron', 'renderer', 'dashboard.js');
@@ -2972,6 +2990,10 @@ test('dashboard Trends and device selector recover to All Devices when selected 
     setDeviceMenuOpen() {},
     hideTooltip() {},
     openDrawer() {},
+    closeDrawer({ restoreFocus }) {
+      assert.equal(restoreFocus, false);
+      context.state.drawer = null;
+    },
     axisEvery: () => 1,
     chartSize: () => ({ w: 600, h: 240 }),
     captureGeometry: () => null,
@@ -3004,9 +3026,11 @@ test('dashboard Trends and device selector recover to All Devices when selected 
   // Replace fleet with two entirely different machines so dev-a disappears
   context.state.stats = mkStats(['dev-c', 'dev-d']);
   context.state.history = mkHistory(['dev-c', 'dev-d']);
+  context.state.drawer = { kind: 'workspace' };
   context.renderNow();
 
   assert.equal(context.state.selectedDeviceId, 'all', 'disappeared selected device must reset to All Devices');
+  assert.equal(context.state.drawer, null);
   assert.match(deviceTrigger.innerHTML, /device-kind-icon.*>All Devices<.*dash-device-trigger-chevron/);
   assert.doesNotMatch(deviceTrigger.innerHTML, /2\/2/);
   assert.match(deviceMenu.innerHTML, /2\/2 online/);
