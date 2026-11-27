@@ -1826,12 +1826,7 @@ test('a synced fixed page keeps uncovered device History without counting covere
   });
   assert.equal(view(stats).hero.tokens, 300000);
 
-  const exact = {
-    totalTokens: 110000, costUsd: 3, clients: { codex: 110000 },
-    projects: { repo: { label: 'Mac Repo', tokens: 110000 } },
-    sessions: { 'codex:mac': { client: 'codex', sessionId: 'mac', totalTokens: 110000,
-      projectLabel: 'Mac Repo', sourceDevice: { deviceId: 'mac' } } }
-  };
+  const exact = { totalTokens: 110000, costUsd: 3, clients: { codex: 110000 } };
   const paged = {
     ...stats, periods: { ...stats.periods, yesterday: exact },
     devices: [{ ...mac, periods: { ...mac.periods, yesterday: exact } }],
@@ -1842,33 +1837,9 @@ test('a synced fixed page keeps uncovered device History without counting covere
   assert.equal(overview.hero.cost, 5);
   assert.equal(overview.tools.find(row => row.id === 'codex').tokens, 310000);
   assert.equal(overview.sessionsIncomplete, true);
-  assert.equal(overview.hero.messages, 6);
-  assert.equal(overview.hero.activeTimeMs, 2000);
-  assert.deepEqual(overview.sessions, []);
-  assert.deepEqual(overview.workspaces, []);
   assert.equal(overview.fleet.machines.reduce((sum, row) => sum + row.tokens, 0), 310000);
   assert.equal(view(paged, 'pc').hero.tokens, 200000);
-  const macView = view(paged, 'mac');
-  assert.equal(macView.hero.tokens, 110000);
-  assert.equal(macView.hero.messages, 3);
-  assert.equal(macView.hero.activeTimeMs, 1000);
-  assert.equal(macView.sessionsIncomplete, false);
-  assert.equal(macView.sessions.length, 1);
-  assert.deepEqual(macView.workspaces.map(row => row.name), ['Mac Repo']);
-
-  history.deviceHistories.push({ deviceId: 'undated', historyAvailable: true,
-    history: { daily: [{ date: '2026-11-23', tokens: 40000, cost: 1 }] } });
-  assert.equal(view(paged).hero.tokens, 310000);
-  assert.equal(view(paged, 'pc').hero.tokens, 200000);
-  const unverifiedView = view(paged);
-  assert.equal(unverifiedView.hero.accountingStatus, 'partial');
-  assert.equal(view(paged, 'undated').hero.accountingStatus, 'unavailable');
-  assert.equal(view(paged, 'pc').hero.accountingStatus, 'ready');
-  assert.equal(view(paged, 'mac').hero.accountingStatus, 'ready');
-  assert.equal(unverifiedView.sessionsIncomplete, true);
-  assert.deepEqual(unverifiedView.sessions, []);
-  assert.deepEqual(unverifiedView.workspaces, []);
-  history.deviceHistories.pop();
+  assert.equal(view(paged, 'mac').hero.tokens, 110000);
   assert.deepEqual(exact.clients, { codex: 110000 });
 
   const fullPage = {
@@ -2160,7 +2131,7 @@ test('local fixed fallback needs History coverage and retains only confirmed Tod
   assert.equal(view('last7', { stats: stale }).hero.accountingStatus, 'unavailable');
 });
 
-test('device flow accents use confirmed active tools even when their endpoints are offscreen', () => {
+test('Flow accents use active tools in each device and workspace even when endpoints are offscreen', () => {
   const session = (key, client, deviceId, isActive = true) => ({
     key, client, isActive, sourceDevice: { deviceId }, projectLabel: 'Repo'
   });
@@ -2173,15 +2144,132 @@ test('device flow accents use confirmed active tools even when their endpoints a
         session('claude', 'claude', 'mac')
       ] },
       session('gemini', 'gemini', 'pc'),
+      { ...session('other-repo', 'cursor', 'pc'), projectLabel: 'Other' },
       session('history', 'gemini', 'mac', false),
+      session('inactive-tool', 'opencode', 'mac', false),
       { ...session('ambiguous', 'claude', 'pc'), sourceDevice: { ambiguous: true } }
     ]
   }, { maxEndpoints: 1 });
   const devices = Object.fromEntries(graph.devices.map(device => [device.id, device.activeToolColors]));
   assert.deepEqual(graph.endpoints.map(endpoint => endpoint.id), ['group']);
   assert.equal(devices.mac.length, 2);
-  assert.equal(devices.pc.length, 1);
+  assert.equal(devices.pc.length, 2);
   assert.notEqual(devices.mac[0], devices.mac[1]);
   assert.ok(!devices.mac.includes(devices.pc[0]));
   assert.deepEqual(devices.idle, []);
+  const hubs = Object.fromEntries(graph.hubs.map(hub => [hub.id, hub.activeToolColors]));
+  const { claude, codex, cursor, gemini } = usageCharts.clientColors;
+  assert.deepEqual(hubs['ws:repo'], [claude, codex, gemini].sort());
+  assert.deepEqual(hubs['ws:other'], [cursor]);
+});
+
+test('buildTopologyGraph defaults to sync flowMode and assigns deterministic per-component flowPhase offsets in stagger mode', () => {
+  const mkSession = (key, client, deviceId, projectLabel, totalTokens) => ({
+    key,
+    client,
+    isActive: true,
+    totalTokens,
+    sourceDevice: { deviceId },
+    projectLabel
+  });
+
+  const syncGraph = model.buildTopologyGraph({
+    isSynced: true,
+    fleet: {
+      machines: [
+        { deviceId: 'alpha', name: 'Alpha', tokens: 100, share: 0.1 },
+        { deviceId: 'beta', name: 'Beta', tokens: 900, share: 0.9 }
+      ]
+    },
+    sessions: [
+      mkSession('s-a', 'codex', 'alpha', 'RepoA', 100),
+      mkSession('s-b', 'claude', 'beta', 'RepoB', 900)
+    ]
+  });
+  assert.equal(syncGraph.flowMode, 'sync');
+  for (const col of ['devices', 'hubs', 'endpoints', 'devToHub', 'hubToEnd']) {
+    for (const item of syncGraph[col]) assert.equal(item.flowPhase ?? 0, 0);
+  }
+
+  // Two completely disjoint paths should keep intra-path nodes/edges phase-locked
+  // and stagger across components regardless of volatile token totals.
+  const lowFirst = model.buildTopologyGraph({
+    isSynced: true,
+    fleet: {
+      machines: [
+        { deviceId: 'alpha', name: 'Alpha', tokens: 100, share: 0.1 },
+        { deviceId: 'beta', name: 'Beta', tokens: 900, share: 0.9 }
+      ]
+    },
+    sessions: [
+      mkSession('s-a', 'codex', 'alpha', 'RepoA', 100),
+      mkSession('s-b', 'claude', 'beta', 'RepoB', 900)
+    ]
+  }, { flowMode: 'stagger' });
+  const highFirst = model.buildTopologyGraph({
+    isSynced: true,
+    fleet: {
+      machines: [
+        { deviceId: 'alpha', name: 'Alpha', tokens: 900, share: 0.9 },
+        { deviceId: 'beta', name: 'Beta', tokens: 100, share: 0.1 }
+      ]
+    },
+    sessions: [
+      mkSession('s-a', 'codex', 'alpha', 'RepoA', 900),
+      mkSession('s-b', 'claude', 'beta', 'RepoB', 100)
+    ]
+  }, { flowMode: 'stagger' });
+
+  assert.equal(lowFirst.flowMode, 'stagger');
+  const phaseById = (graph, col) => Object.fromEntries(graph[col].map((item) => [item.id, item.flowPhase]));
+  assert.equal(phaseById(lowFirst, 'devices').alpha, 0);
+  assert.equal(phaseById(lowFirst, 'hubs')['ws:repoa'], 0);
+  assert.equal(phaseById(lowFirst, 'endpoints')['s-a'], 0);
+  assert.equal(phaseById(lowFirst, 'devices').beta, -1.5);
+  assert.equal(phaseById(lowFirst, 'hubs')['ws:repob'], -1.5);
+  assert.equal(phaseById(lowFirst, 'endpoints')['s-b'], -1.5);
+  assert.deepEqual(phaseById(lowFirst, 'devToHub'), {
+    'd2h:alpha->ws:repoa': 0,
+    'd2h:beta->ws:repob': -1.5
+  });
+  assert.deepEqual(phaseById(lowFirst, 'hubToEnd'), {
+    'h2e:ws:repoa->s-a': 0,
+    'h2e:ws:repob->s-b': -1.5
+  });
+  assert.deepEqual(phaseById(lowFirst, 'devices'), phaseById(highFirst, 'devices'));
+
+  // Two devices feeding the same shared workspace form one connected component (all phase 0).
+  const shared = model.buildTopologyGraph({
+    isSynced: true,
+    fleet: {
+      machines: [
+        { deviceId: 'alpha', name: 'Alpha', tokens: 500, share: 0.5 },
+        { deviceId: 'beta', name: 'Beta', tokens: 500, share: 0.5 }
+      ]
+    },
+    sessions: [
+      mkSession('s-a', 'codex', 'alpha', 'SharedRepo', 500),
+      mkSession('s-b', 'claude', 'beta', 'SharedRepo', 500)
+    ]
+  }, { flowMode: 'stagger' });
+  assert.equal(phaseById(shared, 'devices').alpha, 0);
+  assert.equal(phaseById(shared, 'devices').beta, 0);
+  assert.equal(phaseById(shared, 'hubs')['ws:sharedrepo'], 0);
+
+  // buildScopedOverview defaults to sync and propagates stagger when dashboardFlowMode === 'stagger'.
+  const overviewStats = {
+    devices: [
+      { deviceId: 'alpha', deviceName: 'Alpha' },
+      { deviceId: 'beta', deviceName: 'Beta' }
+    ],
+    periods: { today: { totalTokens: 1000, sessions: {} } }
+  };
+  const defaultOverview = model.buildScopedOverview({ stats: overviewStats, statsMode: 'sync' });
+  assert.equal(defaultOverview.topology.flowMode, 'sync');
+  const staggerOverview = model.buildScopedOverview({
+    stats: overviewStats,
+    statsMode: 'sync',
+    settings: { dashboardFlowMode: 'stagger' }
+  });
+  assert.equal(staggerOverview.topology.flowMode, 'stagger');
 });

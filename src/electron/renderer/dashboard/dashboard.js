@@ -129,6 +129,7 @@ const dashboardSettings = {
   velocity: document.getElementById('dashShowVelocity'),
   quotas: document.getElementById('dashShowQuotas'),
   stage: document.getElementById('dashDefaultStage'),
+  flowMode: document.getElementById('dashFlowMode'),
   metric: document.getElementById('dashDefaultMetric'),
   error: document.getElementById('dashSettingsError'),
   shortcutError: document.getElementById('dashShortcutSaveError')
@@ -147,6 +148,7 @@ const state = {
   mode: 'bars',
   trendMetric: 'tokens',
   stageView: 'flow',
+  flowMode: 'sync',
   heatmapView: '3d',
   heatmapMetric: 'cost',
   skylineColorMode: 'heat',
@@ -635,6 +637,7 @@ function syncDashboardSettings(settings) {
   dashboardSettings.velocity.checked = settings.dashboardShowVelocity !== false;
   dashboardSettings.quotas.checked = settings.dashboardShowQuotas !== false;
   dashboardSettings.stage.value = state.stageView;
+  if (dashboardSettings.flowMode) dashboardSettings.flowMode.value = state.flowMode;
   dashboardSettings.metric.value = state.heatmapMetric;
   const displayed = dashboardSettings.follow.checked ? dashboardPeriodTabs(settings) : visible;
   for (const button of dashboardSettings.choices.querySelectorAll('button')) {
@@ -765,6 +768,10 @@ function applySwatchColors(root) {
   root.querySelectorAll('[data-weight]').forEach((el) => { el.style.setProperty('--seg-weight', el.getAttribute('data-weight')); });
   root.querySelectorAll('[data-bg]').forEach((el) => { el.style.background = el.getAttribute('data-bg'); });
   root.querySelectorAll('[data-node-accent]').forEach((el) => { el.style.setProperty('--node-accent', el.getAttribute('data-node-accent')); });
+  root.querySelectorAll('[data-flow-phase]').forEach((el) => { el.style.setProperty('--topo-flow-phase', el.getAttribute('data-flow-phase')); });
+  root.querySelectorAll('[data-workspace-gradient]').forEach((el) => {
+    el.style.setProperty('--workspace-gradient', el.getAttribute('data-workspace-gradient'));
+  });
   root.querySelectorAll('[data-limit-fill]').forEach((el) => { el.style.setProperty('--home-limit-fill', `${el.getAttribute('data-limit-fill')}%`); });
   root.querySelectorAll('[data-limit-pace]').forEach((el) => { el.style.setProperty('--home-limit-pace', `${el.getAttribute('data-limit-pace')}%`); });
   root.querySelectorAll('[data-vendor-color]').forEach((el) => {
@@ -2280,13 +2287,6 @@ function showTopologyTooltip(kind, id, anchorEl) {
   positionTooltip(anchorEl);
 }
 
-function topologyEdgeSpeedTier(liveRate) {
-  const rate = Number(liveRate || 0);
-  if (rate >= 100) return 3;
-  if (rate >= 15) return 2;
-  return 1;
-}
-
 function syncTopologyScrollFades(canvas) {
   if (!canvas) return;
   canvas.querySelectorAll('.dash-topo-col-scroll').forEach((scroller) => {
@@ -2294,6 +2294,15 @@ function syncTopologyScrollFades(canvas) {
     scroller.classList.toggle('has-top-fade', overflow && scroller.scrollTop > 3);
     scroller.classList.toggle('has-bottom-fade', overflow && scroller.scrollTop + scroller.clientHeight < scroller.scrollHeight - 3);
   });
+}
+
+function syncTopologyAnimationClock(canvas) {
+  // Join the document's clock even when a card or link appears mid-cycle.
+  for (const animation of canvas.getAnimations?.({ subtree: true }) || []) {
+    if (animation.animationName?.startsWith('topo') && animation.startTime !== 0) {
+      animation.startTime = 0;
+    }
+  }
 }
 
 function layoutTopologyLinks(graph) {
@@ -2356,6 +2365,10 @@ function layoutTopologyLinks(graph) {
   };
 
   const reduced = prefersReducedMotion();
+  const stagger = graph.flowMode === 'stagger' || (!graph.flowMode && state.flowMode === 'stagger');
+  const gradientHubs = new Set(graph.hubs
+    .filter(hub => hub.activeSessionCount > 0 && hub.activeToolColors?.length > 1)
+    .map(hub => hub.id));
   const edgesHtml = edgeSpecs.map(({ edge, hop, d, color, swNum, sw }) => {
     const active = Boolean(edge.active);
     const classes = ['topo-edge', `topo-edge--hop${hop}`];
@@ -2363,30 +2376,36 @@ function layoutTopologyLinks(graph) {
     if (active) {
       classes.push('is-active');
       if (!reduced) {
-        const tier = topologyEdgeSpeedTier(edge.liveRate);
-        const branchIdx = Array.from(edge.id).reduce((sum, char) => sum + char.charCodeAt(0), 0) % 4;
-        classes.push(`topo-speed-${tier}`, `topo-branch-${branchIdx}`);
+        const beamColor = gradientHubs.has(hop === 1 ? edge.to : edge.from)
+          ? `color-mix(in srgb, ${color} 78%, white)`
+          : '#ffffff';
         activeLayers = `<path class="topo-edge-aura" stroke="${escapeHtml(color)}" stroke-width="${(swNum + 3.2).toFixed(2)}" d="${d}"></path>`
           + `<path class="topo-beam-tail" pathLength="100" stroke="${escapeHtml(color)}" stroke-width="${(swNum + 1.8).toFixed(2)}" d="${d}"></path>`
           + `<path class="topo-beam-body" pathLength="100" stroke="${escapeHtml(color)}" stroke-width="${Math.max(1.5, swNum + 0.35).toFixed(2)}" d="${d}"></path>`
-          + `<path class="topo-beam-head" pathLength="100" stroke-width="1.25" d="${d}"></path>`;
+          + `<path class="topo-beam-head" pathLength="100" stroke="${escapeHtml(beamColor)}" stroke-width="1.25" d="${d}"></path>`;
       }
     }
-    return `<g class="${classes.join(' ')}" data-edge-id="${escapeHtml(edge.id)}" data-key="${escapeHtml(edge.id)}">`
+    const edgePhase = stagger ? Number(edge.flowPhase || 0) : 0;
+    return `<g class="${classes.join(' ')}" data-edge-id="${escapeHtml(edge.id)}" data-key="${escapeHtml(edge.id)}" data-flow-phase="${edgePhase}">`
       + `<path class="topo-edge-base" stroke="${escapeHtml(color)}" stroke-width="${sw}" d="${d}"></path>`
       + activeLayers
       + `</g>`;
   }).join('');
 
-  patchDashboardMarkup(svg, `<defs>`
+  const linksChanged = patchDashboardMarkup(svg, `<defs>`
     + `<filter id="dashTopoBeamGlow" x="-30%" y="-30%" width="160%" height="160%"><feGaussianBlur stdDeviation="2.4" result="b"></feGaussianBlur><feMerge><feMergeNode in="b"></feMergeNode><feMergeNode in="SourceGraphic"></feMergeNode></feMerge></filter>`
     + `<filter id="dashTopoAmbientGlow" x="-40%" y="-40%" width="180%" height="180%"><feGaussianBlur stdDeviation="5"></feGaussianBlur></filter>`
     + `</defs>${edgesHtml}`);
 
+  if (!reduced && linksChanged) syncTopologyAnimationClock(canvas);
+
   const edgeSpecById = new Map(edgeSpecs.map((spec) => [spec.edge.id, spec]));
   svg.querySelectorAll('g.topo-edge[data-edge-id]').forEach((g) => {
     const spec = edgeSpecById.get(g.getAttribute('data-edge-id'));
-    if (spec) applyEdgeVisibility(g, spec.vis);
+    if (spec) {
+      applyEdgeVisibility(g, spec.vis);
+      g.style?.setProperty?.('--topo-flow-phase', String(stagger ? Number(spec.edge.flowPhase || 0) : 0));
+    }
   });
 
   if (activeHover?.kind === 'topo') {
@@ -2404,8 +2423,9 @@ function renderTopology(overview) {
     return;
   }
 
-  const reduced = prefersReducedMotion();
   const isSessionMode = graph.mode === 'sessions';
+  const flowMode = graph.flowMode === 'stagger' || (!graph.flowMode && state.flowMode === 'stagger') ? 'stagger' : 'sync';
+  const stagger = flowMode === 'stagger';
   const maxHubTokens = graph.hubs.reduce((mx, h) => Math.max(mx, h.tokens), 0) || 1;
   const existingCanvas = els.topology.querySelector('.dash-topo-canvas');
 
@@ -2421,19 +2441,6 @@ function renderTopology(overview) {
       activeHubColorMap.set(e.to, e.color);
     }
   }
-  const hubRateMap = new Map();
-  for (const e of graph.devToHub || []) {
-    if (e.active) hubRateMap.set(e.to, Math.max(hubRateMap.get(e.to) || 0, Number(e.liveRate || 0)));
-  }
-  for (const e of graph.hubToEnd || []) {
-    if (e.active) hubRateMap.set(e.from, Math.max(hubRateMap.get(e.from) || 0, Number(e.liveRate || 0)));
-  }
-  const endRateMap = new Map();
-  for (const e of graph.hubToEnd || []) {
-    if (e.active) endRateMap.set(e.to, Math.max(endRateMap.get(e.to) || 0, Number(e.liveRate || 0)));
-  }
-  const nodeSpeedClass = (active, rate) => (active && !reduced ? `topo-speed-${topologyEdgeSpeedTier(rate)}` : '');
-
   const devicesHtml = graph.devices.map((d) => {
     const colors = (d.activeToolColors || []).map(color => `color-mix(in srgb, ${displayColor(color)} 72%, var(--text))`);
     const hasLiveFlow = liveDevices.has(d.id) || colors.length > 0;
@@ -2442,13 +2449,13 @@ function renderTopology(overview) {
     const barColor = hasLiveFlow || d.liveTokPerSec > 0
       ? 'rgba(var(--overlay-rgb), 0.56)' : 'rgba(var(--overlay-rgb), 0.34)';
     const borderColor = colors.length ? `linear-gradient(180deg, transparent, ${colors.join(', ')}, transparent)` : '';
-    const cls = ['topo-node', 'topo-node--device', hasLiveFlow ? 'is-active' : '', nodeSpeedClass(hasLiveFlow, d.liveTokPerSec), selected ? 'is-selected' : '', d.stale ? 'is-stale' : ''].filter(Boolean).join(' ');
+    const cls = ['topo-node', 'topo-node--device', hasLiveFlow ? 'is-active' : '', selected ? 'is-selected' : '', d.stale ? 'is-stale' : ''].filter(Boolean).join(' ');
     const subLeft = d.liveTokPerSec > 0
       ? `<span class="topo-live-rate is-rate">${Math.round(d.liveTokPerSec)} tok/s</span>`
       : escapeHtml(d.activeWorkspace || (d.isLocal ? t('dashboard.devices.you') : ''));
     const subRight = d.activeSessionCount > 0 ? t('dashboard.fleet.activeAgents', { count: d.activeSessionCount }) : '';
     const shareScale = Math.min(1, d.share || 0).toFixed(3);
-    return `<div class="${cls}" data-topo-kind="device" data-topo-id="${escapeHtml(d.id)}" data-key="device:${escapeHtml(d.id)}" data-node-accent="${accent}" tabindex="0" role="button">`
+    return `<div class="${cls}" data-topo-kind="device" data-topo-id="${escapeHtml(d.id)}" data-key="device:${escapeHtml(d.id)}" data-node-accent="${accent}" data-flow-phase="${stagger ? Number(d.flowPhase || 0) : 0}" tabindex="0" role="button">`
       + `<div class="topo-node-top">`
       + `<span class="topo-node-ident"><span class="device-kind-icon device-kind-${escapeHtml(d.deviceKind)}" aria-hidden="true"></span><span class="topo-node-title">${escapeHtml(d.name)}</span></span>`
       + `<span class="topo-node-val">${escapeHtml(formatAccountingValue(d.accountingStatus, formatCompact(d.tokens)))}</span>`
@@ -2464,7 +2471,11 @@ function renderTopology(overview) {
     const active = h.activeSessionCount > 0;
     const titleText = h.isGeneral ? t('dashboard.topology.generalWorkspace') : h.name;
     const accent = displayColor(activeHubColorMap.get(h.id) || h.color || '#73bdf5');
-    const hubCls = ['topo-node', 'topo-node--hub', active ? 'is-active' : '', nodeSpeedClass(active, hubRateMap.get(h.id) || 0)].filter(Boolean).join(' ');
+    const colors = h.activeToolColors || [];
+    const border = active && colors.length > 1
+      ? `linear-gradient(115deg, ${colors.map(color => `color-mix(in srgb, ${displayColor(color)} 54%, transparent)`).join(', ')})`
+      : '';
+    const hubCls = ['topo-node', 'topo-node--hub', active ? 'is-active' : '', border ? 'has-tool-gradient' : ''].filter(Boolean).join(' ');
     const iconHtml = isSessionMode
       ? `<span class="row-icon row-icon-project" aria-hidden="true"></span>`
       : (h.iconClass ? `<span class="dash-bd-icon row-icon ${escapeHtml(h.iconClass)}" aria-hidden="true"></span>` : `<span class="dash-bd-swatch" data-c="${accent}"></span>`);
@@ -2472,7 +2483,8 @@ function renderTopology(overview) {
     const subRight = active ? `<span class="topo-live-rate">${escapeHtml(t('dashboard.fleet.activeAgents', { count: h.activeSessionCount }))}</span>` : escapeHtml(formatCost(h.cost, h.unpricedTokens));
     const fillScale = Math.max(0.04, Math.min(1, h.tokens / maxHubTokens)).toFixed(3);
     const barAttr = h.barBackground ? `data-bg="${escapeHtml(h.barBackground)}"` : `data-c="${accent}"`;
-    return `<div class="${hubCls}" data-topo-kind="hub" data-topo-id="${escapeHtml(h.id)}" data-key="hub:${escapeHtml(h.id)}" data-node-accent="${accent}" tabindex="0" role="button">`
+    const borderAttr = border ? ` data-workspace-gradient="${escapeHtml(border)}"` : '';
+    return `<div class="${hubCls}" data-topo-kind="hub" data-topo-id="${escapeHtml(h.id)}" data-key="hub:${escapeHtml(h.id)}" data-node-accent="${accent}" data-flow-phase="${stagger ? Number(h.flowPhase || 0) : 0}"${borderAttr} tabindex="0" role="button">`
       + `<span class="topo-port topo-port--in${active ? ' is-live' : ''}" data-port="hub-in:${escapeHtml(h.id)}"></span>`
       + `<div class="topo-node-top">`
       + `<span class="topo-node-ident">${iconHtml}<span class="topo-node-title">${escapeHtml(titleText)}</span></span>`
@@ -2480,13 +2492,14 @@ function renderTopology(overview) {
       + `</div>`
       + `<div class="topo-node-sub"><span class="topo-node-sub-text">${escapeHtml(subLeft)}</span><span>${subRight}</span></div>`
       + `<div class="topo-mini-bar"><div class="topo-mini-bar-fill" data-w="${fillScale}" ${barAttr}></div></div>`
+      + (border ? '<span class="topo-workspace-border" aria-hidden="true"></span>' : '')
       + `<span class="topo-port topo-port--out${active ? ' is-live' : ''}" data-port="hub-out:${escapeHtml(h.id)}"></span>`
       + `</div>`;
   }).join('');
 
   const endsHtml = graph.endpoints.map((ep) => {
     const accent = displayColor(ep.color || '#6ab4f0');
-    const epCls = ['topo-node', 'topo-node--endpoint', ep.isActive ? 'is-active' : '', nodeSpeedClass(Boolean(ep.isActive), endRateMap.get(ep.id) || 0)].filter(Boolean).join(' ');
+    const epCls = ['topo-node', 'topo-node--endpoint', ep.isActive ? 'is-active' : ''].filter(Boolean).join(' ');
     const iconHtml = ep.iconClass
       ? `<span class="dash-session-brand row-icon ${escapeHtml(ep.iconClass)}" aria-hidden="true"></span>`
       : `<span class="dash-bd-swatch" data-c="${accent}"></span>`;
@@ -2495,7 +2508,7 @@ function renderTopology(overview) {
     const rightMeta = ep.context
       ? `<span class="home-session-context"${ep.context.tone ? ` data-tone="${escapeHtml(ep.context.tone)}"` : ''}><span class="home-session-context-meter"><span class="home-session-context-fill" data-w="${Math.max(0, Math.min(1, Number(ep.context.displayPercent || 0) / 100)).toFixed(3)}"></span></span><span class="home-session-context-value">${ep.context.displayPercent}%</span></span>`
       : `<span>${escapeHtml(formatCost(ep.costUsd, ep.unpricedTokens))}</span>`;
-    return `<div class="${epCls}" data-topo-kind="endpoint" data-topo-id="${escapeHtml(ep.id)}" data-key="endpoint:${escapeHtml(ep.id)}" data-node-accent="${accent}" tabindex="0" role="button">`
+    return `<div class="${epCls}" data-topo-kind="endpoint" data-topo-id="${escapeHtml(ep.id)}" data-key="endpoint:${escapeHtml(ep.id)}" data-node-accent="${accent}" data-flow-phase="${stagger ? Number(ep.flowPhase || 0) : 0}" tabindex="0" role="button">`
       + (!isSessionMode || ep.hubId ? `<span class="topo-port topo-port--in${ep.isActive ? ' is-live' : ''}" data-port="end:${escapeHtml(ep.id)}"></span>` : '')
       + `<div class="topo-node-top">`
       + `<span class="topo-node-ident">${iconHtml}${stateHtml}<span class="topo-node-title">${escapeHtml(ep.title)}</span></span>`
@@ -2510,7 +2523,7 @@ function renderTopology(overview) {
 
   // Keep the scroll containers and focused nodes on membership/rank changes.
   // The link layer owns its SVG children and stays mounted through node updates.
-  const changed = patchDashboardMarkup(els.topology, `<div class="dash-topo-canvas">`
+  const changed = patchDashboardMarkup(els.topology, `<div class="dash-topo-canvas" data-flow-mode="${flowMode}">`
     + `<svg class="dash-topo-links" data-dom-island aria-hidden="true"></svg>`
     + `<div class="dash-topo-col"><div class="dash-topo-col-head"><span>${escapeHtml(t('dashboard.topology.colDevices'))}</span><span>${graph.counts.devices}</span></div><div class="dash-topo-col-scroll" data-topo-col="devices">${devicesHtml}</div></div>`
     + `<div class="dash-topo-col"><div class="dash-topo-col-head"><span>${escapeHtml(hubColTitle)}</span><span>${graph.counts.hubs}</span></div><div class="dash-topo-col-scroll" data-topo-col="hubs">${hubsHtml}</div></div>`
@@ -2519,6 +2532,7 @@ function renderTopology(overview) {
 
   if (changed) applySwatchColors(els.topology);
   const canvas = els.topology.querySelector('.dash-topo-canvas');
+  if (changed && canvas && !prefersReducedMotion()) syncTopologyAnimationClock(canvas);
   if (canvas && canvas !== existingCanvas && typeof ResizeObserver === 'function') {
     topologyResizeObserver?.disconnect();
     topologyResizeObserver = new ResizeObserver(() => {
@@ -4617,6 +4631,7 @@ async function boot() {
   state.stageView = settings.dashboardStageView === '2d' || settings.dashboardStageView === '3d' || settings.dashboardStageView === 'flow'
     ? settings.dashboardStageView
     : 'flow';
+  state.flowMode = settings.dashboardFlowMode === 'stagger' ? 'stagger' : 'sync';
   state.heatmapView = state.stageView === '2d' ? '2d' : '3d';
   state.rateMode = settings.tokenRateMode === 'burn' ? 'burn' : 'speed';
   if (settings.defaultUsageRange && PERIODS.includes(settings.defaultUsageRange)) {
@@ -4713,6 +4728,14 @@ window.tokenMonitor.onSettingsPush?.((next) => {
       } else {
         state.motion = 'update';
       }
+      needsRender = true;
+    }
+  }
+  if ('dashboardFlowMode' in next) {
+    const nextFlowMode = next.dashboardFlowMode === 'stagger' ? 'stagger' : 'sync';
+    if (state.flowMode !== nextFlowMode) {
+      state.flowMode = nextFlowMode;
+      state.motion = 'update';
       needsRender = true;
     }
   }
@@ -4938,7 +4961,7 @@ els.trendMetricBtns.forEach((b) => b.addEventListener('click', () => {
   render();
 }));
 
-const dashboardSelectControls = [dashboardSettings.stage, dashboardSettings.metric].map(select =>
+const dashboardSelectControls = [dashboardSettings.stage, dashboardSettings.flowMode, dashboardSettings.metric].map(select =>
   window.TokenMonitorSelectControl?.enhance(select, { align: 'end' }));
 dashboardSettings.popover?.addEventListener('toggle', event => {
   if (event.newState === 'closed') dashboardSelectControls.forEach(control => control?.close());
@@ -4965,6 +4988,8 @@ dashboardSettings.popover?.addEventListener('change', (event) => {
     void saveDashboardSettings({ dashboardShowQuotas: input.checked });
   } else if (input === dashboardSettings.stage) {
     void saveDashboardSettings({ dashboardStageView: input.value });
+  } else if (input === dashboardSettings.flowMode) {
+    void saveDashboardSettings({ dashboardFlowMode: input.value });
   } else if (input === dashboardSettings.metric) {
     void saveDashboardSettings({ dashboardHeatmapMetric: input.value });
   }
