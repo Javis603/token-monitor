@@ -152,12 +152,13 @@ test('POSIX cleanup kills a detached group after its leader exits', { skip: proc
       trackLiveSubprocesses(table);
       const child = spawn(process.execPath, ['-e', `
         const { spawn } = require('node:child_process');
-        const descendant = spawn(process.execPath, ['-e', 'setTimeout(() => {}, 60000)'], {
-          stdio: ['ignore', 'inherit', 'inherit']
+        const descendant = spawn(process.execPath, ['-e', "process.on('SIGTERM', () => console.log('term')); setTimeout(() => {}, 60000); process.send('ready')"], {
+          stdio: ['ignore', 'inherit', 'inherit', 'ipc']
         });
-        descendant.once('spawn', () => process.exit(0));
+        descendant.once('message', () => process.exit(0));
       `], { detached: true, stdio: ['ignore', 'pipe', 'pipe'] });
-      const termination = createSubprocessTermination(child, { killTree: true });
+      const clock = fakeTimers();
+      const termination = createSubprocessTermination(child, { ...clock, killTree: true });
       const closed = once(child, 'close');
       let groupClosed = false;
       child.once('close', () => {
@@ -173,8 +174,12 @@ test('POSIX cleanup kills a detached group after its leader exits', { skip: proc
       });
       assert.deepEqual(await once(child, 'exit'), [0, null]);
       assert.ok(table.includes(-child.pid));
-      if (mode === 'worker cancellation') termination.request();
-      else signalLiveSubprocesses(table);
+      if (mode === 'worker cancellation') {
+        const stdout = once(child.stdout, 'data');
+        termination.request();
+        assert.equal(String((await stdout)[0]).trim(), 'term');
+        clock.timers[0].fn();
+      } else signalLiveSubprocesses(table);
       await closed;
       assert.ok(!table.includes(-child.pid));
     });

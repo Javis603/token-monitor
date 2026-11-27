@@ -40,9 +40,9 @@ function registerLiveSubprocess(child, killTree) {
   return () => {};
 }
 
-function killSubprocessTree(pid, kill) {
+function killSubprocessTree(pid, kill, signal = 'SIGKILL') {
   if (process.platform !== 'win32') {
-    return kill(-pid, 'SIGKILL');
+    return kill(-pid, signal);
   }
   const root = process.env.SystemRoot || process.env.SYSTEMROOT || process.env.windir || 'C:\\Windows';
   try {
@@ -104,7 +104,7 @@ function createSubprocessTermination(child, options = {}) {
   });
   const kill = signal => {
     if (options.killTree && child.pid) {
-      if (detachedGroup || !exited) killSubprocessTree(child.pid, process.kill.bind(process));
+      if (detachedGroup || !exited) killSubprocessTree(child.pid, process.kill.bind(process), signal);
     } else child.kill(signal);
   };
 
