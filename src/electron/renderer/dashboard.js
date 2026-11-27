@@ -2472,7 +2472,7 @@ function renderTopology(overview) {
       ? `<span class="home-session-context"${ep.context.tone ? ` data-tone="${escapeHtml(ep.context.tone)}"` : ''}><span class="home-session-context-meter"><span class="home-session-context-fill" data-w="${Math.max(0, Math.min(1, Number(ep.context.displayPercent || 0) / 100)).toFixed(3)}"></span></span><span class="home-session-context-value">${ep.context.displayPercent}%</span></span>`
       : `<span>${escapeHtml(formatCost(ep.costUsd, ep.unpricedTokens))}</span>`;
     return `<div class="${epCls}" data-topo-kind="endpoint" data-topo-id="${escapeHtml(ep.id)}" data-key="endpoint:${escapeHtml(ep.id)}" data-node-accent="${accent}" tabindex="0" role="button">`
-      + `<span class="topo-port topo-port--in${ep.isActive ? ' is-live' : ''}" data-port="end:${escapeHtml(ep.id)}"></span>`
+      + (!isSessionMode || ep.hubId ? `<span class="topo-port topo-port--in${ep.isActive ? ' is-live' : ''}" data-port="end:${escapeHtml(ep.id)}"></span>` : '')
       + `<div class="topo-node-top">`
       + `<span class="topo-node-ident">${iconHtml}${stateHtml}<span class="topo-node-title">${escapeHtml(ep.title)}</span></span>`
       + `<span class="topo-node-val">${escapeHtml(formatCompact(ep.totalTokens))}</span>`

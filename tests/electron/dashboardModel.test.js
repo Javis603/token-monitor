@@ -296,9 +296,9 @@ test('buildTopologyGraph links devices, workspaces, and sessions cleanly and fal
   const graph = sessionOverview.topology;
   assert.equal(graph.mode, 'sessions');
   assert.equal(graph.devices.length, 2);
-  assert.equal(graph.hubs.length, 2);
+  assert.equal(graph.hubs.length, 1);
   assert.equal(graph.endpoints.length, 2);
-  assert.ok(graph.hubs.some((h) => h.isGeneral === true));
+  assert.equal(graph.endpoints.find((ep) => ep.id === 'claude:unassigned').hubId, '');
   const liveEdge = graph.hubToEnd.find((e) => e.to === 'codex:live');
   assert.equal(liveEdge.active, true);
   assert.equal(liveEdge.liveRate, 72);
@@ -1419,13 +1419,19 @@ test('legacy and current client model attribution merge without dropping either 
   assert.deepEqual(view.tools[0].models.map(({ id, tokens }) => [id, tokens]), [['gemini', 30]]);
 });
 
-test('a workspace named __general stays separate from unassigned sessions', () => {
+test('Live Flow keeps unassigned sessions in order without a synthetic workspace or links', () => {
   const graph = model.buildTopologyGraph({
-    hero: { tokens: 30 },
-    sessions: [{ key: 'named', projectLabel: '__general', totalTokens: 10 },
-      { key: 'unassigned', projectLabel: '', totalTokens: 20 }]
+    fleet: { machines: [{ deviceId: 'mac', isLocal: true }] },
+    sessions: [
+      { key: 'review', backgroundReview: true, totalTokens: 20 },
+      { key: 'named', projectLabel: '__general', totalTokens: 10 },
+      { key: 'grok', grokBot: true, totalTokens: 30 }
+    ]
   });
-  assert.deepEqual(graph.hubs.map(hub => [hub.id, hub.tokens]).sort(), [['unassigned', 20], ['ws:__general', 10]]);
+  assert.deepEqual(graph.endpoints.map(endpoint => endpoint.id), ['review', 'named', 'grok']);
+  assert.deepEqual(graph.hubs.map(hub => [hub.id, hub.tokens]), [['ws:__general', 10]]);
+  assert.deepEqual(graph.devToHub.map(edge => edge.to), ['ws:__general']);
+  assert.deepEqual(graph.hubToEnd.map(edge => edge.to), ['named']);
 });
 
 

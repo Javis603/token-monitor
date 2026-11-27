@@ -1998,7 +1998,7 @@
       /** @param {any} s */
       const sessionHubKey = (s) => {
         const label = String(s?.projectLabel || '').trim();
-        return label ? `ws:${label.toLowerCase()}` : 'unassigned';
+        return label ? `ws:${label.toLowerCase()}` : '';
       };
 
       // Rank workspace hubs across all sessions/workspaces in scope by live activity then volume.
@@ -2006,6 +2006,7 @@
       const candidateHubs = new Map();
       for (const s of sessions) {
         const hubId = sessionHubKey(s);
+        if (!hubId) continue;
         const label = String(s?.projectLabel || '').trim();
         const ws = label ? wsLookup.get(label.toLowerCase()) : null;
         let hub = candidateHubs.get(hubId);
@@ -2074,7 +2075,10 @@
       const visibleHubSet = new Set(hubs.map((h) => h.id));
 
       const endpoints = sessions
-        .filter((s) => visibleHubSet.has(sessionHubKey(s)))
+        .filter((s) => {
+          const hubId = sessionHubKey(s);
+          return !hubId || visibleHubSet.has(hubId);
+        })
         .slice(0, maxEndpoints)
         .map((s) => {
           const epDeviceId = resolveSessionDeviceId(s);
@@ -2205,7 +2209,7 @@
       const maxD2H = devToHub.reduce((mx, e) => Math.max(mx, e.tokens), 0) || 1;
       for (const edge of devToHub) edge.share = edge.tokens / maxD2H;
 
-      const hubToEnd = endpoints.map((ep) => {
+      const hubToEnd = endpoints.filter((ep) => ep.hubId).map((ep) => {
         const devIds = ep.deviceId ? [ep.deviceId] : (ep.memberDeviceIds || []);
         const maxLiveRate = devIds.reduce(
           /** @param {number} mx @param {string} dId */
