@@ -356,13 +356,10 @@ In the widget on one always-on machine, open Settings → Multi-device Sync and 
 
 The hub runs while Token Monitor is running — quitting (not just closing the window) stops it for all connected devices.
 
-For an Android companion that supports pairing QR codes, choose **Pair phone**
-next to a private Wi-Fi or Tailscale address in **Host hub on this device**.
-When **Connect to a hub** has a saved public HTTPS address, such as a Cloudflare
-Worker Hub, **Pair phone** appears next to **Change connection**. In the
-companion, choose **Scan QR code** or **Choose QR image** and confirm the
-address. For a public HTTPS address, enable internet Hub access in the review
-before connecting.
+In **Multi-device Sync**, choose **Pair phone** next to a private Wi-Fi or
+Tailscale address in **Host hub on this device**, or next to
+**Change connection** when a public HTTPS Hub is saved in **Connect to a hub**.
+Scan the code with a compatible client.
 
 The QR contains the Hub's shared secret. An internet Hub QR works from anywhere,
 so anyone who photographs it can read your usage until you change the secret.
