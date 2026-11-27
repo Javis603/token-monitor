@@ -3282,6 +3282,10 @@ function qwenworkAccountOwner({ source = 'settings', enabled = true, readStatus 
     getSettings: () => ({ qwenworkSessionConfigured: true, qwenworkSessionSource: source }),
     getReading: () => ({ status: 'ok', source: sourceId }),
     getAccountContext: () => ({ providerEnabled: enabled }),
+    legacyAccountList: { mountEditor({ editor }) {
+      handlers.set('cancel', editor.cancel);
+      return { sync: () => hidden.set('cancel', !editor.isOpen() || !editor.canCancel()) };
+    } },
     accountSlotsPanel: { createPanel(options) {
       panel = options;
       return {
@@ -3314,9 +3318,9 @@ test('QwenWork fallback accounts can start and cancel a stored browser sign-in',
     assert.equal(hidden.get('add'), source === 'settings');
     if (source === 'settings') continue;
     const signIn = panel.onAdd();
-    assert.equal(hidden.get('qwenworkCancelSignInButton'), false);
-    await handlers.get('qwenworkCancelSignInButton')();
-    assert.equal(hidden.get('qwenworkCancelSignInButton'), true);
+    assert.equal(hidden.get('cancel'), false);
+    await handlers.get('cancel')();
+    assert.equal(hidden.get('cancel'), true);
     finish();
     await signIn;
   }
@@ -3400,11 +3404,11 @@ test('QwenWork cancel keeps the flow cancelable when the cancel request fails', 
     }
   });
   const signIn = panel.onAdd();
-  await handlers.get('qwenworkCancelSignInButton')();
-  assert.equal(hidden.get('qwenworkCancelSignInButton'), false);
+  await handlers.get('cancel')();
+  assert.equal(hidden.get('cancel'), false);
   assert.match(output.errorText, /cancel IPC failed/);
-  await handlers.get('qwenworkCancelSignInButton')();
-  assert.equal(hidden.get('qwenworkCancelSignInButton'), true);
+  await handlers.get('cancel')();
+  assert.equal(hidden.get('cancel'), true);
   finish();
   await signIn;
 });

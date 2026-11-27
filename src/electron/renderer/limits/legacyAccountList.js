@@ -28,7 +28,7 @@
     return candidates.length === 1 ? candidates[0] : undefined;
   }
   /**
-   * @param {{document: Document, provider: string, label?: string, add?: Function, container: HTMLElement, t: Function, bridge: any, getContext: Function, preserveScroll: Function, refresh: Function, changed: Function, enabled?: Function, remove?: Function, edit?: Function, sourceLabel?: Function, busy?: Function, editor?: {nodes: string[], submit?: string, visibility?: string, replaceVisibility?: string, allowBusyCancel?: boolean, isOpen?: Function, retryAvailable?: Function, cancel?: Function}, actions?: Function, statusReading?: Function, secondaryText?: Function, detailText?: Function, blocked?: Function, readings?: () => any[], status?: {element: () => HTMLElement | null, empty?: () => string, text?: (summary: {total: number, linked: number}) => string, active?: () => boolean}}} options
+   * @param {{document: Document, provider: string, label?: string, add?: Function, container: HTMLElement, t: Function, bridge: any, getContext: Function, preserveScroll: Function, refresh: Function, changed: Function, enabled?: Function, remove?: Function, edit?: Function, sourceLabel?: Function, busy?: Function, editor?: {nodes: string[], submit?: string, visibility?: string, replaceVisibility?: string, allowBusyCancel?: boolean, canCancel?: Function, isOpen?: Function, retryAvailable?: Function, cancel?: Function}, actions?: Function, statusReading?: Function, secondaryText?: Function, detailText?: Function, blocked?: Function, readings?: () => any[], status?: {element: () => HTMLElement | null, empty?: () => string, text?: (summary: {total: number, linked: number}) => string, active?: () => boolean}}} options
    */
   function create(options) {
     let accounts = /** @type {any[]} */ ([]);
@@ -144,7 +144,7 @@
     };
   }
   /** Provider-owned nodes and callbacks remain live across expansion and status updates.
-   * @param {{document: Document, editor: {nodes: string[], submit?: string, visibility?: string, replaceVisibility?: string, allowBusyCancel?: boolean, isOpen?: Function, retryAvailable?: Function, cancel?: Function}, t: Function, label?: string, provider: string, busy?: Function}} options @param {HTMLElement} root
+   * @param {{document: Document, editor: {nodes: string[], submit?: string, visibility?: string, replaceVisibility?: string, allowBusyCancel?: boolean, canCancel?: Function, isOpen?: Function, retryAvailable?: Function, cancel?: Function}, t: Function, label?: string, provider: string, busy?: Function}} options @param {HTMLElement} root
    */
   function mountEditor(options, root) {
     const { document, editor: config, t } = options;
@@ -197,13 +197,13 @@
       if (actions.classList.contains('hidden') !== (footer !== actions)) actions.classList.toggle('hidden', footer !== actions);
       if (config.isOpen) setOpen(Boolean(config.isOpen()));
       else if (active) setOpen(!active.classList.contains('hidden'));
-      const disabled = Boolean(options.busy?.()) && !config.allowBusyCancel;
+      const disabled = config.canCancel?.() === false || (Boolean(options.busy?.()) && !config.allowBusyCancel);
       // Cancel can live inside an observed owner form. Rewriting a present
       // boolean attribute queues another mutation even when its value is equal.
       if (cancel.disabled !== disabled) cancel.disabled = disabled;
     };
     const close = () => {
-      if (options.busy?.() && !config.allowBusyCancel) return;
+      if (cancel.disabled) return;
       const cancellingLogin = config.allowBusyCancel && options.busy?.();
       config.cancel?.();
       if (cancellingLogin) return;
@@ -247,5 +247,5 @@
       setOpen(true);
     } };
   }
-  return { create, readingFor };
+  return { create, readingFor, mountEditor };
 });

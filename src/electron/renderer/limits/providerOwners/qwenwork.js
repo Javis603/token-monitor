@@ -15,6 +15,8 @@ function create(host) {
   let error = '';
   /** @type {any} */
   let accounts;
+  /** @type {any} */
+  let loginEditor;
 
   const element = (/** @type {string} */ name) => document.getElementById(`qwenwork${name}`);
   function refreshReadings() {
@@ -54,7 +56,7 @@ function create(host) {
     }] : [];
     accounts?.update(slots, current ? [current] : [], host.getAccountContext());
     accounts?.element.querySelector('.slot-add')?.classList.toggle('hidden', stored);
-    element('CancelSignInButton').classList.toggle('hidden', !flowId || !cancelable);
+    loginEditor?.sync();
   }
 
   function clearFlow() {
@@ -140,7 +142,20 @@ function create(host) {
       }
     });
     element('AccountList').append(accounts.element);
-    element('CancelSignInButton').addEventListener('click', cancel);
+    loginEditor = host.legacyAccountList.mountEditor({
+      document, t, provider: 'qwenwork', label: 'QwenWork', busy: () => Boolean(flowId),
+      editor: {
+        nodes: ['qwenworkLoginStatus', 'qwenworkErrorMessage'],
+        isOpen: () => Boolean(flowId || error),
+        allowBusyCancel: true,
+        canCancel: () => !flowId || cancelable,
+        cancel: () => {
+          if (flowId) return cancel();
+          error = '';
+          refreshReadings();
+        }
+      }
+    }, accounts.element);
     bridge.onLoginStatus((/** @type {{flowId?: string, phase?: string, error?: string}} */ status) => {
       if (!flowId || status?.flowId !== flowId) return;
       if (status.phase === 'authorize' || status.phase === 'polling') progress = 'settings.qwenwork.loginWaiting';
