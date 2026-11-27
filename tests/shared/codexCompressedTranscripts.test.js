@@ -14,6 +14,7 @@ const { applySessionMetadata, projectIdentity } = require('../../src/shared/sess
 const { readSessionDetail } = require('../../src/shared/sessionDetail');
 const { readSessionActivity } = require('../../src/shared/providers/codex/sessionActivity');
 const { buildLocalUsageView } = require('../../src/shared/providers/codex/localUsage');
+const { symlinkOrSkip } = require('../helpers/symlink');
 
 const NATIVE_ID = '11111111-1111-4111-8111-111111111111';
 const ID = `rollout-2026-10-12T12-00-00-${NATIVE_ID}`;
@@ -250,17 +251,22 @@ test('Codex decode budgets apply across frames and reject content-corrupt comple
   assert.throws(() => readCompressedCodexTranscript(f.compressed), /excessive/);
 });
 
-test('compressed Codex discovery respects configured roots and bounded non-symlink traversal', t => {
+test('compressed Codex discovery respects configured roots and bounds traversal depth', t => {
   const f = fixture(t);
   const env = { CODEX_HOME: f.codexHome };
   assert.equal(resolveSessionFile('codex', ID, path.join(f.home, 'other'), { env }), f.compressed);
   assert.equal(resolveSessionFile('codex', ID, path.join(f.home, 'other'), { env, useEnvRoots: false }), '');
   const root = path.join(f.codexHome, 'sessions');
-  fs.symlinkSync(f.compressed, path.join(root, 'linked.jsonl.zst'));
-  assert.equal(resolveSessionFile('codex', 'linked', f.home, { env: {} }), '');
   let dir = root;
   for (let index = 0; index < 33; index++) dir = path.join(dir, 'nested');
   fs.mkdirSync(dir, { recursive: true });
   fs.writeFileSync(path.join(dir, 'too-deep.jsonl.zst'), zlib.zstdCompressSync(Buffer.from(text)));
   assert.equal(resolveSessionFile('codex', 'too-deep', f.home, { env: {} }), '');
+});
+
+test('compressed Codex discovery does not follow symlinks', t => {
+  const f = fixture(t);
+  const root = path.join(f.codexHome, 'sessions');
+  if (!symlinkOrSkip(t, f.compressed, path.join(root, 'linked.jsonl.zst'))) return;
+  assert.equal(resolveSessionFile('codex', 'linked', f.home, { env: {} }), '');
 });

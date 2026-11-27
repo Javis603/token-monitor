@@ -1075,6 +1075,7 @@ test('hidden Settings keeps the custom tray clock running without refreshing com
       }
     },
     statsRenderScheduler: { request() { scheduledRenders += 1; } },
+    syncTrayProviderIconDemand() {},
     trayLayoutApi: { trayLayoutNeedsClock: () => true },
     window: {
       TokenMonitorTrayText: { isGeneratedTrayIconMode: () => false },

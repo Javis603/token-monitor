@@ -959,7 +959,10 @@ span.settings-note.settings-item-desc {
 }
 .settings-section-toggle {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(0, auto);
+  /* The title takes its full width first and the summary truncates in the
+     space left over. The 12px floor keeps the disclosure chevron visible when
+     the window is too narrow for the whole title. */
+  grid-template-columns: minmax(0, max-content) minmax(12px, 1fr);
   align-items: center;
   gap: 10px;
   width: 100%;
@@ -8595,6 +8598,9 @@ html.native-liquid-glass .view-switcher-menu-item { border-radius: 9px; }
 .session-group-totals { white-space: nowrap; color: var(--text); }
 .row[role="button"]:focus-visible { outline: 2px solid rgba(var(--accent-rgb), 0.35); outline-offset: 2px; }
 .row[role="button"] { cursor: pointer; }
+.detail-token-toggle { cursor: pointer; }
+.detail-token-toggle:hover { text-decoration: underline dotted rgba(var(--overlay-rgb), 0.35); text-underline-offset: 2px; }
+.detail-token-toggle:focus-visible { outline: 2px solid rgba(var(--accent-rgb), 0.35); outline-offset: 2px; border-radius: 3px; }
 .detail-session-id { display: flex; align-items: center; gap: 6px; min-width: 0; color: var(--muted, #8a8a90); font-size: 0.625rem; }
 .detail-session-source { color: var(--readable-muted); font-size: 0.625rem; }
 .detail-session-source .session-source-device { max-width: 100%; }

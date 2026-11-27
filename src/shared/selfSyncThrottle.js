@@ -18,7 +18,7 @@
 // it. Keeping them in one object would have to pick one of those lifetimes and
 // be wrong about the other.
 
-const SELF_SYNC_KINDS = ['cursor', 'antigravity'];
+const SELF_SYNC_KINDS = ['cursor', 'antigravity', 'amp'];
 const {
   normalizeClientSyncDetailCode,
   normalizeClientSyncExitCode,

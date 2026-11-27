@@ -171,3 +171,14 @@ test('short-window labels and cost scale while the primary total stays fixed', (
   const headingRules = rules(css).filter((r) => r.selector.includes('.settings-section-toggle'));
   assert.ok(headingRules.every((r) => !r.body.includes('minmax(max-content')));
 });
+
+// In a narrow window a long summary used to claim its full width first and
+// squeeze section titles such as "Collection" down to nothing.
+test('settings section titles keep their width before summaries', () => {
+  const css = readRendererFile('styles.css');
+  const toggle = rules(css).find((r) => r.selector === '.settings-section-toggle');
+  assert.match(toggle?.body || '', /grid-template-columns: minmax\(0, max-content\) minmax\(12px, 1fr\);/);
+  const summary = rules(css).find((r) => r.selector.split(', ').includes('.settings-section-summary'));
+  assert.match(summary?.body || '', /min-width: 0;/);
+  assert.match(summary?.body || '', /text-overflow: ellipsis;/);
+});

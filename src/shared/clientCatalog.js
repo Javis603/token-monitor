@@ -44,8 +44,7 @@
   // unknown to upstream tokscale: the collector requests it with --client like
   // any other id, but it is absent from tokscale's --help client list and does
   // not honour TOKSCALE_EXTRA_DIRS. This is an axis of its own, not a
-  // collection "mode": self-synced clients (cursor, antigravity) are tracked
-  // separately in collector.js.
+  // collection "mode": self-synced clients are tracked in selfSyncThrottle.js.
   //
   // `locallyParsed: true` means Token Monitor parses the client in-process
   // (providers/<id>/usage.js) and no tokscale build accepts its id, so the

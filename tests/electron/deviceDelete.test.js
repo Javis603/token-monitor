@@ -147,6 +147,10 @@ function createHarness() {
     clientsWithIcon: new Set(),
     formatNumber: (value) => String(value),
     formatCompact: (value) => String(value),
+    formatDetailTokens: (value) => String(value),
+    isDetailCompactEnabled: () => false,
+    detailTokenDisplaySignature: () => '0:0:western:en',
+    decorateDetailTokenElement() {},
     t: (key) => ({
       'devices.remove': 'Delete',
       'devices.removeConfirm': 'Confirm removal'

@@ -234,9 +234,9 @@ function createLocalUsageSource(options = {}, deps = {}) {
     if (!entry || entry.retiring || entry.disconnected || !localThreadEnvironment(entry.thread, executorIds)) return;
     const accountKey = hashAccountKey(context.accountId);
     const turnId = params.turnId || params.turn?.id;
-    // The desktop schema's Turn has no model. Thread.model and resume.model
-    // are current configuration, not per-turn execution telemetry. Only an
-    // explicit turn-linked reroute identifies the execution model here.
+    // The desktop schema's Turn has no model. A turn-linked reroute names the
+    // execution model; otherwise the request uses Thread.model, the thread's
+    // configured model, which discovery refreshes while the subscription lives.
     const reportedModel = message.method === 'model/rerouted' ? params.toModel : null;
     if (turnId && typeof reportedModel === 'string' && reportedModel.trim()) {
       entry.turnModels.set(turnId, reportedModel.trim());
@@ -250,7 +250,7 @@ function createLocalUsageSource(options = {}, deps = {}) {
       if (!turnId || !total || !last || Object.keys(last).some((key) => last[key] > total[key])) return;
       if (shouldYield() || !store.claimObserver(owner)) { disconnect(); store.releaseObserver(owner); return; }
       if (store.observe({
-        accountKey, thread: { ...entry.thread, model: entry.turnModels.get(turnId) || 'unknown' }, ...entry.local, turnId,
+        accountKey, thread: { ...entry.thread, model: entry.turnModels.get(turnId) || entry.thread.model }, ...entry.local, turnId,
         tokenUsage: params.tokenUsage, baselineOnly: entry.baselinePending, now: now()
       })) {
         resumeRetries.delete(params.threadId);

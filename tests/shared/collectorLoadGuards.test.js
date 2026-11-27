@@ -3391,6 +3391,9 @@ for (const client of ['zcode', 'cherrystudio', 'goose']) {
     const originalSharedDir = process.env.TOKEN_MONITOR_SHARED_DIR;
     os.homedir = () => tmp;
     process.env.TOKEN_MONITOR_SHARED_DIR = tmp;
+    // Without APPDATA, Windows Goose roots fall back to the native Roaming
+    // folder, which would put this fixture in the developer's real profile.
+    process.env.APPDATA = path.join(tmp, 'AppData', 'Roaming');
     const { clientSourceRoots } = freshCollector();
     const dbDir = clientSourceRoots(client)[client].find((root) => root.id === `${client}-db`)?.dir
       || path.join(tmp, '.zcode', 'cli', 'db');

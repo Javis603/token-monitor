@@ -367,6 +367,7 @@ test('search renders reuse matching rows without layout motion or rebuilding too
     setSessionSearchStatus: (query, count) => statuses.push({ query, count }),
     currentCurrency: () => 'USD',
     currentLocale: () => 'en',
+    detailTokenDisplaySignature: () => '0:0:western:en',
     t: key => key,
     rowRenderFingerprints: new WeakMap(),
     captureBreakdownMotion: () => { calls.capture++; return new Map(); },

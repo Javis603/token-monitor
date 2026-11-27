@@ -641,6 +641,7 @@ function defaultSettings() {
     titleIconOnly: true,
     settingsInTitlebar: false,
     showCompactTotalTokens: false,
+    detailTokensUseCompactUnits: false,
     showLiveTokenRate: false,
     liveTokenRateScope: 'all',
     compactTokenUnits: 'western',
@@ -843,7 +844,7 @@ function resettableSettingsDefaults() {
     'notchStyle', 'notchProgressiveBlur', 'notchSummaryEnabled', 'notchSummaryMode',
     'notchHideSummaryInFullScreen', 'notchRunningIndicatorEnabled', 'notchWarnColors', 'notchHaptic', 'notchSwipeGestures',
     'systemGlass', 'windowsBackdrop', 'macBackdrop', 'textSize', 'reduceMotion', 'tokenNumberAnimation',
-    'showCompactTotalTokens', 'compactTokenUnits', 'showLiveTokenRate', 'liveTokenRateScope',
+    'showCompactTotalTokens', 'detailTokensUseCompactUnits', 'compactTokenUnits', 'showLiveTokenRate', 'liveTokenRateScope',
     'settingsInTitlebar', 'showLiveDot', 'showToolIcons', 'titleIconOnly',
     'collectionMode', 'exportIntervalMs',
     'showLimitSource', 'showLimitUsed', 'workbuddyQuotaTotalEnabled', 'syncUploadIntervalMs'
@@ -2213,6 +2214,7 @@ function readSettings() {
     merged.tokenNumberAnimation = tokenNumberAnimationApi.normalize(merged.tokenNumberAnimation);
     merged.showLiveTokenRate = parseBoolean(merged.showLiveTokenRate, false);
     merged.liveTokenRateScope = normalizeLiveTokenRateScope(merged.liveTokenRateScope);
+    merged.detailTokensUseCompactUnits = parseBoolean(merged.detailTokensUseCompactUnits, false);
     merged.compactTokenUnits = normalizeCompactTokenUnits(merged.compactTokenUnits);
     merged.modelAliases = normalizeModelAliases(merged.modelAliases);
     merged.syncContentState = normalizeSyncContentState(merged.syncContentState);
@@ -8307,6 +8309,7 @@ app.whenReady().then(() => {
       showToolIcons: patch.showToolIcons ?? settings.showToolIcons ?? true,
       titleIconOnly: parseBoolean(patch.titleIconOnly ?? settings.titleIconOnly, false),
       showCompactTotalTokens: parseBoolean(patch.showCompactTotalTokens ?? settings.showCompactTotalTokens, false),
+      detailTokensUseCompactUnits: parseBoolean(patch.detailTokensUseCompactUnits ?? settings.detailTokensUseCompactUnits, false),
       showLiveTokenRate: parseBoolean(patch.showLiveTokenRate ?? settings.showLiveTokenRate, false),
       liveTokenRateScope: normalizeLiveTokenRateScope(patch.liveTokenRateScope ?? settings.liveTokenRateScope),
       compactTokenUnits: normalizeCompactTokenUnits(patch.compactTokenUnits ?? settings.compactTokenUnits),

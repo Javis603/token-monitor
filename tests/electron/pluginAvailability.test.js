@@ -20,6 +20,7 @@ function iconDeliveryFixture(load) {
     trayProviderIconDeliveryGuard: require('../../src/electron/renderer/trayProviderIcons').createTrayProviderIconDeliveryGuard(),
     trayIconProviderIds: [], trayProviderImages: {}, trayProviderImageIds: new WeakMap(),
     loadImage: path => path.startsWith('../../../') ? Promise.resolve({}) : load(path),
+    trayProviderIconDemand: () => [], trayProviderIconsRequested: new Set(), trayProviderIconsLoading: new Set(), loadTrayProviderMark: async () => ({}),
     providerImageToPngDataUrl: () => 'bitmap', maybeUpdateBarsIcon() {}, renderFloatingBubbleContent() {} };
   vm.createContext(context);
   vm.runInContext(source('renderer/app.js', 'async function deliverTrayProviderIcons(', '\nfunction setAccountGroupExpanded('), context);

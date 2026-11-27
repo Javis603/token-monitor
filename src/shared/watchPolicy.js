@@ -57,6 +57,7 @@ function clientWatchCandidates(clientsCsv, options = {}) {
       .filter((root) => (
         !(client === 'copilot' && ['copilot-otel', 'copilot-session-state'].includes(root.id))
         && !INTERVAL_ONLY_SOURCE_CHECK_IDS.has(root.id)
+        && !(client === 'amp' && root.id === 'amp-threads' && root.optional)
       ))
       .map((root) => root.dir);
   }
@@ -116,7 +117,7 @@ function watchClientRootsForClients(clientsCsv, options = {}) {
   for (const [client, dirs] of Object.entries(clientWatchCandidates(clientsCsv, options))) {
     // Cursor and Antigravity's built-in roots are caches written by our own
     // self-sync. A custom root is external input, so it must remain watchable.
-    const candidates = SELF_SYNCED_CLIENTS.has(client)
+    const candidates = SELF_SYNCED_CLIENTS.has(client) && client !== 'amp'
       ? dirs.filter((dir) => customScanPaths[client]?.includes(dir))
       : dirs;
     const existing = [...new Set(candidates.filter(dirExists))];
@@ -702,7 +703,7 @@ function watchPolicyEntries(clientsCsv, options = {}) {
       .flatMap(([client, dirs]) => dirs
         .filter((dir) => (
           (client !== 'copilot' || customRoots.get(client)?.has(canonicalRoot(dir)))
-          && (!SELF_SYNCED_CLIENTS.has(client) || customScanPaths[client]?.includes(dir)
+          && (!SELF_SYNCED_CLIENTS.has(client) || client === 'amp' || customScanPaths[client]?.includes(dir)
             || (client === 'antigravity' && acpDirs.has(dir)))
           && !(claimed.get(client) || EMPTY_SET).has(dir)
         ))

@@ -576,7 +576,10 @@ test('source observations keep exact files, optional roots and WSL health in syn
   os.homedir = () => homeDir;
   delete process.env.GEMINI_CLI_HOME;
   try {
-    const options = { homeDir, platform: process.platform, env: {}, wslDetected: ['hermes'] };
+    // On Windows the tokscale config root comes from the native Roaming folder,
+    // not the stubbed home, so name it here to keep the cache check hermetic.
+    const env = { TOKSCALE_CONFIG_DIR: path.join(homeDir, '.config', 'tokscale') };
+    const options = { homeDir, platform: process.platform, env, wslDetected: ['hermes'] };
     const dbDir = path.join(homeDir, '.zcode', 'cli', 'db');
     const capture = path.join(homeDir, '.config', 'tokscale', 'headless', 'codex');
     fs.mkdirSync(dbDir, { recursive: true });
@@ -624,6 +627,26 @@ test('source observations keep exact files, optional roots and WSL health in syn
   }
 });
 
+test('Copilot and CodeBuddy source roots follow the injected platform and AppData', () => {
+  const homeDir = path.resolve('fixture-home');
+  const env = {
+    APPDATA: path.join(homeDir, 'roaming'),
+    LOCALAPPDATA: path.join(homeDir, 'local')
+  };
+  const rootsFor = (platform) => clientSourceRoots('copilot,codebuddy', { homeDir, platform, env });
+  const workspace = path.join(env.APPDATA, 'Code', 'User', 'workspaceStorage');
+  const windowsLogs = path.join(env.LOCALAPPDATA, 'CodeBuddyExtension', 'Logs');
+  const windows = rootsFor('win32');
+  assert.ok(windows.copilot.some(({ dir }) => dir === workspace));
+  assert.ok(windows.codebuddy.some(({ dir }) => dir === windowsLogs));
+
+  const mac = rootsFor('darwin');
+  const macLogs = path.join(homeDir, 'Library', 'Application Support', 'CodeBuddyExtension', 'Logs');
+  assert.ok(mac.codebuddy.some(({ dir }) => dir === macLogs));
+  assert.ok(!mac.copilot.some(({ dir }) => dir === workspace));
+  assert.ok(!mac.codebuddy.some(({ dir }) => dir === windowsLogs));
+});
+
 test('labelling roots keeps diagnostics separate from watcher roots', () => {
   const roots = clientSourceRoots(KNOWN_CLIENTS);
   const candidates = clientWatchCandidates(KNOWN_CLIENTS);
@@ -633,6 +656,7 @@ test('labelling roots keeps diagnostics separate from watcher roots', () => {
       .filter((root) => (
         !(client === 'copilot' && ['copilot-otel', 'copilot-session-state'].includes(root.id))
         && root.id !== 'kiro-ide-globalstorage'
+        && !(client === 'amp' && root.id === 'amp-threads' && root.optional)
       ))
       .map((root) => root.dir);
     if (client === 'senpi') {
