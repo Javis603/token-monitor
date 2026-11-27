@@ -17698,6 +17698,8 @@ function roundedRectPath(ctx, x, y, w, h, r) {
 const trayProviderImages = {};
 const trayProviderImageIds = new WeakMap();
 const trayProviderImageOpticalSamples = new WeakMap();
+const trayProviderIconsRequested = new Set();
+let trayProviderIconsLoading = new Set();
 const trayProviderIconDeliveryGuard = window.TokenMonitorTrayProviderIcons.createTrayProviderIconDeliveryGuard();
 const trayComposers = {};
 let customTrayClockTimer = null;
@@ -18450,10 +18452,11 @@ function trayDataUrlForMode(mode, size = 44, colors, options = {}) {
 
 async function maybeUpdateBarsIcon(options = {}) {
   if (options.refreshComposers !== false && isSettingsSurfaceVisible()) {
-    refreshTrayComposers();
+    refreshTrayComposers(options);
     if (edgeDockAvailable() && state.settings?.edgeDockEnabled === true) edgeDockComposer?.render();
     if (state.appInfo?.platform === 'darwin' && state.settings?.notchEnabled === true) notchItemsComposer?.render();
   } else {
+    syncTrayProviderIconDemand();
     syncCustomTrayClockTimer();
   }
   const mode = state.settings?.trayContent;
@@ -18778,7 +18781,8 @@ function syncCustomTrayClockTimer() {
   }
 }
 
-function refreshTrayComposers() {
+function refreshTrayComposers(options) {
+  if (isSettingsSurfaceVisible()) syncTrayProviderIconDemand();
   const surfaces = [
     { id: 'tray', root: els.trayComposer, visible: true },
     { id: 'floatingBubble', root: els.floatingBubbleComposer, visible: true },
@@ -18789,7 +18793,7 @@ function refreshTrayComposers() {
     trayComposers,
     createTrayComposer
   );
-  Object.values(trayComposers).forEach((composer) => composer?.refresh());
+  Object.values(trayComposers).forEach((composer) => composer?.refresh(options));
   syncCustomTrayClockTimer();
 }
 
@@ -18863,10 +18867,45 @@ function providerImageToPngDataUrl(img, size, showBadge = false, options = {}) {
   return canvas.toDataURL('image/png');
 }
 
+function trayProviderIconDemand() {
+  const demand = window.TokenMonitorTrayProviderIcons.trayProviderIconDemand({
+    stats: state.stats,
+    layouts: ['trayCustomLayout', 'floatingBubbleCustomLayout', 'notchCustomLayout']
+      .map((key) => state.settings?.[key])
+  });
+  if (isSettingsSurfaceVisible()) {
+    for (const { provider } of statsForTrayComposer().limits.providers) demand.add(provider);
+  }
+  return [...demand].filter((id) => trayIconProviderIds.has(id));
+}
+
+// A provider that starts reporting usage after startup needs its mark delivered
+// before the tray can pick it. An id counts as requested while the latest
+// finished delivery sent its mark to main or failed to load it, so a failed
+// mark cannot turn every stats push into another delivery, while one dropped
+// by a superseded delivery, or left out of a later one, is asked for again.
+// Ids the current delivery is still loading are left to it.
+function syncTrayProviderIconDemand() {
+  if (!state.settings || !window.tokenMonitor.setTrayIcons) return;
+  if (trayProviderIconDemand().some((id) => !trayProviderIconsRequested.has(id) && !trayProviderIconsLoading.has(id))) {
+    void deliverTrayProviderIcons();
+  }
+}
+
+// Draws only ever read the 128 px optical sample, so keep that canvas as the
+// provider's image and let the decoded SVG go.
+async function loadTrayProviderMark(path) {
+  const sample = providerImageOpticalSample(await loadImage(path));
+  trayProviderImageOpticalSamples.set(sample.canvas, sample);
+  return sample.canvas;
+}
+
 async function deliverTrayProviderIcons(showBadge = state.settings?.showTrayProviderBadge === true) {
   if (!window.tokenMonitor.setTrayIcons) return;
   const deliveryId = trayProviderIconDeliveryGuard.begin();
-  const sources = window.TokenMonitorTrayProviderIcons.trayProviderIconSources(trayIconProviderIds);
+  const demand = trayProviderIconDemand();
+  trayProviderIconsLoading = new Set(demand);
+  const sources = window.TokenMonitorTrayProviderIcons.trayProviderIconSources(demand);
   sources.app = '../../../assets/icons/tray-token-monitor.png';
   const modules = state.pluginCatalog?.limits?.modules || [];
   for (const module of modules) {
@@ -18876,23 +18915,35 @@ async function deliverTrayProviderIcons(showBadge = state.settings?.showTrayProv
   }
   for (const id of Object.keys(trayProviderImages)) if (id.startsWith('plugin:') && !sources[id]) delete trayProviderImages[id];
   const icons = {};
+  const failed = [];
   for (const [id, path] of Object.entries(sources)) {
     try {
-      const img = await loadImage(path);
+      // Built-in marks never change, so a redelivery for the badge or the system
+      // theme repaints from the kept sample. Plugin icons can, so reload those.
+      const img = id.startsWith('plugin:')
+        ? await loadImage(path)
+        : trayProviderImages[id] || await loadTrayProviderMark(path);
       if (!trayProviderIconDeliveryGuard.isCurrent(deliveryId)) return;
       trayProviderImages[id] = img;
       trayProviderImageIds.set(img, id);
       if (!id.startsWith('plugin:')) icons[id] = providerImageToPngDataUrl(img, 44, showBadge, { trayInk: true, standalone: true });
     } catch (_) {
       if (!trayProviderIconDeliveryGuard.isCurrent(deliveryId)) return;
+      failed.push(id);
       if (id.startsWith('plugin:')) delete trayProviderImages[id];
     }
   }
   if (!trayProviderIconDeliveryGuard.isCurrent(deliveryId)) return;
-  if (Object.keys(icons).length) await window.tokenMonitor.setTrayIcons(icons);
+  // Drop absent built-in bitmaps so main can use its fallback until a fresh
+  // mark arrives, even if it changes providers while the renderer is hidden.
+  const cleared = Object.fromEntries([...trayIconProviderIds].map((id) => [id, null]));
+  await window.tokenMonitor.setTrayIcons({ ...cleared, ...icons });
   if (!trayProviderIconDeliveryGuard.isCurrent(deliveryId)) return;
+  trayProviderIconsRequested.clear();
+  for (const id of [...Object.keys(icons), ...failed]) trayProviderIconsRequested.add(id);
+  trayProviderIconsLoading = new Set();
   // Provider images may unlock a richer bars icon now that they're cached.
-  maybeUpdateBarsIcon();
+  maybeUpdateBarsIcon({ refreshOpenPreview: true });
   renderFloatingBubbleContent();
 }
 

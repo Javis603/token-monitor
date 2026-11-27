@@ -82,6 +82,18 @@
     return el;
   }
 
+  function pickerIcon(src) {
+    const className = 'tray-composer-picker-icon';
+    if (!src.startsWith('../../../assets/icons/') || !src.endsWith('.svg')) return image(src, className);
+    // The Settings picker uses the theme's text ink for provider marks.
+    const el = document.createElement('span');
+    el.className = className;
+    el.setAttribute('aria-hidden', 'true');
+    el.style.backgroundColor = 'var(--text)';
+    el.style.mask = `url(${JSON.stringify(src)}) center / contain no-repeat`;
+    return el;
+  }
+
   function sourceForItem(item, rowIndex = 0) {
     if (Array.isArray(item?.rows)) return item.rows[rowIndex] || {};
     return item?.source || {};
@@ -455,7 +467,7 @@
           option.setAttribute('role', 'option');
           option.setAttribute('aria-selected', String(choice.value) === String(selectedValue) ? 'true' : 'false');
           option.disabled = Boolean(choice.disabled);
-          if (choice.icon) option.append(image(choice.icon, 'tray-composer-picker-icon'));
+          if (choice.icon) option.append(pickerIcon(choice.icon));
           if (choice.preview) option.append(image(choice.preview, 'tray-composer-picker-preview'));
           const copy = document.createElement('span');
           copy.className = 'tray-composer-picker-option-copy';
@@ -572,7 +584,7 @@
       const trigger = button('tray-composer-picker', '');
       trigger.setAttribute('aria-haspopup', 'listbox');
       trigger.setAttribute('aria-expanded', 'false');
-      if (current?.icon) trigger.append(image(current.icon, 'tray-composer-picker-icon'));
+      if (current?.icon) trigger.append(pickerIcon(current.icon));
       if (current?.preview) trigger.append(image(current.preview, 'tray-composer-picker-preview'));
       const value = document.createElement('span');
       value.className = 'tray-composer-picker-value';
@@ -1412,11 +1424,18 @@
       root.classList.toggle('is-empty', editable && current.items.length === 0);
     }
 
-    function refresh() {
+    function refresh({ refreshOpenPreview = false } = {}) {
       // Do not replace controls underneath an active pointer gesture or open
       // picker/popover. Periodic stats/reset refreshes may update the real tray,
       // but an editor the user is operating must keep stable DOM and focus.
-      if (drag || addPopover || itemPopover) return;
+      if (drag || addPopover) return;
+      if (itemPopover) {
+        if (refreshOpenPreview) {
+          const item = layout().items.find((entry) => entry.id === itemPopoverId);
+          if (item) reflectItemPreview(item);
+        }
+        return;
+      }
       render();
     }
 
