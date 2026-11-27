@@ -450,8 +450,39 @@ test('cold native periods withhold accounting until a source confirms a total', 
     periodKey: 'allTime',
     history: { daily: [{ date: '2026-11-26', tokens: 100 }] }
   });
-  assert.equal(retained.hero.accountingStatus, 'ready');
+  assert.equal(retained.hero.accountingStatus, 'partial');
   assert.equal(retained.hero.tokens, 100);
+});
+
+test('All Time fallback uses the uncapped History summary for aggregate and device totals', () => {
+  const { normalizeHistory } = require('../../src/shared/history');
+  const complete = normalizeHistory({ contributions: [
+    { date: '2024-01-01', tokens: 90, cost: 9 },
+    { date: '2026-11-26', tokens: 10, cost: 1 }
+  ] }, { todayKey: '2026-11-27' });
+  assert.equal(complete.daily.reduce((sum, day) => sum + day.tokens, 0), 10);
+  const devices = [{ deviceId: 'mac' }, { deviceId: 'pc' }];
+  const stats = { mode: 'sync', devices };
+  const all = historyData => ({
+    ...historyData,
+    deviceHistories: [{ deviceId: 'mac', historyAvailable: true, history: historyData }]
+  });
+  for (const [history, tokens, status] of [
+    [all(complete), 100, 'ready'],
+    [all({ daily: [], summary: { totalTokens: 90, totalCost: 9, activeDaysComplete: false } }), 90, 'partial']
+  ]) {
+    for (const selectedDeviceId of ['all', 'mac']) {
+      const view = model.buildScopedOverview({ stats, history, periodKey: 'allTime', selectedDeviceId });
+      assert.equal(view.hero.tokens, tokens);
+      assert.equal(view.hero.accountingStatus, status);
+      assert.equal(view.fleet.aggregateAccounting.tokens, tokens);
+      const mac = view.fleet.machines.find(machine => machine.deviceId === 'mac');
+      assert.equal(mac.tokens, tokens);
+      assert.equal(mac.accountingStatus, status);
+    }
+  }
+  const local = model.buildScopedOverview({ periodKey: 'allTime', history: { daily: [{ date: '2026-11-26', tokens: 100 }] } });
+  assert.equal(local.topology.devices[0].share, 0);
 });
 
 test('all-time History fallback preserves missing lifetime coverage', () => {

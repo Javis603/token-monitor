@@ -263,7 +263,7 @@
    * @param {any} source
    * @param {any[]} historyDaily
    * @param {string} periodKey
-   * @param {{ locale?: string, todayKey?: string, synced?: boolean, historyAvailable?: boolean, historyEnabled?: boolean, historyComplete?: boolean, nowMs?: number }} [options]
+   * @param {{ locale?: string, todayKey?: string, synced?: boolean, historyAvailable?: boolean, historyEnabled?: boolean, historySummary?: any, nowMs?: number }} [options]
    */
   function resolvePeriodData(source, historyDaily, periodKey, options = {}) {
     const todayKey = options.todayKey || fixedPeriodRanges?.localDayKey?.() || '';
@@ -310,13 +310,23 @@
       }
     }
 
-    if (periodKey === 'allTime' && daily.length > 0 && fixedPeriodRanges?.derivePeriod) {
-      const period = fixedPeriodRanges.derivePeriod(daily, { start: daily[0]?.date || '', end: daily[daily.length - 1]?.date || '' });
-      if (options.historyComplete === false && !periodHasUsage(period)) return null;
+    if (periodKey === 'allTime' && options.historyEnabled !== false && fixedPeriodRanges?.derivePeriod) {
+      const summary = options.historySummary;
+      const period = daily.length
+        ? fixedPeriodRanges.derivePeriod(daily, { start: daily[0].date, end: daily[daily.length - 1].date })
+        : { totalTokens: 0, costUsd: 0, unclassifiedTokens: 0 };
+      const totalTokens = Math.max(period.totalTokens, n(summary?.totalTokens));
+      const costUsd = Math.max(period.costUsd, n(summary?.totalCost));
+      const complete = summary?.activeDaysComplete === true;
+      if (!complete && !periodHasUsage({ totalTokens, costUsd })) return null;
       return {
         ...period,
+        totalTokens,
+        costUsd,
+        unpricedTokens: Math.max(n(period.unpricedTokens), n(summary?.unpricedTokens)),
+        unclassifiedTokens: period.unclassifiedTokens + totalTokens - period.totalTokens,
         derivedFromHistory: true,
-        accountingStatus: options.historyComplete === false ? 'partial' : 'ready'
+        accountingStatus: complete ? 'ready' : 'partial'
       };
     }
 
@@ -510,7 +520,7 @@
         : resolvePeriodData(mergedDevice, devDaily, key, {
           ...rangeOptions,
           historyAvailable: history?.fixedPeriods?.historyTransportAvailable === true && devHistory?.historyAvailable === true,
-          historyComplete: devHistory?.history?.summary?.activeDaysComplete
+          historySummary: devHistory?.history?.summary
         });
       const resolvedPeriod = options.fixedHistorySnapshot
         ? mergedDevice.periods?.[periodKey] || fixedHistoryById.get(deviceId)
@@ -2083,7 +2093,7 @@
         cost: Math.max(0, n(hero.cost)),
         unpricedTokens: Math.max(0, n(hero.unpricedTokens)),
         accountingStatus: hero.accountingStatus,
-        share: 1,
+        share: fleet.aggregateAccounting?.hasShares ? 1 : 0,
         liveTokPerSec: Math.max(0, n(hero.liveTokPerSec)),
         activeSessionCount: sessions.filter((s) => s.isActive).length,
         activeWorkspace: String(workspaces[0]?.name || ''),
@@ -2705,45 +2715,35 @@
         todayKey,
         historyAvailable: historyOptions.historyAvailable,
         historyEnabled: historyOptions.historyEnabled,
-        historyComplete: history?.summary?.activeDaysComplete,
+        historySummary: history?.summary,
         nowMs,
         synced
       });
-    const usesAllTimeHistory = periodKey === 'allTime' && historyOptions.historyEnabled;
-    const aggregateHistory = !aggregatePeriod && usesAllTimeHistory
-      && (historyOptions.historyAvailable || history?.daily?.length > 0)
-      ? (activeMachine ? selectScopedHistory(history) : scopedHistory) : null;
-    const historyAccountingStatus = (/** @type {any} */ snapshot) => {
-      if (!snapshot) return 'unavailable';
-      if (snapshot.summary.activeDaysComplete !== false) return 'ready';
-      return snapshot.summary.totalTokens > 0 || snapshot.summary.totalCost > 0 ? 'partial' : 'unavailable';
-    };
-    const aggregateStatus = freshness.expired ? 'unavailable' : aggregatePeriod
-      ? (aggregatePeriod.accountingStatus === 'partial'
-        || [...uncoveredSnapshots.values()].some(snapshot => snapshot.status !== 'ready') ? 'partial' : 'ready')
-      : historyAccountingStatus(aggregateHistory);
+    const aggregateStatus = !aggregatePeriod ? 'unavailable'
+      : aggregatePeriod.accountingStatus === 'partial'
+        || [...uncoveredSnapshots.values()].some(snapshot => snapshot.status !== 'ready')
+        ? 'partial' : 'ready';
+    const aggregateTokens = Math.max(0, n(aggregatePeriod?.totalTokens));
     const aggregateAccounting = {
       accountingStatus: aggregateStatus,
-      hasShares: aggregateStatus === 'ready' && fleet.accountingComplete && fleet.fleetTotals.tokens > 0,
-      tokens: aggregatePeriod ? Math.max(0, n(aggregatePeriod.totalTokens)) : n(aggregateHistory?.summary.totalTokens)
+      hasShares: aggregateStatus === 'ready' && fleet.accountingComplete && aggregateTokens > 0
+        && (fleet.machines.length ? fleet.fleetTotals.tokens === aggregateTokens : !synced),
+      tokens: aggregateTokens
     };
     const periodData = activeMachine ? (accountingExpired ? null : activeMachine.periodData) : aggregatePeriod;
-    const periodFallbackHistory = activeMachine
-      ? (usesAllTimeHistory && activeMachine.historyAvailable ? scopedHistory : null)
-      : aggregateHistory;
     const selectedHistory = activeMachine ? uncoveredSnapshots.get(activeMachine.deviceId) : null;
     const accountingStatus = activeMachine
-      ? (accountingExpired || (selectedHistory && selectedHistory.status !== 'ready')
-        ? 'unavailable' : periodData ? periodData.accountingStatus || 'ready' : historyAccountingStatus(periodFallbackHistory))
+      ? (!periodData || (selectedHistory && selectedHistory.status !== 'ready')
+        ? 'unavailable' : periodData.accountingStatus || 'ready')
       : aggregateStatus;
 
-    const anatomy = computeTokenAnatomy(periodData, periodFallbackHistory?.daily);
-    const totalTokens = periodData ? Math.max(0, n(periodData.totalTokens)) : n(periodFallbackHistory?.summary.totalTokens);
-    const totalCost = periodData ? Math.max(0, n(periodData.costUsd ?? periodData.totalCost)) : n(periodFallbackHistory?.summary.totalCost);
-    const unpricedTokens = periodData ? Math.max(0, n(periodData.unpricedTokens)) : n(periodFallbackHistory?.summary.unpricedTokens);
+    const anatomy = computeTokenAnatomy(periodData);
+    const totalTokens = Math.max(0, n(periodData?.totalTokens));
+    const totalCost = Math.max(0, n(periodData?.costUsd ?? periodData?.totalCost));
+    const unpricedTokens = Math.max(0, n(periodData?.unpricedTokens));
 
-    const tools = buildToolRows(periodData, periodFallbackHistory?.daily || [], totalTokens);
-    const models = buildModelRows(periodData, periodFallbackHistory?.daily || [], totalTokens);
+    const tools = buildToolRows(periodData, [], totalTokens);
+    const models = buildModelRows(periodData, [], totalTokens);
     const uncoveredDetails = [...uncoveredSnapshots.entries()].some(([deviceId, snapshot]) =>
       (!activeMachine || activeMachine.deviceId === deviceId)
       && (snapshot.status !== 'ready' || periodHasUsage(snapshot.period)));

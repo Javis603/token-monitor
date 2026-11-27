@@ -4055,10 +4055,24 @@ test('native accounting rollover closes only drawers affected by the displayed p
     close(previous, { ...previous, accountingWindows: windows(3000) });
     assert.equal(closed, before + 2);
   }
+  const prior = { periodKey: 'today', accountingWindows: windows(1000) };
+  const pc = { sourceDevice: { deviceId: 'pc' } };
+  state.drawer = { kind: 'session', session: { ...pc, groupRows: [pc, pc] } };
+  close(prior, { ...prior, accountingWindows: windows(1000, true) });
+  assert.equal(closed, 4);
+  const pcRolled = windows(1000, true);
+  pcRolled.set('pc', { endsAt: 4000, expired: true });
+  close(prior, { ...prior, accountingWindows: pcRolled });
+  assert.equal(closed, 5);
+  state.drawer = { kind: 'session', session: { groupRows: [pc, { sourceDevice: { deviceId: 'linux' } }] } };
+  close(prior, { ...prior, accountingWindows: windows(1000, true) });
+  assert.equal(closed, 5);
+  close(prior, { ...prior, accountingWindows: pcRolled });
+  assert.equal(closed, 6);
   state.drawer = { kind: 'day' };
   close({ periodKey: 'today', accountingWindows: windows(1000) },
     { periodKey: 'today', accountingWindows: windows(3000) });
-  assert.equal(closed, 4);
+  assert.equal(closed, 6);
 });
 
 test('All Devices menu shows the overview aggregate and labels partial metrics', () => {

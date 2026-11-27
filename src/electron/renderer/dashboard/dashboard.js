@@ -1230,7 +1230,7 @@ function renderDeviceMenu(fleet) {
   const machines = fleet.machines;
   const allSelected = state.selectedDeviceId === 'all';
   const aggregate = fleet.aggregateAccounting;
-  const hasFleetShares = aggregate?.hasShares ?? (!fleet.accountingExpired && fleet.fleetTotals.tokens > 0);
+  const hasFleetShares = aggregate?.hasShares === true;
   const allItem = `<button type="button" class="dash-device-menu-item is-all${allSelected ? ' is-selected' : ''}" data-device="all" data-key="all" role="menuitemradio" aria-checked="${allSelected}">`
     + `<span class="dash-device-menu-meta"><span class="dash-device-menu-name">${escapeHtml(t('dashboard.fleet.all'))}</span><span class="dash-device-menu-sub">${escapeHtml(t('settings.sync.panel.onlineCount', { online: fleet.fleetTotals.onlineCount, total: machines.length }))}</span></span>`
     + `<span class="dash-device-menu-val">${escapeHtml(formatAccountingValue(aggregate?.accountingStatus, formatCompact(aggregate?.tokens ?? fleet.fleetTotals.tokens)))}</span>`
@@ -1947,8 +1947,7 @@ function renderWorkPanel(overview) {
   if (state.workMode === 'devices') {
     const fleet = overview?.fleet;
     const machines = fleet?.machines || [];
-    const hasFleetShares = fleet?.aggregateAccounting?.hasShares
-      ?? (!fleet?.accountingExpired && fleet?.fleetTotals?.tokens > 0);
+    const hasFleetShares = fleet?.aggregateAccounting?.hasShares === true;
     if (machines.length === 0) {
       lastWorkStructureSig = '';
       els.workPanel.innerHTML = `<div class="dash-quotas-empty">${escapeHtml(t('dashboard.empty'))}</div>`;
@@ -3915,10 +3914,13 @@ function closeRolledOverAccountingDrawer(previous, current) {
     || !['session', 'workspace', 'machine', 'client', 'model'].includes(drawer?.kind)) return;
   const selectedDeviceId = current.activeMachine?.deviceId;
   if (previous.activeMachine?.deviceId !== selectedDeviceId) return;
-  const deviceId = selectedDeviceId || drawer.machine?.deviceId
-    || (!drawer.session?.groupRows?.length ? drawer.session?.sourceDevice?.deviceId : undefined);
+  const session = drawer.session;
+  const sourceId = session?.sourceDevice?.ambiguous !== true ? session?.sourceDevice?.deviceId : undefined;
+  const deviceId = selectedDeviceId || drawer.machine?.deviceId || sourceId;
+  const members = session?.groupRows?.map(member => member.sourceDevice?.ambiguous !== true && member.sourceDevice?.deviceId);
+  const deviceIds = deviceId ? new Set([deviceId]) : members?.length && members.every(Boolean) ? new Set(members) : null;
   for (const [id, window] of current.accountingWindows || []) {
-    if (deviceId && deviceId !== id) continue;
+    if (deviceIds && !deviceIds.has(id)) continue;
     const prior = previous.accountingWindows?.get(id);
     if (prior && ((!prior.expired && window.expired)
       || (prior.endsAt !== window.endsAt && Date.now() >= prior.endsAt))) {
