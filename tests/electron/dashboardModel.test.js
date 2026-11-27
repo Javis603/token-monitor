@@ -1655,7 +1655,7 @@ test('a synced fixed page keeps uncovered device History without counting covere
     fixedPeriods: { historyTransportAvailable: true },
     deviceHistories: [['mac', 100000], ['pc', 200000]].map(([deviceId, tokens]) => ({
       deviceId, periodWindows, historyAvailable: true,
-      history: { daily: [{ date: '2026-11-23', tokens, cost: 2, perClient: { codex: { tokens, cost: 2 } } }] }
+      history: { daily: [{ date: '2026-11-23', tokens, cost: 2, messages: 3, activeTimeMs: 1000, perClient: { codex: { tokens, cost: 2 } } }] }
     }))
   };
   const view = (snapshot, selectedDeviceId = 'all') => model.buildScopedOverview({
@@ -1679,14 +1679,16 @@ test('a synced fixed page keeps uncovered device History without counting covere
   assert.equal(overview.hero.cost, 5);
   assert.equal(overview.tools.find(row => row.id === 'codex').tokens, 310000);
   assert.equal(overview.sessionsIncomplete, true);
-  assert.deepEqual(overview.sessions, []);
-  assert.deepEqual(overview.workspaces, []);
+  assert.equal(overview.hero.messages, 6);
+  assert.equal(overview.hero.activeTimeMs, 2000);
   assert.deepEqual(overview.sessions, []);
   assert.deepEqual(overview.workspaces, []);
   assert.equal(overview.fleet.machines.reduce((sum, row) => sum + row.tokens, 0), 310000);
   assert.equal(view(paged, 'pc').hero.tokens, 200000);
   const macView = view(paged, 'mac');
   assert.equal(macView.hero.tokens, 110000);
+  assert.equal(macView.hero.messages, 3);
+  assert.equal(macView.hero.activeTimeMs, 1000);
   assert.equal(macView.sessionsIncomplete, false);
   assert.equal(macView.sessions.length, 1);
   assert.deepEqual(macView.workspaces.map(row => row.name), ['Mac Repo']);
@@ -1695,7 +1697,10 @@ test('a synced fixed page keeps uncovered device History without counting covere
     history: { daily: [{ date: '2026-11-23', tokens: 40000, cost: 1 }] } });
   assert.equal(view(paged).hero.tokens, 310000);
   assert.equal(view(paged, 'pc').hero.tokens, 200000);
-  assert.equal(view(paged).sessionsIncomplete, true);
+  const unverifiedView = view(paged);
+  assert.equal(unverifiedView.sessionsIncomplete, true);
+  assert.deepEqual(unverifiedView.sessions, []);
+  assert.deepEqual(unverifiedView.workspaces, []);
   history.deviceHistories.pop();
   assert.deepEqual(exact.clients, { codex: 110000 });
 
@@ -1710,6 +1715,8 @@ test('a synced fixed page keeps uncovered device History without counting covere
   };
   assert.equal(view(fullPage).hero.tokens, 330000);
   assert.equal(view(fullPage).sessionsIncomplete, false);
+  assert.equal(view(fullPage).hero.messages, 6);
+  assert.equal(view(fullPage).hero.activeTimeMs, 2000);
 });
 
 test('a synced fixed period renders without totals while device History is pending or unavailable', () => {

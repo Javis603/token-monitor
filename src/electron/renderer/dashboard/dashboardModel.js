@@ -2568,9 +2568,9 @@
     const uncoveredSnapshots = new Map(deviceHistorySources
       .filter(device => coveredDevices && !coveredDevices.has(device.deviceId))
       .map(device => [device.deviceId, fixedPeriodRanges.fixedPeriodSnapshotFromDevices(periodKey, [device], historyOptions)]));
-    const fixedHistorySnapshot = !fixed || !synced ? null : syncedPage
-      ? { devices: [...uncoveredSnapshots.values()].flatMap(snapshot => snapshot.devices) }
-      : fixedPeriodRanges.fixedPeriodSnapshotFromDevices(periodKey, deviceHistorySources, historyOptions);
+    const fixedHistorySnapshot = fixed && synced && !syncedPage
+      ? fixedPeriodRanges.fixedPeriodSnapshotFromDevices(periodKey, deviceHistorySources, historyOptions)
+      : null;
     let syncedAccounting = syncedPage;
     for (const snapshot of uncoveredSnapshots.values()) {
       if (snapshot.status === 'ready' && periodHasUsage(snapshot.period)) {
@@ -2579,7 +2579,9 @@
     }
     const freshness = aggregatePeriodFreshness(stats, periodKey, nowMs);
     const fleet = { ...buildFleetModel({
-      fixedHistorySnapshot,
+      fixedHistorySnapshot: syncedPage
+        ? { devices: [...uncoveredSnapshots.values()].flatMap(snapshot => snapshot.devices) }
+        : fixedHistorySnapshot,
       stats,
       history,
       periodKey,
@@ -2609,8 +2611,11 @@
         .filter(device => !activeMachine || device.deviceId === activeMachine.deviceId)
         .map(device => {
           const day = fixedPeriodRanges.deviceDayState(device, { now: nowMs })?.currentKey || todayKey;
-          const range = stats?.syncedFixedPeriodDeviceWindows?.[periodKey]?.[device.deviceId] || activityRange(day);
-          const devicePeriod = device.periods?.[periodKey]
+          const uncovered = uncoveredSnapshots.get(device.deviceId);
+          const range = uncovered
+            ? (uncovered.status === 'ready' ? uncovered.range : null)
+            : stats?.syncedFixedPeriodDeviceWindows?.[periodKey]?.[device.deviceId] || activityRange(day);
+          const devicePeriod = device.periods?.[periodKey] || uncovered?.period
             || fixedHistorySnapshot?.devices.find((/** @type {any} */ entry) => entry.deviceId === device.deviceId)?.period;
           return {
             history: device.history,
