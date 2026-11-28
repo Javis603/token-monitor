@@ -84,6 +84,7 @@ const els = {
   workSummary: document.getElementById('dashWorkSummary'),
   workPanel: document.getElementById('dashWorkPanel'),
   breakdown: document.getElementById('dashBreakdown'),
+  breakdownSummary: document.getElementById('dashBreakdownSummary'),
   dailyLedger: document.getElementById('dashDailyLedger'),
   ledgerMeta: document.getElementById('dashLedgerMeta'),
   rangeSelect: document.getElementById('rangeSelect'),
@@ -1005,18 +1006,25 @@ function renderBreakdown(overview) {
   if (!elsBreakdown) return;
   const tools = overview?.tools || [];
   const models = overview?.models || [];
-  if (tools.length === 0 && models.length === 0) {
-    lastBreakdownStructureSig = '';
-    elsBreakdown.innerHTML = '';
-    return;
-  }
-
   const groups = [];
   if (state.breakdownMode !== 'model' && tools.length > 0) {
     groups.push({ kind: 'client', titleKey: 'dashboard.stack.client', rows: tools.slice(0, 6) });
   }
   if (state.breakdownMode !== 'client' && models.length > 0) {
     groups.push({ kind: 'model', titleKey: 'dashboard.stack.model', rows: models.slice(0, 6) });
+  }
+  if (els.breakdownSummary) els.breakdownSummary.textContent = groups.length ? '' : t('dashboard.empty');
+  if (groups.length === 0) {
+    lastBreakdownStructureSig = '';
+    const ghostGroups = [
+      state.breakdownMode !== 'model' ? 'dashboard.stack.client' : '',
+      state.breakdownMode !== 'client' ? 'dashboard.stack.model' : ''
+    ].filter(Boolean);
+    elsBreakdown.innerHTML = '<div class="dash-ghost-list dash-ghost-list--attribution" aria-hidden="true">'
+      + ghostGroups.map((titleKey) => `<div class="dash-breakdown-group"><div class="dash-breakdown-title">${escapeHtml(t(titleKey))}</div>`
+        + ghostRowHtml('attribution').repeat(ghostGroups.length > 1 ? 3 : 5) + '</div>').join('')
+      + '</div>';
+    return;
   }
 
   const nextSig = JSON.stringify([
@@ -1202,9 +1210,9 @@ function setDeviceMenuOpen(nextOpen) {
 }
 
 function renderDeviceSelector(fleet) {
-  if (!els.deviceScope || !els.deviceTrigger || !els.deviceMenu || !fleet) return;
-  const machines = fleet.machines || [];
-  if (machines.length === 0) {
+  if (!els.deviceScope || !els.deviceTrigger || !els.deviceMenu) return;
+  const machines = fleet?.machines || [];
+  if (machines.length === 0 || (!fleet.isFleetMode && !isSyncedStatsContext())) {
     state.selectedDeviceId = 'all';
     els.deviceScope.classList.add('hidden');
     setDeviceMenuOpen(false);
@@ -1583,7 +1591,14 @@ function renderVelocity(overview) {
   }
 
   if (els.velocityModels) {
-    const models = (vel.models || []).slice(0, 3);
+    const models = vel.models || [];
+    if (models.length === 0) {
+      els.velocityModels.innerHTML = ghostListHtml('velocity', 3);
+      syncScrollFades(els.velocityModels);
+      return;
+    }
+    // Rows rebuild on every tick; keep the reader's place in a scrolled list.
+    const scrollTop = els.velocityModels.scrollTop;
     els.velocityModels.innerHTML = models.map((m) => {
       const color = displayColor(m.color);
       const iconHtml = m.iconClass
@@ -1596,6 +1611,8 @@ function renderVelocity(overview) {
         + `</div>`;
     }).join('');
     applySwatchColors(els.velocityModels);
+    els.velocityModels.scrollTop = scrollTop;
+    syncScrollFades(els.velocityModels);
   }
 }
 
@@ -1656,12 +1673,12 @@ function renderQuotas(overview) {
   if (els.quotasCount) {
     els.quotasCount.textContent = accounts.length
       ? t(showUsed ? 'settings.limits.barsUsed' : 'settings.limits.barsRemaining')
-      : '';
+      : t('dashboard.quotas.empty');
   }
 
   if (accounts.length === 0) {
     lastQuotasStructureSig = '';
-    els.quotas.innerHTML = `<div class="dash-quotas-empty">${escapeHtml(t('dashboard.quotas.empty'))}</div>`;
+    els.quotas.innerHTML = ghostListHtml('quotas', 3);
     return;
   }
 
@@ -1917,6 +1934,56 @@ function renderSessionRowsHtml(list, overview) {
   }).join('');
 }
 
+function ghostBar(cls) {
+  return `<span class="dash-ghost-bar ${cls}"></span>`;
+}
+
+// Empty states draw static, non-interactive ghosts of the real rows (same
+// classes, so they keep the live geometry); the card head's subtitle says
+// why. They never shimmer: a shimmer would read as loading, not "nothing here".
+function ghostRowHtml(kind) {
+  if (kind === 'quotas') {
+    return '<div class="home-limit-account is-ghost">'
+      + `<div class="home-limit-account-head"><span class="home-list-mark dash-quota-mark"></span><span class="home-list-name">${ghostBar('is-name')}</span></div>`
+      + '<div class="home-limit-windows"><div class="home-limit-window">'
+      + `<span class="home-limit-window-label">${ghostBar('is-label')}</span><span class="home-limit-reset"></span>`
+      + `<div class="home-limit-track"></div><span class="home-list-value">${ghostBar('is-num')}</span>`
+      + '</div></div></div>';
+  }
+  if (kind === 'attribution') {
+    return '<div class="dash-bd-row is-ghost">'
+      + `<span class="dash-bd-name"><span class="dash-bd-swatch dash-ghost-fill"></span>${ghostBar('is-name')}</span>`
+      + '<div class="dash-bd-bar-bg"></div>'
+      + `<span class="dash-bd-val">${ghostBar('is-num')}</span><span class="dash-bd-pct">${ghostBar('is-num-sm')}</span>`
+      + '</div>';
+  }
+  if (kind === 'velocity') {
+    return `<div class="dash-velocity-model is-ghost"><span class="dash-bd-swatch dash-ghost-fill"></span>${ghostBar('is-name')}${ghostBar('is-num')}</div>`;
+  }
+  return '<div class="dash-session-row is-ghost">'
+    + '<span class="dash-session-lead"><span class="dash-session-brand dash-ghost-fill"></span></span>'
+    + `<div class="dash-session-body">${ghostBar('is-title')}${ghostBar('is-sub')}</div>`
+    + `<div class="dash-session-metrics">${ghostBar('is-num')}${ghostBar('is-num-sm')}</div>`
+    + '</div>';
+}
+
+function ghostListHtml(kind, count) {
+  return `<div class="dash-ghost-list dash-ghost-list--${kind}" aria-hidden="true">${ghostRowHtml(kind).repeat(count)}</div>`;
+}
+
+function showWorkEmpty(key) {
+  if (els.workSummary) els.workSummary.textContent = t(key);
+  els.workPanel.innerHTML = ghostListHtml('work', 4);
+}
+
+function ghostTopologyNodeHtml(withBar) {
+  return '<div class="topo-node is-ghost" aria-hidden="true">'
+    + `<div class="topo-node-top"><span class="topo-node-ident"><span class="dash-bd-swatch dash-ghost-fill"></span>${ghostBar('is-name')}</span>${ghostBar('is-num-sm')}</div>`
+    + `<div class="topo-node-sub">${ghostBar('is-sub')}</div>`
+    + (withBar ? '<div class="topo-mini-bar"></div>' : '')
+    + '</div>';
+}
+
 function renderWorkPanel(overview) {
   if (!els.workPanel) return;
   const allSessions = overview?.sessions || [];
@@ -1945,7 +2012,7 @@ function renderWorkPanel(overview) {
     const hasFleetShares = fleet?.aggregateAccounting?.hasShares === true;
     if (machines.length === 0) {
       lastWorkStructureSig = '';
-      els.workPanel.innerHTML = `<div class="dash-quotas-empty">${escapeHtml(t('dashboard.empty'))}</div>`;
+      showWorkEmpty('dashboard.empty');
       return;
     }
     const nextSig = JSON.stringify(['devices', state.locale, state.selectedDeviceId, machines.map((m) => [m.deviceId, m.name, m.isLocal, m.deviceKind])]);
@@ -2022,7 +2089,8 @@ function renderWorkPanel(overview) {
     const workspaces = overview?.workspaces || [];
     if (workspaces.length === 0) {
       lastWorkStructureSig = '';
-      els.workPanel.innerHTML = `<div class="dash-quotas-empty">${escapeHtml(t(overview?.sessionsIncomplete ? 'sessions.incomplete' : 'dashboard.work.emptyWorkspaces'))}</div>`;
+      if (overview?.sessionsIncomplete) els.workPanel.innerHTML = `<div class="dash-quotas-empty">${escapeHtml(t('sessions.incomplete'))}</div>`;
+      else showWorkEmpty('dashboard.work.emptyWorkspaces');
       return;
     }
     const visibleWs = workspaces.slice(0, 12);
@@ -2095,9 +2163,9 @@ function renderWorkPanel(overview) {
     : '';
   if (list.length === 0) {
     lastWorkStructureSig = '';
-    const emptyKey = overview?.sessionsIncomplete ? 'sessions.incomplete'
-      : state.workMode === 'running' ? 'dashboard.work.emptyRunning' : 'dashboard.work.emptySessions';
-    els.workPanel.innerHTML = `<div class="dash-quotas-empty">${escapeHtml(t(emptyKey))}</div>`;
+    const emptyKey = state.workMode === 'running' ? 'dashboard.work.emptyRunning' : 'dashboard.work.emptySessions';
+    if (overview?.sessionsIncomplete) els.workPanel.innerHTML = `<div class="dash-quotas-empty">${escapeHtml(t('sessions.incomplete'))}</div>`;
+    else showWorkEmpty(emptyKey);
     return;
   }
 
@@ -2275,13 +2343,15 @@ function showTopologyTooltip(kind, id, anchorEl) {
   positionTooltip(anchorEl);
 }
 
+function syncScrollFades(scroller) {
+  const overflow = scroller.scrollHeight > scroller.clientHeight + 2;
+  scroller.classList.toggle('has-top-fade', overflow && scroller.scrollTop > 3);
+  scroller.classList.toggle('has-bottom-fade', overflow && scroller.scrollTop + scroller.clientHeight < scroller.scrollHeight - 3);
+}
+
 function syncTopologyScrollFades(canvas) {
   if (!canvas) return;
-  canvas.querySelectorAll('.dash-topo-col-scroll').forEach((scroller) => {
-    const overflow = scroller.scrollHeight > scroller.clientHeight + 2;
-    scroller.classList.toggle('has-top-fade', overflow && scroller.scrollTop > 3);
-    scroller.classList.toggle('has-bottom-fade', overflow && scroller.scrollTop + scroller.clientHeight < scroller.scrollHeight - 3);
-  });
+  canvas.querySelectorAll('.dash-topo-col-scroll').forEach(syncScrollFades);
 }
 
 function syncTopologyAnimationClock(canvas) {
@@ -2511,14 +2581,18 @@ function renderTopology(overview, revealed = false, cardRateSamples = {}) {
 
   const hubColTitle = t(isSessionMode ? 'dashboard.topology.colWorkspaces' : 'dashboard.topology.colTools');
   const endColTitle = t(isSessionMode ? 'dashboard.topology.colSessions' : 'dashboard.topology.colModels');
+  const emptyFlow = overview.hero?.accountingStatus === 'ready' && overview.hero.tokens === 0
+    && graph.hubs.length === 0 && graph.endpoints.length === 0;
+  const ghostHub = emptyFlow ? ghostTopologyNodeHtml(true) : '';
+  const ghostEndpoint = emptyFlow ? ghostTopologyNodeHtml(false) : '';
 
   // Keep the scroll containers and focused nodes on membership/rank changes.
   // The link layer owns its SVG children and stays mounted through node updates.
-  const changed = patchDashboardMarkup(els.topology, `<div class="dash-topo-canvas" data-flow-mode="${flowMode}">`
+  const changed = patchDashboardMarkup(els.topology, `<div class="dash-topo-canvas${emptyFlow ? ' is-empty' : ''}" data-flow-mode="${flowMode}">`
     + `<svg class="dash-topo-links" data-dom-island aria-hidden="true"></svg>`
     + `<div class="dash-topo-col"><div class="dash-topo-col-head"><span>${escapeHtml(t('dashboard.topology.colDevices'))}</span><span>${graph.counts.devices}</span></div><div class="dash-topo-col-scroll" data-topo-col="devices">${devicesHtml}</div></div>`
-    + `<div class="dash-topo-col"><div class="dash-topo-col-head"><span>${escapeHtml(hubColTitle)}</span><span>${graph.counts.hubs}</span></div><div class="dash-topo-col-scroll" data-topo-col="hubs">${hubsHtml}</div></div>`
-    + `<div class="dash-topo-col"><div class="dash-topo-col-head"><span>${escapeHtml(endColTitle)}</span><span>${graph.counts.endpoints}</span></div><div class="dash-topo-col-scroll" data-topo-col="endpoints">${endsHtml}</div></div>`
+    + `<div class="dash-topo-col"><div class="dash-topo-col-head"><span>${escapeHtml(hubColTitle)}</span><span>${graph.counts.hubs}</span></div><div class="dash-topo-col-scroll" data-topo-col="hubs">${hubsHtml || ghostHub}</div></div>`
+    + `<div class="dash-topo-col"><div class="dash-topo-col-head"><span>${escapeHtml(endColTitle)}</span><span>${graph.counts.endpoints}</span></div><div class="dash-topo-col-scroll" data-topo-col="endpoints">${endsHtml || ghostEndpoint}</div></div>`
     + `</div>`);
 
   if (changed) applySwatchColors(els.topology);
@@ -5224,6 +5298,8 @@ els.topology?.addEventListener('pointerleave', () => {
   clearTopologyFocus();
   if (activeHover?.kind === 'topo') hideTooltip();
 });
+
+els.velocityModels?.addEventListener('scroll', () => syncScrollFades(els.velocityModels), { passive: true });
 
 els.topology?.addEventListener('scroll', (ev) => {
   if (!ev.target?.classList?.contains('dash-topo-col-scroll')) return;
