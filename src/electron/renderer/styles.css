@@ -4625,6 +4625,13 @@ html.is-windows .settings-panel select option {
   line-height: 1.4;
   text-wrap: pretty;
 }
+.breakdown-empty-reason {
+  margin: 0;
+  padding: 0 2px 1px;
+  color: var(--muted);
+  font-size: 0.625rem;
+  line-height: 1.4;
+}
 
 .home-panel {
   position: relative;
@@ -5554,21 +5561,123 @@ html.is-windows .settings-panel select option {
   font-variant-numeric: tabular-nums;
   font-size: 0.5625rem;
 }
-.home-module-empty {
+/* Empty states (Home and the dashboard): static ghosts built from the real
+   rows' classes, so they keep the populated geometry; the head says why. */
+.ghost-list {
+  -webkit-mask-image: linear-gradient(to bottom, #000 35%, rgba(0, 0, 0, 0.3) 100%);
+  mask-image: linear-gradient(to bottom, #000 35%, rgba(0, 0, 0, 0.3) 100%);
+}
+.is-ghost {
+  pointer-events: none;
+  cursor: default;
+}
+.ghost-bar {
+  display: inline-block;
+  flex: none;
+  max-width: 100%;
+  height: 7px;
+  border-radius: 4px;
+  vertical-align: middle;
+  background: rgba(var(--line-rgb), 0.09);
+}
+.ghost-fill {
+  background: rgba(var(--line-rgb), 0.09);
+}
+.ghost-bar.is-title { width: 148px; height: 8px; }
+.ghost-bar.is-sub { width: 96px; height: 6px; opacity: 0.7; }
+.ghost-bar.is-name { width: 92px; }
+.ghost-bar.is-label { width: 48px; height: 6px; }
+.ghost-bar.is-num { width: 34px; }
+.ghost-bar.is-num-sm { width: 24px; height: 6px; }
+.is-ghost:nth-child(even) .ghost-bar.is-title { width: 112px; }
+.is-ghost:nth-child(even) .ghost-bar.is-name { width: 68px; }
+.is-ghost:nth-child(even) .ghost-bar.is-sub { width: 72px; }
+.is-ghost .home-list-mark.home-list-mark {
+  background: rgba(var(--line-rgb), 0.14);
+  box-shadow: none;
+}
+.home-limit-account.is-ghost .home-limit-account-head { min-height: 16px; }
+.home-limit-account.is-ghost .home-limit-track {
+  border-radius: 4px;
+  background: rgba(var(--line-rgb), 0.07);
+}
+.home-ghost-list {
+  display: grid;
+  min-width: 0;
+  gap: inherit;
+  pointer-events: none;
+}
+.home-ghost-list--limits {
+  grid-template-columns: subgrid;
+}
+.home-ghost-list--limits > * {
+  grid-column: 1 / -1;
+}
+.home-ghost-list .home-list-value,
+.home-ghost-list .home-list-aux {
+  text-align: right;
+}
+/* The latest months sit at the end, as the live heatmap scrolls to them. */
+.home-ghost-activity {
   display: flex;
-  min-height: 36px;
-  align-items: center;
-  gap: 8px;
-  color: var(--muted);
-  font-size: 0.6875rem;
+  min-height: 90px;
+  margin-top: 1px;
+  justify-content: flex-end;
+  overflow: hidden;
+}
+.home-ghost-activity > .home-activity-canvas { flex: none; }
+/* Not .home-area-chart: Home binds the trend tooltip to the first one it finds. */
+.home-ghost-plot {
+  height: 70px;
+  border-bottom: 1px solid rgba(var(--line-rgb), 0.12);
+  background: linear-gradient(to top, rgba(var(--line-rgb), 0.06), transparent 70%);
+}
+.home-ghost-list--trends .home-trend-date {
+  line-height: 6px;
+}
+/* Breakdown lists keep the rows' spacing; the bar track stays a faint well. */
+.breakdown-ghost-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  pointer-events: none;
+}
+.row.is-ghost .row-mark {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+}
+.row.is-ghost .bar { background: rgba(var(--line-rgb), 0.06); box-shadow: none; }
+.limit-row-pending .limit-meter { background: rgba(var(--line-rgb), 0.07); }
+/* The text line holds only ghost bars, so it keeps the height its text would give it. */
+.limit-window.is-ghost .limit-window-text { min-height: 1.2em; }
+/* The mark and name are real; only the ghosts stand in for the reading. */
+.limit-row-pending :is(.ghost-bar, .limit-meter) {
+  animation: ghost-pending 1.4s ease-in-out infinite alternate;
+}
+:root[data-reduce-motion="on"] .limit-row-pending :is(.ghost-bar, .limit-meter) { animation: none; }
+@media (prefers-reduced-motion: reduce) {
+  :root:not([data-reduce-motion="off"]) .limit-row-pending :is(.ghost-bar, .limit-meter) { animation: none; }
+}
+/* Data still on its way breathes; settled emptiness stays still. */
+.home-module.is-pending .home-ghost-list,
+.ghost-list.is-pending {
+  animation: ghost-pending 1.4s ease-in-out infinite alternate;
+}
+@keyframes ghost-pending {
+  to { opacity: 0.45; }
+}
+:root[data-reduce-motion="on"] :is(.home-module.is-pending .home-ghost-list, .ghost-list.is-pending) { animation: none; }
+@media (prefers-reduced-motion: reduce) {
+  :root:not([data-reduce-motion="off"]) :is(.home-module.is-pending .home-ghost-list, .ghost-list.is-pending) { animation: none; }
 }
 .home-module-empty-action {
-  height: 22px;
-  padding: 0 8px;
-  border-radius: 6px;
+  height: 18px;
+  padding: 0 7px;
+  border-radius: 5px;
   border-color: rgba(var(--accent-rgb), 0.24);
   color: var(--accent);
-  font-size: 0.6875rem;
+  font-size: 0.625rem;
 }
 .home-empty {
   display: grid;
@@ -9147,7 +9256,17 @@ html.native-liquid-glass .view-switcher-menu-item { border-radius: 9px; }
 .trends-stat { display: flex; flex-direction: column; gap: 2px; padding: 8px 10px; border-radius: 8px; background: rgba(var(--overlay-rgb), 0.04); }
 .trends-stat-v { font-size: 1rem; font-weight: 600; font-variant-numeric: tabular-nums; }
 .trends-stat-k { font-size: 0.625rem; opacity: 0.55; }
-.trends-empty { flex: 1; display: flex; align-items: center; justify-content: center; opacity: 0.6; font-size: 0.75rem; }
+.trends-cap.is-reason { letter-spacing: 0; text-transform: none; }
+/* Empty Trends: the populated layout with an empty plot and no readings. */
+.trends-ghost { flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; gap: 10px; -webkit-mask-image: none; mask-image: none; }
+.trends-ghost-plot {
+  flex: 1 1 auto;
+  min-height: 0;
+  margin: 6px 4px;
+  border-bottom: 1px solid rgba(var(--line-rgb), 0.12);
+  background: linear-gradient(to top, rgba(var(--line-rgb), 0.06), transparent 70%);
+}
+.trends-ghost .trends-stat-v { line-height: 1.25; }
 
 /* Row Accordion for Cache Stats */
 .row.has-accordion { cursor: pointer; }

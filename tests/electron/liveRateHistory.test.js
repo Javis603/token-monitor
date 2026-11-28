@@ -10,7 +10,7 @@ const { buildEdgeDockCells } = require('../../src/electron/renderer/edgeDock/pre
 
 test('dock history survives headline expiry, resets with scope and stops with its feature', () => {
   const main = fs.readFileSync(path.join(__dirname, '../../src/electron/main.js'), 'utf8');
-  const source = main.slice(main.indexOf('const EDGE_DOCK_RATE_ACTIVE_MS'), main.indexOf('// Week / last-7'));
+  const source = main.slice(main.indexOf('const EDGE_DOCK_RATE_ACTIVE_MS'), main.indexOf('// Only ranges without a matching local snapshot'));
   let now = 1000;
   class Clock extends Date { static now() { return now; } }
   const context = vm.createContext({

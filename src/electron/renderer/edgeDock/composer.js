@@ -426,9 +426,7 @@
         }
         const noteKey = item.metric === 'liveRate'
           ? 'settings.edgeDock.statNote.liveRate'
-          : itemsApi.DERIVED_PERIODS.includes(item.metric)
-            ? 'settings.edgeDock.statNote.derived'
-            : 'settings.edgeDock.statNote.usage';
+          : 'settings.edgeDock.statNote.usage';
         pane.append(el('p', 'edge-dock-composer-hint', t(noteKey)));
         return pane;
       }
