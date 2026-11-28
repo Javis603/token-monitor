@@ -15,6 +15,7 @@ const { appVersion } = require('../../appVersion');
 const { hashKey } = require('../../hashKey');
 const { limitStage } = require('../../limits/failureDetail');
 const { errorWithStatus } = require('../../limits/providerHelpers');
+const defaultWindowsTcpTable = require('../../windowsTcpTable');
 const { quotaGroupRank } = require('./corePolicy');
 
 const DEFAULT_PROBE_TIMEOUT_MS = 8000;
@@ -372,6 +373,16 @@ async function listeningPortsPosix(pid, deps = {}) {
 }
 
 async function listeningPortsWin32(pid, deps = {}) {
+  if (deps.windowsTcpTable || !deps.spawn) {
+    const tcpTable = deps.windowsTcpTable || defaultWindowsTcpTable;
+    const nativePorts = tcpTable?.readWindowsListeningPorts?.(pid, {
+      ipv4LoopbackOnly: Boolean(deps.ipv4LoopbackOnly)
+    });
+    if (Array.isArray(nativePorts)) {
+      if (nativePorts.length === 0) throw errorWithStatus('unavailable', 'no listening ports for antigravity LS');
+      return nativePorts;
+    }
+  }
   const loopbackFilter = deps.ipv4LoopbackOnly ? " | Where-Object LocalAddress -eq '127.0.0.1'" : '';
   const script = `Get-NetTCPConnection -OwningProcess ${pid} -State Listen -ErrorAction SilentlyContinue${loopbackFilter} | Select-Object -ExpandProperty LocalPort`;
   const stdout = await runProcessText('powershell', ['-NoProfile', '-NonInteractive', '-Command', script], {
@@ -405,6 +416,15 @@ function statusFromHttpCode(code) {
 
 async function desktopSocketOwned(port, pid, localPort, timeoutMs, deps) {
   if ((deps.platform || process.platform) === 'win32') {
+    if (deps.windowsTcpTable || !deps.spawn) {
+      const tcpTable = deps.windowsTcpTable || defaultWindowsTcpTable;
+      const nativeOwned = tcpTable?.isWindowsLoopbackTcpSocketOwned?.({
+        localPort: port,
+        remotePort: localPort,
+        owningPid: pid
+      });
+      if (typeof nativeOwned === 'boolean') return nativeOwned;
+    }
     const script = `Get-NetTCPConnection -OwningProcess ${pid} -State Established -LocalAddress 127.0.0.1 -LocalPort ${port} -RemoteAddress 127.0.0.1 -RemotePort ${localPort} -ErrorAction SilentlyContinue | Select-Object -ExpandProperty OwningProcess`;
     const output = await runProcessText('powershell', ['-NoProfile', '-NonInteractive', '-Command', script], { timeoutMs, deps });
     return output.split(/\r?\n/).some((line) => line.trim() === String(pid));

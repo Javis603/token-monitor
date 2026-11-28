@@ -1292,3 +1292,80 @@ test('probe keeps the full discovery budget when there is no explicit hub port',
   assert.equal(discoveryResolved, true, 'discovery must be allowed to finish after half the deadline');
   assert.equal(result.accountEmail, 'nohub@example.com');
 });
+
+test('listeningPorts (win32) uses windowsTcpTable without spawning PowerShell', async () => {
+  const spawn = () => assert.fail('unexpected PowerShell lookup');
+  const ports = await probe.listeningPorts(64252, {
+    platform: 'win32',
+    ipv4LoopbackOnly: true,
+    spawn,
+    windowsTcpTable: {
+      readWindowsListeningPorts(pid, options) {
+        assert.equal(pid, 64252);
+        assert.equal(options.ipv4LoopbackOnly, true);
+        return [49931];
+      }
+    }
+  });
+  assert.deepEqual(ports, [49931]);
+
+  const emptyErr = await probe.listeningPorts(64252, {
+    platform: 'win32',
+    spawn,
+    windowsTcpTable: { readWindowsListeningPorts: () => [] }
+  }).catch((error) => error);
+  assert.equal(emptyErr.status, 'unavailable');
+});
+
+test('listeningPorts (win32) falls back to PowerShell when the native table is unavailable', async (t) => {
+  const readWindowsListeningPorts = t.mock.fn(() => null);
+  const spawn = t.mock.fn(fakeSpawn('51153\r\n49931\r\n51153\r\n'));
+  const ports = await probe.listeningPorts(64252, {
+    platform: 'win32',
+    ipv4LoopbackOnly: true,
+    windowsTcpTable: { readWindowsListeningPorts },
+    spawn
+  });
+  assert.equal(readWindowsListeningPorts.mock.callCount(), 1);
+  assert.equal(spawn.mock.callCount(), 1);
+  const [command, args] = spawn.mock.calls[0].arguments;
+  assert.equal(command, 'powershell');
+  assert.match(args.at(-1), /Get-NetTCPConnection -OwningProcess 64252 -State Listen\b/);
+  assert.match(args.at(-1), /Where-Object LocalAddress -eq '127\.0\.0\.1'/);
+  assert.deepEqual(ports, [49931, 51153]);
+});
+
+test('desktop RPC uses windowsTcpTable on win32 without spawning PowerShell', async (t) => {
+  const { port, close } = await startStubHttpServer((req, res) => {
+    assert.equal(req.headers['x-codeium-csrf-token'], 'native-token');
+    req.resume();
+    res.writeHead(200, { 'content-type': 'application/json' });
+    res.end('{"native":true}');
+  });
+  t.after(close);
+
+  let ownershipChecks = 0;
+  const result = await probe.callLs({
+    scheme: 'http',
+    port,
+    desktopPid: process.pid,
+    csrfToken: 'native-token',
+    method: 'Heartbeat',
+    timeoutMs: 2000
+  }, {
+    platform: 'win32',
+    spawn: () => assert.fail('unexpected PowerShell lookup'),
+    windowsTcpTable: {
+      isWindowsLoopbackTcpSocketOwned({ localPort, remotePort, owningPid }) {
+        ownershipChecks += 1;
+        assert.equal(localPort, port);
+        assert.ok(Number.isInteger(remotePort) && remotePort > 0);
+        assert.equal(owningPid, process.pid);
+        return ownershipChecks >= 2;
+      }
+    }
+  });
+
+  assert.deepEqual(result, { native: true });
+  assert.equal(ownershipChecks, 2);
+});
