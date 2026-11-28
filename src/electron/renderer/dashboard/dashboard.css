@@ -1324,6 +1324,11 @@ html.native-high-contrast .dash-stage {
   white-space: nowrap;
 }
 
+.topo-live-rate.is-idle {
+  color: var(--readable-muted, var(--muted));
+  opacity: 1;
+}
+
 .topo-live-rate::before {
   content: '';
   width: 4.5px;

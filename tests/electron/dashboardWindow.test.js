@@ -1623,9 +1623,21 @@ test('renderQuotas renders expired plan status without meter, hover refresh hand
       ]
     });
     assert.deepEqual(JSON.parse(JSON.stringify(rateContext.currentLiveRatesByDevice())), { 'dev-1': 150, 'dev-2': 100 });
-    assert.ok(scheduledTimer && scheduledTimer.ms >= 11_000, 'expiry repaint timer should be armed');
-    nowVal += 12_500;
-    assert.deepEqual(JSON.parse(JSON.stringify(rateContext.currentLiveRatesByDevice())), {}, 'idle retained sample must not appear in live topology rates');
+    assert.equal(scheduledTimer.ms, 8_020, 'repaint when device rates go idle');
+    const tracker = rateContext.deviceRateTrackers.get('dev-1').cardTracker;
+    nowVal += 7_999;
+    assert.equal(tracker.getSample().idle, false);
+    nowVal += 1;
+    assert.equal(tracker.getSample().idle, true);
+    assert.equal(rateContext.deviceRateTrackers.get('dev-1').tracker.getSample().idle, false);
+    nowVal += 4_000;
+    assert.deepEqual(JSON.parse(JSON.stringify(rateContext.currentLiveRatesByDevice())), {}, 'retained readings do not drive active flows');
+    rateContext.scheduleRateExpiry();
+    assert.ok(scheduledTimer.ms > 0, 'repaint remains scheduled after the device rate goes idle');
+    nowVal += 167_999;
+    assert.equal(tracker.getSample().speed, 150);
+    nowVal += 1;
+    assert.equal(tracker.getSample(), null);
   } finally {
     Date.now = realDateNow;
   }
@@ -3120,6 +3132,21 @@ test('dashboard groups subagent hierarchies and review groups in Work Panel, Top
   context.renderTopology(overview);
   assert.match(topology.innerHTML, /1 subagents/);
   assert.match(topology.innerHTML, /1 background runs/);
+  const device = overview.topology.devices[0];
+  device.cardProject = 'Token Monitor';
+  context.renderTopology(overview, false, { [device.id]: { speed: 150, idle: false } });
+  assert.match(topology.innerHTML, /class="topo-live-rate is-rate">150 tok\/s/);
+  context.renderTopology(overview, false, { [device.id]: { speed: 150, idle: true } });
+  assert.match(topology.innerHTML, /class="topo-live-rate is-rate is-idle">150 tok\/s/);
+  context.renderTopology(overview);
+  assert.match(topology.innerHTML, /class="topo-node-sub-text">Token Monitor</);
+  const syntheticOverview = {
+    ...overview,
+    topology: { ...overview.topology, devices: [{ ...device, id: 'local', raw: null, liveTokPerSec: 0 }] }
+  };
+  const localDeviceId = context.state.stats.localDeviceId;
+  context.renderTopology(syntheticOverview, false, { [localDeviceId]: { speed: 150, idle: true } });
+  assert.match(topology.innerHTML, /class="topo-live-rate is-rate is-idle">150 tok\/s/);
 
   const groupedParent = overview.sessions.find((s) => s.subagentGroup);
   context.openDrawer({ kind: 'session', session: groupedParent });

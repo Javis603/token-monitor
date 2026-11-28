@@ -440,6 +440,23 @@
     };
   }
 
+  /** @param {any[]} sessions */
+  function deviceCardProject(sessions) {
+    let project = null;
+    for (const row of sessions) {
+      for (const session of row.groupRows || [row]) {
+        const label = session.projectLabel;
+        if (!label) continue;
+        const active = Boolean(session.isActive);
+        const time = n(session.sortTime);
+        if (!project || (active && !project.active) || (active === project.active && time >= project.time)) {
+          project = { label, active, time };
+        }
+      }
+    }
+    return project?.label || '';
+  }
+
   /**
    * Builds the Fleet model across all synced or history-bearing devices.
    * `isFleetMode` is true only when more than 1 machine is known, keeping single-device setups pure.
@@ -586,6 +603,7 @@
         activeSessionCount: runningCount,
         sessionCount: devSessions.length,
         activeWorkspace,
+        cardProject: deviceCardProject(devSessions),
         topClients,
         periodData: resolvedPeriod,
         accountingStatus: resolvedPeriod ? resolvedPeriod.accountingStatus || 'ready' : 'unavailable',
@@ -2172,6 +2190,7 @@
         liveTokPerSec: Math.max(0, n(m.liveTokPerSec)),
         activeSessionCount: Math.max(0, n(m.activeSessionCount)),
         activeWorkspace: String(m.activeWorkspace || ''),
+        cardProject: String(m.cardProject || ''),
         topClients: Array.isArray(m.topClients) ? m.topClients : [],
         activeToolColors: /** @type {string[]} */ ([]),
         raw: m
@@ -2194,6 +2213,7 @@
         liveTokPerSec: Math.max(0, n(hero.liveTokPerSec)),
         activeSessionCount: sessions.filter((s) => s.isActive).length,
         activeWorkspace: String(workspaces[0]?.name || ''),
+        cardProject: deviceCardProject(sessions),
         topClients: tools.slice(0, 3),
         activeToolColors: [],
         raw: null

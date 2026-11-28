@@ -57,6 +57,39 @@ test('buildFleetModel detects single-device vs multi-device fleet and computes a
   assert.equal(srv.activeWorkspace, 'gpu-train');
 });
 
+test('device cards prefer the latest active project and fall back to a named recent project', () => {
+  const nowMs = Date.parse('2026-11-28T12:00:00Z');
+  const session = (projectLabel, ageSeconds, activity = {}) => ({
+    client: 'codex',
+    projectLabel,
+    lastUsedAt: new Date(nowMs - ageSeconds * 1000).toISOString(),
+    sourceDevice: { deviceId: 'mac-1' },
+    ...activity
+  });
+  const projectFor = (sessions, devices = [{ deviceId: 'mac-1' }]) => model.buildScopedOverview({
+    nowMs,
+    stats: {
+      localDeviceId: 'mac-1',
+      devices,
+      periods: { today: { totalTokens: 100, sessions } }
+    }
+  }).topology.devices[0].cardProject;
+  const running = session('Token Monitor', 10, { turnEnded: false });
+  const waiting = session('Docs', 5, { waitingForInput: true });
+  const ended = session('Website', 3, { turnEnded: true });
+  const unnamed = session('', 1, { title: 'Session title' });
+
+  assert.equal(projectFor({ running, ended }), 'Token Monitor');
+  assert.equal(projectFor({ running, waiting, ended, unnamed }), 'Docs');
+  assert.equal(projectFor({ ended, unnamed }), 'Website');
+  assert.equal(projectFor({ unnamed }), '');
+  assert.equal(projectFor({ running, ended }, []), 'Token Monitor');
+  assert.equal(projectFor({
+    'codex:parent': { ...ended, sessionId: 'parent' },
+    'codex:child': { ...running, sessionId: 'child', parentSessionId: 'parent', parentClient: 'codex' }
+  }), 'Token Monitor');
+});
+
 test('selectScopedHistory and buildScopedOverview isolate a selected machine without cross-machine leaks', () => {
   const history = {
     daily: [

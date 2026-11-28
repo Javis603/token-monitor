@@ -2399,7 +2399,7 @@ function layoutTopologyLinks(graph) {
   }
 }
 
-function renderTopology(overview, revealed = false) {
+function renderTopology(overview, revealed = false, cardRateSamples = {}) {
   if (!els.topology) return;
   const graph = overview?.topology;
   if (!graph || !graph.devices?.length) {
@@ -2436,9 +2436,12 @@ function renderTopology(overview, revealed = false) {
       ? 'rgba(var(--overlay-rgb), 0.56)' : 'rgba(var(--overlay-rgb), 0.34)';
     const borderColor = colors.length ? `linear-gradient(180deg, transparent, ${colors.join(', ')}, transparent)` : '';
     const cls = ['topo-node', 'topo-node--device', hasLiveFlow ? 'is-active' : '', selected ? 'is-selected' : '', d.stale ? 'is-stale' : ''].filter(Boolean).join(' ');
-    const subLeft = d.liveTokPerSec > 0
-      ? `<span class="topo-live-rate is-rate">${Math.round(d.liveTokPerSec)} tok/s</span>`
-      : escapeHtml(d.activeWorkspace || (d.isLocal ? t('dashboard.devices.you') : ''));
+    const rateDeviceId = d.raw === null ? String(state.stats?.localDeviceId || 'local') : d.id;
+    const rateSample = cardRateSamples[rateDeviceId];
+    const rate = rateSample?.speed ?? d.liveTokPerSec;
+    const subLeft = rate > 0
+      ? `<span class="topo-live-rate is-rate${rateSample?.idle ? ' is-idle' : ''}">${Math.round(rate)} tok/s</span>`
+      : escapeHtml(d.cardProject);
     const subRight = d.activeSessionCount > 0 ? t('dashboard.fleet.activeAgents', { count: d.activeSessionCount }) : '';
     const shareScale = Math.min(1, d.share || 0).toFixed(3);
     return `<div class="${cls}" data-topo-kind="device" data-topo-id="${escapeHtml(d.id)}" data-key="device:${escapeHtml(d.id)}" data-node-accent="${accent}" data-flow-phase="${stagger ? Number(d.flowPhase || 0) : 0}" tabindex="0" role="button">`
@@ -2666,7 +2669,7 @@ function setHeatmapMarkup(markup) {
   if (restoreFocus) current?.focus({ preventScroll: true });
 }
 
-function renderActivity(overview) {
+function renderActivity(overview, cardRateSamples) {
   const isFlow = state.stageView === 'flow';
   const flowRevealed = isFlow && (lastRenderedTab === 'trends' || Boolean(els.topology?.classList.contains('hidden')));
   els.activityCol?.setAttribute('data-stage', state.stageView);
@@ -2685,7 +2688,7 @@ function renderActivity(overview) {
     els.skylineStage?.classList.add('hidden');
     els.heatFooter?.classList.add('hidden');
     renderHeatLegend(false);
-    renderTopology(overview, flowRevealed);
+    renderTopology(overview, flowRevealed, cardRateSamples);
   } else {
     state.heatmapView = state.stageView === '2d' ? '2d' : '3d';
     const scopedDailySource = state.selectedDeviceId === 'all'
@@ -3947,10 +3950,13 @@ function renderNow() {
   const nextFixedPeriodExpiryAt = revalidateSyncedPeriodOnRender();
   const sample = deviceRateTracker?.getSample?.() || null;
   const deviceRateSamples = {};
+  const cardRateSamples = {};
   const rateSamplesByDevice = {};
   for (const [devId, devState] of deviceRateTrackers.entries()) {
     const devSample = devState.tracker.getSample?.();
     if (devSample) deviceRateSamples[devId] = devSample;
+    const cardSample = devState.cardTracker.getSample();
+    if (cardSample) cardRateSamples[devId] = cardSample;
     rateSamplesByDevice[devId] = devState.history.getSamples?.() || [];
   }
   const overview = modelApi?.buildScopedOverview?.({
@@ -4047,7 +4053,7 @@ function renderNow() {
     renderTrends();
     renderDailyLedger(overview);
   } else {
-    renderActivity(overview);
+    renderActivity(overview, cardRateSamples);
   }
 
   syncAllSegIndicators({ animate: !prefersReducedMotion() });
@@ -4326,6 +4332,7 @@ function scheduleRateExpiry() {
   }
   for (const devState of deviceRateTrackers.values()) {
     collect(devState.tracker?.nextExpiryAt?.());
+    collect(devState.cardTracker.nextExpiryAt());
     collect(devState.history?.nextExpiryAt?.());
   }
   if (!expiries.length) return;
@@ -4380,10 +4387,12 @@ function observeStatsRates(stats) {
       if (!devState) {
         devState = {
           tracker: tokenRateApi.createLiveTokenRateGroupTracker({ now: Date.now, activeMs: 12_000 }),
+          cardTracker: tokenRateApi.createLiveTokenRateGroupTracker({ now: Date.now }),
           history: tokenRateApi.createLiveTokenRateHistory()
         };
         deviceRateTrackers.set(entry.id, devState);
       }
+      devState.cardTracker.observe([entry]);
       const devRes = devState.tracker.observe([entry]);
       if (devRes?.sample && !devRes.sample.idle) {
         devState.history.observe(devRes.sample);
