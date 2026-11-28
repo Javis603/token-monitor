@@ -134,6 +134,8 @@ function candidateOAuthArtifacts(options = {}) {
   const roots = options.applicationRoots || [
     '/Applications/Antigravity.app',
     path.join(home, 'Applications', 'Antigravity.app'),
+    '/Applications/Antigravity IDE.app',
+    path.join(home, 'Applications', 'Antigravity IDE.app'),
     '/Applications/Gemini.app',
     path.join(home, 'Applications', 'Gemini.app')
   ];

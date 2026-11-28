@@ -1,5 +1,8 @@
 'use strict';
 
+const { execFileSync } = require('node:child_process');
+const path = require('node:path');
+
 const DEFAULT_TERMINATION_GRACE_MS = 2000;
 const DEFAULT_TERMINATION_CLOSE_GRACE_MS = 5000;
 // Enough for every subprocess one collector can have running at once.
@@ -23,23 +26,42 @@ function trackLiveSubprocesses(table) {
 
 // Returns the function that removes it again. A full table leaves the extra
 // subprocess untracked rather than failing its spawn.
-function registerLiveSubprocess(child) {
+function registerLiveSubprocess(child, killTree) {
   const table = liveSubprocessTable;
   const pid = child?.pid;
   if (!table || !Number.isInteger(pid) || pid <= 0) return () => {};
+  // A negative entry marks a subprocess whose descendants also own work.
+  const entry = killTree ? -pid : pid;
   for (let slot = 0; slot < table.length; slot += 1) {
-    if (Atomics.compareExchange(table, slot, 0, pid) === 0) {
-      return () => { Atomics.compareExchange(table, slot, pid, 0); };
+    if (Atomics.compareExchange(table, slot, 0, entry) === 0) {
+      return () => { Atomics.compareExchange(table, slot, entry, 0); };
     }
   }
   return () => {};
 }
 
-function signalLiveSubprocesses(table, signal = 'SIGTERM', kill = process.kill.bind(process)) {
+function killSubprocessTree(pid, kill, signal = 'SIGKILL') {
+  if (process.platform !== 'win32') {
+    return kill(-pid, signal);
+  }
+  const root = process.env.SystemRoot || process.env.SYSTEMROOT || process.env.windir || 'C:\\Windows';
+  try {
+    execFileSync(path.win32.join(root, 'System32', 'taskkill.exe'), ['/pid', String(pid), '/t', '/f'], {
+      windowsHide: true, stdio: 'ignore', timeout: 2000
+    });
+  } catch (_) {
+    kill(pid, 'SIGKILL');
+  }
+}
+
+function signalLiveSubprocesses(table, signal = 'SIGTERM', kill = process.kill.bind(process), killTree = killSubprocessTree) {
   for (let index = 0; index < table.length; index += 1) {
     const pid = Atomics.load(table, index);
-    if (pid <= 0) continue;
-    try { kill(pid, signal); } catch (_) { /* already gone */ }
+    if (pid === 0) continue;
+    try {
+      if (pid < 0) killTree(-pid, kill);
+      else kill(pid, signal);
+    } catch (_) { /* already gone */ }
   }
 }
 
@@ -72,9 +94,19 @@ function createSubprocessTermination(child, options = {}) {
   let requested = false;
   let closed = false;
   let unconfirmed = false;
-  // Listed until it has exited: its PID is free for reuse from then on.
-  const untrack = registerLiveSubprocess(child);
-  child.once?.('exit', untrack);
+  let exited = false;
+  // A detached POSIX group may still own the pipes after its leader exits.
+  const detachedGroup = options.killTree && process.platform !== 'win32';
+  const untrack = registerLiveSubprocess(child, options.killTree);
+  child.once?.('exit', () => {
+    exited = true;
+    if (!detachedGroup) untrack();
+  });
+  const kill = signal => {
+    if (options.killTree && child.pid) {
+      if (detachedGroup || !exited) killSubprocessTree(child.pid, process.kill.bind(process), signal);
+    } else child.kill(signal);
+  };
 
   function armCloseReportGrace() {
     closeTimer = setTimer(() => {
@@ -92,11 +124,11 @@ function createSubprocessTermination(child, options = {}) {
     forceTimer = setTimer(() => {
       forceTimer = null;
       if (closed) return;
-      try { child.kill('SIGKILL'); } catch (_) {}
+      try { kill('SIGKILL'); } catch (_) {}
       armCloseReportGrace();
     }, graceMs);
     if (typeof forceTimer?.unref === 'function') forceTimer.unref();
-    try { child.kill('SIGTERM'); } catch (_) {}
+    try { kill('SIGTERM'); } catch (_) {}
     return true;
   }
 

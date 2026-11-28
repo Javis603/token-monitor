@@ -13,6 +13,7 @@ const { createAccountSlotFetcher } = require('../../src/shared/limits/accountSlo
 const { createLimitsRuntime } = require('../../src/shared/limits/runtime');
 const { limitProviderEntry } = require('../../src/shared/limits/registry');
 const { accountStatusProjection } = require('../../src/electron/limits/accountSettings');
+const { symlinkOrSkip } = require('../helpers/symlink');
 function fixture(t, settings = {}) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'slot-migration-'));
   t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
@@ -338,7 +339,7 @@ test('a failed read-back leaves the fixed credential intact', t => {
 for (const bad of ['corrupt', 'unsupported', 'symlink']) test(`migration refuses ${bad} store without replacement`, t => {
   const store = fixture(t, values);
   const file = store.filePath;
-  if (bad === 'symlink') { fs.renameSync(file, file + '.original'); fs.symlinkSync(file + '.original', file); }
+  if (bad === 'symlink') { fs.renameSync(file, file + '.original'); if (!symlinkOrSkip(t, file + '.original', file)) return; }
   else fs.writeFileSync(file, bad === 'corrupt' ? '{' : '{"version":999}');
   const before = fs.readFileSync(file, 'utf8');
   assert.throws(() => migrateAccountSlots(store, {}));

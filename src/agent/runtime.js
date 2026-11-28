@@ -43,6 +43,7 @@ async function runAgentOnce(options = {}, deps = {}) {
   const originalUsageError = options.usageOptions?.onError;
   const usageOptions = {
     ...(options.usageOptions || {}),
+    awaitInitialAmpSync: true,
     onError(error, reason) {
       originalUsageError?.(error, reason);
       if (!usageSettled) {

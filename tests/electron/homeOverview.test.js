@@ -77,7 +77,7 @@ test('Home activity heatmap is a scaled copy of the dashboard heatmap', () => {
 
   const rendererDir = path.join(__dirname, '../../src/electron/renderer');
   const css = fs.readFileSync(path.join(rendererDir, 'styles.css'), 'utf8');
-  const dashboardCss = fs.readFileSync(path.join(rendererDir, 'dashboard.css'), 'utf8');
+  const dashboardCss = fs.readFileSync(path.join(rendererDir, 'dashboard', 'dashboard.css'), 'utf8');
   const rule = (source, selector) => {
     const start = source.indexOf(`${selector} {`);
     assert.notEqual(start, -1, `missing CSS rule: ${selector}`);

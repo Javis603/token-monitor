@@ -147,17 +147,25 @@ function translate(key, params) {
   return key;
 }
 
-function incumbentOptions(stats) {
+function incumbentOptions(stats, settings, formatDetailTokens = String) {
   const { CLIENT_LABELS } = require('../../src/shared/clientCatalog');
   const { clientColors } = require('../../src/electron/renderer/usageCharts');
   const { translate: localize } = require('../../src/electron/renderer/i18n');
   const source = app.slice(app.indexOf('function sessionPresentationOptions()'), app.indexOf('function rawSessionRowsForPeriod('));
   return Function('clientLabels', 'clientColors', 'modelColor', 'stableColor', 'fallbackModelColors', 't',
-    'state', 'formatCompact', 'effectiveCompactTokenUnits', 'currentLocale', `${source}; return sessionPresentationOptions();`)(
+    'state', 'formatCompact', 'effectiveCompactTokenUnits', 'currentLocale', 'formatDetailTokens', 'detailTokenDisplaySignature', `${source}; return sessionPresentationOptions();`)(
     CLIENT_LABELS, clientColors, () => '', () => '', [], (key, params) => localize('zh-TW', key, params),
-    { stats, period: 'month' }, String, () => '', () => 'zh-TW'
+    { stats, settings, period: 'month' }, value => `${value / 1000}K`, () => '', () => 'zh-TW', formatDetailTokens, () => '0:0:western:zh-TW'
   );
 }
+
+test('Auto Review latest count follows exact mode only when compact details are enabled', () => {
+  const summary = { latestValue: 120_000 };
+  const formatExact = value => value.toLocaleString('en-US');
+  const label = settings => incumbentOptions({}, settings, formatExact).backgroundReviews.summaryLabel(summary);
+  assert.equal(label({ detailTokensUseCompactUnits: false }), '120K');
+  assert.equal(label({ detailTokensUseCompactUnits: true }), '120,000');
+});
 
 function renderStatusGroup(group, metric = 'used') {
   const document = { createElement: tag => new Node(tag), createTextNode: text => new Node('text', '', text) };

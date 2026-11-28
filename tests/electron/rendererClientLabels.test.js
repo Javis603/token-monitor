@@ -147,12 +147,11 @@ test('Reasonix icon keeps the official color in a mask-safe SVG path', () => {
   assert.doesNotMatch(icon, /stroke=/);
 });
 
-test('Reasonix native session keeps presentation identity for the brand icon path', () => {
-  const source = rendererSource();
+test('Reasonix stays an aggregate-only brand mark and emits no native session rows', () => {
+  assert.ok(clientLabelIds().has('reasonix'));
   assertUsageMarks('reasonix');
-  assert.match(source, /if \(breakdown === 'session'\) \{[\s\S]*rowData\.client && clientsWithIcon\.has\(rowData\.client\)[\s\S]*row-icon-\$\{rowData\.client\}/);
 
-  const [row] = sessionRowsForPeriod({ sessions: {} }, {
+  const rows = sessionRowsForPeriod({ sessions: {} }, {
     nativeSessions: {
       'reasonix:branch-id': {
         client: 'reasonix',
@@ -164,8 +163,7 @@ test('Reasonix native session keeps presentation identity for the brand icon pat
     clientLabels: { reasonix: 'Reasonix' },
     clientColors: { reasonix: '#4d6bfe' }
   });
-  assert.equal(row.client, 'reasonix');
-  assert.equal(row.name, 'Reasonix · deepseek/deepseek-v4-flash');
+  assert.deepEqual(rows, []);
 });
 
 test('LM Studio has a label and uses the standard mask-safe icon path', () => {

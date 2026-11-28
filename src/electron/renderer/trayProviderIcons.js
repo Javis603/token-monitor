@@ -100,6 +100,31 @@
     return providerId === 'claude' ? 1 : TRAY_PROVIDER_OPTICAL_RATIO;
   }
 
+  // The tray, bubble and notch pick from reported usage, limits, recent local
+  // activity and explicit layout choices. A provider that first reports data
+  // while the window is hibernated shows the app icon until the window wakes,
+  // the same fallback a system theme change uses.
+  function trayProviderIconDemand({ stats, layouts = [] } = {}) {
+    const ids = new Set();
+    const add = (value) => {
+      const id = String(value || '').trim().toLowerCase();
+      if (id && id !== 'auto' && id !== 'app') ids.add(id);
+    };
+    add(stats?.localRecentUsageActivity?.provider);
+    for (const period of Object.values(stats?.periods || {})) {
+      for (const id of Object.keys(period?.clients || {})) add(id);
+      for (const id of Object.keys(period?.clientCosts || {})) add(id);
+    }
+    for (const provider of stats?.limits?.providers || []) add(provider?.provider);
+    for (const layout of layouts) {
+      for (const item of layout?.items || []) {
+        add(item?.source?.provider);
+        for (const row of item?.rows || []) add(row?.provider);
+      }
+    }
+    return ids;
+  }
+
   function createTrayProviderIconDeliveryGuard() {
     let latestDeliveryId = 0;
     return {
@@ -116,6 +141,7 @@
   return {
     createTrayProviderIconDeliveryGuard,
     isFlatInkPixels,
+    trayProviderIconDemand,
     trayProviderIconSources,
     trayProviderBadgeLayout,
     trayProviderOpticalLayout,

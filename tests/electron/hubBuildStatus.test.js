@@ -1,7 +1,10 @@
 'use strict';
 
 const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const path = require('node:path');
 const test = require('node:test');
+const vm = require('node:vm');
 
 const { currentHubBuild } = require('../../src/shared/hubBuildIdentity');
 const { healthRuntime, probeHubBuild } = require('../../src/electron/hubBuildStatus');
@@ -27,6 +30,24 @@ test('remote Hub probe recognizes the exact current Worker build', async () => {
     runtime: 'cloudflare-worker',
     hubUrl: 'https://hub.example'
   });
+});
+
+test('desktop Hub build status checks health through the Hub transport', async () => {
+  const main = fs.readFileSync(path.join(__dirname, '../../src/electron/main.js'), 'utf8');
+  const source = main.slice(main.indexOf('async function getHubBuildStatus()'), main.indexOf('async function startEmbeddedHub()'));
+  const fetchFromHub = async (url) => {
+    assert.equal(url, 'https://proxy-only.invalid/api/health');
+    return response({ role: 'hub', hubBuild: currentHubBuild('node-hub') });
+  };
+  const getStatus = vm.runInNewContext(source + 'getHubBuildStatus;', {
+    settings: { hubMode: 'client', hubUrl: 'https://proxy-only.invalid' },
+    fetchFromHub,
+    probeHubBuild(url, options) {
+      assert.equal(options?.fetchImpl, fetchFromHub);
+      return probeHubBuild(url, options);
+    }
+  });
+  assert.equal((await getStatus()).status, 'current');
 });
 
 test('remote Hub probe identifies legacy health responses without guessing an update direction', async () => {

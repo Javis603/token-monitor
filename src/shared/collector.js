@@ -5,7 +5,7 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const { createHash } = require('node:crypto');
-const { customPricingPath } = require('./tokscaleConfig');
+const { customPricingPath, tokscaleConfigDir } = require('./tokscaleConfig');
 const { catalogRevision, createPricingCatalogRefresher } = require('./pricingCatalog');
 const { senpiWatchSources } = require('./providers/senpi/paths');
 const { abortReason, throwIfAborted } = require('./abortSignal');
@@ -74,6 +74,7 @@ const {
   terminationUnconfirmedError
 } = require('./subprocessTermination');
 const { lowerSubprocessPriority } = require('./subprocessPriority');
+const { ampCliAvailable, syncAmp } = require('./providers/amp/selfSync');
 const { createAntigravitySelfSync } = require('./providers/antigravity/selfSync');
 const { readRecentTurns: readRecentAntigravityTurns } = require('./providers/antigravity/sessionMetadata');
 const { ANTIGRAVITY_ACP_SOURCE_ID, discoverAntigravityAcpPaths } = require('./providers/antigravity/acpPaths');
@@ -100,13 +101,6 @@ const { createProcessStartBatch } = require('./processStarts');
 const { catpawSourcesFingerprint } = require('./providers/catpaw/paths');
 const { readLocalUsageView, resolveLocalUsagePricing } = require('./providers/codex/localUsage');
 const { createLocalUsageSource } = require('./providers/codex/localUsageSource');
-const {
-  createReasonixNativeSessionCache,
-  isReasonixNativeSessionPath,
-  isReasonixNativeSessionSidecar,
-  reasonixNativeSessionWatchRoots,
-  emptyNativeView
-} = require('./providers/reasonix/sessions');
 const { hostOsInfo, normalizeOsInfo } = require('./osVersion');
 const { hostDeviceKind } = require('./deviceHardware');
 const {
@@ -281,7 +275,9 @@ function spawnTokscaleJson(userArgs, commandTimeoutMs, command = tokscaleCommand
   const { bin, prefixArgs, env } = command;
   if (signal?.aborted) return Promise.reject(abortReason(signal));
   return new Promise((resolve, reject) => {
-    const child = spawn(bin, [...prefixArgs, ...userArgs], { env, windowsHide: true });
+    const child = spawn(bin, [...prefixArgs, ...userArgs], {
+      env, windowsHide: true, ...(options.killTree && process.platform !== 'win32' ? { detached: true } : {})
+    });
     lowerSubprocessPriority(child);
     let stdout = '';
     let stderr = '';
@@ -290,6 +286,7 @@ function spawnTokscaleJson(userArgs, commandTimeoutMs, command = tokscaleCommand
     let terminalError = null;
     const termination = createSubprocessTermination(child, {
       ...(options.terminationOptions || {}),
+      killTree: options.killTree === true,
       onUnconfirmed() {
         const error = terminationUnconfirmedError(terminalError, options.operation || 'tokscale');
         try { options.onTerminationUnconfirmed?.(error); } catch (_) {}
@@ -340,6 +337,10 @@ function spawnTokscaleJson(userArgs, commandTimeoutMs, command = tokscaleCommand
         const error = new Error(`tokscale exited with code ${code}: ${stderr.trim() || stdout.trim()}`);
         error.tokscaleExitCode = code;
         error.tokscaleStderr = stderr;
+        if (options.readErrorJson) {
+          // Amp reports partial exports on stdout even when the command fails.
+          try { error.tokscaleJson = parseJsonOutput(stdout); } catch (_) {}
+        }
         return finish(error);
       }
       try { finish(null, parseJsonOutput(stdout)); } catch (error) { finish(error); }
@@ -1125,6 +1126,25 @@ function rangeT3Parent(resolved, session, period, allTime) {
 // back in here.
 const selfSyncThrottle = createSelfSyncThrottle();
 
+function syncAmpForCollection(options, signal, onTerminationUnconfirmed) {
+  if (options.runTokscale && !options.runAmpSync) return Promise.resolve(null);
+  const command = tokscaleCommand();
+  if (!options.runAmpSync && !ampCliAvailable(command.env)) return Promise.resolve(null);
+  return syncAmp(selfSyncThrottle, {
+    signal,
+    minIntervalMs: selfSyncThrottle.minIntervalForTick(options, 'amp'),
+    run: options.runAmpSync || (() => spawnTokscaleJson(
+      ['amp', 'sync', '--json', '--timeout', '60'], 70_000, command, signal, {
+        operation: 'tokscale amp sync',
+        terminationOptions: options.subprocessTerminationOptions,
+        onTerminationUnconfirmed,
+        readErrorJson: true,
+        killTree: true
+      }
+    ))
+  });
+}
+
 const { maybeSyncCursor } = createCursorSelfSync({ selfSyncThrottle });
 const { maybeSyncAntigravity } = createAntigravitySelfSync({ selfSyncThrottle, tokscaleCommand });
 
@@ -1503,6 +1523,9 @@ async function collectUsageOnce(options) {
   if (normalizedClients) {
     const selectedSyncClients = targetRequested ? targetClientsCsv : normalizedClients;
     const syncClients = cursorSnapshot ? withoutCursor(selectedSyncClients) : selectedSyncClients;
+    if (!options.ampSyncManaged && syncClients.split(',').includes('amp')) {
+      await syncAmpForCollection(options, options.signal, () => reportTerminationUnconfirmed('amp-sync'));
+    }
     await maybeSyncCursor(syncClients, options.logger, {
       minIntervalMs: selfSyncThrottle.minIntervalForTick(options, 'cursor'),
       explicit: selfSyncSelected(options.forceSelfSync, 'cursor'),
@@ -1992,25 +2015,6 @@ async function collectUsageOnce(options) {
   // The request ledger is this source's archive. A second per-session archive
   // would resurrect its contribution after a native rollout takes precedence.
   if (codexLocalView) summary.codexLocalSessionKeys = codexLocalView.sessionKeys;
-  if (options.reasonixNativeSessionsEnabled === true && trackedClientSet.has('reasonix')) {
-    try {
-      const nativeCache = options.reasonixNativeSessionCache || createReasonixNativeSessionCache({
-        env: options.env || process.env,
-        homeDir: options.homeDir || os.homedir(),
-        platform: platformValue,
-        cwdDir: options.cwdDir || process.cwd(),
-        projectIdentity
-      });
-      const nativeView = nativeCache.getView({ now: collectedAt, projectsEnabled, allTimeSince });
-      summary.nativeSessions = nativeView.sessions;
-      summary.nativeProjects = nativeView.projects;
-    } catch (error) {
-      if (typeof options.logger === 'function') options.logger(`reasonix native session scan failed: ${error.message}`);
-      const empty = emptyNativeView();
-      summary.nativeSessions = empty.sessions;
-      summary.nativeProjects = empty.projects;
-    }
-  }
   if (typeof options.onAnchorComputed === 'function') {
     // Reuse the existing catalog-title ledger (historically named t3Titles)
     // for summary overrides too. Provenance never enters published rows.
@@ -2486,18 +2490,24 @@ function startCollector(options) {
   const runtimeAbortController = new AbortController();
   const runtimeSignal = runtimeAbortController.signal;
   let startBarrier = options.startBarrier ? Promise.resolve(options.startBarrier) : null;
+  let ampImport = null;
+  let initialAmpSync = null;
+  let ampCacheRevision = 0;
+  let publishedAmpCacheRevision = 0;
   let cursorRestartRead = null;
   const trackedClients = new Set(normalizeClientsCsv(clients).split(',').filter(Boolean));
-  const reasonixNativeSessionsEnabled = options.reasonixNativeSessionsEnabled === true;
-  const reasonixNativeSessionCache = reasonixNativeSessionsEnabled && trackedClients.has('reasonix')
-    ? options.reasonixNativeSessionCache || createReasonixNativeSessionCache({
-      env: options.env || process.env,
-      homeDir: options.homeDir || os.homedir(),
-      platform: options.platform || process.platform,
-      cwdDir: options.cwdDir || process.cwd(),
-      projectIdentity
-    })
-    : null;
+  const ampCacheDir = trackedClients.has('amp')
+    ? path.join(tokscaleConfigDir(), 'amp-cache', 'threads') : null;
+  let publishedAmpCacheMarker = null;
+  function ampCacheMarker() {
+    if (!ampCacheDir) return null;
+    // Tokscale atomically replaces each export. The directory changes when
+    // either this collector or another local process publishes an export.
+    try {
+      const { ino, mtimeNs } = fs.statSync(ampCacheDir, { bigint: true });
+      return `${ino}:${mtimeNs}`;
+    } catch (_) { return null; }
+  }
   const deviceOsInfo = options.osInfo === undefined
     ? hostOsInfo()
     : normalizeOsInfo(options.osInfo);
@@ -2876,6 +2886,14 @@ function startCollector(options) {
   const sourcesChangedDuringScan = Symbol('scan sources changed during scan');
 
   async function performTick(reason, tickOptions = {}) {
+    const ampImportInProgress = Boolean(ampImport);
+    const tickAmpCacheRevision = ampCacheRevision;
+    const tickAmpCacheMarker = ampImportInProgress ? publishedAmpCacheMarker : ampCacheMarker();
+    if (!ampImportInProgress && (tickAmpCacheRevision !== publishedAmpCacheRevision || tickAmpCacheMarker !== publishedAmpCacheMarker)) {
+      // An export can update older threads. Keep demanding a full scan until
+      // the import has been published, even if the first scan fails.
+      tickOptions = { ...tickOptions, todayOnly: false, targetClients: [], forceHistory: true };
+    }
     const visibilityRevision = codexVisibilityRevision;
     const tickStartedAt = Date.now();
     const collectedAt = collectionDate(options.now);
@@ -2943,6 +2961,7 @@ function startCollector(options) {
       let sourceChangeObserved = false;
       const summary = await collectUsageOnce({
         ...options,
+        ampSyncManaged: true,
         antigravityAcpPaths,
         ...(tickCursorSnapshot ? { cursorSnapshot: tickCursorSnapshot } : {}),
         offlinePricing: true,
@@ -2975,8 +2994,6 @@ function startCollector(options) {
         } : null,
         forceSelfSync: tickOptions.forceSelfSync ?? null,
         sourceSelfSync: tickOptions.sourceSelfSync ?? null,
-        reasonixNativeSessionsEnabled,
-        reasonixNativeSessionCache,
         codexLocalUsageStore: codexLocalSource?.store || options.codexLocalUsageStore,
         onCodexLocalUsageComputed: (view) => {
           if (visibilityRevision !== codexVisibilityRevision) return;
@@ -3202,6 +3219,10 @@ function startCollector(options) {
       }
       const transformedSummary = await onUpdate?.(summary, reason);
       if (tickCursorSnapshot) publishedCursorRevision = tickCursorSnapshot.revision;
+      if (historyScanSucceeded && !ampImportInProgress) {
+        publishedAmpCacheRevision = tickAmpCacheRevision;
+        publishedAmpCacheMarker = tickAmpCacheMarker;
+      }
       publishedCodexVisibilityRevision = visibilityRevision;
       const visibleSummary = transformedSummary && typeof transformedSummary === 'object'
         ? transformedSummary
@@ -3310,6 +3331,16 @@ function startCollector(options) {
       } finally {
         if (startBarrier === barrier) startBarrier = null;
       }
+      if (stopped || runtimeSignal.aborted) return false;
+    }
+    if (trackedClients.has('amp') && options.awaitInitialAmpSync && !initialCollectionComplete) {
+      initialAmpSync ||= startAmpImport(['amp']).promise;
+      await initialAmpSync;
+      if (stopped || runtimeSignal.aborted) return false;
+    } else if (trackedClients.has('amp') && selfSyncSelected(tickOptions.forceSelfSync, 'amp')) {
+      const job = startAmpImport(tickOptions.forceSelfSync);
+      job.joinedByRefresh = true;
+      await job.promise;
       if (stopped || runtimeSignal.aborted) return false;
     }
     if (cursorSource) {
@@ -3670,18 +3701,6 @@ function startCollector(options) {
           ? activityRevision
           : Math.max(pendingActivityRevision, activityRevision);
       }
-      if (
-        reasonixNativeSessionCache
-        && isReasonixNativeSessionSidecar(filePath)
-        && isReasonixNativeSessionPath(
-          filePath,
-          typeof reasonixNativeSessionCache.sessionRoots === 'function'
-            ? reasonixNativeSessionCache.sessionRoots()
-            : reasonixNativeSessionWatchRoots(watchOptions)
-        )
-      ) {
-        reasonixNativeSessionCache.invalidate(filePath);
-      }
       for (const client of clientsForWatchPath(filePath, sourceSyncRootsByClient, attributionIgnores)) {
         // Catalog and context changes only refresh session metadata.
         if (client === 'antigravity' && antigravityMetadataFiles.has(path.resolve(filePath))) continue;
@@ -3746,8 +3765,38 @@ function startCollector(options) {
     }
   }
 
+  function startAmpImport(forceSelfSync = null) {
+    if (ampImport) return ampImport;
+    const job = { joinedByRefresh: false, promise: null };
+    ampImport = job;
+    job.promise = Promise.resolve(startBarrier).then(() => {
+      throwIfAborted(runtimeSignal);
+      return syncAmpForCollection({ ...options, forceSelfSync }, runtimeSignal, () => emitDiagnosticEvent({
+        subsystem: 'collector', code: 'subprocess-termination-unconfirmed', operation: 'amp-sync'
+      }));
+    }).then(result => {
+      if (result?.changed) ampCacheRevision += 1;
+      return result;
+    }).catch(error => {
+      if (!runtimeSignal.aborted) log(`Amp sync failed: ${error.message}`);
+      return null;
+    }).finally(() => { ampImport = null; });
+    return job;
+  }
+
   function loop() {
     if (stopped) return;
+    const awaitAmp = options.awaitInitialAmpSync === true && !initialCollectionComplete && trackedClients.has('amp');
+    // Amp can have new server-side threads without a local watch event. Kick
+    // off its import independently, including in Smart mode while locally idle.
+    if (trackedClients.has('amp') && !ampImport && !awaitAmp) {
+      const job = startAmpImport();
+      void job.promise.then(result => {
+        if (stopped || job.joinedByRefresh) return;
+        if (result?.changed || ampCacheMarker() !== publishedAmpCacheMarker) return runTick('source-sync');
+        if (result) return runTick('client:amp', { todayOnly: true, targetClients: ['amp'] });
+      });
+    }
     const activityRevisionAtStart = activityRevision;
     // Native watchers are an optimization, not the source of truth. Always
     // retain the hourly reconciliation path for missed events, newly created
@@ -3763,6 +3812,7 @@ function startCollector(options) {
       activityGated &&
       initialCollectionComplete &&
       !fullScanDue &&
+      (ampImport || (ampCacheRevision === publishedAmpCacheRevision && ampCacheMarker() === publishedAmpCacheMarker)) &&
       activityRevisionAtStart <= collectedActivityRevision
     ) {
       intervalTimer = setTimeout(loop, intervalMs);
@@ -3853,7 +3903,7 @@ function startCollector(options) {
     if (cursorRestartRead) return cursorRestartRead.then(() => whenIdle());
     const usageIdle = !tickInFlight ? Promise.resolve() : new Promise((resolve) => idleWaiters.push(resolve));
     return usageIdle.then(() => activityUpdate).then(() => stopped
-      ? Promise.all([pricingRefresher?.whenIdle(), codexLocalSource?.whenIdle(), cursorSource?.whenIdle()]) : undefined);
+      ? Promise.all([pricingRefresher?.whenIdle(), codexLocalSource?.whenIdle(), cursorSource?.whenIdle(), ampImport?.promise]) : undefined);
   }
 
   function getDiagnostics() {

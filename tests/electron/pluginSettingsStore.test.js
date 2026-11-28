@@ -6,6 +6,7 @@ const os = require('node:os');
 const path = require('node:path');
 const { createPluginSettingsStore, MAX_BYTES } = require('../../src/electron/plugins/settings');
 const { normalizeSettings } = require('../../src/shared/plugins/settings');
+const { symlinkOrSkip } = require('../helpers/symlink');
 const schema = normalizeSettings({ version: 1, fields: [{ id: 'count', type: 'number', label: 'Count', default: 2, min: 0 }] });
 function fixture(t, injected = fs) {
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'tm-author-settings-'));
@@ -59,16 +60,23 @@ test('migration, reset and downgrade preserve unknown data; invalid old values r
   assert.equal(store.get('alpha', newer).values.size, 9);
 });
 
-test('corrupt, oversized, symlinked and non-file stores fail closed; unsafe ids rejected', t => {
+test('corrupt, oversized and non-file stores fail closed; unsafe ids rejected', t => {
   const { directory, store } = fixture(t); const file = path.join(directory, 'alpha.json');
   for (const bytes of ['{', '{}', ' '.repeat(MAX_BYTES + 1)]) {
     fs.writeFileSync(file, bytes); assert.throws(() => store.get('alpha', schema));
     assert.throws(() => store.save('alpha', schema, { revision: 0, values: {} })); assert.equal(fs.readFileSync(file, 'utf8'), bytes);
   }
   fs.unlinkSync(file); fs.mkdirSync(file); assert.throws(() => store.get('alpha', schema)); fs.rmdirSync(file);
-  const target = path.join(directory, 'target'); fs.writeFileSync(target, '{}'); fs.symlinkSync(target, file);
-  assert.throws(() => store.get('alpha', schema)); assert.equal(fs.readFileSync(target, 'utf8'), '{}');
   for (const id of ['../alpha', 'a/b', 'A', '']) assert.throws(() => store.get(id, schema), /invalid-plugin-id/);
+});
+
+test('symlinked settings stores fail closed', t => {
+  const { directory, store } = fixture(t);
+  const target = path.join(directory, 'target');
+  fs.writeFileSync(target, '{}');
+  if (!symlinkOrSkip(t, target, path.join(directory, 'alpha.json'))) return;
+  assert.throws(() => store.get('alpha', schema));
+  assert.equal(fs.readFileSync(target, 'utf8'), '{}');
 });
 
 test('quota failure keeps compatibility data untouched and explicit remove only affects one plugin', t => {

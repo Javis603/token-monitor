@@ -1,10 +1,13 @@
 'use strict';
 
 const assert = require('node:assert/strict');
+const http = require('node:http');
 const test = require('node:test');
+const { MockAgent, getGlobalDispatcher, setGlobalDispatcher } = require('undici');
 
 const {
   AppProxyAgent,
+  createDesktopHubFetch,
   createSessionProxyApplier,
   networkProxySource,
   noProxyError,
@@ -15,6 +18,66 @@ const {
   sessionProxyConfig
 } = require('../../src/electron/networkProxy');
 const { resolveProxyConfig } = require('../../src/shared/outboundFetch');
+
+test('desktop Hub requests keep local addresses direct and use the current route for remote requests', async () => {
+  const calls = [];
+  let route = 'system';
+  const fetchFromHub = createDesktopHubFetch(
+    async (url, init) => calls.push([route, url, init]),
+    async (url, init) => calls.push(['direct', url, init])
+  );
+  const init = { headers: { authorization: 'Bearer fixture' }, signal: new AbortController().signal };
+  const local = 'http://127.0.0.1:17321/api/stats';
+  const remote = 'https://hub.example/api/stats/stream';
+  await fetchFromHub(local, init);
+  await fetchFromHub(remote, init);
+  route = 'app';
+  await fetchFromHub(remote, init);
+  assert.deepEqual(calls, [['direct', local, init], ['system', remote, init], ['app', remote, init]]);
+});
+
+test('desktop Hub requests to private and Tailscale networks stay direct', async () => {
+  const routes = [];
+  const fetchFromHub = createDesktopHubFetch(
+    async (url) => routes.push(['proxy', url]),
+    async (url) => routes.push(['direct', url]),
+    'win32'
+  );
+  const direct = [
+    'http://10.0.0.5:17321', 'http://172.16.4.2:17321', 'http://172.31.255.1:17321',
+    'http://192.168.1.20:17321', 'http://100.64.0.1:17321', 'http://100.101.102.103:17321',
+    'http://[fd7a:115c:a1e0::1]:17321', 'http://[::ffff:192.168.1.20]:17321',
+    'http://desktop-pc:17321', 'http://hub.local:17321', 'https://desktop.tail1234.ts.net',
+    'http://localhost:17321', 'http://169.254.10.1:17321'
+  ];
+  const proxied = [
+    'https://hub.example', 'http://8.8.8.8:17321', 'http://172.32.0.1:17321',
+    'http://100.128.0.1:17321', 'http://[2001:db8::1]:17321', 'https://ts.net.example.com',
+    'https://localnet.example'
+  ];
+  for (const url of [...direct, ...proxied]) await fetchFromHub(url);
+  assert.deepEqual(routes, [...direct.map((url) => ['direct', url]), ...proxied.map((url) => ['proxy', url])]);
+});
+
+test('the default direct Hub fetch bypasses the global dispatcher', async (t) => {
+  const server = http.createServer((_req, res) => res.end('direct'));
+  await new Promise((resolve, reject) => {
+    server.once('error', reject);
+    server.listen(0, '127.0.0.1', resolve);
+  });
+  t.after(() => server.close());
+  const previous = getGlobalDispatcher();
+  const blocked = new MockAgent();
+  blocked.disableNetConnect();
+  setGlobalDispatcher(blocked);
+  t.after(async () => {
+    setGlobalDispatcher(previous);
+    await blocked.close();
+  });
+  const fetchFromHub = createDesktopHubFetch(() => assert.fail('local Hub must bypass the proxy'));
+  const response = await fetchFromHub(`http://127.0.0.1:${server.address().port}/api/stats`);
+  assert.equal(await response.text(), 'direct');
+});
 
 test('proxy URLs normalize to scheme://host[:port]', () => {
   assert.equal(normalizeProxyUrl('http://127.0.0.1:7897'), 'http://127.0.0.1:7897');

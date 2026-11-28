@@ -143,18 +143,21 @@ test('Codex watch setup uses its captured home classification across matchers', 
   } }, { ...captured, clients: 'codex', dirs: [home] });
 });
 
-test('Reasonix watches the configured state directory in the watcher worker', (t) => {
+test('Reasonix watches only the stats directory, not native session or project directories', (t) => {
   const home = fs.realpathSync.native(fs.mkdtempSync(path.join(os.tmpdir(), 'tm-reasonix-watch-')));
   t.after(() => fs.rmSync(home, { recursive: true, force: true }));
   const state = path.join(home, 'reasonix-state');
+  const stats = path.join(state, 'stats');
   const sessions = path.join(state, 'sessions');
+  const projects = path.join(state, 'projects');
+  fs.mkdirSync(stats, { recursive: true });
   fs.mkdirSync(sessions, { recursive: true });
+  fs.mkdirSync(projects, { recursive: true });
   const options = { homeDir: home, env: { REASONIX_STATE_HOME: state } };
-  assert.ok(watchPathsForClients('reasonix', options).includes(sessions));
-  openWatch({ watch(_dirs, { ignored }) {
-    assert.equal(ignored(path.join(sessions, 'session.jsonl.meta')), false);
-    assert.equal(ignored(path.join(sessions, 'unrelated.data')), true);
-  } }, { ...options, clients: 'reasonix', dirs: [sessions] });
+  const watched = watchPathsForClients('reasonix', options);
+  assert.deepEqual(watched, [stats]);
+  assert.equal(watched.includes(sessions), false);
+  assert.equal(watched.includes(projects), false);
 });
 
 test('a Copilot exporter parent named like a workspace root keeps only the exporter file', (t) => {
