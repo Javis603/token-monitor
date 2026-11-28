@@ -577,6 +577,29 @@ test('Hero labels partial coverage and distinguishes unavailable totals from zer
   assert.equal(cost.textContent, '0');
 });
 
+test('Dashboard hero shows token counts and displays the cache hit rate separately', () => {
+  let markup;
+  const heroCache = { textContent: '' };
+  const context = {
+    els: { heroAnatomy: {}, heroCache },
+    state: { selectedDeviceId: 'all', periodKey: 'today' },
+    lastHeroRender: {}, t: String, escapeHtml: String, formatExactTokens: String,
+    formatCompact: String, updateHeroTokens() {}, heroCacheMissDetails: () => [],
+    patchDashboardMarkup(_target, html) { markup = html; }
+  };
+  context.formatHeroPercent = dashboardFunction('formatHeroPercent', '\nfunction renderHero', context);
+  const render = dashboardFunction('renderHero', '\nfunction renderVelocity', context);
+  const segments = [
+    { key: 'cacheRead', labelKey: 'Cached input', tokens: 970, share: 0.97 },
+    { key: 'cacheMiss', labelKey: 'Uncached input', tokens: 29, share: 0.029 },
+    { key: 'output', labelKey: 'Output', tokens: 1, share: 0.001 }
+  ];
+  render({ hero: { tokens: 1000, cacheHitRate: 0.97, anatomy: { cacheWrite: 0, cacheMiss: 29, segments } } });
+  assert.deepEqual(Array.from(markup.matchAll(/<strong>(\d+)<\/strong>/g), match => match[1]), ['970', '29', '1']);
+  assert.doesNotMatch(markup, /%/);
+  assert.equal(heroCache.textContent, '97%');
+});
+
 test('Dashboard tooltips distinguish unrecorded days and buckets from recorded zeros', () => {
   const tooltip = { innerHTML: '' };
   const context = {

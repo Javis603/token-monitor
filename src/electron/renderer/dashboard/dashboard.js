@@ -1485,9 +1485,7 @@ function renderHero(overview) {
       if (seg !== cacheMissComponents[0]) return [];
       return [{
         key: 'cacheMiss', labelKey: 'dashboard.tooltip.inputCacheMiss',
-        tokens: anatomy.cacheWrite + anatomy.cacheMiss,
-        share: (anatomy.cacheWrite + anatomy.cacheMiss) / (anatomy.totalTokens
-          || anatomy.cacheRead + anatomy.cacheWrite + anatomy.cacheMiss + anatomy.output + anatomy.unclassified)
+        tokens: anatomy.cacheWrite + anatomy.cacheMiss
       }];
     });
     patchDashboardMarkup(els.heroAnatomy, segments.map((seg) => {
@@ -1499,7 +1497,6 @@ function renderHero(overview) {
         + `<span class="dash-anatomy-dot kind-${kind}" aria-hidden="true"></span>`
         + `<span class="dash-anatomy-label">${escapeHtml(t(seg.labelKey))}</span>`
         + `<strong>${escapeHtml(formatCompact(seg.tokens))}</strong>`
-        + `<span class="dash-anatomy-pct">(${escapeHtml(formatHeroPercent(seg.share))})</span>`
         + `</span>`;
     }).join(''));
   }
