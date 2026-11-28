@@ -1010,6 +1010,42 @@ test('dashboard tooltips stay anchored above pointer and survive live renderNow 
   // Above anchor: top (200) - gap (11) - tip height (50) = 139px; horizontal center: 306 - 60 = 246px.
   assert.equal(style.transform, 'translate3d(246px, 139px, 0)');
   assert.equal(dataset.visible, 'true');
+
+  const hit = {
+    getAttribute: () => '0',
+    getBoundingClientRect: () => ({ left: 300, top: 100, bottom: 500, width: 12 })
+  };
+  let move;
+  const chart = {
+    addEventListener(name, handler) { if (name === 'mousemove') move = handler; },
+    querySelector: () => hit
+  };
+  const bar = { label: '2026-11-15', total: 42 };
+  const candle = { key: bar.label, close: 42 };
+  const readings = [];
+  const show = (entry, anchor) => {
+    readings.push(entry.total ?? entry.close);
+    positionTooltip(anchor);
+  };
+  const hoverContext = {
+    ...context, els: { tooltip, chart }, activeHover: null,
+    state: { chartKind: 'bar', chartModel: { bars: [bar], candles: [candle] } },
+    showBarTooltip: show, showCandleTooltip: show, hideTooltip() {}
+  };
+  const chartListener = js.indexOf("els.chart.addEventListener('mousemove'");
+  vm.runInNewContext(js.slice(chartListener, js.indexOf('els.heatmap.addEventListener', chartListener)), hoverContext);
+  const refresh = dashboardFunction('refreshActiveHover', '\nlet localSessionActivity', hoverContext);
+  for (const [kind, entry, valueField] of [['bar', bar, 'total'], ['candle', candle, 'close']]) {
+    hoverContext.state.chartKind = kind;
+    move({ target: { closest: () => hit }, clientX: 306, clientY: 200 });
+    assert.equal(style.transform, 'translate3d(246px, 139px, 0)');
+    move({ target: { closest: () => hit }, clientX: 308, clientY: 350 });
+    assert.equal(style.transform, 'translate3d(248px, 289px, 0)');
+    entry[valueField]++;
+    refresh();
+    assert.equal(readings.at(-1), 43);
+    assert.equal(style.transform, 'translate3d(248px, 289px, 0)');
+  }
 });
 
 test('widget bottom-left viewSwitcherMenu offers Usage Dashboard launcher', () => {
