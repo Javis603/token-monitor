@@ -6027,14 +6027,23 @@ function refreshEdgeDockDerivedPeriods(visibleStats) {
         return retrySelection;
       }));
       const pending = selectionsToRead.filter((_, index) => retry[index]);
-      if (isCurrent() && retriesLeft && pending.length) {
+      if (!isCurrent() || !pending.length) return;
+      if (retriesLeft) {
         setTimeout(() => void loadPeriods(pending, retriesLeft - 1), 5000).unref();
+      } else {
+        const retryAt = Date.now() + 30_000;
+        request.resume = () => {
+          if (Date.now() < retryAt) return;
+          request.resume = null;
+          void loadPeriods(pending, 2);
+        };
       }
     }
 
     // Defer the first read so its repaint cannot re-enter the current projection.
     void Promise.resolve().then(() => loadPeriods(missing, 2));
   }
+  edgeDockPeriodRead.resume?.();
   return { ...edgeDockPeriodRead.periods, ...native };
 }
 

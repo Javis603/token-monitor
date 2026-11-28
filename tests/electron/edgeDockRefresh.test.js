@@ -338,6 +338,44 @@ test('an exact period repaints while another waits and a failed range retries at
   assert.equal(retries.length, 1);
 });
 
+test('a later repaint retries exhausted History reads at the same revision after cooldown', async () => {
+  const { context } = fixture();
+  context.settings.edgeDockItems = [{ type: 'stat', metric: 'yesterday' }];
+  const device = { deviceId: 'local', totalTokens: 42 };
+  context.latestStats = { historyRevision: 'same', devices: [device] };
+  let now = 0;
+  context.Date = class extends Date { static now() { return now; } };
+  context.clearTimeout = () => {};
+  const retries = [];
+  context.setTimeout = (callback, delay) => {
+    if (delay === 5000) retries.push(callback);
+    return { unref() {} };
+  };
+  let historyReads = 0;
+  context.getDashboardHistory = async () => {
+    if (++historyReads <= 3) return null;
+    return { fixedPeriods: { historyTransportAvailable: true } };
+  };
+  const flush = () => new Promise(setImmediate);
+  context.repaintDockSurfaces();
+  await flush();
+  retries.shift()();
+  await flush();
+  retries.shift()();
+  await flush();
+  assert.equal(historyReads, 3);
+  assert.equal(context.dockPeriods.yesterday, undefined);
+
+  context.repaintDockSurfaces();
+  await flush();
+  assert.equal(historyReads, 3);
+  now += 30_000;
+  context.repaintDockSurfaces();
+  await flush();
+  assert.equal(historyReads, 4);
+  assert.equal(context.dockPeriods.yesterday, device);
+});
+
 test('a delayed derived-period repaint retains the manually refreshed snapshot until a stats push replaces it', async () => {
   const { context, history } = fixture();
   const old = { historyRevision: '1', devices: [{ today: 'old' }] };
