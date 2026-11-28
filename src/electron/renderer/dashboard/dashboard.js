@@ -2366,7 +2366,8 @@ function layoutTopologyLinks(graph) {
   const rect = canvas.getBoundingClientRect?.();
   if (!rect || rect.width <= 0 || rect.height <= 0) return;
 
-  svg.setAttribute('viewBox', `0 0 ${Math.round(rect.width)} ${Math.round(rect.height)}`);
+  const viewBox = `0 0 ${Math.round(rect.width)} ${Math.round(rect.height)}`;
+  if (svg.getAttribute('viewBox') !== viewBox) svg.setAttribute('viewBox', viewBox);
 
   const colBounds = new Map();
   canvas.querySelectorAll('.dash-topo-col-scroll[data-topo-col]').forEach((scroller) => {
@@ -2411,12 +2412,6 @@ function layoutTopologyLinks(graph) {
     return { ...spec, d, color, swNum, sw, vis };
   }).filter(Boolean);
 
-  const applyEdgeVisibility = (g, vis) => {
-    if (!g) return;
-    g.classList.toggle('is-offscreen', vis <= 0.01);
-    g.style?.setProperty?.('--edge-vis', vis >= 0.99 ? '1' : vis.toFixed(3));
-  };
-
   const reduced = prefersReducedMotion();
   const stagger = graph.flowMode === 'stagger' || (!graph.flowMode && state.flowMode === 'stagger');
   const gradientHubs = new Set(graph.hubs
@@ -2450,16 +2445,18 @@ function layoutTopologyLinks(graph) {
     + `<filter id="dashTopoAmbientGlow" x="-40%" y="-40%" width="180%" height="180%"><feGaussianBlur stdDeviation="5"></feGaussianBlur></filter>`
     + `</defs>${edgesHtml}`);
 
-  if (!reduced && linksChanged) syncTopologyAnimationClock(canvas);
-
+  let resumedActiveEdge = false;
   const edgeSpecById = new Map(edgeSpecs.map((spec) => [spec.edge.id, spec]));
   svg.querySelectorAll('g.topo-edge[data-edge-id]').forEach((g) => {
     const spec = edgeSpecById.get(g.getAttribute('data-edge-id'));
-    if (spec) {
-      applyEdgeVisibility(g, spec.vis);
-      g.style?.setProperty?.('--topo-flow-phase', String(stagger ? Number(spec.edge.flowPhase || 0) : 0));
-    }
+    if (!spec) return;
+    const offscreen = spec.vis <= 0.01;
+    if (!offscreen && spec.edge.active && g.classList.contains('is-offscreen')) resumedActiveEdge = true;
+    g.classList.toggle('is-offscreen', offscreen);
+    g.style.setProperty('--edge-vis', spec.vis >= 0.99 ? '1' : spec.vis.toFixed(3));
+    g.style.setProperty('--topo-flow-phase', String(stagger ? Number(spec.edge.flowPhase || 0) : 0));
   });
+  if (!reduced && (linksChanged || resumedActiveEdge)) syncTopologyAnimationClock(canvas);
 
   if (activeHover?.kind === 'topo') {
     applyTopologyFocus(activeHover.nodeKind, activeHover.nodeId);
