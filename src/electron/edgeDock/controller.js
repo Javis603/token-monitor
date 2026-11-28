@@ -2,6 +2,7 @@
 
 const os = require('node:os');
 const path = require('node:path');
+const { themePaletteKey, themePalette } = require('../renderer/themePresets');
 const { CARD_MOVE_MS, CARD_SPRING, advanceCardFrame } = require('../cardSpring');
 const { createCardMotionDriver } = require('../cardMotion');
 const { cardCanvasBounds, createCardPointerRouting } = require('../cardCanvas');
@@ -557,11 +558,26 @@ function createEdgeDockController(deps) {
     return { ...layout, tops: toPage(layout.tops), heights: toPage(layout.heights), length: layout.length / scale };
   }
 
+  function updateGlassAppearance() {
+    const wanted = liquidGlass();
+    for (const surface of SURFACES) {
+      try {
+        glasses[surface]?.update({ dark: wanted?.dark !== false, style: wanted?.style, tintOpacity: wanted?.tintOpacity, visible: surface !== 'peek' || peekMode === 'refresh' });
+      } catch (error) {
+        logger(`[edge-dock] ${surface} Liquid Glass appearance failed: ${error.message}`);
+      }
+    }
+  }
+
   function renderPayload(surface) {
     const side = layout()?.side || placement().side;
     const shapedGlass = nativeMaterial[surface] === true && glasses[surface] !== null
       && (surface !== 'peek' || peekMode === 'refresh');
     const base = { surface, side, platform, osRelease: os.release(), appearance, glass: nativeMaterial[surface] === true, liquidGlass: shapedGlass, shape: shapes[surface], zoom: surface === 'bubble' ? bubbleScale() : dockScale() };
+    if (shapedGlass) {
+      const key = themePaletteKey(appearance, liquidGlass()?.dark === false ? 'light' : 'dark');
+      base.appearance = { ...appearance, themeColors: themePalette(appearance, key) };
+    }
     if (surface === 'rail') {
       return {
         ...base,
@@ -1642,6 +1658,7 @@ function createEdgeDockController(deps) {
         return;
       }
       start();
+      updateGlassAppearance();
       syncPageZoom();
       refreshFullScreen(Date.now(), true);
       syncAlwaysVisible();
@@ -1703,14 +1720,7 @@ function createEdgeDockController(deps) {
         }
       } else appearance = nextAppearance || {};
       if (!running) return;
-      const wanted = liquidGlass();
-      for (const surface of SURFACES) {
-        try {
-          glasses[surface]?.update({ dark: wanted?.dark !== false, style: wanted?.style, tintOpacity: wanted?.tintOpacity, visible: surface !== 'peek' || peekMode === 'refresh' });
-        } catch (error) {
-          logger(`[edge-dock] ${surface} Liquid Glass appearance failed: ${error.message}`);
-        }
-      }
+      updateGlassAppearance();
       for (const surface of SURFACES) render(surface);
     },
     isRunning: () => running,

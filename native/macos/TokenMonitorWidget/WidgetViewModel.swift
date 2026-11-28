@@ -26,9 +26,18 @@ enum WidgetDesignTokens {
     static let dashboardTrendHeight: CGFloat = 34
     static let dividerOpacity = 0.14
     static let accent = Color.accentColor
-    static let chartBlue = Color(red: 115 / 255, green: 189 / 255, blue: 245 / 255)
-    static let number = Color(red: 243 / 255, green: 251 / 255, blue: 247 / 255)
-    static let muted = Color(red: 163 / 255, green: 173 / 255, blue: 187 / 255)
+
+    static func background(for scheme: ColorScheme) -> Color {
+        scheme == .dark
+            ? Color(red: 11 / 255, green: 12 / 255, blue: 14 / 255)
+            : Color(red: 246 / 255, green: 247 / 255, blue: 249 / 255)
+    }
+
+    static func chartBlue(for scheme: ColorScheme) -> Color {
+        scheme == .dark
+            ? Color(red: 115 / 255, green: 189 / 255, blue: 245 / 255)
+            : Color(red: 37 / 255, green: 99 / 255, blue: 235 / 255)
+    }
 }
 
 enum WidgetTrendChange {

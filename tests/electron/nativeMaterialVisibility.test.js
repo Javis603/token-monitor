@@ -83,6 +83,29 @@ test('an unchanged material preference does not recreate its native container', 
   assert.equal(disposals, 1);
 });
 
+test('the renderer receives a color scheme only while native Liquid Glass is active', () => {
+  const win = fakeWindow();
+  const updates = [], messages = [];
+  const deps = { osRelease: '25.0', createGlass: () => ({ update: options => updates.push(options), dispose() {} }) };
+  win.webContents.send = (_channel, state) => messages.push(state);
+  for (const style of ['regular', 'clear']) {
+    const options = { enabled: true, liquidGlass: true, style, tintOpacity: 0.25 };
+    for (const dark of [false, true, false]) {
+      const count = messages.length;
+      syncNativeMaterialVisibility(win, { ...options, dark }, 'darwin', deps);
+      assert.equal(messages.length, count + 1);
+      assert.equal(messages.at(-1).colorScheme, dark ? 'dark' : 'light');
+      assert.equal(updates.at(-1).dark, dark);
+      assert.equal(updates.at(-1).style, style);
+      assert.equal(updates.at(-1).tintOpacity, 0.25);
+    }
+    for (const fallback of [{ reducedTransparency: true }, { opaque: true }, { liquidGlass: false }, { enabled: false }]) {
+      syncNativeMaterialVisibility(win, { ...options, ...fallback }, 'darwin', deps);
+      assert.equal(getNativeMaterialState(win).colorScheme, undefined);
+    }
+  }
+});
+
 test('Regular and Clear update in place while older macOS and reduced transparency keep their fallbacks', () => {
   const win = fakeWindow();
   win.setVisible(true);

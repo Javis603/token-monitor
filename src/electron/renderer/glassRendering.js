@@ -37,6 +37,7 @@
     const type = MATERIAL_TYPES.has(value?.type) ? value.type : 'transparent';
     return {
       type,
+      colorScheme: type === 'liquid-glass' ? value.colorScheme : undefined,
       reducedTransparency: value?.reducedTransparency === true,
       highContrast: value?.highContrast === true,
       fallbackReason: value?.fallbackReason == null ? null : String(value.fallbackReason),

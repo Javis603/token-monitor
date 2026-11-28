@@ -507,7 +507,8 @@ function applyAppearance(settings) {
   root.setProperty('--line-alpha', (0.1 + depth * 0.09).toFixed(3));
   applyReduceMotionPreference(settings?.reduceMotion);
   applyFontSettings(settings);
-  applyThemeColors(settings?.themeColors);
+  const paletteKey = themePresetsApi.themePaletteKey(settings, nativeMaterialState.colorScheme);
+  applyThemeColors(themePresetsApi.themePalette(settings, paletteKey));
   applyVendorColorOverrides(settings?.vendorColors);
   els.body.classList.toggle('flat', settings?.dashboardBackdrop === 'solid');
   els.body.classList.toggle('desktop-mode', settings?.dashboardWindowBehavior === 'desktop');

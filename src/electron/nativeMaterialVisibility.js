@@ -79,6 +79,7 @@ function syncNativeMaterialVisibility(win, options, platform = process.platform,
   // and keep that same container between opacity-only dismissals.
   setVibrancy(type === 'vibrancy' && (visible || Boolean(shape)) ? 'hud' : null);
   const state = { type, reducedTransparency, highContrast, fallbackReason: entry.failed, liquidGlassSupported: supported };
+  if (type === 'liquid-glass') state.colorScheme = dark ? 'dark' : 'light';
   if (JSON.stringify(entry.state) !== JSON.stringify(state)) {
     entry.state = state;
     if (!win.webContents.isDestroyed()) win.webContents.send('appearance:nativeMaterial', state);
