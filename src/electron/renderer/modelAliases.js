@@ -17,6 +17,11 @@
   function matchKey(model) {
     return text(model)
       .toLowerCase()
+      // A vendor that publishes `gpt5.6sol` and one that publishes `gpt-5.6-sol`
+      // mean the same id; without this boundary they never meet, because the
+      // separators alone cannot recover a boundary that was never written.
+      .replace(/([a-z])(\d)/g, '$1-$2')
+      .replace(/(\d)([a-z])/g, '$1-$2')
       .replace(/[._\s]+/g, '-')
       .replace(/-+/g, '-')
       .replace(/^-+|-+$/g, '');
@@ -77,14 +82,27 @@
   }
 
   function compareCanonicalCandidates(left, right, identity) {
+    const segments = (leaf) => leaf.split(/[-._\s]+/).filter(Boolean).length;
     const rank = (model) => {
       const leaf = modelLeaf(model);
       const leafKey = modelIdentityKey(model);
+      const parts = segments(leaf);
       return [
         leafKey === identity ? 0 : 1,
         model === leaf ? 0 : 1,
         leaf === leaf.toLowerCase() ? 0 : 1,
-        /[._\s]/.test(leaf) ? 1 : 0,
+        // The vendor writes the boundaries of its own id. `gpt-5.6-sol` and
+        // `gpt5.6sol` are one model, and the shorter string is the one that lost
+        // them, so the spelling that kept more separators is canonical. This
+        // outranks length, which otherwise preferred whichever happened to be
+        // shorter.
+        -parts,
+        // `deepseek-v4.1-flash` is the vendor's own spelling and
+        // `deepseek-v4-1-flash` is a separator-normalized copy of it, so the
+        // dotted form is the canonical one however rare it looks in this
+        // installation. Ranking the plain hyphenated form first renamed the
+        // vendor's spelling to the copy.
+        /[._\s]/.test(leaf) ? 0 : 1,
         leaf.length,
         leaf.toLowerCase(),
         leaf
