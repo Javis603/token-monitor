@@ -288,8 +288,7 @@ function clientSourceRoots(clientsCsv, options = {}) {
   add('opencode', ['opencode-data', path.join(xdgHome, 'opencode')]);
   add('openclaw', ['openclaw-agents', path.join(home, '.openclaw', 'agents')]);
   // The sync cache is config-derived; legacy local threads stay XDG-data
-  // derived. Token Monitor reads both and watches external `tokscale amp sync`
-  // writes; it does not create this cache during collection.
+  // derived. Token Monitor reads both, but only watches the legacy source.
   add('amp',
     ['amp-threads', path.join(xdgHome, 'amp', 'threads')],
     ['amp-threads', path.join(tokscaleConfigDir({ env, platform, homeDir: home }), 'amp-cache', 'threads'), null, true]);
@@ -337,8 +336,8 @@ function clientSourceRoots(clientsCsv, options = {}) {
   const copilotWorkspaceRoots = [
     path.join(home, 'Library', 'Application Support', 'Code', 'User', 'workspaceStorage'),
     path.join(home, '.config', 'Code', 'User', 'workspaceStorage'),
-    ...(process.platform === 'win32'
-      ? [path.join(process.env.APPDATA || path.join(home, 'AppData', 'Roaming'), 'Code', 'User', 'workspaceStorage')]
+    ...(platform === 'win32'
+      ? [path.join(env.APPDATA || path.join(home, 'AppData', 'Roaming'), 'Code', 'User', 'workspaceStorage')]
       : []),
     path.join(home, 'AppData', 'Roaming', 'Code', 'User', 'workspaceStorage')
   ];
@@ -375,7 +374,7 @@ function clientSourceRoots(clientsCsv, options = {}) {
     'zed',
     ['zed-threads', path.join(xdgHome, 'zed', 'threads')],
     ['zed-threads', path.join(home, 'Library', 'Application Support', 'Zed', 'threads')],
-    ['zed-threads', path.join(process.env.LOCALAPPDATA || path.join(home, 'AppData', 'Local'), 'Zed', 'threads')]
+    ['zed-threads', path.join(env.LOCALAPPDATA || path.join(home, 'AppData', 'Local'), 'Zed', 'threads')]
   );
   // Kilo joins the CLI's XDG database with every extension task root the
   // scanner reads. Native macOS/Windows roots are home-relative on all hosts;
@@ -431,9 +430,9 @@ function clientSourceRoots(clientsCsv, options = {}) {
   // absent, which is the usual case for the Windows-shaped one.
   const codebuddyExtLogRoots = [
     path.join(home, 'AppData', 'Local', 'CodeBuddyExtension', 'Logs'),
-    process.platform === 'win32'
-      ? path.join(process.env.LOCALAPPDATA || path.join(home, 'AppData', 'Local'), 'CodeBuddyExtension', 'Logs')
-      : process.platform === 'darwin'
+    platform === 'win32'
+      ? path.join(env.LOCALAPPDATA || path.join(home, 'AppData', 'Local'), 'CodeBuddyExtension', 'Logs')
+      : platform === 'darwin'
         ? path.join(home, 'Library', 'Application Support', 'CodeBuddyExtension', 'Logs')
         : path.join(xdgHome, 'CodeBuddyExtension', 'Logs')
   ];
@@ -485,7 +484,7 @@ function clientSourceRoots(clientsCsv, options = {}) {
   );
   add('reasonix', [
     REASONIX_SOURCE_CHECK_ID,
-    resolveReasonixStatsDir({ env: process.env, homeDir: home, platform: process.platform, cwdDir: process.cwd() })
+    resolveReasonixStatsDir({ env, homeDir: home, platform, cwdDir: options.cwdDir || process.cwd() })
   ]);
   // DeepSeek Harness (DSH) — zstd JSONL session transcripts at
   // `<dshHome>/sessions/` (default `~/.dsh`, overridable via `DSH_HOME`).
@@ -522,7 +521,7 @@ function clientSourceRoots(clientsCsv, options = {}) {
     ['kiro-ide-globalstorage', path.join(home, 'Library', 'Application Support', 'Kiro', 'User', 'globalStorage', 'kiro.kiroagent')],
     ['kiro-ide-globalstorage', path.join(home, '.config', 'Kiro', 'User', 'globalStorage', 'kiro.kiroagent')],
     ['kiro-ide-globalstorage', path.join(home, '.config', 'kiro', 'User', 'globalStorage', 'kiro.kiroagent')],
-    ['kiro-ide-globalstorage', path.join(process.env.APPDATA || path.join(home, 'AppData', 'Roaming'), 'Kiro', 'User', 'globalStorage', 'kiro.kiroagent')],
+    ['kiro-ide-globalstorage', path.join(env.APPDATA || path.join(home, 'AppData', 'Roaming'), 'Kiro', 'User', 'globalStorage', 'kiro.kiroagent')],
     ['kiro-cli-data', path.join(home, '.local', 'share', 'kiro-cli')],
     ['kiro-cli-data', path.join(home, 'Library', 'Application Support', 'kiro-cli')]
   );
@@ -530,7 +529,7 @@ function clientSourceRoots(clientsCsv, options = {}) {
     'cline',
     ['cline-tasks', path.join(home, '.config', 'Code', 'User', 'globalStorage', 'saoudrizwan.claude-dev', 'tasks')],
     ['cline-tasks', path.join(home, 'Library', 'Application Support', 'Code', 'User', 'globalStorage', 'saoudrizwan.claude-dev', 'tasks')],
-    ['cline-tasks', path.join(process.env.APPDATA || path.join(home, 'AppData', 'Roaming'), 'Code', 'User', 'globalStorage', 'saoudrizwan.claude-dev', 'tasks')],
+    ['cline-tasks', path.join(env.APPDATA || path.join(home, 'AppData', 'Roaming'), 'Code', 'User', 'globalStorage', 'saoudrizwan.claude-dev', 'tasks')],
     ['cline-tasks', path.join(home, '.vscode-server', 'data', 'User', 'globalStorage', 'saoudrizwan.claude-dev', 'tasks')],
     ['cline-cli-sessions', clineCliSessionRoot(home)]
   );

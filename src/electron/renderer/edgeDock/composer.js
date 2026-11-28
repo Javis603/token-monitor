@@ -295,18 +295,30 @@
 
     function windowChoices(item) {
       const hidden = new Set(item.hiddenAccounts || []);
+      const groups = new Map();
       const choices = new Map();
       for (const record of getStats()?.limits?.providers || []) {
         if (String(record?.provider || '').toLowerCase() !== item.provider
           || (record.accountKey && (hidden.has(selectionKey(record)) || hidden.has(record.accountKey)))) continue;
         for (const window of itemsApi.selectableLimitWindows(record, getSettings())) {
+          const hiddenWindow = isWindowHidden(item.provider, window);
+          if (!limitsOnly && item.provider === 'antigravity') {
+            const groupKey = itemsApi.antigravityGroupKey(window);
+            if (groupKey && (!hiddenWindow || groupKey === item.windowKey) && !groups.has(groupKey)) {
+              groups.set(groupKey, {
+                value: groupKey,
+                keys: [groupKey],
+                label: t('settings.edgeDock.window.group', { group: itemsApi.antigravityGroupLabel(groupKey) })
+              });
+            }
+          }
           const key = itemsApi.limitWindowKey(window);
           if (!key || choices.has(key)) continue;
           // A row hidden from the provider's card is not offered as a new pin;
           // a pin made before it was hidden keeps its name rather than turning
           // into "unavailable".
           const keys = itemsApi.limitWindowKeys(window);
-          if (isWindowHidden(item.provider, window) && !keys.includes(item.windowKey)) continue;
+          if (hiddenWindow && !keys.includes(item.windowKey)) continue;
           choices.set(key, {
             value: key,
             keys,
@@ -314,7 +326,7 @@
           });
         }
       }
-      return [...choices.values()];
+      return [...groups.values(), ...choices.values()];
     }
 
     function refreshWindowPicker(select, item) {
@@ -322,7 +334,11 @@
       const matchingChoices = item.windowKey ? choices.filter((choice) => choice.keys?.includes(item.windowKey)) : [];
       const selectedValue = matchingChoices.length === 1 ? matchingChoices[0].value : item.windowKey || '';
       if (item.windowKey && matchingChoices.length !== 1) {
-        choices.push({ value: item.windowKey, label: t('settings.edgeDock.window.unavailable') });
+        const group = itemsApi.antigravityGroupLabel(item.windowKey);
+        choices.push({
+          value: item.windowKey,
+          label: group ? t('settings.edgeDock.window.groupUnavailable', { group }) : t('settings.edgeDock.window.unavailable')
+        });
       }
       const options = choices.map((choice) => {
         const option = document.createElement('option');
@@ -336,7 +352,8 @@
 
     function windowRow(item, id) {
       const row = el('label', 'settings-item edge-dock-composer-window');
-      row.append(el('span', 'settings-item-title', t('settings.edgeDock.window')));
+      row.append(el('span', 'settings-item-title', t(item.provider === 'antigravity'
+        ? 'settings.edgeDock.limitValue' : 'settings.edgeDock.window')));
       const select = document.createElement('select');
       refreshWindowPicker(select, item);
       select.addEventListener('change', () => { void updateItem(id, { windowKey: select.value }); });

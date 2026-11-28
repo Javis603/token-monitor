@@ -287,6 +287,55 @@ test('the add menu offers all enabled providers in one limits section', () => {
   assert.match(composer, /addableLimitProviders\(\s*enabledLimitProviders\?\.\(\) \|\| connectedProviders\(\),/);
 });
 
+test('Antigravity offers each group once alongside its individual quota windows', () => {
+  const previousDocument = global.document;
+  global.document = { createElement: (tag) => new Element(tag), activeElement: null };
+  try {
+    const root = new Element('div');
+    const settings = { edgeDockItems: [{ type: 'limit', provider: 'antigravity', hiddenAccounts: ['hidden'] }] };
+    const gemini = { kind: 'session', label: 'Gemini 5-hour', remainingPercent: 85 };
+    const weekly = { kind: 'weekly', label: 'Gemini weekly', remainingPercent: 55 };
+    const claude = { kind: 'session', label: 'Claude/GPT 5-hour', remainingPercent: 0 };
+    const argon = { kind: 'session', label: 'Gemini 4 Argon 5-hour', remainingPercent: 50 };
+    const rows = [
+      { provider: 'antigravity', accountKey: 'first', windows: [gemini, weekly, claude] },
+      { provider: 'antigravity', accountKey: 'second', windows: [gemini] },
+      { provider: 'antigravity', accountKey: 'hidden', windows: [argon] }
+    ];
+    const composer = createEdgeDockComposer({
+      root, itemsApi, presentationApi: {},
+      t: (key, params) => translate('en', key, params),
+      getSettings: () => settings,
+      getStats: () => ({ limits: { providers: rows } }),
+      save: (patch) => Object.assign(settings, patch),
+      providerLabel: (id) => id, providerColor: () => '#fff', hasProviderMark: () => false,
+      windowLabel: (_record, window) => window.label,
+      maskEmail: (email) => email,
+      createRowDrag: () => ({ deferRender: () => false })
+    });
+    const findSelect = (node) => node.tagName === 'SELECT' ? node : node.children.map(findSelect).find(Boolean);
+    composer.render();
+    const select = findSelect(root);
+    assert.deepEqual(select.children.map((option) => option.textContent),
+      ['Automatic', 'Gemini (group)', 'Claude/GPT (group)', 'Gemini 5-hour', 'Gemini weekly', 'Claude/GPT 5-hour']);
+    select.value = select.children[1].value;
+    select.listeners.change();
+    assert.equal(settings.edgeDockItems[0].windowKey, JSON.stringify(['group', 'Gemini']));
+
+    rows[0].windows = [claude];
+    rows[1].windows = [];
+    composer.render();
+    const updatedSelect = findSelect(root);
+    assert.equal(updatedSelect.value, select.value);
+    assert.equal(updatedSelect.children.at(-1).textContent, 'Gemini (group unavailable)');
+    updatedSelect.value = '';
+    updatedSelect.listeners.change();
+    assert.equal(settings.edgeDockItems[0].windowKey, '');
+  } finally {
+    global.document = previousDocument;
+  }
+});
+
 test('the composer is handed the enabled providers in the user\'s limits order', () => {
   const app = fs.readFileSync(path.join(rendererDir, 'app.js'), 'utf8');
   assert.match(app, /enabledLimitProviders: \(\) => limitProviderOrderApi/);

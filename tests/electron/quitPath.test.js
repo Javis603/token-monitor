@@ -61,10 +61,12 @@ test('before-quit hands over without taking the quit away from the OS', () => {
 });
 
 
-test('tray and signal quit flush plugin and quota history state before immediate exit', () => {
+test('tray and signal quit flush Dashboard bounds, plugins and quota history before immediate exit', () => {
   const vm = require('node:vm');
   const events = [];
   const context = { console, quitRequested: false, quitInProgress: false,
+    dashboardWindow: {},
+    persistDashboardWindowBounds(win) { assert.equal(win, context.dashboardWindow); events.push('bounds'); },
     pluginRuntime: { dispose() { events.push('flush'); } },
     cancelMainWindowHibernate() {}, stopPersistBoundsTimer() {}, stopLocalCollector() {}, stopStatsStream() {}, stopHostStats() {},
     stopSyncCollector() {}, stopIcloudRuntime() {}, terminateUsageHostSubprocesses() {},
@@ -75,7 +77,7 @@ test('tray and signal quit flush plugin and quota history state before immediate
   vm.runInNewContext(main.slice(main.indexOf('function stopAll()'), main.indexOf('\nlet quitRequested')) + '\n'
     + main.slice(main.indexOf('function performQuit()'), main.indexOf('// Write the export file set')), context);
   context.requestAppQuit();
-  assert.deepEqual(events, ['flush', 'quota-close', 'exit']);
+  assert.deepEqual(events, ['flush', 'bounds', 'quota-close', 'exit']);
 });
 
 test('a failing plugin teardown cannot skip the host shutdown that follows it', () => {

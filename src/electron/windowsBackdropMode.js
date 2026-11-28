@@ -16,6 +16,10 @@
       : WINDOWS_BACKDROP_ACRYLIC;
   }
 
+  function supportsWindowsMica(osRelease = '') {
+    return Number(osRelease.split('.')[2]) >= 22621;
+  }
+
   // Concave dock curves use a clipped HostBackdrop, independent of the main
   // window's material choice. Existing installs follow System Glass.
   function normalizeWindowsDockBackdropMode(value) {
@@ -28,6 +32,7 @@
     WINDOWS_BACKDROP_MICA,
     WINDOWS_BACKDROP_MICA_ALT,
     normalizeWindowsBackdropMode,
+    supportsWindowsMica,
     normalizeWindowsDockBackdropMode
   };
 });

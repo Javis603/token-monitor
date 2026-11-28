@@ -197,7 +197,7 @@ test('project model maps safely retain reserved keys without prototype pollution
   assert.equal({}.polluted, undefined);
 });
 
-test('projectRowsForPeriod recovers trusted native attribution from local sessions when the native rollup is absent', () => {
+test('projectRowsForPeriod does not create Reasonix project rows from nativeSessions', () => {
   const rows = projectRowsForPeriod({
     projects: {
       'token monitor': { label: 'Token Monitor', tokens: 300, costUsd: 2.5, clients: { codex: 300 } }
@@ -210,8 +210,7 @@ test('projectRowsForPeriod recovers trusted native attribution from local sessio
         client: 'reasonix',
         projectId: 'sha256:token-monitor',
         projectLabel: 'Token Monitor',
-        totalTokens: 140,
-        periodTokenDataUnavailable: false
+        totalTokens: 140
       }
     },
     clientLabels: { codex: 'Codex', reasonix: 'Reasonix' },
@@ -219,11 +218,10 @@ test('projectRowsForPeriod recovers trusted native attribution from local sessio
   });
 
   assert.equal(rows.length, 1);
-  assert.equal(rows[0].value, 440);
+  assert.equal(rows[0].value, 300);
   assert.equal(rows[0].cost, 2.5);
   assert.deepEqual(rows[0].accordionRows.map(({ key, value }) => ({ key, value })), [
-    { key: 'codex', value: 300 },
-    { key: 'reasonix', value: 140 }
+    { key: 'codex', value: 300 }
   ]);
 });
 
@@ -258,6 +256,33 @@ test('projectRowsForPeriod safely aggregates client ids inherited by Object.prot
     a: { client: 'constructor', projectId: 'sha256:a', projectLabel: 'client-a', totalTokens: 10, costUsd: 1 }
   } }, { clientColors: { constructor: '#123456' } });
   assert.equal(rows[0].accordionRows[0].value, 10);
+});
+
+test('projectRowsForPeriod labels unknown inherited client ids that tie with a known client', () => {
+  const rows = projectRowsForPeriod({ sessions: {
+    a: { client: 'codex', projectLabel: 'repo', totalTokens: 10 },
+    b: { client: 'constructor', projectLabel: 'repo', totalTokens: 10 }
+  } }, { clientLabels: { codex: 'Codex' } });
+  assert.deepEqual(rows[0].accordionRows.map(row => row.name), ['Codex', 'constructor']);
+});
+
+test('projectRowsForPeriod folds client aliases into one share when asked', () => {
+  const clientKey = client => (client === 'antigravity-cli' ? 'antigravity' : client);
+  const colors = { antigravity: '#4285f4', claude: '#d97757' };
+  const fromSessions = projectRowsForPeriod({ sessions: {
+    a: { client: 'claude', projectLabel: 'repo', totalTokens: 30 },
+    b: { client: 'antigravity', projectLabel: 'repo', totalTokens: 20 },
+    c: { client: 'antigravity-cli', projectLabel: 'repo', totalTokens: 10 }
+  } }, { clientKey, clientColors: colors });
+  const fromRollup = projectRowsForPeriod({ projects: {
+    repo: { label: 'repo', tokens: 60, clients: { claude: 30, antigravity: 20, 'antigravity-cli': 10 } }
+  } }, { clientKey, clientColors: colors });
+  for (const [row] of [fromSessions, fromRollup]) {
+    assert.deepEqual(row.clients, ['antigravity', 'claude']);
+    assert.deepEqual(row.accordionRows.map(share => [share.key, share.value, share.color]), [
+      ['antigravity', 30, '#4285f4'], ['claude', 30, '#d97757']
+    ]);
+  }
 });
 
 test('projectRowsForPeriod labels unattributed tool usage', () => {

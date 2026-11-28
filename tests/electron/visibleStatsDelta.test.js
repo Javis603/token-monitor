@@ -49,6 +49,7 @@ function recoveryFixture() {
     hubModeGeneration: 1,
     currentHubStatsIdentity: () => 'client|test-hub',
     mainWindow: { isDestroyed: () => false, webContents: sender },
+    dashboardStatsPushWanted: () => false,
     mode: 'sync',
     rendererSnapshots: snapshots,
     rendererStats: value => value,
@@ -58,7 +59,8 @@ function recoveryFixture() {
     fetchStats: () => assert.fail('recovery must not read the offline Hub')
   };
   vm.runInNewContext(
-    excerpt(main, 'function sendStatsPresentationToRenderer(', 'function refreshLimitStatsPresentation(')
+    excerpt(main, 'function latestStatsMatchCurrentSource(', '// Two options')
+      + excerpt(main, 'function sendStatsPresentationToRenderer(', 'function refreshLimitStatsPresentation(')
       + excerpt(main, "ipcMain.handle('stats:get',", "ipcMain.handle('devices:delete',"),
     mainScope
   );
@@ -218,4 +220,18 @@ test('a missed alias presentation does not match the next delta base', () => {
   const { delta } = buildStatsDelta(fingerprintStats(missed), next);
   assert.equal(applyStatsDelta(old, delta), null);
   assert.equal(applyStatsDelta(missed, delta).periods.today.sessions['claude:s1'].model, 'alias');
+});
+
+
+test('a presentation refresh cannot stamp unpublished previous-Hub stats with a new source', () => {
+  const f = recoveryFixture();
+  f.mainScope.latestStats = { periods: { today: { totalTokens: 4 } } };
+  f.mainScope.hubModeGeneration++;
+  assert.equal(f.mainScope.sendStatsPresentationToRenderer({ force: true }), false);
+  assert.equal(f.sent.length, 0);
+  f.mainScope.latestStatsSource = {
+    generation: f.mainScope.hubModeGeneration, identity: f.mainScope.currentHubStatsIdentity()
+  };
+  assert.equal(f.mainScope.sendStatsPresentationToRenderer({ force: true }), true);
+  assert.equal(f.sent[0].data.stats.snapshot.source, f.mainScope.hubModeGeneration);
 });

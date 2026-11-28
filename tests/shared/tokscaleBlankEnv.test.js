@@ -17,7 +17,6 @@ const {
   tokscaleEnvWithBlanksDropped
 } = require('../../src/shared/collector');
 const { installSourceEnvGuard } = require('../helpers/sourceEnv');
-const { tokscaleConfigDir } = require('../../src/shared/tokscaleConfig');
 
 // These are exactly the keys the helper is allowed to touch. XDG_CACHE_HOME is
 // absent on purpose: it goes through the `dirs` crate, which already follows the
@@ -69,7 +68,7 @@ test('the XDG fallback follows an absolute native HOME on Windows, like the scan
   const expected = path.join(portable, '.local', 'share', 'amp', 'threads');
 
   assert.equal(clientSourceRoots('amp', options).amp[0].dir, expected);
-  assert.deepEqual(clientWatchCandidates('amp', options).amp, [expected, path.join(tokscaleConfigDir(options), 'amp-cache', 'threads')], 'the watcher must observe the scanned tree');
+  assert.deepEqual(clientWatchCandidates('amp', options).amp, [expected], 'the watcher must observe legacy threads');
 
   // The other PathRoot::XdgData clients hang off the same fallback, so they move
   // together rather than only Amp being corrected.
@@ -174,7 +173,7 @@ test('a blank XDG_DATA_HOME resolves a usable root for Token Monitor', () => {
     const options = { homeDir: home, platform: 'linux', env: { XDG_DATA_HOME: blank } };
     const roots = clientSourceRoots('amp', options).amp.filter(({ optional }) => !optional);
     assert.deepEqual(roots, [{ id: 'amp-threads', dir: expected }]);
-    assert.deepEqual(clientWatchCandidates('amp', options).amp, [expected, path.join(home, '.config', 'tokscale', 'amp-cache', 'threads')]);
+    assert.deepEqual(clientWatchCandidates('amp', options).amp, [expected]);
   }
 });
 
@@ -199,7 +198,7 @@ test('an injected env wins over process.env for the XDG data root', () => {
   );
   assert.deepEqual(
     clientWatchCandidates('amp', options).amp,
-    [path.join('/tmp/injected-xdg', 'amp', 'threads'), path.join(tokscaleConfigDir(options), 'amp-cache', 'threads')]
+    [path.join('/tmp/injected-xdg', 'amp', 'threads')]
   );
 
   // The other PathRoot::XdgData clients read the same injected value rather than

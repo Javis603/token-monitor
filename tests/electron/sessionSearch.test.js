@@ -338,7 +338,7 @@ test('search renders reuse matching rows without layout motion or rebuilding too
   const start = app.indexOf('function renderRows(');
   const end = app.indexOf('\n}', start) + 2;
   const policy = require('../../src/electron/renderer/breakdownRenderPolicy');
-  const state = { breakdown: 'session', sessionSearchQuery: '', sessionToolFilter: '', sessionPage: 0 };
+  const state = { breakdown: 'session', period: 'today', sessionSearchQuery: '', sessionToolFilter: '', sessionPage: 0 };
   const calls = { capture: 0, animate: 0, tools: 0, replace: 0, update: 0 };
   const breakdown = {
     children: [],
@@ -348,9 +348,17 @@ test('search renders reuse matching rows without layout motion or rebuilding too
   const noop = () => {};
   const batch = { active: false, calls: 0 };
   const statuses = [];
+  const reasonixSessionList = { failed: false };
   const dependencies = {
     rendererDom,
     state, els: { breakdown }, ...policy,
+    reasonixSessionList,
+    fixedPeriodRangesApi: { isDerived: period => period === 'last7days' },
+    document: { createElement() {
+      const node = { setAttribute() {} };
+      node.classList = { contains: name => node.className === name };
+      return node;
+    } },
     sessionSearchQuery: () => state.sessionSearchQuery,
     sessionRowsApi: { filterSessionRows },
     sessionToolClients: row => [row.client, ...(row.groupRows || []).map(member => member.client)],
@@ -359,6 +367,7 @@ test('search renders reuse matching rows without layout motion or rebuilding too
     setSessionSearchStatus: (query, count) => statuses.push({ query, count }),
     currentCurrency: () => 'USD',
     currentLocale: () => 'en',
+    detailTokenDisplaySignature: () => '0:0:western:en',
     t: key => key,
     rowRenderFingerprints: new WeakMap(),
     captureBreakdownMotion: () => { calls.capture++; return new Map(); },
@@ -435,4 +444,24 @@ test('search renders reuse matching rows without layout motion or rebuilding too
   assert.equal(calls.tools, 2);
   assert.equal(calls.capture, 1);
   assert.equal(calls.animate, 1);
+
+  reasonixSessionList.failed = true;
+  renderRows(data, { incompleteHint: 'sessions.incomplete', fromSearch: true });
+  assert.equal(breakdown.children[0].textContent, 'sessions.incomplete sessions.reasonixReadFailed');
+  assert.equal(breakdown.children.length, 4, 'other sessions remain visible');
+
+  state.sessionSearchQuery = 'not found';
+  renderRows(data, { fromSearch: true });
+  assert.equal(breakdown.children[0].textContent, 'sessions.reasonixReadFailed');
+  assert.equal(breakdown.children[1].query, 'not found');
+
+  state.period = 'last7days';
+  renderRows(data, { fromSearch: true });
+  assert.equal(breakdown.children[0].query, 'not found', 'derived periods do not read local Reasonix sessions');
+
+  state.period = 'today';
+  state.sessionSearchQuery = '';
+  reasonixSessionList.failed = false;
+  renderRows([], { fromSearch: true });
+  assert.equal(breakdown.children.length, 0, 'a successful empty result does not display a failure');
 });

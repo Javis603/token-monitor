@@ -52,7 +52,7 @@ test('the rolling-year heatmap ends on the local day by default', () => {
 
 test('activity views derive today from the local day key, not toISOString (#177)', () => {
   const rendererDir = path.join(__dirname, '../../src/electron/renderer');
-  for (const file of ['app.js', 'dashboard.js', 'usageCharts.js']) {
+  for (const file of ['app.js', 'dashboard/dashboard.js', 'usageCharts.js']) {
     const source = fs.readFileSync(path.join(rendererDir, file), 'utf8');
     // Key arithmetic on an already-correct key stays UTC-anchored (addDaysUTC,
     // month-start math); what must never come back is reading the wall clock in UTC.

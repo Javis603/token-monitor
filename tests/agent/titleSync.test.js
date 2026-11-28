@@ -300,19 +300,28 @@ test('real process exit after remote admission leaves durable cleanup recovered 
     const input = JSON.parse(process.argv[3]);
     const transport = async (url, options) => {
       const response = await fetch(url, options);
-      if (options.body && JSON.parse(options.body).enabled && response.ok) process.exit(0);
+      if (options.body && JSON.parse(options.body).enabled && response.ok) {
+        // Stop before negotiate sees the admission, then let the process end
+        // on its own. process.exit() here can land while a file write is still
+        // on the thread pool, which trips a libuv assertion on Windows
+        // (src/win/async.c) and ends the process with 0xC0000409.
+        process.exitCode = 0;
+        return new Promise(() => {});
+      }
       return response;
     };
     createAgentTitleSync({ dataDir: process.argv[2], fetchFn: transport }).negotiate(input).then(() => process.exit(2));
   `;
   const child = spawn(process.execPath, ['-e', script, path.resolve(__dirname, '../../src/agent/titleSync.js'), directory, JSON.stringify(binding)], { stdio: ['ignore', 'pipe', 'pipe'] });
   t.after(() => { if (child.exitCode === null) child.kill(); });
+  let stderr = '';
+  child.stderr.on('data', chunk => { stderr += chunk; });
   const exitCode = await new Promise((resolve, reject) => {
     const timeout = setTimeout(() => { child.kill(); reject(new Error('fixture process timeout')); }, 10000);
     child.once('error', error => { clearTimeout(timeout); reject(error); });
     child.once('exit', code => { clearTimeout(timeout); resolve(code); });
   });
-  assert.equal(exitCode, 0);
+  assert.equal(exitCode, 0, stderr);
   const store = new CredentialStore(directory, { filePath: path.join(directory, 'agent-sync-credentials.json') });
   assert.equal(store.readDocument().credentials.hub.titleSync.pending.length, 1);
   const policy = () => JSON.parse(fs.readFileSync(path.join(directory, 'hub.json'))).syncTitlePolicies['fixture-agent'];

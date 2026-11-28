@@ -471,6 +471,30 @@
     return currentKey ? { currentKey, snapshotKey: key } : null;
   }
 
+  const dayBoundaries = new Map();
+
+  function nextDeviceDayBoundary(source, now = Date.now()) {
+    const endsAt = Date.parse(source?.periodWindows?.today?.endsAt || '');
+    if (endsAt > now) return endsAt;
+    const timeZone = source?.periodWindows?.timeZone;
+    if (!timeZone) return 0;
+    const cached = dayBoundaries.get(timeZone);
+    if (cached && cached.from <= now && now < cached.until) return cached.until;
+    const today = dayKeyInTimeZone(now, timeZone);
+    if (!today) return 0;
+
+    // Find the date transition in this zone, including 23- and 25-hour days.
+    let low = now;
+    let high = now + 36 * 60 * 60 * 1000;
+    while (high - low > 1) {
+      const midpoint = Math.floor((low + high) / 2);
+      if (dayKeyInTimeZone(midpoint, timeZone) === today) low = midpoint;
+      else high = midpoint;
+    }
+    dayBoundaries.set(timeZone, { from: now, until: high });
+    return high;
+  }
+
   // A Billing cycle snapshot also belongs to the start day it was computed
   // for, so a changed start day never reuses the previous cycle's totals.
   function readySnapshotForSelection(snapshot, selection, options = {}) {
@@ -793,6 +817,7 @@
     derivePeriod,
     deviceInventorySignature,
     deviceDayState,
+    nextDeviceDayBoundary,
     devicesForReadySnapshot,
     displayLabel,
     fixedPeriodDeviceSnapshots,

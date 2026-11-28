@@ -150,6 +150,8 @@ Standalone OAuth can still produce legacy model pools when grouped quota is unav
 
 The Limits page and Edge Dock show Gemini, Claude/GPT, and Gemini 4 Argon in their existing order, followed by new groups in service order. New groups use the service's display name and show whichever five-hour or weekly buckets the summary supplies. Names that need shortening or sanitization use a stable suffix so RPC and OAuth agree on the group within the Hub label limit. Other periods are skipped. A weekly-only Argon allowance spans the full row.
 
+In Edge Dock settings, the Antigravity quota picker can follow a whole model group or a specific window. A group pin uses the five-hour reading when available, falls back to the weekly reading, and shows zero when either window is exhausted. The rail compares the selected group's readings across visible accounts. If the group temporarily has no usable reading, the selection is kept and the rail shows a placeholder.
+
 ### Identity and aggregation
 
 Managed OAuth accounts use a normalized Google email to derive their stable `accountKey`. An identified local RPC row uses the same derivation, allowing RPC/OAuth deduplication and cross-device collapse for the same account.

@@ -100,12 +100,12 @@ test('the components that animate out keep their box', () => {
 // The dashboard window links styles.css before its own sheet, so it is covered
 // by both rules above and must not grow a second copy of either.
 test('the dashboard window inherits the base rules rather than repeating them', () => {
-  const html = readRendererFile('dashboard.html');
+  const html = readRendererFile('dashboard/dashboard.html');
   assert.ok(
-    html.indexOf('href="styles.css"') < html.indexOf('href="dashboard.css"'),
+    html.indexOf('href="../styles.css"') < html.indexOf('href="dashboard.css"'),
     'dashboard.css should load after styles.css'
   );
-  const css = readRendererFile('dashboard.css');
+  const css = readRendererFile('dashboard/dashboard.css');
   assert.deepEqual(rules(css).filter((r) => r.selector.includes('.hidden')).map((r) => r.selector), []);
   assert.doesNotMatch(css, /\nbody \{[^}]*font-size/);
 });
@@ -170,4 +170,15 @@ test('short-window labels and cost scale while the primary total stays fixed', (
   }
   const headingRules = rules(css).filter((r) => r.selector.includes('.settings-section-toggle'));
   assert.ok(headingRules.every((r) => !r.body.includes('minmax(max-content')));
+});
+
+// In a narrow window a long summary used to claim its full width first and
+// squeeze section titles such as "Collection" down to nothing.
+test('settings section titles keep their width before summaries', () => {
+  const css = readRendererFile('styles.css');
+  const toggle = rules(css).find((r) => r.selector === '.settings-section-toggle');
+  assert.match(toggle?.body || '', /grid-template-columns: minmax\(0, max-content\) minmax\(12px, 1fr\);/);
+  const summary = rules(css).find((r) => r.selector.split(', ').includes('.settings-section-summary'));
+  assert.match(summary?.body || '', /min-width: 0;/);
+  assert.match(summary?.body || '', /text-overflow: ellipsis;/);
 });
