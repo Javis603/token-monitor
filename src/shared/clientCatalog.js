@@ -45,6 +45,10 @@
   // any other id, but it is absent from tokscale's --help client list and does
   // not honour TOKSCALE_EXTRA_DIRS. This is an axis of its own, not a
   // collection "mode": self-synced clients are tracked in selfSyncThrottle.js.
+  //
+  // `locallyParsed: true` means Token Monitor parses the client in-process
+  // (providers/<id>/usage.js) and no tokscale build accepts its id, so the
+  // collector keeps it out of every --client list (tokscaleClientFilter).
   const CLIENT_CATALOG = Object.freeze([
     { id: 'claude', label: 'Claude Code' },
     { id: 'codex', label: 'Codex' },
@@ -61,6 +65,7 @@
     { id: 'qwen', label: 'Qwen' },
     { id: 'grok', label: 'Grok Build' },
     { id: 'copilot', label: 'GitHub Copilot' },
+    { id: 'gcmp', label: 'AI Chat Models', defaultTracked: false, locallyParsed: true },
     { id: 'pi', label: 'Pi' },
     // Oh My Pi was folded into the `pi` row until the two products were split
     // apart (see clientIdentitySplits.js). Tokscale has always parsed its
@@ -100,6 +105,7 @@
   ].map((client) => Object.freeze({
     defaultTracked: true,
     forkOnly: false,
+    locallyParsed: false,
     ...client
   })));
 
@@ -118,6 +124,9 @@
   const FORK_ONLY_CLIENT_IDS = Object.freeze(
     CLIENT_CATALOG.filter((client) => client.forkOnly).map((client) => client.id)
   );
+  const LOCALLY_PARSED_CLIENT_IDS = Object.freeze(
+    CLIENT_CATALOG.filter((client) => client.locallyParsed).map((client) => client.id)
+  );
 
   // Renderer-facing projections. CLIENT_LABELS carries the non-catalog ids too
   // because it is a lookup, while KNOWN_CLIENT_LIST is a display list.
@@ -132,6 +141,7 @@
   return {
     CLIENT_CATALOG,
     NON_CATALOG_CLIENT_LABELS,
+    LOCALLY_PARSED_CLIENT_IDS,
     CLIENT_IDS,
     DEFAULT_CLIENT_IDS,
     FORK_ONLY_CLIENT_IDS,
