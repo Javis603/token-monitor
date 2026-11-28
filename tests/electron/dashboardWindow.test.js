@@ -463,6 +463,7 @@ test('dashboard.js fetches history over IPC and renders both tabs', () => {
   assert.match(html, /<script src="\.\.\/accountIdentity\.js"><\/script>/);
   assert.match(html, /<script src="dashboardModel\.js"><\/script>/);
   assert.match(html, /<script src="activitySkyline3d\.js"><\/script>/);
+  assert.match(html, /<script src="activitySkyline3d\.js"><\/script>\s*<script src="topologyBeams\.js"><\/script>\s*<script src="dashboard\.js">/);
   assert.match(js, /TokenMonitorContentBlur/);
   const skylineJs = read('src', 'electron', 'renderer', 'dashboard', 'activitySkyline3d.js');
   assert.match(html, /id="dashDeviceMenu"[^>]*popover="manual"/);
@@ -497,20 +498,19 @@ test('dashboard.js fetches history over IPC and renders both tabs', () => {
   assert.match(js, /--edge-vis/);
   assert.match(js, /is-offscreen/);
   assert.doesNotMatch(js, /topologyExpanded|topo-more-btn|topo-collapse-btn/);
-  assert.match(js, /topo-beam-tail/);
-  assert.match(js, /topo-beam-body/);
-  assert.match(js, /topo-beam-head/);
-  assert.match(js, /topo-edge--hop/);
+  assert.match(js, /class="dash-topo-beams" data-dom-island/);
+  assert.match(js, /createTopologyBeamRenderer/);
+  assert.doesNotMatch(js, /topo-beam-(?:tail|body|head)|feGaussianBlur|topo-edge--hop/);
   assert.match(js, /topo-node--device/);
   assert.match(js, /topo-node--hub/);
   assert.match(js, /topo-node--endpoint/);
-  assert.match(js, /pathLength="100"/);
   assert.doesNotMatch(js, /topo-packet-core/);
   assert.doesNotMatch(js, /<animateMotion/);
   assert.match(css, /\.dash-topo-col-scroll\b/);
   assert.match(css, /\.has-bottom-fade/);
   assert.match(css, /\.topo-edge\.is-offscreen/);
-  assert.match(css, /\.topo-beam-head/);
+  assert.match(css, /\.dash-topo-beams/);
+  assert.doesNotMatch(css, /topo-edge-aura|topoBeamTravel/);
   assert.match(css, /mask-composite:\s*exclude/);
   assert.match(css, /topoBorderPass/);
   assert.match(css, /topoSheenPass/);
@@ -5050,4 +5050,97 @@ test('returning to Live Flow requests clock sync even when its topology is retai
   context.lastRenderedTab = 'trends';
   renderActivity({});
   assert.deepEqual(reveals, [true, false, true]);
+});
+
+test('re-enabling motion while Live Flow stays mounted resyncs card sweeps even with unchanged rails', () => {
+  const js = read('src', 'electron', 'renderer', 'dashboard', 'dashboard.js');
+  let reduced = true;
+  let syncCalls = 0;
+  let created = 0;
+  let destroyed = 0;
+  let markupCalls = 0;
+  const beamUpdates = [];
+  const attrs = new Map();
+  const beamCanvas = {};
+  const port = (key, x, y) => ({
+    getAttribute: (name) => name === 'data-port' ? key : null,
+    getBoundingClientRect: () => ({ left: x, top: y, width: 8, height: 8 }),
+    closest: () => null
+  });
+  const svg = {
+    getAttribute: (name) => attrs.get(name) ?? null,
+    setAttribute: (name, value) => attrs.set(name, value),
+    querySelectorAll: () => []
+  };
+  const canvas = {
+    getAttribute: () => null,
+    getBoundingClientRect: () => ({ left: 0, top: 0, width: 400, height: 180 }),
+    querySelector: (sel) => sel === '.dash-topo-beams' ? beamCanvas : null,
+    querySelectorAll: (sel) => {
+      if (sel === '[data-port]') return [port('dev:mac', 40, 60), port('hub-in:codex', 200, 60)];
+      return [];
+    }
+  };
+  const context = {
+    state: { flowMode: 'sync' },
+    els: {
+      topology: {
+        querySelector: (sel) => {
+          if (sel === '.dash-topo-canvas') return canvas;
+          if (sel === '.dash-topo-links') return svg;
+          return null;
+        }
+      }
+    },
+    activeHover: null,
+    topologyBeams: null,
+    topologyBeamsWereReduced: false,
+    topologyBeamEdgeEls: new Map(),
+    topologyBeamsApi: {
+      createTopologyBeamRenderer(el) {
+        created += 1;
+        return {
+          canvas: el,
+          update(beams) { beamUpdates.push(beams.length); },
+          destroy() { destroyed += 1; }
+        };
+      }
+    },
+    window: { devicePixelRatio: 2 },
+    document: { hidden: false, documentElement: {} },
+    getComputedStyle: () => ({ getPropertyValue: () => '2.9s', colorScheme: 'dark' }),
+    prefersReducedMotion: () => reduced,
+    displayColor: (c) => c,
+    escapeHtml: String,
+    patchDashboardMarkup: () => ++markupCalls === 1,
+    syncTopologyAnimationClock: (target) => {
+      if (target === canvas) syncCalls += 1;
+    }
+  };
+  vm.runInNewContext(
+    js.slice(js.indexOf('function layoutTopologyLinks('), js.indexOf('\nfunction renderTopology(')),
+    context
+  );
+  const graph = {
+    devices: [{ id: 'mac' }],
+    hubs: [{ id: 'codex' }],
+    devToHub: [{ id: 'mac->codex', from: 'mac', to: 'codex', active: true, color: '#34d399', share: 1 }],
+    hubToEnd: []
+  };
+
+  context.layoutTopologyLinks(graph);
+  assert.equal(created, 1);
+  assert.equal(destroyed, 0);
+  assert.equal(syncCalls, 0);
+  assert.deepEqual(beamUpdates, [0]);
+
+  reduced = false;
+  context.layoutTopologyLinks(graph);
+  assert.equal(created, 1);
+  assert.equal(syncCalls, 1);
+  assert.deepEqual(beamUpdates, [0, 1]);
+
+  context.layoutTopologyLinks(graph);
+  assert.equal(syncCalls, 1);
+  assert.deepEqual(beamUpdates, [0, 1, 1]);
 });

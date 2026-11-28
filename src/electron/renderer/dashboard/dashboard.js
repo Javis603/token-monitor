@@ -29,6 +29,7 @@ const readAllTimeProjects = window.TokenMonitorProjectRows?.createPagedProjectRe
 );
 
 const skylineApi = window.TokenMonitorActivitySkyline3D;
+const topologyBeamsApi = window.TokenMonitorTopologyBeams;
 const rendererDom = window.TokenMonitorDomReconcile.create();
 
 // Canonical brand colours captured before overrides (clientColors is shared by reference).
@@ -210,6 +211,9 @@ const metricTextAnimations = new WeakMap();
 let topologyLayoutFrame = 0;
 let topologyScrollFrame = 0;
 let topologyResizeObserver = null;
+let topologyBeams = null;
+let topologyBeamsWereReduced = false;
+const topologyBeamEdgeEls = new Map();
 let skylineController = null;
 let skylineResizeObserver = null;
 let skylineHintDismissed = false;
@@ -517,6 +521,9 @@ function applyAppearance(settings) {
   els.body.classList.toggle('flat', settings?.dashboardBackdrop === 'solid');
   els.body.classList.toggle('desktop-mode', settings?.dashboardWindowBehavior === 'desktop');
   skylineController?.refreshTheme?.();
+  if (state.stageView === 'flow' && state.overview?.topology) {
+    layoutTopologyLinks(state.overview.topology);
+  }
 }
 
 function applyFontSettings(settings) {
@@ -2465,41 +2472,32 @@ function layoutTopologyLinks(graph) {
     const swNum = 1.15 + Math.max(0, Math.min(1, Number(spec.edge.share || 0))) * 0.85;
     const sw = swNum.toFixed(2);
     const vis = Math.min(p1.vis, p2.vis);
-    return { ...spec, d, color, swNum, sw, vis };
+    return { ...spec, p1, p2, d, color, swNum, sw, vis };
   }).filter(Boolean);
 
   const reduced = prefersReducedMotion();
   const stagger = graph.flowMode === 'stagger' || (!graph.flowMode && state.flowMode === 'stagger');
-  const gradientHubs = new Set(graph.hubs
-    .filter(hub => hub.activeSessionCount > 0 && hub.activeToolColors?.length > 1)
-    .map(hub => hub.id));
-  const edgesHtml = edgeSpecs.map(({ edge, hop, d, color, swNum, sw }) => {
+  const railDefs = [];
+  const edgesHtml = edgeSpecs.map(({ edge, hop, p1, p2, d, color, sw }) => {
     const active = Boolean(edge.active);
-    const classes = ['topo-edge', `topo-edge--hop${hop}`];
-    let activeLayers = '';
+    const classes = ['topo-edge'];
+    let stroke = escapeHtml(color);
     if (active) {
       classes.push('is-active');
-      if (!reduced) {
-        const beamColor = gradientHubs.has(hop === 1 ? edge.to : edge.from)
-          ? `color-mix(in srgb, ${color} 78%, white)`
-          : '#ffffff';
-        activeLayers = `<path class="topo-edge-aura" stroke="${escapeHtml(color)}" stroke-width="${(swNum + 3.2).toFixed(2)}" d="${d}"></path>`
-          + `<path class="topo-beam-tail" pathLength="100" stroke="${escapeHtml(color)}" stroke-width="${(swNum + 1.8).toFixed(2)}" d="${d}"></path>`
-          + `<path class="topo-beam-body" pathLength="100" stroke="${escapeHtml(color)}" stroke-width="${Math.max(1.5, swNum + 0.35).toFixed(2)}" d="${d}"></path>`
-          + `<path class="topo-beam-head" pathLength="100" stroke="${escapeHtml(beamColor)}" stroke-width="1.25" d="${d}"></path>`;
+      // Device ports are neutral, so the first hop warms into the tool colour.
+      if (hop === 1) {
+        const id = `dashTopoRail${railDefs.length}`;
+        railDefs.push(`<linearGradient id="${id}" gradientUnits="userSpaceOnUse" x1="${p1.x.toFixed(1)}" y1="${p1.y.toFixed(1)}" x2="${p2.x.toFixed(1)}" y2="${p2.y.toFixed(1)}">`
+          + `<stop offset="0" class="topo-rail-neutral"></stop><stop offset="0.28" stop-color="${stroke}"></stop><stop offset="1" stop-color="${stroke}"></stop></linearGradient>`);
+        stroke = `url(#${id})`;
       }
     }
-    const edgePhase = stagger ? Number(edge.flowPhase || 0) : 0;
-    return `<g class="${classes.join(' ')}" data-edge-id="${escapeHtml(edge.id)}" data-key="${escapeHtml(edge.id)}" data-flow-phase="${edgePhase}">`
-      + `<path class="topo-edge-base" stroke="${escapeHtml(color)}" stroke-width="${sw}" d="${d}"></path>`
-      + activeLayers
+    return `<g class="${classes.join(' ')}" data-edge-id="${escapeHtml(edge.id)}" data-key="${escapeHtml(edge.id)}">`
+      + `<path class="topo-edge-base" stroke="${stroke}" stroke-width="${sw}" d="${d}"></path>`
       + `</g>`;
   }).join('');
 
-  const linksChanged = patchDashboardMarkup(svg, `<defs>`
-    + `<filter id="dashTopoBeamGlow" x="-30%" y="-30%" width="160%" height="160%"><feGaussianBlur stdDeviation="2.4" result="b"></feGaussianBlur><feMerge><feMergeNode in="b"></feMergeNode><feMergeNode in="SourceGraphic"></feMergeNode></feMerge></filter>`
-    + `<filter id="dashTopoAmbientGlow" x="-40%" y="-40%" width="180%" height="180%"><feGaussianBlur stdDeviation="5"></feGaussianBlur></filter>`
-    + `</defs>${edgesHtml}`);
+  const linksChanged = patchDashboardMarkup(svg, `<defs>${railDefs.join('')}</defs>${edgesHtml}`);
 
   let resumedActiveEdge = false;
   const edgeSpecById = new Map(edgeSpecs.map((spec) => [spec.edge.id, spec]));
@@ -2510,13 +2508,66 @@ function layoutTopologyLinks(graph) {
     if (!offscreen && spec.edge.active && g.classList.contains('is-offscreen')) resumedActiveEdge = true;
     g.classList.toggle('is-offscreen', offscreen);
     g.style.setProperty('--edge-vis', spec.vis >= 0.99 ? '1' : spec.vis.toFixed(3));
-    g.style.setProperty('--topo-flow-phase', String(stagger ? Number(spec.edge.flowPhase || 0) : 0));
   });
-  if (!reduced && (linksChanged || resumedActiveEdge)) syncTopologyAnimationClock(canvas);
+  const motionResumed = !reduced && topologyBeamsWereReduced;
+  if (!reduced && (linksChanged || resumedActiveEdge || motionResumed)) syncTopologyAnimationClock(canvas);
+  layoutTopologyBeams(canvas, rect, edgeSpecs, svg, stagger, reduced);
+  topologyBeamsWereReduced = reduced;
 
   if (activeHover?.kind === 'topo') {
     applyTopologyFocus(activeHover.nodeKind, activeHover.nodeId);
   }
+}
+
+function destroyTopologyBeams() {
+  topologyBeams?.destroy();
+  topologyBeams = null;
+  topologyBeamsWereReduced = false;
+  topologyBeamEdgeEls.clear();
+}
+
+function topologyDurationMs(canvas) {
+  const m = /^\s*([\d.]+)(ms|s)\s*$/.exec(getComputedStyle(canvas).getPropertyValue('--topo-dur'));
+  return m ? Number(m[1]) * (m[2] === 's' ? 1000 : 1) : 2900;
+}
+
+// Beams follow the card sweeps: hop 1 lands on the hub at 38%, hop 2 on the endpoint at 84%.
+const TOPOLOGY_HOP_DELAY = { 1: 0.16, 2: 0.62 };
+
+function layoutTopologyBeams(canvas, rect, edgeSpecs, svg, stagger, reduced) {
+  const beamCanvas = canvas.querySelector('.dash-topo-beams');
+  if (!beamCanvas || !topologyBeamsApi) return;
+  if (topologyBeams?.canvas !== beamCanvas) {
+    destroyTopologyBeams();
+    topologyBeams = topologyBeamsApi.createTopologyBeamRenderer(beamCanvas, {
+      paused: () => prefersReducedMotion() || document.hidden,
+      edgeAlpha: (id) => {
+        if (canvas.getAttribute('data-focus') !== 'true') return 1;
+        return topologyBeamEdgeEls.get(id)?.getAttribute('data-related') === 'true' ? 1 : 0.12;
+      }
+    });
+  }
+  topologyBeamEdgeEls.clear();
+  svg.querySelectorAll('g.topo-edge[data-edge-id]').forEach((g) => topologyBeamEdgeEls.set(g.getAttribute('data-edge-id'), g));
+  const beams = reduced ? [] : edgeSpecs
+    .filter((spec) => spec.edge.active && spec.vis > 0.01)
+    .map((spec) => ({
+      id: spec.edge.id,
+      p1: spec.p1,
+      p2: spec.p2,
+      color: spec.color,
+      width: spec.swNum,
+      rate: Number(spec.edge.liveRate || 0),
+      delay: (stagger ? Number(spec.edge.flowPhase || 0) : 0) + TOPOLOGY_HOP_DELAY[spec.hop],
+      vis: spec.vis
+    }));
+  topologyBeams.update(beams, {
+    width: rect.width,
+    height: rect.height,
+    dpr: window.devicePixelRatio || 1,
+    durationMs: topologyDurationMs(canvas),
+    dark: getComputedStyle(document.documentElement).colorScheme.trim() !== 'light'
+  });
 }
 
 function renderTopology(overview, revealed = false, cardRateSamples = {}) {
@@ -2525,6 +2576,7 @@ function renderTopology(overview, revealed = false, cardRateSamples = {}) {
   if (!graph || !graph.devices?.length) {
     topologyResizeObserver?.disconnect();
     topologyResizeObserver = null;
+    destroyTopologyBeams();
     patchDashboardMarkup(els.topology, `<div class="dash-quotas-empty">${escapeHtml(t('dashboard.topology.empty'))}</div>`);
     return;
   }
@@ -2640,6 +2692,7 @@ function renderTopology(overview, revealed = false, cardRateSamples = {}) {
   // The link layer owns its SVG children and stays mounted through node updates.
   const changed = patchDashboardMarkup(els.topology, `<div class="dash-topo-canvas" data-flow-mode="${flowMode}">`
     + `<svg class="dash-topo-links" data-dom-island aria-hidden="true"></svg>`
+    + `<canvas class="dash-topo-beams" data-dom-island aria-hidden="true"></canvas>`
     + `<div class="dash-topo-col"><div class="dash-topo-col-head"><span>${escapeHtml(t('dashboard.topology.colDevices'))}</span><span>${graph.counts.devices}</span></div><div class="dash-topo-col-scroll" data-topo-col="devices">${devicesHtml}</div></div>`
     + `<div class="dash-topo-col"><div class="dash-topo-col-head"><span>${escapeHtml(hubColTitle)}</span><span>${graph.counts.hubs}</span></div><div class="dash-topo-col-scroll" data-topo-col="hubs">${hubsHtml || ghostHub}</div></div>`
     + `<div class="dash-topo-col"><div class="dash-topo-col-head"><span>${escapeHtml(endColTitle)}</span><span>${graph.counts.endpoints}</span></div><div class="dash-topo-col-scroll" data-topo-col="endpoints">${endsHtml || ghostEndpoint}</div></div>`
@@ -4225,8 +4278,12 @@ function handleDashboardVisibilityChange() {
     dashboardRenderScheduler.flush();
     scheduleDashboardRefresh();
     if (typeof scheduleRateExpiry === 'function') scheduleRateExpiry();
+    if (typeof state !== 'undefined' && state.stageView === 'flow' && state.overview?.topology) {
+      layoutTopologyLinks(state.overview.topology);
+    }
     return;
   }
+  if (typeof topologyBeams !== 'undefined') topologyBeams?.stop?.(true);
   if (dashboardRefreshFrame) cancelAnimationFrame(dashboardRefreshFrame);
   dashboardRefreshFrame = 0;
   if (typeof rateExpiryTimer !== 'undefined' && rateExpiryTimer) {

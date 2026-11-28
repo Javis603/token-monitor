@@ -1031,7 +1031,8 @@ html.native-high-contrast .dash-stage {
   min-height: 214px;
 }
 
-.dash-topo-links {
+.dash-topo-links,
+.dash-topo-beams {
   position: absolute;
   inset: 0;
   width: 100%;
@@ -1519,13 +1520,11 @@ html.native-high-contrast .dash-stage {
 }
 
 .topo-edge {
-  --topo-phase-offset: 0s;
   opacity: var(--edge-vis, 1);
   transition: opacity 180ms ease;
 }
 
-.dash-topo-canvas[data-flow-mode="stagger"] .topo-node,
-.dash-topo-canvas[data-flow-mode="stagger"] .topo-edge {
+.dash-topo-canvas[data-flow-mode="stagger"] .topo-node {
   --topo-phase-offset: calc(var(--topo-dur) * var(--topo-flow-phase, 0));
 }
 
@@ -1533,15 +1532,6 @@ html.native-high-contrast .dash-stage {
   opacity: 0;
   visibility: hidden;
 }
-
-/* Fully clipped links don't need to run their SVG effects. */
-.topo-edge.is-offscreen > :not(.topo-edge-base) {
-  display: none;
-}
-
-/* First hop arrives at 38%, second at 84%, when their card sweeps begin. */
-.topo-edge--hop1 { --topo-hop-delay: calc(var(--topo-dur) * 0.16); }
-.topo-edge--hop2 { --topo-hop-delay: calc(var(--topo-dur) * 0.62); }
 
 .topo-edge-base {
   fill: none;
@@ -1551,65 +1541,13 @@ html.native-high-contrast .dash-stage {
 }
 
 .topo-edge.is-active .topo-edge-base {
-  stroke-opacity: 0.30;
+  stroke-opacity: 0.22;
 }
 
-.topo-edge-aura {
-  fill: none;
-  stroke-linecap: round;
-  stroke-opacity: 0.08;
-  filter: url("#dashTopoAmbientGlow");
-  animation: topoAuraBreathe var(--topo-dur) ease-in-out calc(var(--topo-phase-offset) + var(--topo-hop-delay)) infinite both;
-}
-
-.topo-beam-tail,
-.topo-beam-body,
-.topo-beam-head {
-  fill: none;
-  stroke-linecap: round;
-  animation: topoBeamTravel var(--topo-dur) linear calc(var(--topo-phase-offset) + var(--topo-hop-delay)) infinite both;
-}
-
-.topo-beam-tail {
-  --topo-beam-length: 28px;
-  --topo-beam-opacity: 0.42;
-  stroke-dasharray: 28 152;
-  filter: url("#dashTopoBeamGlow");
-}
-
-.topo-beam-body {
-  --topo-beam-length: 12px;
-  --topo-beam-opacity: 0.94;
-  stroke-dasharray: 12 168;
-  filter: url("#dashTopoBeamGlow");
-}
-
-.topo-beam-head {
-  --topo-beam-length: 3.2px;
-  --topo-beam-opacity: 1;
-  stroke-dasharray: 3.2 176.8;
-}
-
-@keyframes topoAuraBreathe {
-  0%, 30%, 100% { stroke-opacity: 0.08; }
-  12% { stroke-opacity: 0.30; }
-  22% { stroke-opacity: 0.22; }
-}
-
-@keyframes topoBeamTravel {
-  0% {
-    stroke-dashoffset: var(--topo-beam-length);
-    opacity: 0;
-    animation-timing-function: cubic-bezier(0.32, 0.04, 0.22, 1);
-  }
-  3% { opacity: var(--topo-beam-opacity); }
-  22% {
-    stroke-dashoffset: calc(var(--topo-beam-length) - 100px);
-    opacity: var(--topo-beam-opacity);
-    animation-timing-function: ease-out;
-  }
-  27% { stroke-dashoffset: -100px; opacity: 0; }
-  28%, 100% { stroke-dashoffset: -100px; opacity: 0; }
+/* Light travels on the .dash-topo-beams canvas (topologyBeams.js); the SVG keeps the rails. */
+.topo-rail-neutral {
+  stop-color: rgb(var(--overlay-rgb));
+  stop-opacity: 0.6;
 }
 
 @keyframes topoBorderEmit {
@@ -2871,7 +2809,6 @@ body.flat .dash-drawer {
   opacity: 0 !important;
 }
 
-:root[data-reduce-motion="on"] .topo-edge-aura,
 :root[data-reduce-motion="on"] .topo-port.is-live,
 :root[data-reduce-motion="on"] .topo-node--device.is-active .topo-device-edge {
   animation: none !important;
@@ -2893,7 +2830,6 @@ body.flat .dash-drawer {
     opacity: 0 !important;
   }
 
-  :root:not([data-reduce-motion="off"]) .topo-edge-aura,
   :root:not([data-reduce-motion="off"]) .topo-port.is-live,
   :root:not([data-reduce-motion="off"]) .topo-node--device.is-active .topo-device-edge {
     animation: none !important;
