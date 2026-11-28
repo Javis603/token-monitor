@@ -179,7 +179,7 @@ Launch the app to start tracking this device locally, with no hub setup required
 - **Quota history** — hover or click an account in the Limits view for its current-cycle trend and the last 14 days of measured usage; history is recorded locally and never uploaded
 - **Network proxy** — route AI Tool Limits and account requests through a proxy set in Settings → General
 - **Codex reset forecast** — an optional third-party forecast below Codex limits, showing the expected reset time, the reset type (Regular or Banked), and when the window last reset
-- **Preserve deleted session usage** — many tools prune old sessions (Claude Code drops transcripts after 30 days by default), losing that history. When enabled, Token Monitor archives observed daily tool/model usage locally so the heatmap and trends survive even after the source files are gone (see [Session data retention](#session-data-retention) below)
+- **Preserve deleted session usage** keeps per-session totals locally after source tools delete sessions. See [Session data retention](#session-data-retention).
 - **Usage Trends & Dashboard** — a home-screen activity heatmap and trend chart, plus a dedicated dashboard window with streaks and stacked per-tool/per-model history (bar and K-line views) across all your devices
 - **Fixed usage ranges** — switch between This week, Last 7 days, and Last 30 days alongside the native day, month, and total periods
 - **Optional Status view** — official provider status pages, with manual or interval re-checks
@@ -446,7 +446,9 @@ The widget chooses local vs sync mode based on Settings → Multi-device Sync. T
 
 ## Session data retention
 
-With **Preserve deleted session usage** enabled (Settings → Collection), Token Monitor archives observed daily tool/model usage locally with no time limit — so even after a source tool prunes its own sessions, the heatmap and trends are unaffected.
+**Preserve deleted session usage** (Settings → Collection) controls whether individual session totals are kept.
+
+With **Enable Trends** on, Token Monitor keeps a local archive of observed daily tool and model totals without a time limit. The heatmap and trends include those totals while session retention is on. Pausing session retention hides archived totals while daily recording continues.
 
 <details>
 <summary><strong>Advanced: extend the source tool's own retention</strong></summary>

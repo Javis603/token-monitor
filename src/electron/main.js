@@ -5135,6 +5135,7 @@ function primeLocalStatsFromAnchor(usageOptions, widgetProducerOwner) {
       wslSupported: process.platform === 'win32',
       historyEnabled: usageOptions.historyEnabled,
       dailyHistoryArchiveEnabled: usageOptions.dailyHistoryArchiveEnabled,
+      dailyHistoryArchiveVisible: usageOptions.dailyHistoryArchiveVisible,
       hostname: os.hostname(),
       platform: `${process.platform}-${process.arch}`
     }

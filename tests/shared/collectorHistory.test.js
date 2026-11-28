@@ -147,6 +147,34 @@ test('Dots history still merges after a successful empty native scan or a graph 
   assert.equal(fallback.daily[0].perClient.codex.tokens, 10);
 });
 
+test('a source-only collector clears carried archive history when its first graph fails', async (t) => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'hidden-daily-history-'));
+  t.after(() => fs.rmSync(directory, { recursive: true, force: true }));
+  const state = createDeviceState();
+  state.updateUsage({ month: {}, allTime: {}, history: { daily: [{ date: '2026-06-07', tokens: 30 }] } });
+  let published;
+  const runtime = startCollector({
+    clients: 'claude',
+    homeDir: directory,
+    env: { TOKEN_MONITOR_SHARED_DIR: directory },
+    projectsEnabled: false,
+    watchEnabled: false,
+    anchorPersistenceEnabled: false,
+    dailyHistoryArchiveEnabled: true,
+    dailyHistoryArchiveVisible: false,
+    dailyHistoryArchiveOptions: { path: path.join(directory, 'daily-history.json') },
+    runTokscale: async () => ({ entries: [] }),
+    runGraph: async () => { throw new Error('graph unavailable'); },
+    onUpdate: (summary) => { published = state.updateUsage(summary); }
+  });
+  try {
+    await waitForCondition(() => published);
+    assert.equal(published.history, null);
+  } finally {
+    runtime.stop();
+  }
+});
+
 test('collector preserves the last successful history timestamp after a failed refresh', async () => {
   let graphCalls = 0;
   const updates = [];

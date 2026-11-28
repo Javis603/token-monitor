@@ -437,7 +437,8 @@ test('the seed leaves History to the first scan when History or the archive is o
     const options = { dailyHistoryArchiveOptions: { path: archivePath } };
     for (const overrides of [
       { ...options },
-      { ...options, dailyHistoryArchiveEnabled: true, historyEnabled: false }
+      { ...options, dailyHistoryArchiveEnabled: true, historyEnabled: false },
+      { ...options, dailyHistoryArchiveEnabled: true, dailyHistoryArchiveVisible: false }
     ]) {
       const record = deviceRecordFromAnchor(anchorFixture(), seedOptions(overrides));
       assert.equal(Object.prototype.hasOwnProperty.call(record, 'history'), false);

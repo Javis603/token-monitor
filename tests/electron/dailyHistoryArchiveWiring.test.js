@@ -2,8 +2,11 @@
 
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
+const os = require('node:os');
 const path = require('node:path');
 const test = require('node:test');
+const { usageConfigFromSettings } = require('../../src/electron/runtimeConfig');
+const { collectUsageOnce } = require('../../src/shared/collector');
 
 const ROOT = path.resolve(__dirname, '../..');
 const main = fs.readFileSync(path.join(ROOT, 'src/electron/main.js'), 'utf8');
@@ -33,10 +36,51 @@ function assertEveryCollectorModeUsesUsageConfig() {
   }
 }
 
-test('every Electron collector mode follows the retained-session setting for daily history', () => {
+test('every Electron collector mode takes daily history options from the same configuration', () => {
   assert.match(main, /function electronUsageConfig/);
   assert.match(main, /usageConfigFromSettings\(settings, \{/);
   assertEveryCollectorModeUsesUsageConfig();
+});
+
+test('Electron records while paused, shows only source totals, and restores the archive on resume', async (t) => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'tm-daily-history-wiring-'));
+  t.after(() => fs.rmSync(directory, { recursive: true, force: true }));
+  const options = {
+    ...usageConfigFromSettings({ clients: 'claude', sessionUsageArchiveEnabled: false, projectsEnabled: false }),
+    homeDir: directory,
+    env: { TOKEN_MONITOR_SHARED_DIR: directory },
+    includeHistory: true,
+    dailyHistoryArchiveOptions: { path: path.join(directory, 'daily-history.json') }
+  };
+  const first = await collectUsageOnce({
+    ...options,
+    now: new Date(2026, 7, 5, 23, 55),
+    runGraph: async () => ({ contributions: [] }),
+    runTokscale: async () => ({ entries: [{ client: 'claude', modelId: 'opus', input: 100, messages: 1 }] })
+  });
+  assert.equal(first.history?.daily.find((day) => day.date === '2026-08-05')?.tokens, 100);
+
+  const nextOptions = {
+    ...options,
+    now: new Date(2026, 7, 6, 0, 5),
+    runGraph: async () => ({ contributions: [{ date: '2026-08-05', clients: [
+      { client: 'claude', modelId: 'opus', tokens: { input: 30 }, messages: 1 }
+    ] }] }),
+    runTokscale: async () => ({ entries: [] })
+  };
+  const next = await collectUsageOnce(nextOptions);
+  assert.equal(next.history.daily.find((day) => day.date === '2026-08-05')?.tokens, 30);
+  assert.equal(next.history.summary.totalTokens, 30);
+
+  const emptySource = { ...nextOptions, runGraph: async () => ({ contributions: [] }) };
+  const empty = await collectUsageOnce(emptySource);
+  assert.equal(empty.history.summary.totalTokens, 0);
+
+  const resumed = await collectUsageOnce({
+    ...emptySource,
+    ...usageConfigFromSettings({ clients: 'claude', projectsEnabled: false, sessionUsageArchiveEnabled: true })
+  });
+  assert.equal(resumed.history.daily.find((day) => day.date === '2026-08-05')?.tokens, 100);
 });
 
 test('every Electron collector mode yields daily-history writes to an external agent', () => {
@@ -48,8 +92,9 @@ test('clearing retained session usage also clears retained daily history', () =>
   assert.match(main, /sessionUsageArchiveStore\.clear\(\);\s*clearDailyHistoryArchive\(\);/);
 });
 
-test('the headless agent retains daily history without mutating storage in dry-run mode', () => {
-  assert.match(agent, /dailyHistoryArchiveEnabled:\s*sessionUsageArchiveEnabled/);
+test('the headless agent follows the history setting and leaves storage alone in dry-run mode', () => {
+  assert.match(agent, /dailyHistoryArchiveEnabled:\s*historyEnabled/);
+  assert.match(agent, /dailyHistoryArchiveVisible:\s*sessionUsageArchiveEnabled/);
   assert.match(agent, /dailyHistoryArchiveWriteEnabled:\s*!dryRun/);
 });
 

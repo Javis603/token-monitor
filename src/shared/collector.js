@@ -63,7 +63,7 @@ const { activityWatchSources, activityClientsForPath, comparablePath } = require
 const { readT3AntigravityContextStamp } = require('./t3/sessionMetadata');
 const { localDayKey, parseGraphResult, normalizeHistory, mergeHistories, mergeDailyMaps } = require('./history');
 const {
-  graphFromDailyHistoryArchive, readDailyHistoryArchive, retainDailyHistory, retainLiveDailyHistory
+  captureLiveDailyHistory, graphFromDailyHistoryArchive, readDailyHistoryArchive, retainDailyHistory, retainLiveDailyHistory
 } = require('./dailyHistoryArchive');
 const {
   createSubprocessTermination,
@@ -1140,6 +1140,7 @@ async function collectHistoryOnce(options) {
   const runGraph = options.runGraph || runTokscaleGraph;
   const capDays = Number.isFinite(options.capDays) ? options.capDays : HISTORY_CAP_DAYS;
   const todayKey = options.todayKey || localTodayKey();
+  const showArchived = options.dailyHistoryArchiveVisible !== false;
   if (clients) {
     try {
       const graphJson = await runGraph({
@@ -1168,6 +1169,16 @@ async function collectHistoryOnce(options) {
       ...(graphs[0]?.timeMetrics ? { timeMetrics: graphs[0].timeMetrics } : {})
     }, { capDays, todayKey });
   }
+  if (!showArchived && !failureCode && options.liveToday) {
+    // The period scan can be ahead of the graph. Include only this scan's
+    // Today, without importing any saved daily observations into the display.
+    const current = captureLiveDailyHistory({}, options.liveToday, { todayKey });
+    if (current.liveDays?.[todayKey]) {
+      liveHistory = normalizeHistory(parseGraphResult(graphFromDailyHistoryArchive(rawGraphs, current, { todayKey })), {
+        capDays, todayKey
+      });
+    }
+  }
   // Keep the supplemental ledger out of generic history retention too: a
   // retained maximum would survive when a native rollout replaces this thread.
   const withLocalHistory = (history) => {
@@ -1188,18 +1199,26 @@ async function collectHistoryOnce(options) {
         customPricingActive: options.customPricingActive,
         todayKey,
         capDays,
-        writeEnabled: options.dailyHistoryArchiveWriteEnabled
+        writeEnabled: options.dailyHistoryArchiveWriteEnabled,
+        includeArchived: showArchived
       });
-      const result = historyFromArchiveGraph(retainedGraph, {
-        capDays, todayKey, complete: failureCode !== 'history-graph-failed'
-      });
-      reportStatus(failureCode === null);
-      return withLocalHistory(result);
+      if (showArchived) {
+        const result = historyFromArchiveGraph(retainedGraph, {
+          capDays, todayKey, complete: failureCode !== 'history-graph-failed'
+        });
+        reportStatus(failureCode === null);
+        return withLocalHistory(result);
+      }
     } catch (error) {
       failureCode = failureCode || 'daily-history-archive-failed';
       if (liveHistory) liveHistory.summary.activeDaysComplete = false;
       if (typeof options.logger === 'function') options.logger(`daily history archive failed: ${error.message}`);
     }
+  }
+  if (!showArchived && failureCode !== 'history-graph-failed') {
+    // A successful empty source graph must replace the last archived History.
+    reportStatus(failureCode === null);
+    return withLocalHistory(liveHistory ?? normalizeHistory([], { capDays, todayKey }));
   }
   if (!liveHistory) {
     reportStatus(false);
@@ -1830,6 +1849,7 @@ async function collectUsageOnce(options) {
 
   // This contribution is durable but has no rollout file. Keep it outside
   // windowsPeriods/todayPartitions so exact native watch deltas stay native.
+  const nativeTodayForHistory = today;
   let codexLocalView = null;
   if (trackedClientSet.has('codex') && options.codexLocalUsageEnabled !== false
     && options.codexDotsVisible !== false) {
@@ -2000,6 +2020,8 @@ async function collectUsageOnce(options) {
       runGraph: runGraphFn,
       signal: options.signal,
       dailyHistoryArchiveEnabled: options.dailyHistoryArchiveEnabled,
+      dailyHistoryArchiveVisible: options.dailyHistoryArchiveVisible,
+      liveToday: options.dailyHistoryArchiveVisible === false ? nativeTodayForHistory : undefined,
       dailyHistoryArchiveWriteEnabled: options.dailyHistoryArchiveWriteEnabled,
       dailyHistoryArchiveOptions: options.dailyHistoryArchiveOptions,
       dailyHistoryLiveDays,
@@ -2459,6 +2481,7 @@ function startCollector(options) {
   let lastHistoryAt = 0;
   let lastHistoryAttemptAt = 0;
   let lastHistorySuccessAt = 0;
+  let hasPublishedHistory = false;
   let lastHistoryFailureCode = null;
   let lastHistoryScanDurationMs = null;
   let rolloverHistoryPending = false;
@@ -3004,12 +3027,11 @@ function startCollector(options) {
       // the observer nor publish an in-flight result under the old selection.
       if (visibilityRevision !== codexVisibilityRevision) return false;
       if (includeHistory && !summary.history
-        && (!codexDotsVisible || visibilityRevision !== publishedCodexVisibilityRevision)) {
-        // An empty successful graph normally omits history so DeviceState can
-        // keep its last snapshot. A visibility change must replace that old
-        // projection, including when all its history was Dots-only. A newly
-        // created hidden collector must do the same after replacement/fallback:
-        // its local revision starts at zero, but DeviceState keeps old history.
+        && (!codexDotsVisible || visibilityRevision !== publishedCodexVisibilityRevision
+          || (options.dailyHistoryArchiveVisible === false && !hasPublishedHistory))) {
+        // DeviceState carries an omitted history forward. Clear a previous
+        // projection when it could still contain hidden entries, including
+        // after replacing a collector whose archive was visible.
         summary.history = historyScanSucceeded ? normalizeHistory([], { todayKey }) : null;
       }
       if (sourceChangeObserved || scanSourceFingerprint(normalizedClients, sourceOptions) !== tickSourceRevision) {
@@ -3136,6 +3158,7 @@ function startCollector(options) {
         }
       }
       const transformedSummary = await onUpdate?.(summary, reason);
+      if (summary.history) hasPublishedHistory = true;
       if (tickCursorSnapshot) publishedCursorRevision = tickCursorSnapshot.revision;
       if (historyScanSucceeded && !ampImportInProgress) {
         publishedAmpCacheRevision = tickAmpCacheRevision;

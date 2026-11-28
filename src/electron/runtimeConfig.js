@@ -35,7 +35,6 @@ const USAGE_STRUCTURAL_KEYS = Object.freeze([
   'collectionMode',
   'historyEnabled',
   'historyIntervalMs',
-  'sessionUsageArchiveEnabled',
   'projectsEnabled',
   'wslScanEnabled'
 ]);
@@ -52,6 +51,7 @@ const USAGE_CONFIG_FINGERPRINT_KEYS = Object.freeze([
   'intervalMs',
   'historyEnabled',
   'dailyHistoryArchiveEnabled',
+  'dailyHistoryArchiveVisible',
   'projectsEnabled',
   'historyIntervalMs',
   'watchEnabled',
@@ -112,7 +112,8 @@ function usageConfigFromSettings(settings = {}, context = {}) {
     agentRuntime: context.agentRuntime || 'electron-widget',
     intervalMs: context.intervalMs ?? settings.collectionIntervalMs,
     historyEnabled: settings.historyEnabled !== false,
-    dailyHistoryArchiveEnabled: settings.sessionUsageArchiveEnabled !== false,
+    dailyHistoryArchiveEnabled: settings.historyEnabled !== false,
+    dailyHistoryArchiveVisible: settings.historyEnabled !== false && settings.sessionUsageArchiveEnabled !== false,
     dailyHistoryArchiveWriteEnabled: context.dailyHistoryArchiveWriteEnabled,
     projectsEnabled: settings.projectsEnabled !== false,
     historyIntervalMs: context.historyIntervalMs ?? settings.historyIntervalMs,
@@ -248,9 +249,11 @@ function classifySettingsChange(previous = {}, next = {}) {
       && !changedAny(previous, next, keys.filter((key) => key !== sourcePreference));
     limitScopes.push({ provider, ...(preserveReadings ? { preserveReadings: true } : {}) });
   }
+  const dailyArchiveVisibilityChanged = next.historyEnabled !== false
+    && (previous.sessionUsageArchiveEnabled === false) !== (next.sessionUsageArchiveEnabled === false);
   return {
     modeStructural: changedAny(previous, next, MODE_STRUCTURAL_KEYS),
-    usageStructural: changedAny(previous, next, USAGE_STRUCTURAL_KEYS),
+    usageStructural: changedAny(previous, next, USAGE_STRUCTURAL_KEYS) || dailyArchiveVisibilityChanged,
     limitsReconfigure: changedAny(previous, next, LIMITS_RECONFIGURE_KEYS),
     sinkStructural: changedAny(previous, next, SINK_STRUCTURAL_KEYS),
     limitScopes,

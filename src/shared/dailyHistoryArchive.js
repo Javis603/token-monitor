@@ -907,7 +907,7 @@ function retainDailyHistory(graphs, options = {}) {
       writeDailyHistoryArchive(next, options);
     }
   }
-  return graphFromDailyHistoryArchive(graphs, next, options);
+  return options.includeArchived === false ? null : graphFromDailyHistoryArchive(graphs, next, options);
 }
 
 function retainLiveDailyHistory(period, options = {}) {
