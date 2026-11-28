@@ -7708,12 +7708,23 @@ function renderHomeLimitModule() {
     body.append(empty);
     return module;
   }
-  const displayMode = homeModulePreferencesApi.resolveHomeLimitDisplayMode(state.settings?.homeLimitDisplayMode);
-  if (displayMode !== 'rows') return renderClassicHomeLimits(module, body, rows, displayMode === 'bars');
-  const vendorColors = homeVendorColorsEnabled();
   // Low-limit colour is opt-in in every layout; the reading and meter length
   // already show how much is left.
   const highlightLow = state.settings?.showHomeLimitBars === true;
+  function applyWarning(metric, value, remainingPercent) {
+    if (!highlightLow) return;
+    const warning = homeOverviewApi.limitWarning(remainingPercent);
+    if (warning === 'exhausted') {
+      value.classList.add('home-limit-value-critical');
+      metric.classList.add('is-exhausted');
+    } else if (warning === 'low') {
+      value.classList.add('home-limit-value-low');
+      metric.classList.add('is-low');
+    }
+  }
+  const displayMode = homeModulePreferencesApi.resolveHomeLimitDisplayMode(state.settings?.homeLimitDisplayMode);
+  if (displayMode !== 'rows') return renderClassicHomeLimits(module, body, rows, displayMode === 'bars', applyWarning);
+  const vendorColors = homeVendorColorsEnabled();
   const nowMs = Date.now();
   for (const row of rows) {
     const item = document.createElement('div');
@@ -7726,7 +7737,7 @@ function renderHomeLimitModule() {
     const mark = document.createElement('span');
     const pluginModule = state.pluginCatalog?.limits?.modules?.find(module => module.id === row.providerId);
     if (pluginModule) mark.append(window.TokenMonitorPluginViews.navigationIcon(document, pluginModule, 14));
-    else applyHomeListMark(mark, iconKindFor({ key: row.iconId || row.providerId || row.key }, 'limits'), row.color);
+    else applyHomeListMark(mark, iconKindFor({ key: row.iconId || row.providerId || row.key }, 'limits'), 'rgba(var(--overlay-rgb), 0.5)');
     const name = document.createElement('span');
     name.className = 'home-list-name';
     name.textContent = row.name;
@@ -7800,26 +7811,7 @@ function renderHomeLimitModule() {
         value.setAttribute('data-limit-motion-value', String(readingPercent));
         value.setAttribute('data-limit-motion-text', value.textContent);
       }
-      if (highlightLow && remainingPercent != null) {
-        const clamped = Math.max(0, Math.min(100, remainingPercent));
-        if (!vendorColors) {
-          // Red only when exhausted, amber when nearly out.
-          if (clamped === 0) {
-            value.classList.add('home-limit-value-critical');
-            metric.classList.add('is-exhausted');
-          } else if (clamped < 20) {
-            value.classList.add('home-limit-value-low');
-            metric.classList.add('is-low');
-          }
-        } else if (clamped < 20) {
-          value.classList.add('home-limit-value-critical');
-          metric.classList.add('is-critical');
-          if (clamped === 0) metric.classList.add('is-exhausted');
-        } else if (clamped < 50) {
-          value.classList.add('home-limit-value-low');
-          value.style.setProperty('--home-limit-accent', row.color);
-        }
-      }
+      applyWarning(metric, value, remainingPercent);
       // An untouched window needs no attention, so it steps back.
       if (remainingPercent === 100 && !fixedValue) metric.classList.add('is-untouched');
       let reading = value;
@@ -7907,10 +7899,9 @@ function classicHomeLimitWindowLabel(window, providerId = '', visibleWindows = [
 // The earlier Home layouts, kept as choices: each account's compact pick of
 // windows sits two to a row, a reading beside its name and the reset
 // underneath, with or without a meter.
-function renderClassicHomeLimits(module, body, rows, showBars) {
+function renderClassicHomeLimits(module, body, rows, showBars, applyWarning) {
   module.classList.add('home-module-limits-classic');
   const showUsed = Boolean(state.settings?.showLimitUsed);
-  const highlightLow = state.settings?.showHomeLimitBars === true;
   for (const row of rows) {
     const item = document.createElement('div');
     item.className = 'home-limit-account';
@@ -7920,7 +7911,7 @@ function renderClassicHomeLimits(module, body, rows, showBars) {
     const mark = document.createElement('span');
     const pluginModule = state.pluginCatalog?.limits?.modules?.find(module => module.id === row.providerId);
     if (pluginModule) mark.append(window.TokenMonitorPluginViews.navigationIcon(document, pluginModule, 14));
-    else applyHomeListMark(mark, iconKindFor({ key: row.iconId || row.providerId || row.key }, 'limits'), row.color);
+    else applyHomeListMark(mark, iconKindFor({ key: row.iconId || row.providerId || row.key }, 'limits'), 'rgba(var(--overlay-rgb), 0.5)');
     const name = document.createElement('span');
     name.className = 'home-list-name';
     name.textContent = row.name;
@@ -7948,20 +7939,7 @@ function renderClassicHomeLimits(module, body, rows, showBars) {
       value.className = 'home-list-value';
       value.textContent = window.value || formatHomeLimitWindowValue(window, showUsed);
       const remainingPercent = optionalFiniteNumber(window.remainingPercent);
-      if (highlightLow && remainingPercent != null) {
-        const clamped = Math.max(0, Math.min(100, remainingPercent));
-        if (!homeVendorColorsEnabled()) {
-          // Same monochrome thresholds as the default rows: red only when
-          // exhausted, amber when nearly out.
-          if (clamped === 0) value.classList.add('home-limit-value-critical');
-          else if (clamped < 20) value.classList.add('home-limit-value-low');
-        } else if (clamped < 20) {
-          value.classList.add('home-limit-value-critical');
-        } else if (clamped < 50) {
-          value.classList.add('home-limit-value-low');
-          value.style.setProperty('--home-limit-accent', row.color);
-        }
-      }
+      applyWarning(metric, value, remainingPercent);
       const info = limitWindowsView.limitDetailInfoNode(window.detailEntries);
       if (info) {
         const right = document.createElement('span');

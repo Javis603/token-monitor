@@ -661,6 +661,7 @@ function defaultSettings() {
     dashboardVisiblePeriods: [],
     dashboardShowVelocity: true,
     dashboardShowQuotas: true,
+    dashboardHighlightLowLimits: true,
     dashboardQuotaProviderOrder: '',
     modelRankingMetric: 'tokens',
     homeActiveDaysWindow: 'all',
@@ -2240,6 +2241,7 @@ function readSettings() {
     merged.dashboardFollowPeriodTabs = parseBoolean(merged.dashboardFollowPeriodTabs, false);
     merged.dashboardShowVelocity = parseBoolean(merged.dashboardShowVelocity, true);
     merged.dashboardShowQuotas = parseBoolean(merged.dashboardShowQuotas, true);
+    merged.dashboardHighlightLowLimits = parseBoolean(merged.dashboardHighlightLowLimits, true);
     merged.dashboardQuotaProviderOrder = require('./plugins/limits').desktopProviderPreference(
       merged.dashboardQuotaProviderOrder ?? '', parseLimitProviders
     );
@@ -8478,7 +8480,7 @@ app.whenReady().then(() => {
       );
     }
     if (patch.dashboardVisiblePeriods !== undefined) normalizedPatch.dashboardVisiblePeriods = normalizeDashboardPeriods(patch.dashboardVisiblePeriods);
-    for (const key of ['dashboardFollowPeriodTabs', 'dashboardShowVelocity', 'dashboardShowQuotas']) {
+    for (const key of ['dashboardFollowPeriodTabs', 'dashboardShowVelocity', 'dashboardShowQuotas', 'dashboardHighlightLowLimits']) {
       if (patch[key] !== undefined) normalizedPatch[key] = parseBoolean(patch[key], settings[key]);
     }
     if (patch.homeActiveDaysWindow !== undefined) normalizedPatch.homeActiveDaysWindow = normalizeHomeActiveDaysWindow(patch.homeActiveDaysWindow, settings.homeActiveDaysWindow);

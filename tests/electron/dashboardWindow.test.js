@@ -487,9 +487,7 @@ test('dashboard.js fetches history over IPC and renders both tabs', () => {
   assert.match(js, /home-limit-account-head/);
   assert.match(js, /home-limit-windows/);
   assert.match(js, /home-limit-resets/);
-  assert.match(js, /const vendorColors = true/);
-  assert.match(js, /const highlightLow = true/);
-  assert.match(js, /data-c="\$\{accColor\}"/);
+  assert.match(js, /class="home-list-mark dash-quota-mark"/);
   assert.match(js, /data-limit-color="\$\{accColor\}"/);
   assert.match(js, /maskLimitAccountEmails/);
   assert.match(js, /function animateMetricText/);
@@ -1490,11 +1488,11 @@ test('renderQuotas renders expired plan status without meter, hover refresh hand
     applySwatchColors() {},
     displayColor: (c) => c,
     formatResetShort: () => '',
-    quotaWindowFlags: () => ({ isExhausted: false, isCritical: false, isLow: false, isValueLow: false, isUntouched: false }),
+    window: { TokenMonitorHomeOverview: require('../../src/electron/renderer/homeOverview') },
     formatQuotaWindowLabel: (w) => w.label || w.kind,
     t: (k) => (k === 'limits.mimo.planExpired' ? 'Expired' : k)
   };
-  vm.runInNewContext(js.slice(js.indexOf('function quotaMotionKey'), js.indexOf('\nfunction sessionStateIconHtml')), quotaContext);
+  vm.runInNewContext(js.slice(js.indexOf('function quotaWindowFlags'), js.indexOf('\nfunction sessionStateIconHtml')), quotaContext);
   quotaContext.renderQuotas({
     quotas: [{
       key: 'mimo:1',
@@ -1506,6 +1504,52 @@ test('renderQuotas renders expired plan status without meter, hover refresh hand
   assert.match(quotasEl.innerHTML, />Expired</);
   assert.doesNotMatch(quotasEl.innerHTML, /home-limit-track/);
   assert.doesNotMatch(quotasEl.innerHTML, /0%/);
+
+  // A quota can cross warning thresholds without rebuilding its row.
+  const win = { windowKey: 'weekly', kind: 'weekly', remainingPercent: 28, fillPercent: 28 };
+  const account = { key: 'codex:1', providerId: 'codex', name: 'Codex', color: '#52a4aa', windows: [win] };
+  const overview = { quotas: [account] };
+  quotaContext.renderQuotas(overview);
+  assert.match(quotasEl.innerHTML, /data-limit-color="#52a4aa"/);
+  assert.match(quotasEl.innerHTML, /class="home-list-value"[^>]*>28%</);
+  assert.doesNotMatch(quotasEl.innerHTML, /data-limit-accent/);
+
+  const createClasses = () => {
+    const classes = new Set();
+    return {
+      contains: (name) => classes.has(name),
+      toggle: (name, enabled) => enabled ? classes.add(name) : classes.delete(name)
+    };
+  };
+  const value = { classList: createClasses(), setAttribute() {} };
+  const row = {
+    dataset: { limitMotionKey: quotaContext.quotaMotionKey(account, win) },
+    classList: createClasses(),
+    querySelector: (selector) => selector === '.home-list-value' ? value : null,
+    setAttribute() {},
+    removeAttribute() {}
+  };
+  quotasEl.querySelectorAll = () => [row];
+  const mounted = quotasEl.innerHTML;
+  for (const remaining of [15, 0, 20, 38]) {
+    Object.assign(win, { remainingPercent: remaining, fillPercent: remaining });
+    quotaContext.renderQuotas(overview);
+    assert.equal(quotasEl.innerHTML, mounted);
+    assert.equal(value.textContent, `${remaining}%`);
+    assert.equal(value.classList.contains('home-limit-value-low'), remaining === 15);
+    assert.equal(value.classList.contains('home-limit-value-critical'), remaining === 0);
+    assert.equal(row.classList.contains('is-exhausted'), remaining === 0);
+  }
+
+  Object.assign(win, { remainingPercent: 0, fillPercent: 0 });
+  for (const enabled of [false, true]) {
+    quotaContext.state.settings.dashboardHighlightLowLimits = enabled;
+    quotaContext.renderQuotas(overview);
+    assert.equal(quotasEl.innerHTML, mounted);
+    assert.equal(value.textContent, '0%');
+    assert.equal(value.classList.contains('home-limit-value-critical'), enabled);
+    assert.equal(row.classList.contains('is-exhausted'), enabled);
+  }
 
   // 2. Quoted workspace ID in refreshActiveHover uses dataset lookup and does not throw
   let focusedNode = null;
