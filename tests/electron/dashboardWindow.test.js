@@ -4872,6 +4872,7 @@ test('Work Panel updates workspace tool attribution without replacing a retained
     els: { workPanel: panel }, state: { workMode: 'workspaces', locale: 'en' },
     lastWorkStructureSig: '', t: String, escapeHtml: String, formatCompact: String, formatCost: String,
     captureListSnapshot() {}, animateListSnapshot() {}, applySwatchColors() {},
+    clientMarksHtml: () => '', setClientMarks() {},
     withPreservedFocus(_root, _selector, _key, update) { rebuilds++; update(); }
   });
   const workspace = { key: 'repo', name: 'Repo', relWidth: 1, barBackground: 'red' };

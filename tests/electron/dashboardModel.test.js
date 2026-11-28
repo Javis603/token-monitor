@@ -2353,3 +2353,30 @@ test('buildTopologyGraph defaults to sync flowMode and assigns deterministic per
   });
   assert.equal(staggerOverview.topology.flowMode, 'stagger');
 });
+
+test('workspace and Flow hub client marks use canonical ids ordered by tokens', () => {
+  const session = (key, client, totalTokens) => ({ key, client, clientLabel: `${client} label`, projectLabel: 'Repo', totalTokens });
+  const graph = model.buildTopologyGraph({
+    sessions: [session('a', 'codex', 10), session('b', 'claude', 40), session('c', 'antigravity-cli', 5), session('d', 'antigravity', 30)]
+  });
+  assert.deepEqual(graph.hubs[0].clientMarks.map(mark => mark.id), ['claude', 'antigravity', 'codex']);
+  assert.ok(graph.hubs[0].clientMarks.every(mark => mark.label && !mark.label.endsWith(' label')));
+
+  const rows = model.buildWorkspaceList({
+    periodData: { sessions: { a: session('a', 'codex', 10), b: session('b', 'claude', 40) } }
+  });
+  assert.deepEqual(rows[0].clientMarks.map(mark => mark.id), ['claude', 'codex']);
+  assert.deepEqual(rows[0].clientMarks.map(mark => mark.share), [0.8, 0.2]);
+  assert.deepEqual(rows[0].clientMarks.map(mark => mark.color), [usageCharts.clientColors.claude, usageCharts.clientColors.codex]);
+
+  const partial = model.buildWorkspaceList({
+    periodData: { sessions: { a: session('a', 'codex', 50), b: { projectLabel: 'Repo', totalTokens: 50 } } }
+  });
+  assert.deepEqual(partial[0].clientMarks.map(mark => [mark.id, mark.share]), [['codex', 0.5]]);
+
+  const unknown = model.buildWorkspaceList({ periodData: { sessions: { k: session('k', 'constructor', 5) } } });
+  assert.deepEqual(unknown[0].clientMarks.map(mark => [mark.label, typeof mark.color]), [['constructor', 'string']]);
+
+  const unpriced = model.buildTopologyGraph({ sessions: [{ ...session('u', 'codex', 10), unpricedTokens: 10 }] });
+  assert.equal(unpriced.hubs[0].unpricedTokens, 10);
+});
