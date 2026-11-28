@@ -6,6 +6,7 @@ const test = require('node:test');
 const {
   inUseModelIds,
   perMillionFromPricing,
+  hasTrustworthyPricingMatch,
   upsertOverride,
   removeOverride,
   hasUsableBasePrice
@@ -37,6 +38,13 @@ test('perMillionFromPricing tolerates missing fields and bad input', () => {
   assert.deepEqual(perMillionFromPricing({ pricing: { outputCostPerToken: 1e-6 } }), { inputPerM: undefined, outputPerM: 1, cacheReadPerM: undefined, cacheWritePerM: undefined, cacheWrite1hPerM: undefined });
   assert.deepEqual(perMillionFromPricing(null), { inputPerM: undefined, outputPerM: undefined, cacheReadPerM: undefined, cacheWritePerM: undefined, cacheWrite1hPerM: undefined });
   assert.deepEqual(perMillionFromPricing({}), { inputPerM: undefined, outputPerM: undefined, cacheReadPerM: undefined, cacheWritePerM: undefined, cacheWrite1hPerM: undefined });
+});
+
+test('hasTrustworthyPricingMatch only accepts submission-safe catalog resolutions', () => {
+  assert.equal(hasTrustworthyPricingMatch({ resolution: { submissionSafe: true } }), true);
+  assert.equal(hasTrustworthyPricingMatch({ resolution: { kind: 'fuzzy', exactModelIdentity: false, priceConsensus: false, submissionSafe: false } }), false);
+  assert.equal(hasTrustworthyPricingMatch({ pricing: { inputCostPerToken: 1e-6 } }), false);
+  assert.equal(hasTrustworthyPricingMatch(null), false);
 });
 
 test('hasUsableBasePrice accepts explicit free input/output and rejects invalid values', () => {
