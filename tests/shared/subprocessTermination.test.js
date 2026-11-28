@@ -3,7 +3,8 @@
 const assert = require('node:assert/strict');
 const test = require('node:test');
 
-const { EventEmitter } = require('node:events');
+const { EventEmitter, once } = require('node:events');
+const { spawn } = require('node:child_process');
 
 const {
   createLiveSubprocessTable,
@@ -127,4 +128,60 @@ test('a full table leaves the extra subprocess untracked, and no table tracks no
   const before = Array.from(table);
   spawnFake(6000);
   assert.deepEqual(Array.from(table), before);
+});
+
+test('the host shutdown fallback recognizes subprocess trees', (t) => {
+  const table = createLiveSubprocessTable();
+  trackLiveSubprocesses(table);
+  t.after(() => trackLiveSubprocesses(null));
+  const child = Object.assign(new EventEmitter(), { pid: 4203 });
+  const termination = createSubprocessTermination(child, { killTree: true });
+  const trees = [];
+  signalLiveSubprocesses(table, 'SIGTERM', () => assert.fail('must not signal only the parent'), pid => trees.push(pid));
+  child.emit('exit', 0, null);
+  signalLiveSubprocesses(table, 'SIGTERM', () => assert.fail('must not signal only the parent'), pid => trees.push(pid));
+  termination.confirmClosed();
+  signalLiveSubprocesses(table, 'SIGTERM', () => assert.fail('must not signal a closed process'), pid => trees.push(pid));
+  assert.deepEqual(trees, process.platform === 'win32' ? [4203] : [4203, 4203]);
+});
+
+test('POSIX cleanup kills a detached group after its leader exits', { skip: process.platform === 'win32' }, async t => {
+  for (const mode of ['worker cancellation', 'host shutdown']) {
+    await t.test(mode, { timeout: 10_000 }, async t => {
+      const table = createLiveSubprocessTable();
+      trackLiveSubprocesses(table);
+      const child = spawn(process.execPath, ['-e', `
+        const { spawn } = require('node:child_process');
+        const descendant = spawn(process.execPath, ['-e', "process.on('SIGTERM', () => console.log('term')); setTimeout(() => {}, 60000); process.send('ready')"], {
+          stdio: ['ignore', 'inherit', 'inherit', 'ipc']
+        });
+        descendant.once('message', () => process.exit(0));
+      `], { detached: true, stdio: ['ignore', 'pipe', 'pipe'] });
+      const clock = fakeTimers();
+      const termination = createSubprocessTermination(child, { ...clock, killTree: true });
+      const closed = once(child, 'close');
+      let groupClosed = false;
+      child.once('close', () => {
+        groupClosed = true;
+        termination.confirmClosed();
+      });
+      t.after(() => {
+        trackLiveSubprocesses(null);
+        termination.confirmClosed();
+        if (!groupClosed) {
+          try { process.kill(-child.pid, 'SIGKILL'); } catch (_) {}
+        }
+      });
+      assert.deepEqual(await once(child, 'exit'), [0, null]);
+      assert.ok(table.includes(-child.pid));
+      if (mode === 'worker cancellation') {
+        const stdout = once(child.stdout, 'data');
+        termination.request();
+        assert.equal(String((await stdout)[0]).trim(), 'term');
+        clock.timers[0].fn();
+      } else signalLiveSubprocesses(table);
+      await closed;
+      assert.ok(!table.includes(-child.pid));
+    });
+  }
 });

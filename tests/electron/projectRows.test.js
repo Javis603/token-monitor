@@ -197,7 +197,7 @@ test('project model maps safely retain reserved keys without prototype pollution
   assert.equal({}.polluted, undefined);
 });
 
-test('projectRowsForPeriod recovers trusted native attribution from local sessions when the native rollup is absent', () => {
+test('projectRowsForPeriod does not create Reasonix project rows from nativeSessions', () => {
   const rows = projectRowsForPeriod({
     projects: {
       'token monitor': { label: 'Token Monitor', tokens: 300, costUsd: 2.5, clients: { codex: 300 } }
@@ -210,8 +210,7 @@ test('projectRowsForPeriod recovers trusted native attribution from local sessio
         client: 'reasonix',
         projectId: 'sha256:token-monitor',
         projectLabel: 'Token Monitor',
-        totalTokens: 140,
-        periodTokenDataUnavailable: false
+        totalTokens: 140
       }
     },
     clientLabels: { codex: 'Codex', reasonix: 'Reasonix' },
@@ -219,11 +218,10 @@ test('projectRowsForPeriod recovers trusted native attribution from local sessio
   });
 
   assert.equal(rows.length, 1);
-  assert.equal(rows[0].value, 440);
+  assert.equal(rows[0].value, 300);
   assert.equal(rows[0].cost, 2.5);
   assert.deepEqual(rows[0].accordionRows.map(({ key, value }) => ({ key, value })), [
-    { key: 'codex', value: 300 },
-    { key: 'reasonix', value: 140 }
+    { key: 'codex', value: 300 }
   ]);
 });
 
@@ -260,6 +258,33 @@ test('projectRowsForPeriod safely aggregates client ids inherited by Object.prot
   assert.equal(rows[0].accordionRows[0].value, 10);
 });
 
+test('projectRowsForPeriod labels unknown inherited client ids that tie with a known client', () => {
+  const rows = projectRowsForPeriod({ sessions: {
+    a: { client: 'codex', projectLabel: 'repo', totalTokens: 10 },
+    b: { client: 'constructor', projectLabel: 'repo', totalTokens: 10 }
+  } }, { clientLabels: { codex: 'Codex' } });
+  assert.deepEqual(rows[0].accordionRows.map(row => row.name), ['Codex', 'constructor']);
+});
+
+test('projectRowsForPeriod folds client aliases into one share when asked', () => {
+  const clientKey = client => (client === 'antigravity-cli' ? 'antigravity' : client);
+  const colors = { antigravity: '#4285f4', claude: '#d97757' };
+  const fromSessions = projectRowsForPeriod({ sessions: {
+    a: { client: 'claude', projectLabel: 'repo', totalTokens: 30 },
+    b: { client: 'antigravity', projectLabel: 'repo', totalTokens: 20 },
+    c: { client: 'antigravity-cli', projectLabel: 'repo', totalTokens: 10 }
+  } }, { clientKey, clientColors: colors });
+  const fromRollup = projectRowsForPeriod({ projects: {
+    repo: { label: 'repo', tokens: 60, clients: { claude: 30, antigravity: 20, 'antigravity-cli': 10 } }
+  } }, { clientKey, clientColors: colors });
+  for (const [row] of [fromSessions, fromRollup]) {
+    assert.deepEqual(row.clients, ['antigravity', 'claude']);
+    assert.deepEqual(row.accordionRows.map(share => [share.key, share.value, share.color]), [
+      ['antigravity', 30, '#4285f4'], ['claude', 30, '#d97757']
+    ]);
+  }
+});
+
 test('projectRowsForPeriod labels unattributed tool usage', () => {
   const rows = projectRowsForPeriod({ sessions: {
     a: { projectId: 'sha256:a', projectLabel: 'client-a', totalTokens: 10, costUsd: 1 }
@@ -281,4 +306,118 @@ test('project missing-price counts stay finite and bounded for rollups and sessi
       assert.equal(row.unpricedTokens || 0, expected);
     }
   }
+});
+
+test('paged projects supplement inline projects only for the matching Hub revision', async () => {
+  const { createPagedProjectReader } = require('../../src/electron/renderer/projectRows');
+  const { projectModelAliasStats } = require('../../src/electron/modelAliasPresentation');
+  const local = { label: 'Example', tokens: 12, costUsd: 1, clients: { codex: 12 }, models: { 'x/Llama.3': 5, 'y/Llama.3': 7 } };
+  const remote = { label: 'Example', tokens: 6, costUsd: 2, clients: { claude: 6 }, models: { 'llama-3': 6 } };
+  const stats = projectModelAliasStats({
+    snapshot: { id: 1, source: 7 },
+    allTimeProjectRevisions: { remote: 'revision' },
+    projectsIncomplete: true,
+    periods: { allTime: { totalTokens: 18, projects: { example: local } } },
+    devices: [
+      { deviceId: 'local', periods: { allTime: { projects: { example: local } } } },
+      { deviceId: 'remote', allTimeProjectsOmitted: true, periods: { allTime: {} } }
+    ]
+  }, {}, { grouping: 'duplicates' });
+  assert.deepEqual({ ...stats.periods.allTime.projects.example.models }, { 'Llama.3': 12 });
+  let reads = 0;
+  let rendered;
+  const repaint = new Promise(resolve => { rendered = resolve; });
+  const attach = createPagedProjectReader(async snapshot => {
+    reads++;
+    assert.equal(snapshot.source, 7);
+    return { example: remote };
+  }, rendered);
+  assert.equal(attach(stats, {}), stats);
+  await repaint;
+  const result = attach(stats, {});
+  const project = result.periods.allTime.projects.example;
+  assert.equal(project.tokens, 18);
+  assert.equal(project.costUsd, 3);
+  assert.deepEqual({ ...project.models }, { 'llama-3': 18 });
+  assert.equal(result.devices[1].periods.allTime.projects.example.models['llama-3'], 6);
+  assert.equal(result.projectsIncomplete, false);
+  assert.equal(reads, 1);
+  const revoked = { ...stats, allTimeProjectRevisions: {} };
+  assert.equal(attach(revoked, {}), revoked);
+  assert.equal(revoked.periods.allTime.projects.example.tokens, 12);
+});
+
+
+test('an unavailable device leaves verified project rows visible and the total incomplete', async () => {
+  const { createPagedProjectReader } = require('../../src/electron/renderer/projectRows');
+  const source = {
+    snapshot: { id: 1, source: 1 },
+    allTimeProjectRevisions: { a: 'rev-a', b: 'rev-b' },
+    periods: { allTime: { projects: {} } },
+    devices: ['a', 'b'].map(deviceId => ({ deviceId, allTimeProjectsOmitted: true }))
+  };
+  let finish;
+  const ready = new Promise(resolve => { finish = resolve; });
+  const reads = [];
+  const attach = createPagedProjectReader(async (_, id) => {
+    reads.push(id);
+    return id === 'a' ? { sample: { label: 'Sample', tokens: 7 } } : new Promise(() => {});
+  }, finish);
+  attach(source, {});
+  await ready;
+  const display = attach(source, {});
+  assert.equal(display.devices[0].periods.allTime.projects.sample.tokens, 7);
+  assert.equal(display.devices[1].allTimeProjectsOmitted, true);
+  assert.equal(display.projectsIncomplete, true);
+  const changed = attach({ ...source, allTimeProjectRevisions: { a: 'rev-a', b: 'new-rev-b' } }, {});
+  assert.equal(changed.devices[0].periods.allTime.projects.sample.tokens, 7);
+  assert.equal(changed.projectsIncomplete, true);
+  await Promise.resolve();
+  assert.deepEqual(reads, ['a', 'b', 'b']);
+});
+
+
+test('attaching a page applies chained explicit model aliases only once with grouping off', async () => {
+  const { createPagedProjectReader } = require('../../src/electron/renderer/projectRows');
+  const { projectModelAliasStats } = require('../../src/electron/modelAliasPresentation');
+  const settings = { modelAliases: { a: 'b', b: 'c' }, modelAliasGrouping: 'off' };
+  const inline = { label: 'Sample', tokens: 12, models: { a: 12 } };
+  const stats = projectModelAliasStats({
+    snapshot: { id: 1, source: 1 },
+    allTimeProjectRevisions: { remote: 'rev' },
+    periods: { allTime: { projects: { sample: inline } } },
+    devices: [{ deviceId: 'remote', allTimeProjectsOmitted: true }]
+  }, settings.modelAliases, { grouping: settings.modelAliasGrouping });
+  assert.deepEqual({ ...stats.periods.allTime.projects.sample.models }, { b: 12 });
+  let finish;
+  const ready = new Promise(resolve => { finish = resolve; });
+  const attach = createPagedProjectReader(async () => ({ sample: { label: 'Sample', tokens: 6, models: { a: 6 } } }), finish);
+  attach(stats, settings);
+  await ready;
+  assert.deepEqual({ ...attach(stats, settings).periods.allTime.projects.sample.models }, { b: 18 });
+});
+
+test('paged project reads resume after the longer retry without an unrelated repaint', async t => {
+  const { createPagedProjectReader } = require('../../src/electron/renderer/projectRows');
+  t.mock.timers.enable({ apis: ['Date', 'setTimeout'] });
+  const stats = {
+    snapshot: { id: 1, source: 1 },
+    allTimeProjectRevisions: { remote: 'rev' },
+    periods: { allTime: { projects: {} } },
+    devices: [{ deviceId: 'remote', allTimeProjectsOmitted: true }]
+  };
+  let reads = 0;
+  const attach = createPagedProjectReader(async () => {
+    reads++;
+    return reads === 4 ? { sample: { label: 'Sample', tokens: 7 } } : null;
+  }, () => attach(stats, {}));
+  const flush = () => new Promise(resolve => setImmediate(resolve));
+  attach(stats, {});
+  await flush();
+  for (const interval of [2000, 2000, 30_000]) {
+    t.mock.timers.tick(interval);
+    await flush();
+  }
+  assert.equal(reads, 4);
+  assert.equal(attach(stats, {}).periods.allTime.projects.sample.tokens, 7);
 });

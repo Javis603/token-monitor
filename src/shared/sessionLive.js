@@ -130,6 +130,8 @@
   function sessionActivityState(session, now = Date.now()) {
     if (isArchivedSession(session)) return 'idle';
     if (liveActivityExpiryAt(session, now)) return session.liveActivity.state;
+    // An ACP display row uses its live lease even when it carries archived counters.
+    if (session?.client === 'antigravity' && session.native === true) return 'idle';
     const last = timestampMs(session?.lastUsedAt);
     if (!last) return 'idle';
     const recent = nowMs(now) - last <= RUNNING_WINDOW_MS;

@@ -2,6 +2,7 @@
 
 const assert = require('node:assert/strict');
 const crypto = require('node:crypto');
+const path = require('node:path');
 const test = require('node:test');
 
 const antigravityOAuth = require('../../src/shared/providers/antigravity/oauth');
@@ -165,6 +166,25 @@ test('parseClientFromText requires complete OAuth credential tokens', () => {
     ${officialClient.clientSecret}suffix
   `);
   assert.equal(client, null);
+});
+
+test('discoverOAuthClient recognizes Antigravity IDE.app in both Applications directories', () => {
+  const home = path.resolve('fixture-home');
+  const installedClient = fixtureOAuthClient('123', 'a');
+  const artifact = 'Antigravity IDE.app/Contents/Resources/app/out/main.js';
+  for (const applications of ['/Applications', path.join(home, 'Applications')]) {
+    const installedArtifact = path.join(applications, artifact);
+    const client = antigravityOAuth.discoverOAuthClient({
+      env: {},
+      home,
+      fs: {
+        statSync: (filePath) => ({ isFile: () => filePath === installedArtifact, size: 128 }),
+        readFileSync: () => Buffer.from(`${installedClient.clientId} ${installedClient.clientSecret}`)
+      }
+    });
+    assert.equal(client.clientId, installedClient.clientId, installedArtifact);
+    assert.equal(client.clientSecret, installedClient.clientSecret, installedArtifact);
+  }
 });
 
 test('discoverOAuthClient uses the bundled Antigravity Hub client without an installed app', () => {

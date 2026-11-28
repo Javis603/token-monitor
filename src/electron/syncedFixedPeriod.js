@@ -95,7 +95,7 @@ async function resolveSyncedFixedPeriod(selection, devices, revisions, options) 
     const range = source.range;
     const { periods: _periods, ...metadata } = device;
     addPeriodInto(period, { ...totals, projects, sessions }, true);
-    rows.push({ ...metadata, period: totals, range });
+    rows.push({ ...metadata, period: { ...totals, projects }, range });
     if (entry.period) sessionSources.push({ ...metadata, [selection]: { sessions } });
   }
   const sessions = projectSessionDeviceSessions(period.sessions, sessionSources, [selection]);
@@ -110,7 +110,7 @@ async function resolveSyncedFixedPeriod(selection, devices, revisions, options) 
   }), null);
   return {
     status: 'ready', selection, range, devices: rows,
-    detailsAvailable: !fallback?.length,
+    detailsAvailable: fallback.every(({ period }) => period.totalTokens === 0 && period.costUsd === 0),
     period: { ...period, sessions }
   };
 }

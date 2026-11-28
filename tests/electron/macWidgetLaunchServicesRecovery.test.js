@@ -5,6 +5,7 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const test = require('node:test');
+const { symlinkOrSkip } = require('../helpers/symlink');
 
 const {
   MARKER_FILE_NAME,
@@ -135,7 +136,7 @@ test('missing packaged Widget artifacts do not launch or create marker state', a
   }
 });
 
-test('symlinked packaged Widget artifacts never launch or create marker state', async () => {
+test('symlinked packaged Widget artifacts never launch or create marker state', async (t) => {
   for (const artifact of ['host', 'appex', 'helper']) {
     const setup = fixture();
     try {
@@ -151,7 +152,7 @@ test('symlinked packaged Widget artifacts never launch or create marker state', 
         : process.platform === 'win32'
           ? 'junction'
           : 'dir';
-      fs.symlinkSync(realTarget, target, linkType);
+      if (!symlinkOrSkip(t, realTarget, target, linkType)) return;
       let launches = 0;
       const recover = createMacWidgetLaunchServicesRecovery({
         execFile: () => { launches += 1; }

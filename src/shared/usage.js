@@ -1463,6 +1463,10 @@ function normalizeDeviceRecord(record, options = {}) {
   if (hasOwn(record, 'wslStatus')) normalized.wslStatus = normalizeWslStatus(record.wslStatus);
   if (hasOwn(record, 'projectsEnabled')) normalized.projectsEnabled = record.projectsEnabled !== false;
   if (hasOwn(record, 'allTimeProjectsOmitted')) normalized.allTimeProjectsOmitted = record.allTimeProjectsOmitted === true;
+  if (normalized.allTimeProjectsOmitted && normalized.projectsEnabled !== false
+    && typeof record.allTimeProjectsRevision === 'string' && /^[a-f0-9]{64}$/.test(record.allTimeProjectsRevision)) {
+    normalized.allTimeProjectsRevision = record.allTimeProjectsRevision;
+  }
   if (hasOwn(record, 'allTimeProjectsIncomplete')) normalized.allTimeProjectsIncomplete = record.allTimeProjectsIncomplete === true;
   if (hasOwn(record, 'sessionDetailsOmitted')) {
     const omitted = normalizePeriodOmissionCounts(record.sessionDetailsOmitted);
@@ -1703,6 +1707,8 @@ function mergeDeviceRecord(existing, incoming) {
     if (hasOwn(normalizedExisting, 'periodWindows')) normalizedIncoming.periodWindows = normalizedExisting.periodWindows;
     if (hasOwn(normalizedExisting, 'projectsEnabled')) normalizedIncoming.projectsEnabled = normalizedExisting.projectsEnabled;
     if (hasOwn(normalizedExisting, 'allTimeProjectsOmitted')) normalizedIncoming.allTimeProjectsOmitted = normalizedExisting.allTimeProjectsOmitted;
+    delete normalizedIncoming.allTimeProjectsRevision;
+    if (normalizedExisting.allTimeProjectsRevision) normalizedIncoming.allTimeProjectsRevision = normalizedExisting.allTimeProjectsRevision;
     if (hasOwn(normalizedExisting, 'allTimeProjectsIncomplete')) normalizedIncoming.allTimeProjectsIncomplete = normalizedExisting.allTimeProjectsIncomplete;
     if (hasOwn(normalizedExisting, 'sessionDetailsOmitted')) normalizedIncoming.sessionDetailsOmitted = normalizedExisting.sessionDetailsOmitted;
     if (hasOwn(normalizedExisting, 'periodProjectsOmitted')) normalizedIncoming.periodProjectsOmitted = normalizedExisting.periodProjectsOmitted;
@@ -1739,6 +1745,10 @@ function mergeDeviceRecord(existing, incoming) {
   if (hasOwn(normalizedIncoming, 'history')) normalizedIncoming.history = historyWithAvailability(normalizedIncoming.history, normalizedIncoming.historyAvailable);
   if (hasIncomingTrackedClients) {
     preserveUntrackedClientUsage(normalizedExisting, normalizedIncoming, normalizedIncoming.trackedClients || []);
+    if (normalizedIncoming.allTimeProjectsRevision && Object.keys(normalizedIncoming.periods.allTime.projects).length > 0) {
+      // The restored Hub archive can overlap the producer's paged rollup.
+      normalizedIncoming.allTimeProjectsIncomplete = true;
+    }
   }
   return normalizedIncoming;
 }

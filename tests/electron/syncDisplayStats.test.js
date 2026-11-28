@@ -156,24 +156,19 @@ test('sync presentation selects recent activity from the local device, not a new
   assert.equal(result.periods.today.clients.openclaw, 10);
 });
 
-test('local Reasonix activity wins independently of a newer remote generic session', () => {
-  const nowMs = Date.parse('2026-07-16T10:04:00.000Z');
+test('the local recent provider includes Codex pre-token activity and excludes retired Reasonix activity', () => {
+  const nowMs = Date.parse('2026-07-16T10:03:00.000Z');
   const local = device('local', 10, {
-    nativeSessions: {
-      today: {
-        reasonix: { client: 'reasonix', lastMessageAt: '2026-07-16T10:02:00.000Z' }
-      },
-      month: {},
-      allTime: {}
-    }
-  });
-  const remote = device('remote', 20, {
-    today: usagePeriod('claude', '2026-07-16T10:03:00.000Z', 20)
+    today: usagePeriod('claude', '2026-07-16T10:00:00.000Z', 10),
+    nativeSessions: { today: {
+      'codex:pre-token': { client: 'codex', tokenDataUnavailable: true, lastMessageAt: '2026-07-16T10:01:00.000Z' },
+      'reasonix:old': { client: 'reasonix', lastMessageAt: '2026-07-16T10:02:00.000Z' }
+    } }
   });
 
-  const result = composeLocalSyncStats(aggregateDevices([local, remote], 0, nowMs), local, { nowMs });
+  const result = composeLocalSyncStats(aggregateDevices([local], 0, nowMs), local, { nowMs });
 
-  assert.equal(pickRecentUsageProviderId(result), 'reasonix');
+  assert.equal(pickRecentUsageProviderId(result), 'codex');
 });
 
 test('remote activity cannot invent a recent provider when the local device has none', () => {
@@ -189,32 +184,8 @@ test('remote activity cannot invent a recent provider when the local device has 
   assert.equal(Object.hasOwn(result, 'localRecentUsageActivity'), false);
 });
 
-test('Reasonix metadata updates cannot override newer local message activity', () => {
-  const nowMs = Date.parse('2026-07-16T10:11:00.000Z');
-  const local = device('local', 10, {
-    today: usagePeriod('claude', '2026-07-16T10:00:00.000Z', 10),
-    nativeSessions: {
-      today: {
-        reasonix: {
-          client: 'reasonix',
-          createdAt: '2026-07-16T09:00:00.000Z',
-          lastMessageAt: '2026-07-16T09:00:00.000Z',
-          lastUsedAt: '2026-07-16T10:10:00.000Z',
-          updatedAt: '2026-07-16T10:10:00.000Z'
-        }
-      },
-      month: {},
-      allTime: {}
-    }
-  });
-
-  const result = composeLocalSyncStats(null, local, { nowMs });
-
-  assert.equal(pickRecentUsageProviderId(result), 'claude');
-});
-
 test('the local cold-start presentation restores native views from the anchor seed', () => {
-  const nativeSessions = { today: { session: { client: 'reasonix', totalTokens: 25 } }, month: {}, allTime: {} };
+  const nativeSessions = { today: { session: { client: 'codex', totalTokens: 0, tokenDataUnavailable: true } }, month: {}, allTime: {} };
   const nativeProjects = { today: { project: { label: 'Project', tokens: 25 } }, month: {}, allTime: {} };
   const seededLocalDevice = device('local', 25, { nativeSessions, nativeProjects });
   const stats = aggregateDevices([seededLocalDevice], 0, Date.parse('2026-07-16T00:00:00.000Z'));
@@ -229,7 +200,7 @@ test('the local cold-start presentation restores native views from the anchor se
   assert.deepEqual(stats.nativeSessions, nativeSessions);
   assert.deepEqual(stats.nativeProjects, nativeProjects);
 
-  const collectedSessions = { today: { live: { client: 'reasonix', totalTokens: 30 } }, month: {}, allTime: {} };
+  const collectedSessions = { today: { live: { client: 'codex', totalTokens: 0, tokenDataUnavailable: true } }, month: {}, allTime: {} };
   attachLocalPresentationNativeViews(stats, {
     lastCollectedDevice: device('local', 30, { nativeSessions: collectedSessions }),
     seededLocalDevice,
@@ -422,6 +393,11 @@ test('a summary never normalizes the local all-time sessions', () => {
   const localOnly = composeLocalOnlySummary(local, (stats) => stats, { nowMs });
   assert.equal(reads.count, 0);
 
+  const accountingTime = new Date(nowMs).toISOString();
+  for (const stats of [summary, localOnly]) {
+    assert.equal(stats.updatedAt, accountingTime);
+    assert.equal(completeLocalSyncStats(stats).updatedAt, accountingTime);
+  }
   assert.equal(Object.keys(completeLocalSyncStats(summary).periods.allTime.sessions).length, 1);
   assert.equal(Object.keys(completeLocalSyncStats(localOnly).periods.allTime.sessions).length, 1);
   assert.ok(reads.count > 0, 'the completions normalize them');

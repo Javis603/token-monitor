@@ -4,10 +4,13 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
 const test = require('node:test');
+const vm = require('node:vm');
+const { createTrayLayoutItem, resolveTrayLayout, VERSION } = require('../../src/shared/trayLayout');
 
 const {
   createTrayProviderIconDeliveryGuard,
   isFlatInkPixels,
+  trayProviderIconDemand,
   trayProviderIconSources,
   trayProviderBadgeLayout,
   trayProviderOpticalLayout,
@@ -162,4 +165,184 @@ test('the alpha floor and the tolerance are both adjustable for callers', () => 
   const twoTones = rgbaPixels([20, 20, 20, 255], [60, 60, 60, 255]);
   assert.equal(isFlatInkPixels(twoTones), false);
   assert.equal(isFlatInkPixels(twoTones, { tolerance: 64 }), true);
+});
+
+test('tray icon demand covers reported usage, limit providers and layout picks', () => {
+  const demand = trayProviderIconDemand({
+    stats: {
+      periods: {
+        today: { clients: { codex: 10, ' Claude ': 2 }, clientCosts: { hermes: 0.2 } },
+        allTime: { clients: { opencode: 4 } }
+      },
+      limits: { providers: [{ provider: 'cursor' }, {}] }
+    },
+    layouts: [
+      { items: [{ type: 'icon', source: { provider: 'claude-brand' } }, { type: 'icon', source: { provider: 'auto' } }] },
+      { items: [{ type: 'bars', rows: [{ provider: 'kimi' }, { provider: 'auto' }] }] },
+      null
+    ]
+  });
+  assert.deepEqual([...demand].sort(), ['claude', 'claude-brand', 'codex', 'cursor', 'hermes', 'kimi', 'opencode']);
+});
+
+test('the recent provider icon is available before the provider reports usage or limits', () => {
+  const stats = {
+    localRecentUsageActivity: { provider: 'codex' },
+    periods: { today: { clients: { claude: 10 } } }
+  };
+  const layout = {
+    version: VERSION,
+    items: [{ ...createTrayLayoutItem('providerIcon'), autoMode: 'recent' }]
+  };
+  const availableProviderIds = [...trayProviderIconDemand({ stats, layouts: [layout] })];
+
+  assert.equal(resolveTrayLayout(layout, stats, { availableProviderIds }).items[0].provider, 'codex');
+});
+
+test('tray icon demand stays empty without data or layouts', () => {
+  assert.deepEqual([...trayProviderIconDemand()], []);
+  assert.deepEqual([...trayProviderIconDemand({ stats: { periods: { today: null } }, layouts: [{ items: [{ type: 'text' }] }] })], []);
+});
+
+function trayMarkDeliveryFixture(loadImage) {
+  const app = fs.readFileSync(path.resolve(__dirname, '..', '..', 'src', 'electron', 'renderer', 'app.js'), 'utf8');
+  const refreshStart = app.indexOf('function refreshTrayComposers(');
+  const refreshEnd = app.indexOf('\nfunction loadImage(', refreshStart);
+  const start = app.indexOf('function trayProviderIconDemand() {');
+  const end = app.indexOf('\nfunction setAccountGroupExpanded(', start);
+  assert.ok(refreshStart >= 0 && refreshEnd > refreshStart && start >= 0 && end > start);
+  const context = {
+    state: { settings: {}, stats: null, pluginCatalog: { limits: { modules: [] } } },
+    window: {
+      tokenMonitor: { setTrayIcons: async () => {} },
+      TokenMonitorTrayProviderIcons: require('../../src/electron/renderer/trayProviderIcons'),
+      TokenMonitorTrayComposer: { syncTrayComposerSurfaces() {} }
+    },
+    els: {},
+    trayComposers: {},
+    createTrayComposer() {},
+    syncCustomTrayClockTimer() {},
+    trayIconProviderIds: new Set(['claude-brand', 'chatgpt', 'codex', 'claude']),
+    trayProviderImages: {},
+    trayProviderImageIds: new WeakMap(),
+    trayProviderImageOpticalSamples: new WeakMap(),
+    trayProviderIconsRequested: new Set(),
+    trayProviderIconsLoading: new Set(),
+    trayProviderIconDeliveryGuard: createTrayProviderIconDeliveryGuard(),
+    loadImage,
+    providerImageOpticalSample: () => ({ canvas: {} }),
+    providerImageToPngDataUrl: () => 'bitmap',
+    isSettingsSurfaceVisible: () => false,
+    statsForTrayComposer: () => ({ limits: { providers: [{ provider: 'codex' }, { provider: 'claude' }] } }),
+    maybeUpdateBarsIcon() {},
+    renderFloatingBubbleContent() {}
+  };
+  vm.createContext(context);
+  vm.runInContext(app.slice(refreshStart, refreshEnd), context);
+  vm.runInContext(app.slice(start, end), context);
+  const pick = (provider) => {
+    context.state.settings = { trayCustomLayout: { items: [{ type: 'icon', source: { provider } }] } };
+  };
+  return { context, pick };
+}
+
+test('opening the tray composer requests the providers used by its quota preview', async () => {
+  const { context } = trayMarkDeliveryFixture(() => Promise.resolve({}));
+  await context.deliverTrayProviderIcons();
+  assert.deepEqual(Object.keys(context.trayProviderImages), ['app']);
+
+  context.isSettingsSurfaceVisible = () => true;
+  context.refreshTrayComposers();
+  await new Promise((resolve) => setImmediate(resolve));
+
+  assert.deepEqual(Object.keys(context.trayProviderImages).sort(), ['app', 'claude', 'codex']);
+});
+
+test('a mark dropped by a superseded delivery is requested again when it returns to demand', async () => {
+  let finishBrand;
+  const loads = [];
+  const { context, pick } = trayMarkDeliveryFixture((source) => {
+    loads.push(source);
+    if (source.endsWith('/claude.svg') && !finishBrand) return new Promise((resolve) => { finishBrand = resolve; });
+    return Promise.resolve({});
+  });
+  pick('claude-brand');
+  const superseded = context.deliverTrayProviderIcons();
+  pick('chatgpt');
+  await context.deliverTrayProviderIcons();
+  finishBrand({});
+  await superseded;
+  assert.equal(context.trayProviderImages['claude-brand'], undefined);
+
+  pick('claude-brand');
+  context.syncTrayProviderIconDemand();
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.ok(context.trayProviderImages['claude-brand'], 'the dropped mark is delivered once it is wanted again');
+  assert.ok(context.trayProviderImages.chatgpt);
+});
+
+test('a mark loaded by a superseded delivery is sent once it returns to demand', async () => {
+  let finishApp;
+  const sent = [];
+  const { context, pick } = trayMarkDeliveryFixture((source) => {
+    if (source.endsWith('tray-token-monitor.png') && !finishApp) return new Promise((resolve) => { finishApp = resolve; });
+    return Promise.resolve({});
+  });
+  context.window.tokenMonitor.setTrayIcons = async (icons) => {
+    for (const [id, bitmap] of Object.entries(icons)) if (bitmap !== null) sent.push(id);
+  };
+  pick('claude-brand');
+  const superseded = context.deliverTrayProviderIcons();
+  await new Promise((resolve) => setImmediate(resolve));
+  pick('chatgpt');
+  await context.deliverTrayProviderIcons();
+  finishApp({});
+  await superseded;
+  assert.ok(context.trayProviderImages['claude-brand'], 'the superseded delivery cached the mark');
+  assert.equal(sent.includes('claude-brand'), false, 'but never sent it to main');
+
+  pick('claude-brand');
+  context.syncTrayProviderIconDemand();
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(sent.includes('claude-brand'), true);
+});
+
+test('a mark left out of a theme redelivery is drawn for the new theme when it returns', async () => {
+  const { context, pick } = trayMarkDeliveryFixture(() => Promise.resolve({}));
+  let theme = 'dark';
+  const held = {};
+  context.providerImageToPngDataUrl = () => `bitmap-${theme}`;
+  context.window.tokenMonitor.setTrayIcons = async (icons) => {
+    for (const [id, bitmap] of Object.entries(icons)) {
+      if (bitmap === null) delete held[id];
+      else held[id] = bitmap;
+    }
+  };
+  pick('claude-brand');
+  await context.deliverTrayProviderIcons();
+  assert.equal(held['claude-brand'], 'bitmap-dark');
+
+  pick('chatgpt');
+  theme = 'light';
+  await context.deliverTrayProviderIcons();
+  assert.equal(held['claude-brand'], undefined, 'main drops the old-theme bitmap');
+
+  pick('claude-brand');
+  context.syncTrayProviderIconDemand();
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(held['claude-brand'], 'bitmap-light');
+});
+
+test('a mark that failed to load is not retried on every stats push', async () => {
+  let loads = 0;
+  const { context, pick } = trayMarkDeliveryFixture((source) => {
+    if (source.endsWith('/claude.svg')) { loads += 1; return Promise.reject(new Error('decode')); }
+    return Promise.resolve({});
+  });
+  pick('claude-brand');
+  await context.deliverTrayProviderIcons();
+  context.syncTrayProviderIconDemand();
+  context.syncTrayProviderIconDemand();
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(loads, 1);
 });

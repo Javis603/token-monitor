@@ -1,8 +1,14 @@
 'use strict';
 
 const assert = require('node:assert/strict');
+const fs = require('node:fs');
 const test = require('node:test');
+const vm = require('node:vm');
+const { fetchFixedRange } = require('../../src/shared/fixedRangeClient');
+const { encodeFixedRangeSnapshot } = require('../../src/shared/fixedRangeSync');
 const { normalizePeriod } = require('../../src/shared/usage');
+const { createDesktopHubFetch } = require('../../src/electron/networkProxy');
+const fixedPeriodRangesApi = require('../../src/electron/renderer/fixedPeriodRanges');
 const { createFixedRangeReadCache, historyFallbackForDevices, resolveSyncedFixedPeriod } = require('../../src/electron/syncedFixedPeriod');
 
 const day = '2026-11-25';
@@ -33,6 +39,61 @@ function period(name, tokens) {
     } }
   });
 }
+
+test('desktop Client reads the fixed-range index and page through the Hub proxy', async () => {
+  const source = fs.readFileSync(require.resolve('../../src/electron/main'), 'utf8');
+  const start = source.indexOf('async function resolveSyncedPeriodForStats(');
+  const end = source.indexOf('\n}\n', start) + 3;
+  const hubUrl = 'https://proxy-only.invalid';
+  const remoteDevice = device('remote');
+  const revision = 'rev';
+  const { ranges, pages } = encodeFixedRangeSnapshot({
+    ...remoteDevice,
+    nativeRangeWindows: { week: windows.week },
+    nativeRanges: { week: period('remote', 42) }
+  }, { maxPageBytes: 1600 });
+  const requests = [];
+  const directFetch = async () => { throw new Error('Hub requires a proxy'); };
+  const fetchFromHub = createDesktopHubFetch(async (input, init) => {
+    const url = new URL(input);
+    requests.push({ url, init });
+    const page = url.searchParams.get('page');
+    return Response.json(page === null ? { revision, ranges } : { rows: pages[Number(page)] });
+  }, directFetch);
+  const resolve = vm.runInNewContext(source.slice(start, end) + '\nresolveSyncedPeriodForStats;', {
+    AbortSignal,
+    Date: { now: () => options.now },
+    mode: 'sync',
+    hubModeGeneration: 1,
+    SYNC_WEEK_STARTS_ON: 1,
+    settings: {},
+    historyResolverOptions: () => ({ hubMode: 'client', hubUrl, secret: 'fixture' }),
+    currentHubStatsIdentity: () => hubUrl,
+    currentHubStatsCache: () => null,
+    fixedRangeReads: createFixedRangeReadCache(),
+    fixedPeriodRangesApi,
+    resolveSyncedFixedPeriod,
+    fetchFixedRange,
+    projectModelAliasStats: stats => stats,
+    fetch: directFetch,
+    fetchFromHub
+  });
+
+  const result = await resolve({ devices: [remoteDevice], fixedRangeRevisions: { remote: revision } }, 1, 'week');
+  assert.deepEqual(requests.map(({ url }) => url.searchParams.get('page')), [null, '0']);
+  for (const { url, init } of requests) {
+    assert.equal(url.origin, hubUrl);
+    assert.equal(url.pathname, '/api/fixed-ranges');
+    assert.equal(url.searchParams.get('deviceId'), 'remote');
+    assert.equal(init.headers.authorization, 'Bearer fixture');
+    assert.equal(init.redirect, 'error');
+    assert.ok(init.signal instanceof AbortSignal);
+  }
+  assert.equal(result.detailsAvailable, true);
+  assert.equal(result.period.totalTokens, 42);
+  assert.equal(Object.values(result.devices[0].period.projects)[0].tokens, 42);
+  assert.equal(result.period.sessions['claude:remote'].sourceDevice.deviceId, 'remote');
+});
 
 test('all four synchronized windows use the same totals for device rows, sessions and projects', async () => {
   for (const [i, [selection, window]] of Object.entries(Object.entries(windows))) {
@@ -119,6 +180,41 @@ test('an idle legacy device with empty History leaves the exact range and detail
   assert.equal(result.period.totalTokens, 20);
   assert.equal(result.detailsAvailable, true);
   assert.deepEqual(result.devices.map(row => row.deviceId), ['a']);
+});
+
+test('a stale device with History usage only outside Week does not hide exact Week details', async () => {
+  const a = device('a');
+  const b = device('b', '2026-11-24');
+  b.periodWindows.today.endsAt = day + 'T00:00:00.000Z';
+  b.periods.today.totalTokens = 0;
+  const histories = [{
+    ...b, historyAvailable: true, history: { daily: [{ date: '2026-11-22', tokens: 120 }] }
+  }];
+  const result = await resolveSyncedFixedPeriod('week', [a, b], { a: 'rev-a', b: 'rev-b' }, {
+    ...options,
+    read: id => id === 'a' ? period('a', 20) : null,
+    history: devices => historyFallbackForDevices('week', devices, histories, options)
+  });
+  assert.equal(result.detailsAvailable, true);
+  assert.equal(result.period.totalTokens, 20);
+  assert.equal(result.period.sessions['claude:a'].totalTokens, 20);
+  assert.equal(result.period.projects.shared.tokens, 20);
+  assert.deepEqual(result.devices.map(row => [row.deviceId, row.period.totalTokens]), [['a', 20], ['b', 0]]);
+});
+
+test('a History-only device with cost but zero tokens still leaves Week details incomplete', async () => {
+  const [a, b] = [device('a'), device('b')];
+  b.periods.today.totalTokens = 0;
+  const histories = [{
+    ...b, historyAvailable: true, history: { daily: [{ date: '2026-11-24', tokens: 0, cost: 1 }] }
+  }];
+  const result = await resolveSyncedFixedPeriod('week', [a, b], { a: 'rev-a' }, {
+    ...options,
+    read: () => period('a', 20),
+    history: devices => historyFallbackForDevices('week', devices, histories, options)
+  });
+  assert.equal(result.detailsAvailable, false);
+  assert.equal(result.period.costUsd, 1);
 });
 
 test('mismatched History cannot make a missing device contribution look like zero', () => {

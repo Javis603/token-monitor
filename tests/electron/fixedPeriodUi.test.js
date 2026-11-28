@@ -24,6 +24,9 @@ test('reset restores the configured middle range from a custom selection', () =>
     let followed = 0;
     const context = {
       state, fixedPeriodRangesApi, tokenNumberAnimationApi: { normalize: value => value },
+      detailTokenDisplayApi: { reset() {} },
+      currentLocale: () => 'en',
+      settleRowNumberAnimations() {},
       setPeriod(period) { state.period = period; return true; },
       followOpenSessionToPeriod() { followed++; }
     };
@@ -231,6 +234,7 @@ for (const hubMode of ['icloud', 'client']) test(`${hubMode} retries incomplete 
     state: { settings: { hubMode }, stats: { snapshot: { id: 'a' } } },
     window: { tokenMonitor: { getSyncedFixedPeriod: async () => responses[reads++] } },
     syncedFixedPeriodKey: () => key,
+    readSyncedFixedPeriod: () => context.window.tokenMonitor.getSyncedFixedPeriod(),
     statsRenderScheduler: { request() {} },
     FIXED_PERIOD_HISTORY_RETRY_MS: 4000,
     FIXED_PERIOD_HISTORY_MAX_RETRIES: 3,
@@ -308,8 +312,9 @@ test('a new fallback device observation invalidates a completed synchronized ran
     reads.push(id);
     return { detailsAvailable: true };
   } } };
-  const extract = name => source.match(new RegExp('function ' + name + '\\(\\) \\{[\\s\\S]*?\\n\\}'))[0];
-  vm.runInNewContext(extract('syncedFixedPeriodKey') + '\n' + extract('requestSyncedFixedPeriod'), context);
+  const extract = name => source.match(new RegExp('function ' + name + '\\([^)]*\\) \\{[\\s\\S]*?\\n\\}'))[0];
+  context.readSyncedFixedPeriod = () => context.window.tokenMonitor.getSyncedFixedPeriod(context.state.stats.snapshot.id);
+  vm.runInNewContext(['syncedFixedPeriodKey', 'syncedFixedPeriodScope', 'requestSyncedFixedPeriod'].map(extract).join('\n'), context);
 
   context.requestSyncedFixedPeriod();
   await Promise.resolve();
@@ -326,6 +331,221 @@ test('a new fallback device observation invalidates a completed synchronized ran
   await Promise.resolve();
   assert.deepEqual(reads, ['snapshot-1', 'snapshot-2']);
 });
+
+test('fixed-range refreshes keep sessions and projects visible until the replacement is ready', async () => {
+  const { context, state, reads } = syncedRangeHarness();
+  for (const period of ['week', 'yesterday', 'last7', 'last30']) {
+    state.period = period;
+    context.requestSyncedFixedPeriod();
+    reads.at(-1).finish(rangeDetails(20));
+    await new Promise(setImmediate);
+
+    state.stats.devices[0].updatedAt += 1;
+    context.requestSyncedFixedPeriod();
+    state.fixedPeriodSnapshot = context.buildFixedPeriodSnapshot();
+    assert.equal(state.fixedPeriodSnapshot.period.totalTokens, 20);
+    for (const breakdown of ['session', 'project', 'model', 'device', 'trends']) {
+      state.breakdown = breakdown;
+      assert.equal(context.periodContentAvailability().fixedUnavailable, false, breakdown);
+      assert.equal(context.periodContentAvailability().detailUnavailable, false, breakdown);
+    }
+    reads.at(-1).finish(rangeDetails(25));
+    await new Promise(setImmediate);
+    assert.equal(context.buildFixedPeriodSnapshot().period.totalTokens, 25);
+  }
+});
+
+test('a visible range warms once, is reused on selection, and drops stale text across a revision change', async () => {
+  const { context, state, reads } = syncedRangeHarness();
+  state.period = 'today';
+  context.warmSyncedFixedPeriod();
+  context.warmSyncedFixedPeriod();
+  assert.deepEqual(reads.map(read => read.period), ['week']);
+  reads[0].finish(rangeDetails(20));
+  await new Promise(setImmediate);
+
+  state.period = 'week';
+  context.requestSyncedFixedPeriod();
+  assert.equal(reads.length, 1);
+  assert.equal(context.buildFixedPeriodSnapshot().period.sessions.example.title, 'Synced title');
+  await new Promise(setImmediate);
+
+  state.stats.fixedRangeRevisions = { ...state.stats.fixedRangeRevisions, remote: 'revision-2' };
+  context.requestSyncedFixedPeriod();
+  assert.equal(context.buildFixedPeriodSnapshot().period.sessions.example.title, undefined);
+  assert.equal(context.buildFixedPeriodSnapshot().period.totalTokens, 20);
+
+  state.stats.devices[0].projectsEnabled = false;
+  context.requestSyncedFixedPeriod();
+  assert.equal(context.buildFixedPeriodSnapshot().status, 'loading');
+  reads[1].finish(rangeDetails(25));
+  reads[2].finish(rangeDetails(30));
+  await new Promise(setImmediate);
+  assert.equal(context.buildFixedPeriodSnapshot().period.totalTokens, 30);
+});
+
+test('a current incomplete range supersedes the retained complete snapshot', async () => {
+  const { context, state, reads } = syncedRangeHarness();
+  context.requestSyncedFixedPeriod();
+  reads[0].finish(rangeDetails(20));
+  await new Promise(setImmediate);
+  state.stats.devices[0].updatedAt++;
+  context.requestSyncedFixedPeriod();
+  reads[1].finish({ ...rangeDetails(90), detailsAvailable: false });
+  await new Promise(setImmediate);
+  state.fixedPeriodSnapshot = context.buildFixedPeriodSnapshot();
+  assert.equal(state.fixedPeriodSnapshot.period.totalTokens, 90);
+  assert.equal(context.periodContentAvailability().detailUnavailable, true);
+});
+
+test('local and still-authorized titles remain stable through remote token updates', async () => {
+  const { context, state, reads } = syncedRangeHarness();
+  state.settings.deviceId = 'local';
+  state.stats.localFixedRangeRevision = 'local-1';
+  state.stats.fixedRangeRevisions.stable = 'unchanged';
+  const titles = {
+    'codex:local': { title: 'Local title', sourceDevice: { deviceId: 'local' } },
+    'codex:remote': { title: 'Shared title', sourceDevice: { deviceId: 'remote' } },
+    'codex:stable': { title: 'Stable title', sourceDevice: { deviceId: 'stable' } }
+  };
+  state.stats.periods = { month: { sessions: { 'codex:remote': titles['codex:remote'] } } };
+  const result = rangeDetails(20);
+  result.period.sessions = titles;
+  context.requestSyncedFixedPeriod();
+  reads[0].finish(result);
+  await new Promise(setImmediate);
+
+  state.stats.fixedRangeRevisions = { ...state.stats.fixedRangeRevisions, remote: 'revision-2' };
+  context.requestSyncedFixedPeriod();
+  assert.deepEqual(context.buildFixedPeriodSnapshot().period.sessions, titles);
+  reads[1].finish(result);
+  await new Promise(setImmediate);
+
+  state.stats.periods.month.sessions = {};
+  state.stats.fixedRangeRevisions = { ...state.stats.fixedRangeRevisions, remote: 'revision-3' };
+  state.openSession = { kind: 'session', period: 'week', client: 'codex', sessionId: 'remote', title: 'Shared title' };
+  context.requestSyncedFixedPeriod();
+  const rows = context.buildFixedPeriodSnapshot().period.sessions;
+  assert.equal(rows['codex:local'].title, 'Local title');
+  assert.equal(rows['codex:stable'].title, 'Stable title');
+  assert.equal(rows['codex:remote'].title, undefined);
+  assert.equal(context.sessionDetailTitle(), '');
+
+  state.syncedFixedPeriodCache.clear();
+  state.syncedFixedPeriod = null;
+  context.requestSyncedFixedPeriod();
+  reads.at(-1).finish({ ...result, period: { ...result.period, sessions: rows } });
+  await new Promise(setImmediate);
+  assert.equal(context.sessionDetailTitle(), '', 'clearing the cache cannot revive the clicked title');
+});
+
+test('an unsuccessful warmup retries once when a new revision arrives', async () => {
+  const { context, state, reads } = syncedRangeHarness();
+  state.period = 'today';
+  context.warmSyncedFixedPeriod();
+  reads[0].finish(null);
+  await new Promise(setImmediate);
+  context.warmSyncedFixedPeriod();
+  assert.equal(reads.length, 1);
+  state.stats.fixedRangeRevisions = { ...state.stats.fixedRangeRevisions, remote: 'revision-2' };
+  context.warmSyncedFixedPeriod();
+  assert.equal(reads.length, 2);
+  reads[1].finish(rangeDetails(25));
+  await new Promise(setImmediate);
+  assert.equal(reads.length, 2);
+});
+
+test('a brief publication gap keeps usage visible without unverified titles and expires', async () => {
+  const { context, state, reads } = syncedRangeHarness();
+  let expire;
+  context.setTimeout = callback => { expire = callback; return 1; };
+  context.requestSyncedFixedPeriod();
+  reads[0].finish(rangeDetails(20));
+  await new Promise(setImmediate);
+  state.stats.fixedRangeRevisions = {};
+  context.requestSyncedFixedPeriod();
+  assert.equal(context.buildFixedPeriodSnapshot().period.totalTokens, 20);
+  assert.equal(context.buildFixedPeriodSnapshot().period.sessions.example.title, undefined);
+  expire();
+  assert.equal(context.buildFixedPeriodSnapshot().status, 'loading');
+  state.stats.fixedRangeRevisions = { remote: 'revision-1' };
+  context.requestSyncedFixedPeriod();
+  assert.equal(reads.length, 2, 'the expired revision must be fetched again');
+  reads[1].finish(rangeDetails(25));
+  await new Promise(setImmediate);
+  assert.equal(context.buildFixedPeriodSnapshot().period.totalTokens, 25);
+});
+
+test('restoring the same revision cancels publication-gap expiry', async () => {
+  const { context, state, reads } = syncedRangeHarness();
+  const timers = new Set();
+  context.setTimeout = callback => { timers.add(callback); return callback; };
+  context.clearTimeout = callback => timers.delete(callback);
+  context.requestSyncedFixedPeriod();
+  reads[0].finish(rangeDetails(20));
+  await new Promise(setImmediate);
+  const revisions = state.stats.fixedRangeRevisions;
+  state.stats.fixedRangeRevisions = {};
+  assert.equal(context.buildFixedPeriodSnapshot().period.totalTokens, 20);
+  assert.equal(timers.size, 1);
+  state.stats.fixedRangeRevisions = revisions;
+  context.requestSyncedFixedPeriod();
+  assert.equal(context.buildFixedPeriodSnapshot().period.totalTokens, 20);
+  assert.equal(timers.size, 0);
+  assert.equal(reads.length, 1);
+});
+
+test('a warmup response for replaced display settings cannot populate the range cache', async () => {
+  const { context, state, reads } = syncedRangeHarness();
+  state.period = 'today';
+  context.warmSyncedFixedPeriod();
+  state.settings.modelAliases = { old: 'new' };
+  reads[0].finish(rangeDetails(20));
+  await new Promise(setImmediate);
+  assert.equal(state.syncedFixedPeriodCache.get('week').snapshot, null);
+  assert.equal(reads.length, 2);
+  reads[1].finish(rangeDetails(25));
+  await new Promise(setImmediate);
+  assert.equal(state.syncedFixedPeriodCache.get('week').snapshot.period.totalTokens, 25);
+});
+
+function rangeDetails(totalTokens) {
+  return { status: 'ready', detailsAvailable: true, period: {
+    totalTokens, sessions: { example: { title: 'Synced title' } }, projects: { example: { totalTokens } }
+  } };
+}
+
+function syncedRangeHarness() {
+  const source = read('app.js');
+  const reads = [];
+  const state = {
+    mode: 'sync', period: 'week', breakdown: 'session', settings: { hubMode: 'client' }, syncedFixedPeriodCache: new Map(),
+    stats: {
+      snapshot: { id: 'snapshot', source: 1 }, fixedRangeRevisions: { remote: 'revision-1' },
+      devices: [{ deviceId: 'remote', updatedAt: 1 }]
+    }
+  };
+  const context = {
+    state, fixedPeriodRangesApi: require('../../src/electron/renderer/fixedPeriodRanges'),
+    fixedPeriodTodayKey: () => '2026-11-25', currentCalendarLocale: () => 'en-GB',
+    currentNativeRangeSnapshot: () => null, buildFixedPeriodSourcesSnapshot: () => null,
+    displayedSessions: () => context.buildFixedPeriodSnapshot().period?.sessions,
+    sessionRowsApi: require('../../src/electron/renderer/sessionRows'),
+    fixedPeriodDevices: () => [{ deviceId: 'remote' }], shownPeriodOrder: () => ['today', 'week'],
+    isRendererWindowHidden: () => false, visibleStatsSurface: () => 'main',
+    statsRenderScheduler: { request() {} }, setTimeout: () => 0, clearTimeout() {},
+    FIXED_PERIOD_HISTORY_RETRY_MS: 4000,
+    FIXED_PERIOD_HISTORY_MAX_RETRIES: 3,
+    window: {
+      TokenMonitorSessionTitleDisplay: require('../../src/electron/sessionTitleDisplay'),
+      tokenMonitor: { getSyncedFixedPeriod: (_id, _source, period) => new Promise(finish => reads.push({ finish, period })) }
+    }
+  };
+  const functions = ['syncedFixedPeriodKey', 'syncedFixedPeriodScope', 'readSyncedFixedPeriod', 'retainVerifiedFixedRangeTitles', 'warmSyncedFixedPeriod',
+    'requestSyncedFixedPeriod', 'buildFixedPeriodSnapshot', 'periodContentAvailability', 'sessionDetailTitle'];
+  vm.runInNewContext(functions.map(name => source.match(new RegExp(`function ${name}\\([^)]*\\) \\{[\\s\\S]*?\\n\\}`))[0]).join('\n'), context);
+  return { context, state, reads };
+}
 
 test('session detail uses a synced range only for the selected period', () => {
   const source = fs.readFileSync(path.join(__dirname, '../../src/electron/renderer/app.js'), 'utf8');
@@ -355,6 +575,7 @@ test('synced range reads stop after the retry budget until the key changes', asy
   const context = {
     state: { stats: { snapshot: {} } },
     syncedFixedPeriodKey: () => key,
+    readSyncedFixedPeriod: () => context.window.tokenMonitor.getSyncedFixedPeriod(),
     window: { tokenMonitor: { getSyncedFixedPeriod: async () => { reads++; return null; } } },
     Date: { now: () => now },
     FIXED_PERIOD_HISTORY_RETRY_MS: 4000,

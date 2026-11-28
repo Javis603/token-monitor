@@ -1,10 +1,13 @@
 'use strict';
 
+const { createHash } = require('node:crypto');
+
 const http = require('node:http');
 const {
   createFixedRangeUploads, fixedRangeRequestPages, retireFixedRangeSnapshot, rememberFixedRangeObservation,
   hasCurrentFixedRangeObservation, withoutFixedRangeObservation
 } = require('../shared/fixedRangeUploads');
+const { createProjectUploads, projectSnapshotMatches, projectPageResponse, expandProjectPage } = require('../shared/projectPages');
 const { dailyRangeKeys, decodeFixedRangePeriod, legacyFixedRangeView, rangesMatchDeviceDay, redactDailyRangeSnapshot, removedPagedClients, restorePagedClientSessions, FIXED_RANGE_HEADER, FIXED_RANGE_VERSION } = require('../shared/fixedRangeSync');
 const { UPLOAD_HEADER, UPLOAD_VERSION, createUploadBaselines } = require('../shared/uploadDelta');
 const path = require('node:path');
@@ -83,6 +86,34 @@ function createHub({
   store.syncSettings = Object.assign(Object.create(null), store.syncSettings || {});
   store.fixedRanges = Object.assign(Object.create(null), store.fixedRanges || {});
   const fixedRangeUploads = createFixedRangeUploads();
+  store.projectPages = Object.assign(Object.create(null), store.projectPages || {});
+  const projectUploads = createProjectUploads();
+  function getProjectPages(id) {
+    const snapshot = store.projectPages[id];
+    return projectSnapshotMatches(store.devices[id], snapshot) ? snapshot : undefined;
+  }
+
+  function acceptProjectPage(id, payload) {
+    const published = store.projectPages[id];
+    const expanded = expandProjectPage(payload, published?.revision, published?.pages[payload?.page]);
+    if (!expanded) return { status: 409 };
+    const result = projectUploads.accept(id, expanded, store.devices[id], published);
+    if (!result.snapshot) return result;
+    if (createHash('sha256').update(JSON.stringify(result.snapshot.pages.flat())).digest('hex') !== result.snapshot.revision) {
+      return { status: 400 };
+    }
+    const previous = store.projectPages[id];
+    store.projectPages[id] = result.snapshot;
+    try { queuePersist(); } catch (error) {
+      if (previous) store.projectPages[id] = previous;
+      else delete store.projectPages[id];
+      throw error;
+    }
+    if (statsListeners.size > 0) notifyStatsListeners('all-time-projects');
+    queueStatsBroadcast();
+    return result;
+  }
+
   const legacyRangeViews = new WeakMap();
   function getFixedRanges(id) {
     const snapshot = store.fixedRanges[id];
@@ -198,6 +229,10 @@ function createHub({
     stats.historyPreview = historyPreview(history);
     stats.historyRevision = historyRevision(history);
     stats.deviceHistoryRevision = deviceHistoryRevision(Object.values(store.devices));
+    stats.allTimeProjectRevisions = Object.fromEntries(Object.keys(store.projectPages).flatMap(id => {
+      const snapshot = getProjectPages(id);
+      return snapshot ? [[id, snapshot.revision]] : [];
+    }));
     stats.fixedRangeRevisions = Object.fromEntries(Object.keys(store.fixedRanges)
       .flatMap(id => {
         const snapshot = getFixedRanges(id);
@@ -340,6 +375,8 @@ function createHub({
     if (previous?.updatedAt !== record.updatedAt || dayChanged || projectsChanged) fixedRangeUploads.discard(deviceId);
     const snapshot = store.fixedRanges[deviceId];
     if (projectsChanged && snapshot?.revision) store.fixedRanges[deviceId] = retireFixedRangeSnapshot(snapshot);
+    if (previous?.allTimeProjectsRevision !== record.allTimeProjectsRevision) projectUploads.discard(deviceId);
+    if (record.projectsEnabled === false) delete store.projectPages[deviceId];
     store.devices[record.deviceId] = record;
     queuePersist();
     if (statsListeners.size > 0) notifyStatsListeners('ingest');
@@ -353,19 +390,23 @@ function createHub({
     const previousPolicy = store.syncTitlePolicies[deviceId];
     const previousDevice = store.devices[deviceId];
     const previousRanges = store.fixedRanges[deviceId];
+    const previousProjects = store.projectPages[deviceId];
     const previousSavedAt = store.savedAt;
     store.syncTitlePolicies[deviceId] = nextTitlePolicy(previousPolicy, false);
     delete store.devices[deviceId];
     delete store.fixedRanges[deviceId];
+    delete store.projectPages[deviceId];
     try { persist(); } catch (error) {
       if (previousPolicy) store.syncTitlePolicies[deviceId] = previousPolicy;
       else delete store.syncTitlePolicies[deviceId];
       if (previousDevice) store.devices[deviceId] = previousDevice;
       if (previousRanges) store.fixedRanges[deviceId] = previousRanges;
+      if (previousProjects) store.projectPages[deviceId] = previousProjects;
       store.savedAt = previousSavedAt;
       throw error;
     }
     fixedRangeUploads.discard(deviceId);
+    projectUploads.discard(deviceId);
     broadcastStats('delete');
   }
 
@@ -516,6 +557,27 @@ function createHub({
 
     if (!isAuthorized(req, secret)) return sendJson(res, 401, { error: 'unauthorized' });
 
+    if (url.pathname === '/api/all-time-projects') {
+      const id = url.searchParams.get('deviceId') || '';
+      if (!id) return sendJson(res, 400, { error: 'deviceId_required' });
+      if (req.method === 'PUT') {
+        let payload;
+        try {
+          payload = await readJsonBody(req);
+        } catch (error) {
+          if (error.code === 'payload_too_large') return sendJson(res, 413, { error: 'payload_too_large' });
+          return sendJson(res, 400, { error: 'invalid_json' });
+        }
+        const { status, complete } = acceptProjectPage(id, payload);
+        return sendJson(res, status, status === 200 ? { complete } : { error: 'project_page_rejected' });
+      }
+      if (req.method === 'GET') {
+        const snapshot = getProjectPages(id);
+        const { status, body, page } = projectPageResponse(snapshot, url.searchParams.get('revision'), url.searchParams.get('page'));
+        return sendJson(res, status, body ?? (status === 200 ? { rows: snapshot.pages[page] } : { error: 'project_page_unavailable' }));
+      }
+    }
+
     if (url.pathname === '/api/fixed-ranges') {
       const deviceId = url.searchParams.get('deviceId') || '';
       if (!deviceId) return sendJson(res, 400, { error: 'deviceId_required' });
@@ -664,6 +726,9 @@ function createHub({
             fixedRanges: 1, fixedRangeDelta: 1, fixedRangeBatch: 1, fixedRangeIndexDelta: 1, dailySessionRanges: 1,
             fixedRangeRevision: getFixedRanges(record.deviceId)?.revision ?? null
           } : {}),
+          ...(record.allTimeProjectsRevision ? {
+            allTimeProjectPages: 1, allTimeProjectsRevision: getProjectPages(record.deviceId)?.revision ?? null
+          } : {}),
           ...(upload ? { upload } : {}),
           ...(!compact && payload.history?.dailyTotalsOmitted > 0 && payload.history.dailyTotalsRevision
             && payload.history.dailyTotalsRevision === record.history?.dailyTotalsRevision
@@ -782,6 +847,8 @@ function createHub({
   return {
     start, stop, server, getStats, getHistory, getDevices, ingest, deleteDevice, onStats, bindHost,
     getSubscriptions, setSubscriptions, getSyncContent, getSyncSettings, setSyncSettings, setSyncTitlePolicy,
+    acceptProjectPage,
+    getProjectPages,
     acceptFixedRange, readFixedRange, restoreHistory: payload => ingestRecord(payload, { historyOnly: true })
   };
 }

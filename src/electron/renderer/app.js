@@ -188,6 +188,7 @@ const subscriptionApi = window.TokenMonitorSubscriptionDisplay;
 // cannot describe one record two ways.
 const subscriptionText = window.TokenMonitorSubscriptionText;
 const compactTokenApi = window.TokenMonitorCompactTokens;
+const detailTokenDisplayApi = window.TokenMonitorDetailTokenDisplay;
 const trayLayoutApi = window.TokenMonitorTrayLayout;
 const sessionRowsApi = window.TokenMonitorSessionRows;
 const breakdownRenderPolicyApi = window.TokenMonitorBreakdownRenderPolicy;
@@ -394,6 +395,8 @@ state.fixedPeriodHistoryPromise = null;
 state.fixedPeriodHistoryCoordinator = null;
 state.fixedPeriodSnapshot = null;
 state.syncedFixedPeriod = null;
+state.syncedFixedPeriodCache = new Map();
+state.syncedFixedPeriodWarmup = null;
 state.periodMenuOpen = false;
 state.sessionToolFilter = '';
 state.sessionPage = 0;
@@ -405,7 +408,7 @@ state.sessionRowsCache = null;
 let directBreakdownOverride = null;
 state.homeActivitySettingsExpanded = false;
 state.settingsSections = Object.fromEntries(SETTINGS_SECTION_IDS.map((id) => [id, false]));
-const defaultAppearance = { glassOpacity: 68, glassBlur: 32, backgroundImageOpacity: 28, zoomFactor: 1, systemGlass: true, windowsBackdrop: 'acrylic', macBackdrop: 'vibrancy', reduceMotion: 'system', tokenNumberAnimation: 'roll', showLiveDot: true, showToolIcons: true, titleIconOnly: true, showCompactTotalTokens: false, showLiveTokenRate: false, liveTokenRateScope: 'all', compactTokenUnits: 'western', settingsInTitlebar: false };
+const defaultAppearance = { glassOpacity: 68, glassBlur: 32, backgroundImageOpacity: 28, zoomFactor: 1, systemGlass: true, windowsBackdrop: 'acrylic', macBackdrop: 'vibrancy', reduceMotion: 'system', tokenNumberAnimation: 'roll', showLiveDot: true, showToolIcons: true, titleIconOnly: true, showCompactTotalTokens: false, detailTokensUseCompactUnits: false, showLiveTokenRate: false, liveTokenRateScope: 'all', compactTokenUnits: 'western', settingsInTitlebar: false };
 const nativeGlassTintSettings = [['macGlassTint', 'liquid-glass'], ['macClearGlassTint', 'liquid-glass-clear']];
 let nativeMaterialState = glassRenderingApi.normalizeNativeMaterialState();
 let nativeMaterialRevision = 0;
@@ -610,6 +613,7 @@ Object.assign(els, {
   titleIconInput: document.getElementById('titleIconInput'),
   tokenNumberAnimationInput: document.getElementById('tokenNumberAnimationInput'),
   showCompactTotalTokensInput: document.getElementById('showCompactTotalTokensInput'),
+  detailTokensUseCompactUnitsInput: document.getElementById('detailTokensUseCompactUnitsInput'),
   showLiveTokenRateInput: document.getElementById('showLiveTokenRateInput'),
   liveTokenRateScopeRow: document.getElementById('liveTokenRateScopeRow'),
   liveTokenRateScopeInput: document.getElementById('liveTokenRateScopeInput'),
@@ -706,9 +710,11 @@ function toggleAccordionRow(row) {
   const isExpanded = row.classList.contains('expanded');
   document.querySelectorAll('.row.expanded').forEach((other) => {
     other.classList.remove('expanded');
+    other.querySelector('.row-accordion-inner').inert = true;
     other.querySelector('.row-head')?.setAttribute('aria-expanded', 'false');
   });
   if (!isExpanded) {
+    row.querySelector('.row-accordion-inner').inert = false;
     row.classList.add('expanded');
     row.querySelector('.row-head')?.setAttribute('aria-expanded', 'true');
     renderActiveToolDetail();
@@ -718,12 +724,13 @@ function toggleAccordionRow(row) {
 }
 
 document.addEventListener('click', (event) => {
-  if (event.target.closest('button, a, input, select, textarea')) return;
+  if (event.target.closest('button, a, input, select, textarea, [data-detail-token-toggle="true"]')) return;
   const row = event.target.closest('.row.has-accordion');
   if (row) toggleAccordionRow(row);
 });
 
 document.addEventListener('keydown', (event) => {
+  if (event.target.closest('[data-detail-token-toggle="true"]')) return;
   const row = event.target.closest('.row-head')?.closest('.row.has-accordion');
   if (!row || (event.key !== 'Enter' && event.key !== ' ')) return;
   event.preventDefault();
@@ -1075,6 +1082,74 @@ function hideTotalCompact() {
   els.totalTokensCompact.textContent = '';
   els.totalTokensCompact.classList.add('hidden');
 }
+function isDetailCompactEnabled() {
+  return state.settings?.detailTokensUseCompactUnits === true;
+}
+function formatDetailTokens(value) {
+  return detailTokenDisplayApi.formatDetailTokens(value);
+}
+function detailTokenDisplaySignature() {
+  return detailTokenDisplayApi.stateSignature();
+}
+function captureDetailTokenFocus() {
+  const active = document.activeElement;
+  if (!active || active.dataset?.detailTokenToggle !== 'true') return null;
+  const host = state.openSession ? els.sessionDetail : els.breakdown;
+  if (!host || !host.contains?.(active)) return null;
+  const row = active.closest?.('.row[data-key]');
+  if (row) {
+    const tokens = Array.from(row.querySelectorAll('[data-detail-token-toggle="true"]'));
+    const index = tokens.indexOf(active);
+    if (index >= 0) return { host, rowKey: row.dataset.key, index };
+  }
+  const tokens = Array.from(host.querySelectorAll('[data-detail-token-toggle="true"]'));
+  const index = tokens.indexOf(active);
+  return index >= 0 ? { host, rowKey: '', index } : null;
+}
+function restoreDetailTokenFocus(anchor) {
+  if (!anchor) return;
+  const scope = anchor.rowKey
+    ? Array.from(anchor.host.querySelectorAll('.row[data-key]')).find((row) => row.dataset.key === anchor.rowKey)
+    : anchor.host;
+  const target = scope?.querySelectorAll('[data-detail-token-toggle="true"]')?.[anchor.index];
+  if (target && document.activeElement !== target) {
+    target.focus?.({ preventScroll: true });
+  }
+}
+function refreshDetailTokenViews() {
+  const focusAnchor = captureDetailTokenFocus();
+  settleRowNumberAnimations();
+  if (state.openSession?.kind === 'session-group') {
+    renderSessionGroupDetail(state.openSession);
+    restoreDetailTokenFocus(focusAnchor);
+    return;
+  }
+  if (state.openSession?.detail) {
+    renderSessionDetail({ detail: state.openSession.detail, preserveScroll: true });
+    restoreDetailTokenFocus(focusAnchor);
+    return;
+  }
+  if (state.stats && ['tool', 'model', 'project', 'device', 'session'].includes(state.breakdown)) {
+    render();
+    restoreDetailTokenFocus(focusAnchor);
+  }
+}
+function decorateDetailTokenElement(el, value, options = {}) {
+  const exactText = options.exactText !== undefined ? String(options.exactText) : formatNumber(value);
+  detailTokenDisplayApi.decorateTokenElement(el, exactText, {
+    ...(options.enabled !== undefined ? { enabled: options.enabled } : {}),
+    exactHint: t('detail.tokens.clickForExact'),
+    compactHint: t('detail.tokens.clickForCompact')
+  });
+}
+detailTokenDisplayApi.configure({
+  isEnabled: isDetailCompactEnabled,
+  getUnitSystem: effectiveCompactTokenUnits,
+  getLocale: currentLocale,
+  formatExact: formatNumber,
+  formatCompact: (value, unitSystem, locale) => formatCompact(value, unitSystem, locale),
+  onToggle: refreshDetailTokenViews
+});
 function currentTokenRateValue() {
   const period = state.stats?.periods?.[state.period];
   const burn = state.settings?.tokenRateMode === 'burn';
@@ -2234,7 +2309,7 @@ function settleRowNumberAnimations() {
     cancelAnimationFrame(motion.handle);
     motion.settleRoll?.();
     const target = Number(motion.target ?? el.dataset.motionTarget ?? el.dataset.motionValue ?? 0);
-    el.textContent = formatNumber(target);
+    el.textContent = formatDetailTokens(target);
     el.dataset.motionValue = String(target);
     delete el.dataset.motionTarget;
   }
@@ -2288,7 +2363,7 @@ function animateRowNumber(el, from, to, duration = 420, capturedRoll = null, { s
   }
   const startValue = Number.isFinite(previous?.value) ? previous.value : from;
   if (!Number.isFinite(startValue) || !Number.isFinite(to) || startValue === to || prefersReducedMotion()) {
-    el.textContent = formatNumber(to);
+    el.textContent = formatDetailTokens(to);
     el.dataset.motionValue = String(Number(to) || 0);
     delete el.dataset.motionTarget;
     rowNumberAnimations.delete(el);
@@ -2300,17 +2375,17 @@ function animateRowNumber(el, from, to, duration = 420, capturedRoll = null, { s
   if (rolling) {
     duration = tokenNumberAnimationApi.duration;
     motion.value = to;
-    motion.settleRoll = tokenNumberAnimationApi.beginRoll(el, formatNumber(startValue), formatNumber(to), to > startValue, null, rollSnapshot,
+    motion.settleRoll = tokenNumberAnimationApi.beginRoll(el, formatDetailTokens(startValue), formatDetailTokens(to), to > startValue, null, rollSnapshot,
       { period: synchronized, whole: synchronized });
   } else {
-    el.textContent = formatNumber(startValue);
+    el.textContent = formatDetailTokens(startValue);
   }
   el.dataset.motionValue = String(motion.value);
   el.dataset.motionTarget = String(to);
   function frame(now) {
     if (prefersReducedMotion()) {
       motion.settleRoll?.();
-      el.textContent = formatNumber(to);
+      el.textContent = formatDetailTokens(to);
       el.dataset.motionValue = String(Number(to) || 0);
       delete el.dataset.motionTarget;
       if (rowNumberAnimations.get(el) === motion) rowNumberAnimations.delete(el);
@@ -2319,7 +2394,7 @@ function animateRowNumber(el, from, to, duration = 420, capturedRoll = null, { s
     const progress = Math.min(1, (now - startedAt) / duration);
     if (!rolling) {
       motion.value = startValue + delta * easeOutQuart(progress);
-      el.textContent = formatNumber(motion.value);
+      el.textContent = formatDetailTokens(motion.value);
       el.dataset.motionValue = String(motion.value);
     }
     if (progress < 1) {
@@ -2350,7 +2425,7 @@ function settleOffscreenBreakdownNumbers() {
   for (const [el, motion] of rowNumberAnimations) {
     if (visible.has(el)) continue;
     cancelRowNumberAnimation(el);
-    el.textContent = formatNumber(motion.target);
+    el.textContent = formatDetailTokens(motion.target);
     el.dataset.motionValue = String(motion.target);
   }
 }
@@ -2370,7 +2445,7 @@ function animateBreakdownFrom(snapshot, { duration = 420, synchronized = false }
   for (const [el, motion] of rowNumberAnimations) {
     if (animatedValues.has(el)) continue;
     cancelRowNumberAnimation(el);
-    el.textContent = formatNumber(motion.target);
+    el.textContent = formatDetailTokens(motion.target);
     el.dataset.motionValue = String(motion.target);
   }
   let enteringIndex = 0;
@@ -2668,6 +2743,7 @@ function createDeviceRemoveButton(deviceId, deleteText, deleteConfirmText) {
 function renderDeviceAccordion(accordionInner, deviceDetail) {
   const signature = JSON.stringify([
     toolIconsEnabled(state.settings?.showToolIcons),
+    detailTokenDisplaySignature(),
     deviceDetail.emptyText,
     deviceDetail.metaParts,
     deviceDetail.tools.map((tool) => [
@@ -2711,7 +2787,8 @@ function renderDeviceAccordion(accordionInner, deviceDetail) {
       label.append(mark, name, percent);
       const metrics = document.createElement('span');
       metrics.className = 'device-tool-metrics';
-      metrics.textContent = formatNumber(tool.value);
+      metrics.textContent = formatDetailTokens(tool.value);
+      decorateDetailTokenElement(metrics, tool.value);
       head.append(label, metrics);
       toolGroup.append(head);
 
@@ -2726,7 +2803,8 @@ function renderDeviceAccordion(accordionInner, deviceDetail) {
           modelName.textContent = model.name;
           const modelValue = document.createElement('span');
           modelValue.className = 'device-model-value';
-          modelValue.textContent = formatCompact(model.value);
+          modelValue.textContent = isDetailCompactEnabled() ? formatDetailTokens(model.value) : formatCompact(model.value);
+          decorateDetailTokenElement(modelValue, model.value);
           modelRow.append(modelName, modelValue);
           modelList.append(modelRow);
         }
@@ -2745,7 +2823,7 @@ function renderDeviceAccordion(accordionInner, deviceDetail) {
   accordionInner.dataset.signature = signature;
 }
 
-function appendAccordionMetricRow(content, labelText, valueText, percent = null, className = '') {
+function appendAccordionMetricRow(content, labelText, valueText, percent = null, className = '', tokenValue = null) {
   const item = document.createElement('div');
   item.className = `accordion-row${className ? ` ${className}` : ''}`;
   const label = document.createElement('div');
@@ -2763,6 +2841,7 @@ function appendAccordionMetricRow(content, labelText, valueText, percent = null,
   const metric = document.createElement('div');
   metric.className = 'accordion-value';
   metric.textContent = valueText;
+  if (tokenValue !== null) decorateDetailTokenElement(metric, tokenValue);
   item.append(label, metric);
   content.append(item);
 }
@@ -2793,6 +2872,7 @@ function renderToolDetailAccordion(accordionInner, detail) {
     detail.name,
     detail.value,
     mode,
+    detailTokenDisplaySignature(),
     labels,
     tokenParts,
     modelRows.map((model) => [model.key, model.value, model.cost, Math.round(model.percent)])
@@ -2804,19 +2884,19 @@ function renderToolDetailAccordion(accordionInner, detail) {
 
   if (mode === 'tokens' && hasTokenDetails) {
     const inputPercentages = toolDetailsApi.tokenInputPercentages(tokenParts);
-    appendAccordionMetricRow(content, labels.cacheHit, formatNumber(tokenParts.cacheRead), inputPercentages.hit);
-    appendAccordionMetricRow(content, labels.cacheMiss, formatNumber(tokenParts.cacheMiss), inputPercentages.miss);
-    appendAccordionMetricRow(content, labels.output, formatNumber(tokenParts.output));
+    appendAccordionMetricRow(content, labels.cacheHit, formatDetailTokens(tokenParts.cacheRead), inputPercentages.hit, '', tokenParts.cacheRead);
+    appendAccordionMetricRow(content, labels.cacheMiss, formatDetailTokens(tokenParts.cacheMiss), inputPercentages.miss, '', tokenParts.cacheMiss);
+    appendAccordionMetricRow(content, labels.output, formatDetailTokens(tokenParts.output), null, '', tokenParts.output);
     if (tokenParts.unclassified > 0) {
-      appendAccordionMetricRow(content, labels.unclassified, formatNumber(tokenParts.unclassified));
+      appendAccordionMetricRow(content, labels.unclassified, formatDetailTokens(tokenParts.unclassified), null, '', tokenParts.unclassified);
     }
   }
 
   if (mode === 'models' && hasModels) {
     for (const model of modelRows) {
-      const metric = model.value > 0 ? formatNumber(model.value) : formatCost(model.cost);
+      const metric = model.value > 0 ? formatDetailTokens(model.value) : formatCost(model.cost);
       const label = model.unattributed === true ? labels.unclassified : model.name;
-      appendAccordionMetricRow(content, label, metric, model.value > 0 ? model.percent : null, 'tool-model-row');
+      appendAccordionMetricRow(content, label, metric, model.value > 0 ? model.percent : null, 'tool-model-row', model.value > 0 ? model.value : null);
     }
   }
 
@@ -2969,11 +3049,8 @@ function updateRow(row, { name, subtitle, subtitleIdentity, subagentCountLabel, 
   if (kind !== undefined) row.dataset.kind = kind || '';
   if (sessionGroup) row.dataset.sessionGroup = sessionGroup;
   else delete row.dataset.sessionGroup;
-  if (kind === 'session' && client === 'reasonix') {
-    row.dataset.detailUnavailable = sessionDetailAvailable === true ? 'false' : 'true';
-  } else if (row.hasAttribute('data-detail-unavailable')) {
-    row.removeAttribute('data-detail-unavailable');
-  }
+  if (client === 'reasonix' && kind === 'session') row.dataset.reasonixDetail = String(sessionDetailAvailable === true);
+  else delete row.dataset.reasonixDetail;
   const interactive = Boolean(sessionGroup) || (kind === 'session'
     && sessionRowsApi.sessionRowDetailAvailable({ client, sessionDetailAvailable }));
   const mark = row.querySelector('.row-mark');
@@ -3076,11 +3153,13 @@ function updateRow(row, { name, subtitle, subtitleIdentity, subagentCountLabel, 
   setHoverMarqueeText(detailEl, shownDetail);
   detailEl.classList.toggle('hidden', !shownDetail);
   const valueEl = row.querySelector('.row-value');
-  const tokenLabel = formatNumber(value);
+  const exactTokenLabel = formatNumber(value);
+  const tokenLabel = formatDetailTokens(value);
   if (tokenDataUnavailable === true) {
     row.dataset.tokenDataUnavailable = 'true';
     cancelRowNumberAnimation(valueEl);
     valueEl.textContent = tokenLabel;
+    decorateDetailTokenElement(valueEl, value, { enabled: false });
   } else {
     delete row.dataset.tokenDataUnavailable;
     // Metadata-only updates must not replace the glyphs of a matching roll.
@@ -3089,6 +3168,7 @@ function updateRow(row, { name, subtitle, subtitleIdentity, subagentCountLabel, 
       cancelRowNumberAnimation(valueEl);
       valueEl.textContent = tokenLabel;
     }
+    decorateDetailTokenElement(valueEl, value);
   }
   valueEl.dataset.motionValue = String(Number(value) || 0);
   row.dataset.motionValue = String(Number(value) || 0);
@@ -3112,7 +3192,10 @@ function updateRow(row, { name, subtitle, subtitleIdentity, subagentCountLabel, 
     row.classList.add('has-accordion');
     if (isExpanded) row.classList.add('expanded');
   } else if (Array.isArray(accordionRows) && accordionRows.length > 0) {
-    const accordionSignature = JSON.stringify(accordionRows.map((tool) => [tool.name, tool.value, Math.round(tool.percent), tool.color]));
+    const accordionSignature = JSON.stringify([
+      detailTokenDisplaySignature(),
+      accordionRows.map((tool) => [tool.name, tool.value, Math.round(tool.percent), tool.color])
+    ]);
     if (accordionInner.dataset.signature !== accordionSignature) {
       const content = document.createElement('div');
       content.className = 'accordion-content project-tool-breakdown';
@@ -3132,7 +3215,8 @@ function updateRow(row, { name, subtitle, subtitleIdentity, subagentCountLabel, 
         label.append(mark, text, percent);
         const tokens = document.createElement('span');
         tokens.className = 'accordion-value';
-        tokens.textContent = formatNumber(tool.value);
+        tokens.textContent = formatDetailTokens(tool.value);
+        decorateDetailTokenElement(tokens, tool.value);
         item.append(label, tokens);
         content.append(item);
       }
@@ -3167,13 +3251,14 @@ function updateRow(row, { name, subtitle, subtitleIdentity, subagentCountLabel, 
   }
   const rowHead = row.querySelector('.row-head');
   const hasAccordion = row.classList.contains('has-accordion');
+  accordionInner.inert = !row.classList.contains('expanded');
   const costLabel = `, ${t('dashboard.stat.totalCost')}: ${costLabelText}`;
   sessionRowsApi.applyBreakdownRowSemantics(row, rowHead, {
     interactive,
     hasAccordion,
     expanded: row.classList.contains('expanded'),
     ariaLabel: hasAccordion
-      ? `${name}, ${t('dashboard.stat.totalTokens')}: ${tokenLabel}${costLabel}`
+      ? `${name}, ${t('dashboard.stat.totalTokens')}: ${exactTokenLabel}${costLabel}`
       : name
   });
 }
@@ -3410,13 +3495,19 @@ function renderRows(rows, { incompleteHint = '', fromSearch = false, reuseToolFi
     rows = sessionRowsApi.filterSessionRows(rows, searchQuery);
   }
   const searchEmpty = Boolean(searchQuery && rows.length === 0);
-  if (rows.length === 0 && (!incompleteHint || searchEmpty)) {
+  const reasonixReadFailed = state.breakdown === 'session' && reasonixSessionList?.failed
+    && !fixedPeriodRangesApi.isDerived(state.period);
+  const hintText = [
+    incompleteHint ? t(incompleteHint) : '',
+    reasonixReadFailed ? t('sessions.reasonixReadFailed') : ''
+  ].filter(Boolean).join(' ');
+  if (rows.length === 0 && (!hintText || searchEmpty)) {
     els.breakdown.replaceChildren();
-    if (incompleteHint) {
+    if (hintText) {
       const hint = document.createElement('p');
       hint.className = 'breakdown-incomplete-hint';
       hint.setAttribute('role', 'status');
-      hint.textContent = t(incompleteHint);
+      hint.textContent = hintText;
       els.breakdown.append(hint);
     }
     if (searchEmpty) els.breakdown.append(sessionSearchEmptyNode(searchQuery));
@@ -3432,7 +3523,6 @@ function renderRows(rows, { incompleteHint = '', fromSearch = false, reuseToolFi
   setSessionSearchStatus(searchQuery, page.total);
   const visibleRows = page.rows;
   const max = barScaleMax(rows);
-  const hintText = incompleteHint ? t(incompleteHint) : '';
   const signature = JSON.stringify([
     state.breakdown,
     hintText,
@@ -3451,6 +3541,7 @@ function renderRows(rows, { incompleteHint = '', fromSearch = false, reuseToolFi
     currency: currentCurrency(),
     currencyRatesEffective: state.settings?.currencyRatesEffective || null,
     locale: currentLocale(),
+    detailTokenDisplay: detailTokenDisplaySignature(),
     showToolIcons: toolIconsEnabled(state.settings?.showToolIcons),
     deviceIconOverrides: state.settings?.deviceIconOverrides,
     deviceIconScope: state.settings?.deviceIconScope,
@@ -3475,7 +3566,7 @@ function renderRows(rows, { incompleteHint = '', fromSearch = false, reuseToolFi
       if (!retainedKeys.has(key)) cancelRowNumberAnimation(row.querySelector('.row-value'));
     }
     const nodes = visibleRows.map((row) => existing.get(row.key) || rowTemplate(row));
-    if (incompleteHint) {
+    if (hintText) {
       const hint = existingHint || document.createElement('p');
       hint.className = 'breakdown-incomplete-hint';
       hint.setAttribute('role', 'status');
@@ -3664,6 +3755,7 @@ function modelRowsForPeriod(period, rankingMetric = state.settings?.modelRanking
 }
 
 function sessionPresentationOptions() {
+  const formatReviewTokens = state.settings?.detailTokensUseCompactUnits === true ? formatDetailTokens : formatCompact;
   const localDevice = state.stats?.devices?.find(device => device.deviceId === state.settings?.deviceId);
   return {
     localDeviceId: state.settings?.deviceId,
@@ -3676,6 +3768,8 @@ function sessionPresentationOptions() {
     subagentLabel: t('sessions.subagent'),
     latestModelLabel: t('session.latestModel'),
     unattributedLabel: t('dashboard.tooltip.unclassified'),
+    formatTokens: formatDetailTokens,
+    formatTokensKey: detailTokenDisplaySignature(),
     sourcePeriods: state.stats?.periods,
     grokBotSessionIds: state.stats?.grokBotSessionIds,
     nativeSessions: state.stats?.nativeSessions?.[state.period] || {},
@@ -3684,14 +3778,15 @@ function sessionPresentationOptions() {
     subagents: {
       countLabel: (count) => t('sessions.subagentCount', { count }),
       latestModelLabel: t('session.latestModel'),
-      unattributedLabel: t('dashboard.tooltip.unclassified')
+      unattributedLabel: t('dashboard.tooltip.unclassified'),
+      formatTokens: formatDetailTokens
     },
     backgroundReviews: {
       label: t('sessions.backgroundReviews'),
       countLabel: (count) => t('sessions.backgroundReviewCount', { count }),
       summaryLabel: ({ latestTime, latestValue }) => [
         latestTime ? t('sessions.backgroundReviewLatest', { time: latestTime }) : '',
-        latestValue > 0 ? formatCompact(latestValue, effectiveCompactTokenUnits(), currentLocale()) : ''
+        latestValue > 0 ? formatReviewTokens(latestValue) : ''
       ].filter(Boolean).join(' · ')
     },
     grokBot: {
@@ -3714,9 +3809,45 @@ function rawSessionRowsForPeriod(period, options = sessionPresentationOptions())
 
 const sessionRowLabelCache = {};
 
+let reasonixSessionList = null;
+
+function loadReasonixSessionList() {
+  if (state.breakdown !== 'session' || !clientRowTracked('reasonix')) {
+    reasonixSessionList = null;
+    return;
+  }
+  // Reuse the list for this visit and local day across ordinary stats repaints.
+  if (state.period && fixedPeriodRangesApi.isDerived(state.period)) return;
+  const key = JSON.stringify([
+    state.settings?.sessionTitlesEnabled !== false,
+    state.settings?.modelAliases,
+    state.settings?.modelAliasGrouping,
+    state.settings?.allTimeSince,
+    fixedPeriodTodayKey()
+  ]);
+  if (state.openSession || reasonixSessionList?.key === key
+    || !window.tokenMonitor.listReasonixSessions) return;
+  const request = { key, titlesEnabled: state.settings?.sessionTitlesEnabled !== false, periods: {}, failed: false };
+  reasonixSessionList = request;
+  window.tokenMonitor.listReasonixSessions().then((periods) => {
+    if (reasonixSessionList !== request) return;
+    request.periods = periods;
+    statsRenderScheduler.request();
+  }, (error) => {
+    if (reasonixSessionList !== request) return;
+    console.log(`[reasonix-sessions] ${error?.message || error}`);
+    request.failed = true;
+    statsRenderScheduler.request();
+  });
+}
+
 function sessionRowsForPeriod(period) {
   const options = sessionPresentationOptions();
-  if (state.breakdown === 'session') options.rowLabelCache = sessionRowLabelCache;
+  if (state.breakdown === 'session') {
+    options.rowLabelCache = sessionRowLabelCache;
+    if (reasonixSessionList?.titlesEnabled === (state.settings?.sessionTitlesEnabled !== false)
+      && clientRowTracked('reasonix')) options.reasonixSessions = reasonixSessionList.periods[state.period];
+  }
   const rows = rawSessionRowsForPeriod(period, options);
   if (rows.length > 0) return sessionRowsApi.sessionListRows(rows, {
     ...options, sortBy: state.sessionSort, sessionTitlesEnabled: state.settings?.sessionTitlesEnabled
@@ -3725,7 +3856,12 @@ function sessionRowsForPeriod(period) {
   return modelRowsForPeriod(period);
 }
 
-function projectRowsForPeriod(period) {
+const readAllTimeProjects = projectRowsApi.createPagedProjectReader(
+  (snapshot, deviceId) => window.tokenMonitor.getSyncedFixedPeriod?.(snapshot.id, snapshot.source, 'allTimeProjects', deviceId),
+  () => statsRenderScheduler.request()
+);
+
+function projectRowsForPeriod(period, stats = state.stats) {
   return projectRowsApi.projectRowsForPeriod(period, {
     clientLabels,
     clientColors,
@@ -3735,9 +3871,8 @@ function projectRowsForPeriod(period) {
     fallbackColors: fallbackModelColors,
     unknownClientLabel: t('projects.unknownTool'),
     unknownModelLabel: t('projects.unknownModel'),
-    allowSessionModelAttribution: !projectRowsApi.projectBreakdownIncomplete(state.stats, state.period),
-    nativeProjects: state.stats?.nativeProjects?.[state.period] || {},
-    nativeSessions: state.stats?.nativeSessions?.[state.period] || {}
+    allowSessionModelAttribution: !projectRowsApi.projectBreakdownIncomplete(stats, state.period),
+    nativeProjects: state.stats?.nativeProjects?.[state.period] || {}
   });
 }
 
@@ -5697,6 +5832,7 @@ function applySessionDetailResult(request, options) {
     return;
   }
   request.renderOptions = null;
+  request.pendingDisplayRefresh = false;
   renderSessionDetail(options);
 }
 
@@ -5708,11 +5844,11 @@ function sessionDetailPeriod() {
   return range ? `range:${range.start}:${range.end}` : state.period;
 }
 
-async function openSessionDetail({ client, sessionId, sessionCost, title, sourceDevice, returnTo = null, titleFollowsSession = false }) {
+async function openSessionDetail({ client, sessionId, sessionCost, title, sourceDevice, reasonixSessionRef, returnTo = null, titleFollowsSession = false }) {
   // A review run is headed by model and time; a named group run (a subagent, a
   // Grok Bot record) is headed by its session title and follows title display.
   const fixedGroupHeading = returnTo?.kind === 'session-group' && titleFollowsSession !== true;
-  const request = { kind: 'session', client, sessionId, sessionCost,
+  const request = { kind: 'session', client, sessionId, sessionCost, reasonixSessionRef,
     title: state.settings?.sessionTitlesEnabled === false && !fixedGroupHeading ? '' : title,
     sourceDevice,
     remote: sourceDevice?.ambiguous === true || Boolean(sourceDevice?.deviceId && sourceDevice.deviceId !== state.settings?.deviceId),
@@ -5731,7 +5867,10 @@ async function openSessionDetail({ client, sessionId, sessionCost, title, source
   // off against a response that predates it.
   const liveSignature = sessionDetailLiveSignature();
   try {
-    const detail = await window.tokenMonitor.getSessionDetail({ client, sessionId, period: request.detailPeriod || request.period, sessionCost });
+    const detail = await window.tokenMonitor.getSessionDetail({
+      client, sessionId, period: request.detailPeriod || request.period, sessionCost,
+      ...(reasonixSessionRef ? { reasonixSessionRef } : {})
+    });
     if (state.openSession === request) {
       request.detail = detail;
       request.liveSignature = liveSignature;
@@ -5747,14 +5886,13 @@ async function openSessionDetail({ client, sessionId, sessionCost, title, source
 
 function sessionLiveStatsEntry(request) {
   if (!request) return null;
+  if (request.client === 'reasonix') return null;
   const periodKey = request.period || state.period;
-  return request.client === 'reasonix'
-    ? state.stats?.nativeSessions?.[periodKey]?.[request.sessionId] || null
-    : displayedSessions(periodKey)?.[`${request.client}:${request.sessionId}`] || null;
+  return displayedSessions(periodKey)?.[`${request.client}:${request.sessionId}`] || null;
 }
 
-function sessionLiveCost(entry, client) {
-  return client === 'reasonix' ? Number(entry?.reportedCostUsd || 0) : Number(entry?.costUsd || 0);
+function sessionLiveCost(entry) {
+  return Number(entry?.costUsd || 0);
 }
 
 // The dates a native-range detail reads move with the range (a new day), even
@@ -5770,7 +5908,6 @@ function sessionDetailLiveSignature() {
   return JSON.stringify([
     Number(entry.totalTokens) || 0,
     Number(entry.costUsd) || 0,
-    Number(entry.reportedCostUsd) || 0,
     ...(String(detailPeriod || '').startsWith('range:') ? [detailPeriod] : [])
   ]);
 }
@@ -5897,9 +6034,8 @@ function renderSessionDetail({ detail, loading, error, preserveScroll = false } 
 
   const rows = sessionDetailApi.exchangeRows(detail, { now: new Date(), sortBy: state.detailSort });
   if (rows.length === 0) { container.append(detailNote(t('detailEmpty') || 'No activity in this period.')); return; }
-  if (detail?.tokenDataUnavailable === true) {
-    container.append(detailNote(t('detailTokenDataUnavailable') || 'Token data is unavailable for this session.'));
-  }
+
+  if (detail?.tokenDataUnavailable === true) container.append(detailNote(t('detailTokenDataUnavailable')));
 
   const sort = document.createElement('button');
   sort.className = 'detail-sort';
@@ -5953,11 +6089,10 @@ function sessionDetailTitle() {
   if (request?.returnTo?.kind === 'session-group' && request.titleFollowsSession !== true) return request.title;
   if (state.settings?.sessionTitlesEnabled === false) return '';
   const period = request?.period || state.period;
-  const session = request?.client === 'reasonix'
-    ? state.stats?.nativeSessions?.[period]?.[request.sessionId]
-    : displayedSessions(period)?.[`${request?.client}:${request?.sessionId}`];
+  const session = displayedSessions(period)?.[`${request?.client}:${request?.sessionId}`];
+  const syncedRange = state.mode === 'sync' && fixedPeriodRangesApi.isDerived(period);
   return sessionRowsApi.sessionTitleForDisplay({
-    client: request?.client, title: session?.title || request?.title
+    client: request?.client, title: session?.title || (syncedRange ? '' : request?.title)
   });
 }
 
@@ -6068,6 +6203,16 @@ function sessionGroupRunNode(row, max, parent) {
   // Group members are still session rows. Share the template, metrics, tooltip
   // and activity rendering; exchange rows belong only to the actual transcript.
   const member = { ...row, name: title, titleModelLabel: namedGroup ? undefined : row.modelLabel };
+  if (row.modelTokens) {
+    member.modelTooltipEntries = sessionRowsApi.sessionModelTooltipEntries(
+      { models: row.modelTokens, totalTokens: row.value, latestModel: row.latestModel },
+      {
+        latestModelLabel: t('session.latestModel'),
+        unattributedLabel: t('dashboard.tooltip.unclassified'),
+        formatTokens: formatDetailTokens
+      }
+    );
+  }
   if (subagentGroup) {
     member.subtitle = [row.clientLabel, sessionRowsApi.sessionModelMetadataLabel(row)].filter(Boolean).join(' · ');
     member.activity = row.activitySummary;
@@ -6083,7 +6228,7 @@ function sessionGroupRunNode(row, max, parent) {
       const sessionId = String(row.key || '').replace(/^session:[^:]+:/, '');
       openSessionDetail({
         client: row.client,
-        sessionId: row.client === 'reasonix' ? `reasonix:${sessionId}` : sessionId,
+        sessionId,
         sessionCost: Number(row.cost || 0),
         title,
         sourceDevice: row.sourceDevice,
@@ -6136,7 +6281,15 @@ function renderSessionGroupDetail(request) {
   overview.innerHTML = '<span class="session-group-count"></span><span class="session-group-totals"></span>';
   overview.querySelector('.session-group-count').textContent = request.summary.subagentGroup
     ? t('dashboard.stat.totalTokens') : request.summary.groupDetail || request.summary.detail;
-  overview.querySelector('.session-group-totals').textContent = `${formatNumber(request.summary.value)} · ${formatCost(request.summary.cost || 0, request.summary.unpricedTokens)}`;
+  const groupTotals = overview.querySelector('.session-group-totals');
+  const groupTokens = document.createElement('span');
+  groupTokens.className = 'session-group-tokens';
+  groupTokens.textContent = formatDetailTokens(request.summary.value);
+  decorateDetailTokenElement(groupTokens, request.summary.value);
+  const groupCost = document.createElement('span');
+  groupCost.className = 'session-group-cost';
+  groupCost.textContent = ` · ${formatCost(request.summary.cost || 0, request.summary.unpricedTokens)}`;
+  groupTotals.replaceChildren(groupTokens, groupCost);
   container.append(overview);
 
   const max = Math.max(1, ...rows.map((row) => Number(row.value) || 0));
@@ -6196,9 +6349,11 @@ function exchangeNode(row, max, expanded = false) {
   bindHoverMarquee(exTitle);
   wrap.querySelector('.detail-ex-sub').textContent = row.subtitle;
   const tokensAvailable = row.tokensAvailable !== false;
-  wrap.querySelector('.detail-ex-value').textContent = tokensAvailable
-    ? formatNumber(row.value)
+  const exValueEl = wrap.querySelector('.detail-ex-value');
+  exValueEl.textContent = tokensAvailable
+    ? formatDetailTokens(row.value)
     : (t('detailTokenUnavailable') || 'Unavailable');
+  decorateDetailTokenElement(exValueEl, row.value, { enabled: tokensAvailable && isDetailCompactEnabled() });
   wrap.querySelector('.detail-ex-cost').textContent = tokensAvailable ? formatCost(row.cost, row.unpricedTokens) : '';
   applyBarScale(wrap.querySelector('.bar-fill'), rowWidth(row.value, max) / 100);
 
@@ -6227,19 +6382,26 @@ function turnNode(turn) {
   // "cache" folds cache reads + cache writes (Claude's cache_creation) into one bucket so the
   // in/out/cache breakdown sums to the turn total; reason is an informational subset of out.
   const cache = (tk.cacheRead || 0) + (tk.cacheWrite || 0);
-  const split = `in ${formatNumber(tk.input || 0)} · out ${formatNumber(tk.output || 0)} · cache ${formatNumber(cache)}`
+  const split = `in ${formatDetailTokens(tk.input || 0)} · out ${formatDetailTokens(tk.output || 0)} · cache ${formatDetailTokens(cache)}`
+    + (tk.reasoning ? ` · reason ${formatDetailTokens(tk.reasoning)}` : '');
+  const exactSplit = `in ${formatNumber(tk.input || 0)} · out ${formatNumber(tk.output || 0)} · cache ${formatNumber(cache)}`
     + (tk.reasoning ? ` · reason ${formatNumber(tk.reasoning)}` : '');
   el.innerHTML = '<div class="detail-turn-label"><span class="detail-turn-title"></span><span class="detail-turn-split"></span><span class="detail-turn-tools"></span></div>'
     + '<div class="detail-turn-metrics"><span class="detail-turn-value"></span><span class="detail-turn-cost"></span></div>';
   el.querySelector('.detail-turn-title').textContent = `AI ${turn.label}`;
   const tokensAvailable = turn.tokensAvailable !== false;
-  el.querySelector('.detail-turn-split').textContent = tokensAvailable
+  const splitEl = el.querySelector('.detail-turn-split');
+  splitEl.textContent = tokensAvailable
     ? split
     : (t('detailTokenUnavailable') || 'Unavailable');
+  const toggleEnabled = tokensAvailable && isDetailCompactEnabled();
+  decorateDetailTokenElement(splitEl, 0, { exactText: exactSplit, enabled: toggleEnabled });
   el.querySelector('.detail-turn-tools').textContent = turn.tools ? `⊢ ${turn.tools}` : '';
-  el.querySelector('.detail-turn-value').textContent = tokensAvailable
-    ? formatNumber(turn.value)
+  const turnValueEl = el.querySelector('.detail-turn-value');
+  turnValueEl.textContent = tokensAvailable
+    ? formatDetailTokens(turn.value)
     : (t('detailTokenUnavailable') || 'Unavailable');
+  decorateDetailTokenElement(turnValueEl, turn.value, { enabled: toggleEnabled });
   el.querySelector('.detail-turn-cost').textContent = tokensAvailable ? formatCost(turn.cost, turn.unpricedTokens) : '';
   return el;
 }
@@ -6675,12 +6837,12 @@ function canRenderNativeDevices() {
   return state.breakdown === 'device' && Boolean(currentNativeRangeSnapshot());
 }
 
-function syncedFixedPeriodKey() {
+function syncedFixedPeriodKey(period = state.period) {
   const stats = state.stats;
   const revisionMap = stats?.fixedRangeRevisions || {};
   const revisions = Object.entries(revisionMap).sort();
   if (state.settings?.hubMode === 'local' || (!revisions.length && !stats?.localFixedRangeRevision) || !stats?.snapshot) return '';
-  if (!fixedPeriodRangesApi.isDerived(state.period)) {
+  if (!fixedPeriodRangesApi.isDerived(period)) {
     if (!needsPagedSessions()) return '';
     const canReadPages = stats.devices?.some(device => device.sessionDetailsOmitted?.[state.period] > 0
       && device.periodWindows?.today?.key && Object.hasOwn(revisionMap, device.deviceId) && revisionMap[device.deviceId]);
@@ -6691,10 +6853,89 @@ function syncedFixedPeriodKey() {
     device.deviceId, device.updatedAt, fixedPeriodRangesApi.deviceDayState(device)?.currentKey || ''
   ]);
   return JSON.stringify([
-    stats.snapshot.source, state.settings?.hubMode, state.period, currentCalendarLocale(), fixedPeriodTodayKey(), deviceObservations, revisions,
-    stats.localFixedRangeRevision, stats.deviceHistoryRevision, state.settings?.historyEnabled, state.settings?.sessionTitlesEnabled,
-    state.settings?.modelAliases, state.settings?.modelAliasGrouping
+    syncedFixedPeriodScope(), period, deviceObservations, revisions, stats.localFixedRangeRevision, stats.deviceHistoryRevision
   ]);
+}
+
+function syncedFixedPeriodScope() {
+  const settings = state.settings;
+  return JSON.stringify([
+    state.stats?.snapshot?.source, settings?.hubMode, settings?.deviceId, currentCalendarLocale(), fixedPeriodTodayKey(),
+    settings?.syncWeekStartsOn, settings?.historyEnabled, settings?.projectsEnabled, settings?.sessionTitlesEnabled,
+    settings?.modelAliases, settings?.modelAliasGrouping,
+    (state.stats?.devices || []).map(device => [device.deviceId, device.projectsEnabled, device.trackedClients,
+      device.periodWindows?.timeZone, fixedPeriodRangesApi.deviceDayState(device)?.currentKey])
+  ]);
+}
+
+function readSyncedFixedPeriod(period, key) {
+  const { id, source } = state.stats.snapshot;
+  if (!fixedPeriodRangesApi.isDerived(period)) return window.tokenMonitor.getSyncedFixedPeriod(id, source, period);
+  const scope = syncedFixedPeriodScope();
+  const cache = state.syncedFixedPeriodCache;
+  const previous = cache.get(period);
+  if (previous?.scope === scope && previous.key === key && previous.promise) return previous.promise;
+  if (previous?.scope === scope && previous.snapshotKey === key) return Promise.resolve(previous.snapshot);
+  const revisions = state.stats.fixedRangeRevisions || {};
+  let snapshot = previous?.scope === scope ? previous.snapshot : null;
+  if (snapshot && (Object.keys(previous.revisions).length !== Object.keys(revisions).length
+    || Object.entries(previous.revisions).some(([id, revision]) => revisions[id] !== revision))) {
+    snapshot = retainVerifiedFixedRangeTitles(snapshot, previous.revisions, revisions);
+  }
+  const entry = { scope, key, revisions, snapshot, promise: null };
+  cache.set(period, entry);
+  entry.promise = window.tokenMonitor.getSyncedFixedPeriod(id, source, period).then(result => {
+    if (cache.get(period) !== entry || syncedFixedPeriodKey(period) !== key) return null;
+    if (result?.detailsAvailable) {
+      entry.snapshot = result;
+      entry.snapshotKey = key;
+    } else if (result?.status === 'ready') {
+      entry.snapshot = null;
+    }
+    return result;
+  }).finally(() => { entry.promise = null; });
+  return entry.promise;
+}
+
+function retainVerifiedFixedRangeTitles(snapshot, previous, current) {
+  const stats = state.stats;
+  const localId = state.settings?.deviceId;
+  const sessions = snapshot.period.sessions;
+  const uncertain = Object.fromEntries(Object.entries(sessions || {}).filter(([key, row]) => {
+    const id = row.sourceDevice?.deviceId;
+    // A local scan owns its own titles. Remote titles are confirmed by the
+    // same accepted range revision or by an inline row from the same device.
+    if (id && id === localId && stats.localFixedRangeRevision) return false;
+    if (id && Object.hasOwn(previous, id) && previous[id] === current[id]) return false;
+    return !id || !['today', 'month'].some(name => {
+      const inline = stats.periods?.[name]?.sessions?.[key];
+      return inline?.sourceDevice?.deviceId === id && inline.title && inline.title === row.title;
+    });
+  }));
+  const redacted = window.TokenMonitorSessionTitleDisplay.withoutSessionTitles(uncertain);
+  if (redacted === uncertain) return snapshot;
+  return { ...snapshot, period: { ...snapshot.period, sessions: { ...sessions, ...redacted } } };
+}
+
+function warmSyncedFixedPeriod() {
+  if (!['session', 'project'].includes(state.breakdown) || !window.tokenMonitor.getSyncedFixedPeriod
+    || state.settings?.hubMode === 'local' || !state.stats?.snapshot || isRendererWindowHidden()
+    || visibleStatsSurface() !== 'main' || state.syncedFixedPeriodWarmup || state.syncedFixedPeriod?.pending) return;
+  const scope = syncedFixedPeriodScope();
+  const period = shownPeriodOrder().find(candidate => {
+    if (candidate === state.period || !fixedPeriodRangesApi.isDerived(candidate)) return false;
+    const cached = state.syncedFixedPeriodCache.get(candidate);
+    return cached?.scope !== scope || (!cached.snapshot && cached.key !== syncedFixedPeriodKey(candidate));
+  });
+  const key = period && syncedFixedPeriodKey(period);
+  if (!key) return;
+  const request = readSyncedFixedPeriod(period, key);
+  state.syncedFixedPeriodWarmup = request;
+  const finish = () => {
+    state.syncedFixedPeriodWarmup = null;
+    warmSyncedFixedPeriod();
+  };
+  void request.then(finish, finish);
 }
 
 function needsPagedSessions() {
@@ -6725,7 +6966,6 @@ function requestSyncedFixedPeriod() {
   const previous = state.syncedFixedPeriod;
   if (previous?.key === key && (previous.pending || Date.now() < previous.retryAt)) return;
   clearTimeout(previous?.retryTimer);
-  const { id, source } = state.stats.snapshot;
   const sameKey = previous?.key === key;
   const request = {
     key, pending: true, snapshot: sameKey ? previous.snapshot : null,
@@ -6755,13 +6995,44 @@ function requestSyncedFixedPeriod() {
     state.sessionRowsCache = null;
     statsRenderScheduler.request();
   };
-  void window.tokenMonitor.getSyncedFixedPeriod(id, source, state.period)
+  void readSyncedFixedPeriod(state.period, key)
     .then(finish, () => finish(null));
 }
 
 function buildFixedPeriodSnapshot() {
   if (!fixedPeriodRangesApi.isDerived(state.period)) return { status: 'native', period: null };
-  const synced = state.syncedFixedPeriod?.key === syncedFixedPeriodKey() ? state.syncedFixedPeriod.snapshot : null;
+  const key = syncedFixedPeriodKey();
+  const request = state.syncedFixedPeriod?.key === key ? state.syncedFixedPeriod : null;
+  const cached = state.syncedFixedPeriodCache?.get(state.period);
+  if (key && cached?.publicationTimer != null) {
+    clearTimeout(cached.publicationTimer);
+    cached.publicationTimer = null;
+  }
+  const usableCache = cached?.snapshot && cached.scope === syncedFixedPeriodScope();
+  let synced = request?.snapshot;
+  if (!synced && usableCache) {
+    if (!key) {
+      // Usage can arrive before its detail pages. Give publication one retry
+      // interval while retaining the same range and checking title consent.
+      const period = state.period;
+      cached.publicationTimer ??= setTimeout(() => {
+        if (state.syncedFixedPeriodCache.get(period) !== cached) return;
+        cached.publicationTimer = null;
+        if (syncedFixedPeriodKey(period)) return;
+        const active = state.syncedFixedPeriod;
+        if (active && (active.key === cached.key || active.key === cached.snapshotKey)) {
+          clearTimeout(active.retryTimer);
+          state.syncedFixedPeriod = null;
+        }
+        cached.snapshot = null;
+        cached.snapshotKey = null;
+        if (state.period === period) statsRenderScheduler.request();
+      }, FIXED_PERIOD_HISTORY_RETRY_MS);
+      synced = retainVerifiedFixedRangeTitles(cached.snapshot, cached.revisions, {});
+    } else if (cached.snapshotKey === key || request?.pending || Number.isFinite(request?.retryAt)) {
+      synced = cached.snapshot;
+    }
+  }
   if (synced) {
     const history = state.settings?.historyEnabled !== false && !state.fixedPeriodHistoryFailed
       ? buildFixedPeriodSourcesSnapshot() : null;
@@ -7101,9 +7372,11 @@ function renderViewSwitcher({ focusMenu = false, focusDisclosure = false } = {})
   const currentLabel = viewLabelById(currentId);
   const nextId = nextBreakdown(currentId);
   const nextLabel = viewLabelById(nextId);
+  const hasDashboardLauncher = typeof window !== 'undefined' && typeof window.tokenMonitor?.openDashboard === 'function';
   const renderKey = JSON.stringify([currentId, order.map(id => [id, viewLabelById(id)]),
     pluginPageOptions().map(page => [page.id, page.icon, page.identityIcon]),
-    t('views.switcher.choose'), t('views.switcher.next', { view: nextLabel })]);
+    t('views.switcher.choose'), t('views.switcher.next', { view: nextLabel }),
+    hasDashboardLauncher ? t('dashboard.menuLabel') : '']);
   // Usage pushes repaint the page without changing navigation. Keep the same
   // popover/rows so hover, focus, scroll and its entry animation survive them.
   if (renderKey === viewSwitcherRenderKey && updateViewSwitcherOpenState({ focusMenu, focusDisclosure })) return;
@@ -7190,6 +7463,32 @@ function renderViewSwitcher({ focusMenu = false, focusDisclosure = false } = {})
       else renderBreakdownChange(id);
     });
     menu.append(item);
+  }
+  if (hasDashboardLauncher) {
+    const separator = document.createElement('div');
+    separator.className = 'view-switcher-menu-separator';
+    separator.setAttribute('role', 'separator');
+    menu.append(separator);
+
+    const dashItem = document.createElement('button');
+    dashItem.type = 'button';
+    dashItem.className = 'view-switcher-menu-item view-switcher-menu-action';
+    dashItem.dataset.action = 'open-dashboard';
+    dashItem.setAttribute('role', 'menuitem');
+    dashItem.tabIndex = -1;
+    const dashExt = document.createElement('span');
+    dashExt.className = 'view-switcher-icon view-switcher-menu-ext';
+    dashExt.setAttribute('aria-hidden', 'true');
+    const dashLabel = document.createElement('span');
+    dashLabel.className = 'view-switcher-menu-label';
+    dashLabel.textContent = t('dashboard.menuLabel');
+    dashItem.append(dashExt, dashLabel);
+    dashItem.addEventListener('click', () => {
+      state.viewSwitcherOpen = false;
+      updateViewSwitcherOpenState();
+      window.tokenMonitor.openDashboard();
+    });
+    menu.append(dashItem);
   }
   menu.addEventListener('keydown', (event) => {
     const items = Array.from(menu.querySelectorAll('.view-switcher-menu-item'));
@@ -7414,12 +7713,23 @@ function renderHomeLimitModule() {
     body.append(empty);
     return module;
   }
-  const displayMode = homeModulePreferencesApi.resolveHomeLimitDisplayMode(state.settings?.homeLimitDisplayMode);
-  if (displayMode !== 'rows') return renderClassicHomeLimits(module, body, rows, displayMode === 'bars');
-  const vendorColors = homeVendorColorsEnabled();
   // Low-limit colour is opt-in in every layout; the reading and meter length
   // already show how much is left.
   const highlightLow = state.settings?.showHomeLimitBars === true;
+  function applyWarning(metric, value, remainingPercent) {
+    if (!highlightLow) return;
+    const warning = homeOverviewApi.limitWarning(remainingPercent);
+    if (warning === 'exhausted') {
+      value.classList.add('home-limit-value-critical');
+      metric.classList.add('is-exhausted');
+    } else if (warning === 'low') {
+      value.classList.add('home-limit-value-low');
+      metric.classList.add('is-low');
+    }
+  }
+  const displayMode = homeModulePreferencesApi.resolveHomeLimitDisplayMode(state.settings?.homeLimitDisplayMode);
+  if (displayMode !== 'rows') return renderClassicHomeLimits(module, body, rows, displayMode === 'bars', applyWarning);
+  const vendorColors = homeVendorColorsEnabled();
   const nowMs = Date.now();
   for (const row of rows) {
     const item = document.createElement('div');
@@ -7432,7 +7742,7 @@ function renderHomeLimitModule() {
     const mark = document.createElement('span');
     const pluginModule = state.pluginCatalog?.limits?.modules?.find(module => module.id === row.providerId);
     if (pluginModule) mark.append(window.TokenMonitorPluginViews.navigationIcon(document, pluginModule, 14));
-    else applyHomeListMark(mark, iconKindFor({ key: row.iconId || row.providerId || row.key }, 'limits'), row.color);
+    else applyHomeListMark(mark, iconKindFor({ key: row.iconId || row.providerId || row.key }, 'limits'), 'rgba(var(--overlay-rgb), 0.5)');
     const name = document.createElement('span');
     name.className = 'home-list-name';
     name.textContent = row.name;
@@ -7506,26 +7816,7 @@ function renderHomeLimitModule() {
         value.setAttribute('data-limit-motion-value', String(readingPercent));
         value.setAttribute('data-limit-motion-text', value.textContent);
       }
-      if (highlightLow && remainingPercent != null) {
-        const clamped = Math.max(0, Math.min(100, remainingPercent));
-        if (!vendorColors) {
-          // Red only when exhausted, amber when nearly out.
-          if (clamped === 0) {
-            value.classList.add('home-limit-value-critical');
-            metric.classList.add('is-exhausted');
-          } else if (clamped < 20) {
-            value.classList.add('home-limit-value-low');
-            metric.classList.add('is-low');
-          }
-        } else if (clamped < 20) {
-          value.classList.add('home-limit-value-critical');
-          metric.classList.add('is-critical');
-          if (clamped === 0) metric.classList.add('is-exhausted');
-        } else if (clamped < 50) {
-          value.classList.add('home-limit-value-low');
-          value.style.setProperty('--home-limit-accent', row.color);
-        }
-      }
+      applyWarning(metric, value, remainingPercent);
       // An untouched window needs no attention, so it steps back.
       if (remainingPercent === 100 && !fixedValue) metric.classList.add('is-untouched');
       let reading = value;
@@ -7613,10 +7904,9 @@ function classicHomeLimitWindowLabel(window, providerId = '', visibleWindows = [
 // The earlier Home layouts, kept as choices: each account's compact pick of
 // windows sits two to a row, a reading beside its name and the reset
 // underneath, with or without a meter.
-function renderClassicHomeLimits(module, body, rows, showBars) {
+function renderClassicHomeLimits(module, body, rows, showBars, applyWarning) {
   module.classList.add('home-module-limits-classic');
   const showUsed = Boolean(state.settings?.showLimitUsed);
-  const highlightLow = state.settings?.showHomeLimitBars === true;
   for (const row of rows) {
     const item = document.createElement('div');
     item.className = 'home-limit-account';
@@ -7626,7 +7916,7 @@ function renderClassicHomeLimits(module, body, rows, showBars) {
     const mark = document.createElement('span');
     const pluginModule = state.pluginCatalog?.limits?.modules?.find(module => module.id === row.providerId);
     if (pluginModule) mark.append(window.TokenMonitorPluginViews.navigationIcon(document, pluginModule, 14));
-    else applyHomeListMark(mark, iconKindFor({ key: row.iconId || row.providerId || row.key }, 'limits'), row.color);
+    else applyHomeListMark(mark, iconKindFor({ key: row.iconId || row.providerId || row.key }, 'limits'), 'rgba(var(--overlay-rgb), 0.5)');
     const name = document.createElement('span');
     name.className = 'home-list-name';
     name.textContent = row.name;
@@ -7654,20 +7944,7 @@ function renderClassicHomeLimits(module, body, rows, showBars) {
       value.className = 'home-list-value';
       value.textContent = window.value || formatHomeLimitWindowValue(window, showUsed);
       const remainingPercent = optionalFiniteNumber(window.remainingPercent);
-      if (highlightLow && remainingPercent != null) {
-        const clamped = Math.max(0, Math.min(100, remainingPercent));
-        if (!homeVendorColorsEnabled()) {
-          // Same monochrome thresholds as the default rows: red only when
-          // exhausted, amber when nearly out.
-          if (clamped === 0) value.classList.add('home-limit-value-critical');
-          else if (clamped < 20) value.classList.add('home-limit-value-low');
-        } else if (clamped < 20) {
-          value.classList.add('home-limit-value-critical');
-        } else if (clamped < 50) {
-          value.classList.add('home-limit-value-low');
-          value.style.setProperty('--home-limit-accent', row.color);
-        }
-      }
+      applyWarning(metric, value, remainingPercent);
       const info = limitWindowsView.limitDetailInfoNode(window.detailEntries);
       if (info) {
         const right = document.createElement('span');
@@ -8712,11 +8989,22 @@ function setRendererSettings(next) {
   const animationChanged = tokenNumberAnimationApi.normalize(state.settings?.tokenNumberAnimation)
     !== tokenNumberAnimationApi.normalize(next.tokenNumberAnimation);
   const restoringPeriodTabs = state.settings?.periodTabOrder?.length && !next.periodTabOrder?.length;
+  const previousLocale = currentLocale();
+  const detailCompactChanged = (state.settings?.detailTokensUseCompactUnits === true) !== (next.detailTokensUseCompactUnits === true);
+  const detailUnitsChanged = (state.settings?.compactTokenUnits === 'localized') !== (next.compactTokenUnits === 'localized');
   state.settings = next;
+  const localeChanged = previousLocale !== currentLocale();
   if (next.periodTabOrder?.length) ensureVisiblePeriod(next.periodTabOrder);
   else if (restoringPeriodTabs && fixedPeriodRangesApi.slotForSelection(state.period) === 'month') {
     const defaultPeriod = fixedPeriodRangesApi.normalizeMonthMode(next.periodMonthMode);
     if (state.period !== defaultPeriod && setPeriod(defaultPeriod)) followOpenSessionToPeriod();
+  }
+  if (next.detailTokensUseCompactUnits !== true) detailTokenDisplayApi.reset();
+  if (detailCompactChanged || detailUnitsChanged || localeChanged) {
+    settleRowNumberAnimations();
+    if (state.openSession?.kind === 'session' && state.openSession.detail) {
+      state.openSession.pendingDisplayRefresh = true;
+    }
   }
   if (animationChanged) {
     pluginViewHost?.refreshMotion();
@@ -8773,6 +9061,7 @@ function renderAppContent({ fromSearch = false } = {}) {
     return;
   }
   ensureBreakdownVisible();
+  loadReasonixSessionList();
   syncSessionSearchChrome();
   if (state.breakdown !== 'session' || state.openSession) els.sessionToolFilter.classList.add('hidden');
   const pluginPage = pluginMainPages?.render(pluginPageOptions(), state.breakdown) || false;
@@ -8814,6 +9103,7 @@ function renderAppContent({ fromSearch = false } = {}) {
     state.fixedPeriodSnapshot = null;
     if (needsPagedSessions()) requestSyncedFixedPeriod();
   }
+  warmSyncedFixedPeriod();
   if (state.openSession && state.breakdown !== 'session') { state.openSession = null; els.sessionDetail.classList.add('hidden'); rendererDom.clear(els.sessionDetail); els.sessionDetailHead.classList.add('hidden'); rendererDom.clear(els.sessionDetailHead); }
   if (state.openSession) { els.sessionDetail.classList.remove('hidden'); els.sessionDetailHead.classList.remove('hidden'); } else { els.sessionDetail.classList.add('hidden'); els.sessionDetailHead.classList.add('hidden'); }
   const period = state.stats.periods?.[state.period] || { totalTokens: 0, costUsd: 0, clients: {} };
@@ -8925,7 +9215,11 @@ function renderAppContent({ fromSearch = false } = {}) {
     if (state.openSession.renderOptions) {
       const options = state.openSession.renderOptions;
       state.openSession.renderOptions = null;
+      state.openSession.pendingDisplayRefresh = false;
       renderSessionDetail(options);
+    } else if (state.openSession.pendingDisplayRefresh && state.openSession.detail) {
+      state.openSession.pendingDisplayRefresh = false;
+      renderSessionDetail({ detail: state.openSession.detail, preserveScroll: true });
     }
     void refreshOpenSessionDetail();
   } else {
@@ -8934,12 +9228,14 @@ function renderAppContent({ fromSearch = false } = {}) {
     els.serviceStatusPanel?.classList.add('hidden');
     els.trendsPanel.classList.add('hidden');
     els.breakdown.classList.remove('hidden');
-    const rows = rowsForPeriod(period);
+    const projectStats = state.breakdown === 'project' && state.period === 'allTime'
+      ? readAllTimeProjects(state.stats, state.settings) : state.stats;
+    const rows = projectStats === state.stats ? rowsForPeriod(period) : projectRowsForPeriod(projectStats.periods.allTime, projectStats);
     state.sessionRowsCache = state.breakdown === 'session'
       ? { stats: state.stats, period: state.period, rows }
       : null;
     let incompleteHint = '';
-    if (state.breakdown === 'project' && projectRowsApi.projectBreakdownIncomplete(state.stats, state.period)) {
+    if (state.breakdown === 'project' && projectRowsApi.projectBreakdownIncomplete(projectStats, state.period)) {
       incompleteHint = 'projects.incomplete';
     } else if (state.breakdown === 'session' && sessionBreakdownIncomplete()) {
       incompleteHint = 'sessions.incomplete';
@@ -9096,6 +9392,7 @@ async function refreshStats(options = {}) {
       state.homeHistorySignature = '';
       clearTimeout(state.syncedFixedPeriod?.retryTimer);
       state.syncedFixedPeriod = null;
+      state.syncedFixedPeriodCache.clear();
     }
     applyCodexActiveAccountFromStats();
     const forceFixedPeriodHistory = options.forceHistory === true;
@@ -10133,6 +10430,7 @@ function appearancePatchFromControls() {
     showToolIcons: Boolean(els.toolIconsInput.checked),
     titleIconOnly: Boolean(els.titleIconInput.checked),
     showCompactTotalTokens: Boolean(els.showCompactTotalTokensInput.checked),
+    detailTokensUseCompactUnits: Boolean(els.detailTokensUseCompactUnitsInput?.checked),
     showLiveTokenRate: Boolean(els.showLiveTokenRateInput.checked),
     liveTokenRateScope: els.liveTokenRateScopeInput?.value === 'device' ? 'device' : 'all',
     compactTokenUnits: els.compactTokenUnitsInput?.value === 'localized' ? 'localized' : 'western',
@@ -11536,6 +11834,9 @@ function syncSettingsForm() {
     els.tokenNumberAnimationInput.value = tokenNumberAnimationApi.normalize(state.settings.tokenNumberAnimation);
   }
   els.showCompactTotalTokensInput.checked = state.settings.showCompactTotalTokens === true;
+  if (els.detailTokensUseCompactUnitsInput) {
+    els.detailTokensUseCompactUnitsInput.checked = state.settings.detailTokensUseCompactUnits === true;
+  }
   els.showLiveTokenRateInput.checked = state.settings.showLiveTokenRate === true;
   if (els.liveTokenRateScopeInput) {
     els.liveTokenRateScopeInput.value = state.settings.liveTokenRateScope === 'device' ? 'device' : 'all';
@@ -15926,6 +16227,7 @@ document.addEventListener('keydown', (event) => {
 
 els.breakdown.addEventListener('scroll', settleOffscreenBreakdownNumbers, { passive: true });
 els.breakdown.addEventListener('click', (event) => {
+  if (event.target?.dataset?.detailTokenToggle === 'true') return;
   if (state.breakdown !== 'session') return;
   const rowEl = event.target.closest('.row');
   if (!rowEl) return;
@@ -15941,19 +16243,20 @@ els.breakdown.addEventListener('click', (event) => {
   }
   const key = rowEl.dataset.key || '';            // "session:<client>:<sessionId>"
   const client = rowEl.dataset.client || '';
-  if (client !== 'claude' && client !== 'codex' && client !== 'opencode' && client !== 'reasonix' && client !== 'dsh' && client !== 'codebuddy' && client !== 'workbuddy' && client !== 'pi' && client !== 'omp' && client !== 'senpi') return;
-  if (client === 'reasonix' && rowEl.dataset.detailUnavailable === 'true') return;
+  if (!sessionRowsApi.sessionRowDetailAvailable({ client, sessionDetailAvailable: rowEl.dataset.reasonixDetail === 'true' })) return;
   const match = key.match(/^session:([^:]+):(.+)$/);
   if (!match) return;
   const sessionId = client === 'reasonix' ? `reasonix:${match[2]}` : match[2];
   const session = client === 'reasonix'
-    ? state.stats?.nativeSessions?.[state.period]?.[sessionId]
+    ? reasonixSessionList?.periods[state.period]?.[sessionId]
     : displayedSessions(state.period)?.[`${client}:${sessionId}`];
+  if (client === 'reasonix' && !session?.reasonixSessionRef) return;
   const { sourceDevice, sessionDetailHeading } = window.TokenMonitorDomReconcile.data(rowEl) || {};
   openSessionDetail({
     client,
     sessionId,
-    sessionCost: client === 'reasonix' ? Number(session?.reportedCostUsd || 0) : Number(session?.costUsd || 0),
+    reasonixSessionRef: session?.reasonixSessionRef,
+    sessionCost: Number(session?.costUsd || 0),
     sourceDevice,
     title: sessionDetailHeading || rowEl.querySelector('.row-title')?.textContent || ''
   });
@@ -16536,6 +16839,9 @@ els.tokenNumberAnimationInput?.addEventListener('change', saveAppearanceFromCont
 els.showCompactTotalTokensInput.addEventListener('change', async () => {
   await saveAppearanceFromControls();
 });
+els.detailTokensUseCompactUnitsInput?.addEventListener('change', async () => {
+  await saveAppearanceFromControls();
+});
 els.showLiveTokenRateInput.addEventListener('change', async () => {
   state.settings.showLiveTokenRate = els.showLiveTokenRateInput.checked;
   const liveRateHasScope = state.settings.showLiveTokenRate
@@ -16954,7 +17260,13 @@ els.refreshButton.addEventListener('click', () => {
   // used all over the settings/account flows, and folding those into it would re-run
   // the expensive `tokscale graph`, plus the Cursor and Antigravity sync subprocesses,
   // on every one of them.
-  else refreshStats({ force: true, forceHistory: true, forceSelfSync: true, feedback: true });
+  else {
+    if (state.breakdown === 'session' && !state.openSession) {
+      reasonixSessionList = null;
+      loadReasonixSessionList();
+    }
+    refreshStats({ force: true, forceHistory: true, forceSelfSync: true, feedback: true });
+  }
 });
 els.minButton.addEventListener('click', (event) => {
   if (event.detail > 0) els.minButton.blur();
@@ -17399,6 +17711,8 @@ function roundedRectPath(ctx, x, y, w, h, r) {
 const trayProviderImages = {};
 const trayProviderImageIds = new WeakMap();
 const trayProviderImageOpticalSamples = new WeakMap();
+const trayProviderIconsRequested = new Set();
+let trayProviderIconsLoading = new Set();
 const trayProviderIconDeliveryGuard = window.TokenMonitorTrayProviderIcons.createTrayProviderIconDeliveryGuard();
 const trayComposers = {};
 let customTrayClockTimer = null;
@@ -18151,10 +18465,11 @@ function trayDataUrlForMode(mode, size = 44, colors, options = {}) {
 
 async function maybeUpdateBarsIcon(options = {}) {
   if (options.refreshComposers !== false && isSettingsSurfaceVisible()) {
-    refreshTrayComposers();
+    refreshTrayComposers(options);
     if (edgeDockAvailable() && state.settings?.edgeDockEnabled === true) edgeDockComposer?.render();
     if (state.appInfo?.platform === 'darwin' && state.settings?.notchEnabled === true) notchItemsComposer?.render();
   } else {
+    syncTrayProviderIconDemand();
     syncCustomTrayClockTimer();
   }
   const mode = state.settings?.trayContent;
@@ -18479,7 +18794,8 @@ function syncCustomTrayClockTimer() {
   }
 }
 
-function refreshTrayComposers() {
+function refreshTrayComposers(options) {
+  if (isSettingsSurfaceVisible()) syncTrayProviderIconDemand();
   const surfaces = [
     { id: 'tray', root: els.trayComposer, visible: true },
     { id: 'floatingBubble', root: els.floatingBubbleComposer, visible: true },
@@ -18490,7 +18806,7 @@ function refreshTrayComposers() {
     trayComposers,
     createTrayComposer
   );
-  Object.values(trayComposers).forEach((composer) => composer?.refresh());
+  Object.values(trayComposers).forEach((composer) => composer?.refresh(options));
   syncCustomTrayClockTimer();
 }
 
@@ -18564,10 +18880,45 @@ function providerImageToPngDataUrl(img, size, showBadge = false, options = {}) {
   return canvas.toDataURL('image/png');
 }
 
+function trayProviderIconDemand() {
+  const demand = window.TokenMonitorTrayProviderIcons.trayProviderIconDemand({
+    stats: state.stats,
+    layouts: ['trayCustomLayout', 'floatingBubbleCustomLayout', 'notchCustomLayout']
+      .map((key) => state.settings?.[key])
+  });
+  if (isSettingsSurfaceVisible()) {
+    for (const { provider } of statsForTrayComposer().limits.providers) demand.add(provider);
+  }
+  return [...demand].filter((id) => trayIconProviderIds.has(id));
+}
+
+// A provider that starts reporting usage after startup needs its mark delivered
+// before the tray can pick it. An id counts as requested while the latest
+// finished delivery sent its mark to main or failed to load it, so a failed
+// mark cannot turn every stats push into another delivery, while one dropped
+// by a superseded delivery, or left out of a later one, is asked for again.
+// Ids the current delivery is still loading are left to it.
+function syncTrayProviderIconDemand() {
+  if (!state.settings || !window.tokenMonitor.setTrayIcons) return;
+  if (trayProviderIconDemand().some((id) => !trayProviderIconsRequested.has(id) && !trayProviderIconsLoading.has(id))) {
+    void deliverTrayProviderIcons();
+  }
+}
+
+// Draws only ever read the 128 px optical sample, so keep that canvas as the
+// provider's image and let the decoded SVG go.
+async function loadTrayProviderMark(path) {
+  const sample = providerImageOpticalSample(await loadImage(path));
+  trayProviderImageOpticalSamples.set(sample.canvas, sample);
+  return sample.canvas;
+}
+
 async function deliverTrayProviderIcons(showBadge = state.settings?.showTrayProviderBadge === true) {
   if (!window.tokenMonitor.setTrayIcons) return;
   const deliveryId = trayProviderIconDeliveryGuard.begin();
-  const sources = window.TokenMonitorTrayProviderIcons.trayProviderIconSources(trayIconProviderIds);
+  const demand = trayProviderIconDemand();
+  trayProviderIconsLoading = new Set(demand);
+  const sources = window.TokenMonitorTrayProviderIcons.trayProviderIconSources(demand);
   sources.app = '../../../assets/icons/tray-token-monitor.png';
   const modules = state.pluginCatalog?.limits?.modules || [];
   for (const module of modules) {
@@ -18577,23 +18928,35 @@ async function deliverTrayProviderIcons(showBadge = state.settings?.showTrayProv
   }
   for (const id of Object.keys(trayProviderImages)) if (id.startsWith('plugin:') && !sources[id]) delete trayProviderImages[id];
   const icons = {};
+  const failed = [];
   for (const [id, path] of Object.entries(sources)) {
     try {
-      const img = await loadImage(path);
+      // Built-in marks never change, so a redelivery for the badge or the system
+      // theme repaints from the kept sample. Plugin icons can, so reload those.
+      const img = id.startsWith('plugin:')
+        ? await loadImage(path)
+        : trayProviderImages[id] || await loadTrayProviderMark(path);
       if (!trayProviderIconDeliveryGuard.isCurrent(deliveryId)) return;
       trayProviderImages[id] = img;
       trayProviderImageIds.set(img, id);
       if (!id.startsWith('plugin:')) icons[id] = providerImageToPngDataUrl(img, 44, showBadge, { trayInk: true, standalone: true });
     } catch (_) {
       if (!trayProviderIconDeliveryGuard.isCurrent(deliveryId)) return;
+      failed.push(id);
       if (id.startsWith('plugin:')) delete trayProviderImages[id];
     }
   }
   if (!trayProviderIconDeliveryGuard.isCurrent(deliveryId)) return;
-  if (Object.keys(icons).length) await window.tokenMonitor.setTrayIcons(icons);
+  // Drop absent built-in bitmaps so main can use its fallback until a fresh
+  // mark arrives, even if it changes providers while the renderer is hidden.
+  const cleared = Object.fromEntries([...trayIconProviderIds].map((id) => [id, null]));
+  await window.tokenMonitor.setTrayIcons({ ...cleared, ...icons });
   if (!trayProviderIconDeliveryGuard.isCurrent(deliveryId)) return;
+  trayProviderIconsRequested.clear();
+  for (const id of [...Object.keys(icons), ...failed]) trayProviderIconsRequested.add(id);
+  trayProviderIconsLoading = new Set();
   // Provider images may unlock a richer bars icon now that they're cached.
-  maybeUpdateBarsIcon();
+  maybeUpdateBarsIcon({ refreshOpenPreview: true });
   renderFloatingBubbleContent();
 }
 

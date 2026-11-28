@@ -198,3 +198,10 @@ test('stripping prefixes merges names that land on the same short form', () => {
   // merge-duplicates reaches the same rows here, because both spellings are present.
   assert.deepEqual(projectModelAliasStats(stats, {}, { grouping: 'duplicates' }).periods.today.models, { 'gpt-5.5': 35 });
 });
+
+
+test('the project reader receives raw model spellings from other periods', () => {
+  const context = { allTimeProjectRevisions: { remote: 'rev' }, periods: { today: { models: { 'anthropic/claude-opus-5': 2 } } } };
+  const projected = projectModelAliasStats(context, {}, { grouping: 'duplicates' });
+  assert.deepEqual(projected.projectModelIds, ['anthropic/claude-opus-5']);
+});

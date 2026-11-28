@@ -85,6 +85,50 @@ test('ACP agent identity comes from its configured instance, with mixed-provider
   assert.equal(ss['devin:bird-notebook'].parentSessionId, 'like-paperback', 'visible main provider switch is a proven parent');
 });
 
+test('T3 Antigravity context follows the current native conversation and clears after an empty update', t => {
+  const s = store(t);
+  const current = '1349661f-2212-4dae-b0b5-000000000001';
+  const historical = '1349661f-2212-4dae-b0b5-000000000002';
+  s.thread('app');
+  s.provider('provider', 'app', current, 'antigravity');
+  s.db.exec(`CREATE TABLE orchestration_v2_projection_run_attempts (
+    thread_id TEXT, provider_thread_id TEXT, root_node_id TEXT, status TEXT, payload_json TEXT)`);
+  s.db.prepare('INSERT INTO orchestration_v2_projection_nodes VALUES (?, ?, ?, ?, ?)')
+    .run('root', 'app', 'root', 'root_turn', 'provider');
+  s.db.prepare('INSERT INTO orchestration_v2_projection_run_attempts VALUES (?, ?, ?, ?, ?)')
+    .run('app', 'provider', 'root', 'completed', JSON.stringify({ nativeThreadId: historical }));
+  const setContext = context => s.db.prepare(`UPDATE orchestration_v2_projection_provider_threads
+    SET payload_json = json_set(payload_json, '$.contextUsage', json(?))`).run(JSON.stringify(context));
+  setContext({ usedTokens: 250000, maxTokens: 1048576, cost: { amount: 100, currency: 'USD' } });
+  const now = Date.now();
+  const sessions = Object.fromEntries([current, historical].map(sessionId => [
+    `antigravity:${sessionId}`,
+    { sessionId, client: 'antigravity', lastUsedAt: new Date(now).toISOString(), totalTokens: 50 }
+  ]));
+  const periods = { today: { sessions } };
+  const row = sessions[`antigravity:${current}`];
+  applySessionMetadata(periods, s.home, { now });
+  assert.equal(row.contextTokens, 250000);
+  assert.equal(row.contextWindow, 1048576);
+  assert.equal(row.totalTokens, 50);
+  assert.equal(sessions[`antigravity:${historical}`].contextWindow, undefined);
+
+  setContext({ usedTokens: 13000, maxTokens: 1048576 });
+  applySessionMetadata(periods, s.home, { now });
+  assert.equal(row.contextTokens, 13000);
+
+  setContext(null);
+  applySessionMetadata(periods, s.home, { now });
+  assert.equal(row.contextTokens, 0);
+  assert.equal(row.contextWindow, 0);
+
+  setContext({ usedTokens: Number.MAX_SAFE_INTEGER + 1, maxTokens: 1048576 });
+  s.db.prepare("UPDATE orchestration_v2_projection_threads SET title = 'Verified title' WHERE thread_id = 'app'").run();
+  applySessionMetadata(periods, s.home, { now });
+  assert.equal(row.title, 'Verified title');
+  assert.equal(row.contextWindow, 0);
+});
+
 test('T3 Antigravity ACP displays its thread title and groups same-thread runs and delegated usage', t => {
   const s = store(t);
   const main = '1349661f-2212-4dae-b0b5-000000000001';

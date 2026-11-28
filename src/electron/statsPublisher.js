@@ -77,12 +77,12 @@ function createStatsPublicationBatcher(options = {}) {
   return { request, flush, cancel };
 }
 
-function withoutSessionDetail(period) {
+function withoutSessionDetail(period, keepProjects = false) {
   if (!period || typeof period !== 'object') return period;
   if (!('sessions' in period) && !('projects' in period)) return period;
   const summary = { ...period };
   delete summary.sessions;
-  delete summary.projects;
+  if (!keepProjects) delete summary.projects;
   return summary;
 }
 
@@ -90,13 +90,12 @@ function withoutSessionDetail(period) {
 // clone copies every byte on the main thread. Main keeps the full snapshot: the
 // exporter, tray, edge dock and Widget read it there.
 //
-// - Device records keep their period totals and breakdowns but not their
-//   sessions and projects. The renderer only reads those aggregated, from
-//   `periods`, and the local device's copy alone repeats all of them.
+// - Device records omit sessions. Only Dashboard needs per-device project
+//   rollups for its device filter.
 // - The all-time session list is pulled, not pushed (`stats:allTimeSessions`).
 //   It is most of the payload and only one view shows it, so shipping it on
 //   every publish would clone it for nothing nearly every time.
-function rendererStats(stats) {
+function rendererStats(stats, { dashboard = false } = {}) {
   if (!stats || typeof stats !== 'object') return stats;
   const result = { ...stats };
   const allTime = stats.periods?.allTime;
@@ -108,7 +107,7 @@ function rendererStats(stats) {
     result.devices = stats.devices.map((device) => {
       if (!device?.periods || typeof device.periods !== 'object') return device;
       const periods = {};
-      for (const [name, period] of Object.entries(device.periods)) periods[name] = withoutSessionDetail(period);
+      for (const [name, period] of Object.entries(device.periods)) periods[name] = withoutSessionDetail(period, dashboard);
       return { ...device, periods };
     });
   }

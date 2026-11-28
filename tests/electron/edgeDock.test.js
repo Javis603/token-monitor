@@ -2016,6 +2016,47 @@ test('a pinned rail window ignores automatic exhaustion and keeps its identity a
   assert.equal(build([scoped, weekly]).status, 'error');
 });
 
+test('an Antigravity group pin uses only that group across visible accounts', () => {
+  const geminiSession = { kind: 'session', label: 'Gemini 5-hour', remainingPercent: 85 };
+  const geminiWeekly = { kind: 'weekly', label: 'Gemini weekly', remainingPercent: 55 };
+  const claudeSession = { kind: 'session', label: 'Claude/GPT 5-hour', remainingPercent: 0 };
+  const main = provider('antigravity', { accountKey: 'main', windows: [geminiSession, geminiWeekly, claudeSession] });
+  const other = provider('antigravity', { accountKey: 'other', windows: [
+    { ...geminiSession, remainingPercent: 70 },
+    { ...geminiWeekly, remainingPercent: 60 }
+  ] });
+  const unrelated = provider('antigravity', { accountKey: 'unrelated', windows: [claudeSession] });
+  const stats = { limits: { providers: [main, other, unrelated] } };
+  const build = (options) => buildEdgeDockCells(stats, { items: normalizeEdgeDockItems([
+    { type: 'limit', provider: 'antigravity', ...options }
+  ]) })[0];
+  const windowKey = JSON.stringify(['group', 'Gemini']);
+
+  assert.equal(build({}).remainingPercent, 0);
+  assert.equal(build({ windowKey }).remainingPercent, 70);
+  const pinned = build({ windowKey, hiddenAccounts: ['other'] });
+  assert.equal(pinned.remainingPercent, 85);
+  assert.equal(pinned.severityPercent, 55);
+  assert.equal(pinned.windowKind, 'session');
+  assert.deepEqual(pinned.accounts[0].record, main);
+  assert.equal(build({ windowKey: limitWindowKey(geminiWeekly) }).remainingPercent, 55);
+
+  main.windows = [geminiSession, { ...geminiWeekly, remainingPercent: 5 }, claudeSession];
+  const lowWeekly = build({ windowKey });
+  assert.equal(lowWeekly.remainingPercent, 70);
+  assert.equal(lowWeekly.severityPercent, 5);
+
+  main.windows = [geminiSession, { ...geminiWeekly, remainingPercent: 0 }, claudeSession];
+  const exhausted = build({ windowKey });
+  assert.equal(exhausted.remainingPercent, 0);
+  assert.equal(exhausted.windowKind, 'weekly');
+
+  main.windows = [claudeSession];
+  other.stale = true;
+  assert.equal(build({ windowKey }).remainingPercent, null);
+  assert.equal(normalizeEdgeDockItems([{ type: 'limit', provider: 'claude', windowKey }])[0].windowKey, '');
+});
+
 test('backend identity separates same-label windows and survives label changes', () => {
   const first = { kind: 'session', label: 'Some quota', limitId: 'feature-a', windowMinutes: 300, additional: true, remainingPercent: 30 };
   const second = { ...first, limitId: 'feature-b', remainingPercent: 70 };
@@ -2687,16 +2728,30 @@ test('a dragged usage item keeps its place in the saved order', () => {
 });
 
 test('derived periods read History totals and stay unknown until they arrive', () => {
-  const items = [{ type: 'stat', metric: 'last7' }, { type: 'stat', metric: 'allTime' }];
+  const { DERIVED_PERIODS, USAGE_PERIODS } = require('../../src/electron/renderer/edgeDock/items');
+  const { PERIOD_TAB_OPTIONS } = require('../../src/electron/renderer/fixedPeriodRanges');
+  const { MESSAGES } = require('../../src/electron/renderer/i18n');
+  assert.deepEqual([...USAGE_PERIODS].sort(), [...PERIOD_TAB_OPTIONS].sort());
+  assert.deepEqual(DERIVED_PERIODS, ['yesterday', 'week', 'last7', 'last30']);
+  for (const [locale, messages] of Object.entries(MESSAGES)) {
+    assert.ok(messages['edgeDock.period.yesterday']?.trim(), `${locale} missing edgeDock.period.yesterday`);
+    assert.ok(messages['edgeDock.periodShort.yesterday']?.trim(), `${locale} missing edgeDock.periodShort.yesterday`);
+  }
+  const items = [{ type: 'stat', metric: 'yesterday' }, { type: 'stat', metric: 'last7' }, { type: 'stat', metric: 'allTime' }];
   const stats = { periods: { allTime: { totalTokens: 5, costUsd: 1, clients: { codex: 5 } } } };
-  const [pending, total] = buildEdgeDockCells(stats, { items });
+  const [pendingYesterday, pending, total] = buildEdgeDockCells(stats, { items });
+  assert.equal(pendingYesterday.available, false);
   assert.equal(pending.available, false);
   assert.equal(pending.totalTokens, null);
   assert.equal(total.available, true);
-  const [ready] = buildEdgeDockCells(stats, {
+  const [readyYesterday, ready] = buildEdgeDockCells(stats, {
     items,
-    derivedPeriods: { last7: { totalTokens: 70, costUsd: 7, clients: { claude: 70 }, clientCosts: { claude: 7 } } }
+    derivedPeriods: {
+      yesterday: { totalTokens: 25, costUsd: 2.5, clients: { codex: 25 }, clientCosts: { codex: 2.5 } },
+      last7: { totalTokens: 70, costUsd: 7, clients: { claude: 70 }, clientCosts: { claude: 7 } }
+    }
   });
+  assert.equal(readyYesterday.totalTokens, 25);
   assert.equal(ready.totalTokens, 70);
   assert.deepEqual(ready.clients.map((client) => client.client), ['claude']);
 });

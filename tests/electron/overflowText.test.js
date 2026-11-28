@@ -242,7 +242,7 @@ for (const className of ['detail-ex-title', 'detail-heading']) {
       const finalReads = finalUpdate ? 3 : 2;
       assert.equal(reads, finalReads, 'the latest push performs exactly the required reads');
       assert.equal(renders.at(-1).detail.marker, finalReads, 'the final update paints without another stats push');
-      assert.equal(state.openSession.liveSignature, JSON.stringify(finalUpdate ? [300, 3, 0] : [200, 2, 0]));
+      assert.equal(state.openSession.liveSignature, JSON.stringify(finalUpdate ? [300, 3] : [200, 2]));
       assert.equal(state.openSession.sessionCost, finalUpdate ? 3 : 2);
       assert.deepEqual(renders.filter(render => render.detail).map(render => render.detail.marker), finalUpdate ? [1, 2, 3] : [1, 2]);
       assert.equal(renders.at(-1).preserveScroll, true);
@@ -424,7 +424,8 @@ test('updateRow keeps IDs for untitled sessions and moves them into Details for 
     window: { TokenMonitorDomReconcile: require('../../src/electron/renderer/domReconcile') },
     state: { breakdown: 'session' }, rowWidth: () => 50,
     iconKindFor: () => ({ kind: 'dot' }),
-    setHoverMarqueeText: h.api.setText, formatNumber: String, formatCost: String,
+    setHoverMarqueeText: h.api.setText, formatNumber: String, formatDetailTokens: String, formatCost: String,
+    detailTokenDisplaySignature: () => '0:0:western:en', decorateDetailTokenElement() {},
     rowNumberAnimations: new Map(), cancelRowNumberAnimation() {},
     updateRowContext() {}, updateRowLive() {}, applyBarScale() {},
     sessionRowsApi: { ...require('../../src/electron/renderer/sessionRows'), applyBreakdownRowSemantics(_row, _head, options) { interactive = options.interactive; } },
@@ -435,7 +436,7 @@ test('updateRow keeps IDs for untitled sessions and moves them into Details for 
     ['claude', undefined, true], ['codex', undefined, true],
     ['opencode', undefined, true], ['dsh', undefined, true],
     ['cursor', undefined, false], ['copilot', undefined, false], ['zed', undefined, false],
-    ['reasonix', false, false], ['reasonix', true, true], ['reasonix', false, false]
+    ['reasonix', undefined, false]
   ]) {
     for (const titled of [true, false, true]) {
       context.update(row, { name: titled ? 'Named session' : 'Tool · Model',
@@ -495,7 +496,8 @@ test('a token and cost update through updateRow keeps the hovered title moving',
     window: { TokenMonitorDomReconcile: require('../../src/electron/renderer/domReconcile') },
     state: { breakdown: 'session' }, rowWidth: () => 50,
     iconKindFor: () => ({ kind: 'dot' }),
-    setHoverMarqueeText: h.api.setText, formatNumber: String, formatCost: String,
+    setHoverMarqueeText: h.api.setText, formatNumber: String, formatDetailTokens: String, formatCost: String,
+    detailTokenDisplaySignature: () => '0:0:western:en', decorateDetailTokenElement() {},
     rowNumberAnimations: new Map(), cancelRowNumberAnimation() {},
     updateRowContext() {}, updateRowLive() {}, applyBarScale() {},
     sessionRowsApi: { ...require('../../src/electron/renderer/sessionRows'), applyBreakdownRowSemantics() {} }, t: key => key
@@ -550,7 +552,8 @@ test('actual shared row rendering keeps group availability and binds Auto Review
     state: { breakdown: 'session', settings: { showToolIcons: true, deviceId: 'imac' } }, rowWidth: () => 50,
     toolIconsEnabled: value => value !== false, clientsWithIcon: new Set(['codex', 'claude']),
     deviceIconsApi: require('../../src/electron/renderer/deviceIcons'),
-    setHoverMarqueeText: h.api.setText, overflowText: h.api, formatNumber: String, formatCost: String,
+    setHoverMarqueeText: h.api.setText, overflowText: h.api, formatNumber: String, formatDetailTokens: String, formatCost: String,
+    detailTokenDisplaySignature: () => '0:0:western:en', decorateDetailTokenElement() {},
     rowNumberAnimations: new Map(),
     updateRowContext() {}, updateRowLive() {}, applyBarScale() {}, cancelRowNumberAnimation() {},
     document: { createElement: makeNode, createTextNode: text => ({ textContent: text }) },

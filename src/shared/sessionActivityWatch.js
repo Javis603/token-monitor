@@ -98,4 +98,4 @@ function activityWatchIgnored(usageIgnored, usageDirs, sources) {
   };
 }
 
-module.exports = { activityWatchSources, activityClientsForPath, activityWatchIgnored };
+module.exports = { activityWatchSources, activityClientsForPath, activityWatchIgnored, comparablePath };

@@ -122,3 +122,29 @@ test('nested account, session and family scroll containers survive independently
   dom.clear(root); assert.equal(root.children.length, 0);
   dom.reconcileChildren(root, build('400')); assert.notEqual(root.children[0], accounts);
 });
+
+
+test('enabling compact tokens activates the retained transcript control', () => {
+  const display = require('../../src/electron/renderer/detailTokenDisplay');
+  const { node, root, dom } = fixture();
+  let enabled = false;
+  display.configure({ isEnabled: () => enabled });
+  const stage = () => {
+    const token = node('exchange-value', display.formatDetailTokens(120000), 'detail-ex-value');
+    display.decorateTokenElement(token, '120,000');
+    dom.reconcileChildren(root, [token]);
+  };
+  stage();
+  const original = root.firstChild;
+  assert.equal(original.getAttribute('tabindex'), undefined);
+  enabled = true;
+  stage();
+  assert.equal(root.firstChild, original);
+  assert.equal(original.getAttribute('tabindex'), '0');
+  original.fire('click');
+  stage();
+  assert.equal(original.getAttribute('aria-pressed'), 'true');
+  original.fire('keydown', { key: 'Enter' });
+  stage();
+  assert.equal(original.getAttribute('aria-pressed'), 'false');
+});

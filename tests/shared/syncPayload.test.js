@@ -32,21 +32,23 @@ test('syncPayload preserves nullish inputs', () => {
   assert.equal(syncPayload(undefined), undefined);
 });
 
-test('oversized model timing detail is omitted before session detail without mutating the source', () => {
+test('a Today timing map that cannot fit is omitted as a unit and sessions can use the space', () => {
   const modelThroughput = Object.fromEntries(Array.from({ length: 13000 }, (_, i) => [
     `model-${i}-${'x'.repeat(20)}`, { timedTokens: 1, timedOutputTokens: 1, timedDurationMs: 1 }
   ]));
   const today = { totalTokens: 13000, outputTokens: 13000, timedTokens: 13000, timedOutputTokens: 13000, timedDurationMs: 13000,
     modelThroughput, sessions: { 'codex:s1': { client: 'codex', sessionId: 's1', totalTokens: 13000 } } };
-  const summary = { deviceId: 'a', today, month: today, allTime: today };
-  const serialized = serializeSyncPayload(summary);
-  assert.ok(serialized.bytes <= SYNC_PAYLOAD_BUDGET_BYTES);
+  const projects = { keep: { label: 'Keep', tokens: 13000 } };
+  const summary = { deviceId: 'a', today, month: today, allTime: { ...today, projects } };
+  const serialized = serializeSyncPayload(summary, { maxBytes: 1024 });
+  assert.ok(serialized.bytes <= 1024);
   for (const name of ['today', 'month', 'allTime']) {
     assert.equal(Object.hasOwn(serialized.payload[name], 'modelThroughput'), false);
     assert.equal(serialized.payload[name].totalTokens, 13000);
     assert.strictEqual(summary[name].modelThroughput, modelThroughput);
   }
   assert.deepEqual(serialized.payload.today.sessions, today.sessions);
+  assert.deepEqual(serialized.payload.allTime.projects, projects);
   assert.equal(serialized.payload.sessionDetailsOmitted, undefined);
   const { normalizePeriod } = require('../../src/shared/usage');
   assert.equal(normalizePeriod(serialized.payload.today).modelThroughput, undefined);
