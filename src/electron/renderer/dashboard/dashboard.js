@@ -1028,7 +1028,7 @@ function renderBreakdown(overview) {
       state.breakdownMode !== 'model' ? 'dashboard.stack.client' : '',
       state.breakdownMode !== 'client' ? 'dashboard.stack.model' : ''
     ].filter(Boolean);
-    elsBreakdown.innerHTML = '<div class="dash-ghost-list dash-ghost-list--attribution" aria-hidden="true">'
+    elsBreakdown.innerHTML = '<div class="ghost-list dash-ghost-list dash-ghost-list--attribution" aria-hidden="true">'
       + ghostGroups.map((titleKey) => `<div class="dash-breakdown-group"><div class="dash-breakdown-title">${escapeHtml(t(titleKey))}</div>`
         + ghostRowHtml('attribution').repeat(ghostGroups.length > 1 ? 3 : 5) + '</div>').join('')
       + '</div>';
@@ -1972,7 +1972,7 @@ function renderSessionRowsHtml(list, overview) {
 }
 
 function ghostBar(cls) {
-  return `<span class="dash-ghost-bar ${cls}"></span>`;
+  return `<span class="ghost-bar ${cls}"></span>`;
 }
 
 // Empty states draw static, non-interactive ghosts of the real rows (same
@@ -1989,20 +1989,20 @@ function ghostRowHtml(kind) {
   }
   if (kind === 'attribution') {
     return '<div class="dash-bd-row is-ghost">'
-      + `<span class="dash-bd-name"><span class="dash-bd-swatch dash-ghost-fill"></span>${ghostBar('is-name')}</span>`
+      + `<span class="dash-bd-name"><span class="dash-bd-swatch ghost-fill"></span>${ghostBar('is-name')}</span>`
       + '<div class="dash-bd-bar-bg"></div>'
       + `<span class="dash-bd-val">${ghostBar('is-num')}</span><span class="dash-bd-pct">${ghostBar('is-num-sm')}</span>`
       + '</div>';
   }
   return '<div class="dash-session-row is-ghost">'
-    + '<span class="dash-session-lead"><span class="dash-session-brand dash-ghost-fill"></span></span>'
+    + '<span class="dash-session-lead"><span class="dash-session-brand ghost-fill"></span></span>'
     + `<div class="dash-session-body">${ghostBar('is-title')}${ghostBar('is-sub')}</div>`
     + `<div class="dash-session-metrics">${ghostBar('is-num')}${ghostBar('is-num-sm')}</div>`
     + '</div>';
 }
 
 function ghostListHtml(kind, count) {
-  return `<div class="dash-ghost-list dash-ghost-list--${kind}" aria-hidden="true">${ghostRowHtml(kind).repeat(count)}</div>`;
+  return `<div class="ghost-list dash-ghost-list dash-ghost-list--${kind}" aria-hidden="true">${ghostRowHtml(kind).repeat(count)}</div>`;
 }
 
 function showWorkEmpty(key) {
@@ -2012,7 +2012,7 @@ function showWorkEmpty(key) {
 
 function ghostTopologyNodeHtml(withBar) {
   return '<div class="topo-node is-ghost" aria-hidden="true">'
-    + `<div class="topo-node-top"><span class="topo-node-ident"><span class="dash-bd-swatch dash-ghost-fill"></span>${ghostBar('is-name')}</span>${ghostBar('is-num-sm')}</div>`
+    + `<div class="topo-node-top"><span class="topo-node-ident"><span class="dash-bd-swatch ghost-fill"></span>${ghostBar('is-name')}</span>${ghostBar('is-num-sm')}</div>`
     + `<div class="topo-node-sub">${ghostBar('is-sub')}</div>`
     + (withBar ? '<div class="topo-mini-bar"></div>' : '')
     + '</div>';

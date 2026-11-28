@@ -3486,6 +3486,58 @@ function renderSessionToolFilter(rows) {
   return state.sessionToolFilter ? rows.filter(row => sessionToolClients(row).includes(state.sessionToolFilter)) : rows;
 }
 
+const BREAKDOWN_EMPTY_KEYS = {
+  tool: 'home.noTools',
+  device: 'home.noDevices',
+  model: 'home.noModels',
+  project: 'projects.empty',
+  session: 'home.noSessions'
+};
+const BREAKDOWN_GHOST_ROWS = 4;
+
+// Session rows carry a subtitle and an activity line, project rows a subtitle.
+function breakdownGhostRow(lines) {
+  const row = document.createElement('div');
+  row.className = 'row is-ghost';
+  const head = document.createElement('div');
+  head.className = 'row-head';
+  const name = document.createElement('div');
+  name.className = 'row-name';
+  const label = document.createElement('div');
+  label.className = 'row-label';
+  label.append(ghostCell('row-title', ghostBar('name')));
+  if (lines > 1) label.append(ghostCell('row-subtitle', ghostBar('sub')));
+  if (lines > 2) label.append(ghostCell('row-activity', ghostBar('sub')));
+  name.append(ghostCell('row-mark ghost-fill'), label);
+  const metrics = document.createElement('div');
+  metrics.className = 'row-metrics';
+  metrics.append(ghostCell('row-value', ghostBar('num')), ghostCell('row-cost', ghostBar('num-sm')));
+  head.append(name, metrics);
+  const body = document.createElement('div');
+  body.className = 'row-body';
+  const bar = document.createElement('div');
+  bar.className = 'bar';
+  body.append(bar);
+  row.append(head, body);
+  return row;
+}
+
+// An empty list keeps the page's shape with ghosts of its rows under a line
+// that says why. As on Home, a first scan still landing pulses and reads as
+// collecting; a settled empty period stays still.
+function breakdownGhostNodes(pending) {
+  const reason = document.createElement('p');
+  reason.className = 'breakdown-empty-reason';
+  reason.setAttribute('role', 'status');
+  reason.textContent = t(pending ? 'home.usageCollecting' : BREAKDOWN_EMPTY_KEYS[state.breakdown] || 'home.noTools');
+  const list = document.createElement('div');
+  list.className = `ghost-list breakdown-ghost-list${pending ? ' is-pending' : ''}`;
+  list.setAttribute('aria-hidden', 'true');
+  const lines = state.breakdown === 'session' ? 3 : state.breakdown === 'project' ? 2 : 1;
+  for (let index = 0; index < BREAKDOWN_GHOST_ROWS; index++) list.append(breakdownGhostRow(lines));
+  return [reason, list];
+}
+
 function renderRows(rows, { incompleteHint = '', fromSearch = false, reuseToolFilter = false } = {}) {
   const searchQuery = state.breakdown === 'session' ? sessionSearchQuery() : '';
   if (state.breakdown === 'session') {
@@ -3501,22 +3553,41 @@ function renderRows(rows, { incompleteHint = '', fromSearch = false, reuseToolFi
     incompleteHint ? t(incompleteHint) : '',
     reasonixReadFailed ? t('sessions.reasonixReadFailed') : ''
   ].filter(Boolean).join(' ');
-  if (rows.length === 0 && (!hintText || searchEmpty)) {
-    els.breakdown.replaceChildren();
-    if (hintText) {
-      const hint = document.createElement('p');
-      hint.className = 'breakdown-incomplete-hint';
-      hint.setAttribute('role', 'status');
-      hint.textContent = hintText;
-      els.breakdown.append(hint);
+  if (rows.length === 0) {
+    // A search with no match says so in words; ghosts would read as loading.
+    // An incomplete-data hint is the reason above the ghosts when there is one.
+    const pending = state.stats?.nativeRangesPending === true;
+    const ghostSignature = searchEmpty ? '' : JSON.stringify([state.breakdown, pending, hintText, currentLocale()]);
+    // Collector ticks re-render an empty list too; rebuilding the same ghosts
+    // would restart their pulse on every tick.
+    const ghostsCurrent = ghostSignature && els.breakdown.dataset.ghost === ghostSignature
+      && els.breakdown.querySelector(':scope > .breakdown-ghost-list');
+    if (!ghostsCurrent) {
+      els.breakdown.replaceChildren();
+      if (hintText) {
+        const hint = document.createElement('p');
+        hint.className = 'breakdown-incomplete-hint';
+        hint.setAttribute('role', 'status');
+        // Over pulsing ghosts the hint also says the first scan is still running.
+        hint.textContent = !searchEmpty && pending ? `${t('home.usageCollecting')} ${hintText}` : hintText;
+        els.breakdown.append(hint);
+      }
+      if (searchEmpty) els.breakdown.append(sessionSearchEmptyNode(searchQuery));
+      else {
+        const [reason, ghosts] = breakdownGhostNodes(pending);
+        els.breakdown.append(...(hintText ? [ghosts] : [reason, ghosts]));
+      }
     }
-    if (searchEmpty) els.breakdown.append(sessionSearchEmptyNode(searchQuery));
+    if (ghostSignature) els.breakdown.dataset.ghost = ghostSignature;
+    else delete els.breakdown.dataset.ghost;
     renderSessionPager(null);
     state.rowSignature = '';
     renderProjectBreakdownFooter();
     setSessionSearchStatus(searchQuery, 0);
     return;
   }
+  // The row signature was cleared with the ghosts, so the rows below replace them.
+  delete els.breakdown.dataset.ghost;
   const page = breakdownPage(rows, { breakdown: state.breakdown, page: state.sessionPage });
   state.sessionPage = page.page;
   renderSessionPager(page);
@@ -5316,9 +5387,47 @@ const {
   codexResetForecastExpired,
   limitAccountTitle,
   limitProviderPlan,
+  limitRowShape,
   renderLimitProviderGroup,
+  renderLimitProviderPending,
   renderLimitProviderSolo
 } = limitWindowsView;
+
+// The Limits page's ghost rows redraw each provider's last layout. A display
+// cache on this device only: losing it costs a ghost that guesses one window.
+const LIMIT_ROW_SHAPES_KEY = 'tokenMonitor.limitRowShapes';
+let limitRowShapes = null;
+
+function storedLimitRowShapes() {
+  if (!limitRowShapes) {
+    try {
+      const parsed = JSON.parse(localStorage.getItem(LIMIT_ROW_SHAPES_KEY) || '{}');
+      limitRowShapes = parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : {};
+    } catch (_) {
+      limitRowShapes = {};
+    }
+  }
+  return limitRowShapes;
+}
+
+// Only rows that drew windows are kept, so a failed reading does not shrink
+// the ghost the provider gets on the next start.
+function rememberLimitRowShapes(rows) {
+  const shapes = storedLimitRowShapes();
+  let changed = false;
+  for (const row of rows) {
+    if (row.classList.contains('limit-row-pending')) continue;
+    const id = row.dataset.key;
+    const shape = limitRowShape(row);
+    if (!shape.some(Boolean) || JSON.stringify(shapes[id]) === JSON.stringify(shape)) continue;
+    shapes[id] = shape;
+    changed = true;
+  }
+  if (!changed) return;
+  try {
+    localStorage.setItem(LIMIT_ROW_SHAPES_KEY, JSON.stringify(shapes));
+  } catch (_) {}
+}
 
 
 function optionalFiniteNumber(value) {
@@ -5548,9 +5657,14 @@ function renderLimits() {
   const orderedProviders = limitProviderOrderApi
     .orderedLimitProviders(desktopLimitProviders(), state.settings?.limitProviderOrder)
     .filter(({ id }) => limitsEnabled && enabled.has(id));
+  // Locally, a provider with no record has not answered its first probe yet:
+  // every probe returns a record, notConfigured included. A synced view can
+  // only show what other devices sent, so there a missing record stays missing.
+  const missingStatus = !state.stats ? 'unavailable'
+    : state.mode === 'sync' ? missingLimitProviderStatus() : 'awaitingFirstData';
   const visibleProviderEntries = new Map(orderedProviders.map(({ id }) => {
     const providerEntries = limitsEnabled && enabled.has(id)
-      ? (providers.get(id) || [{ provider: id, status: state.stats ? missingLimitProviderStatus() : 'unavailable', windows: [] }])
+      ? (providers.get(id) || [{ provider: id, status: missingStatus, windows: [] }])
       : [{ provider: id, status: 'disabled', windows: [] }];
     return [id, providerEntries];
   }));
@@ -5614,9 +5728,14 @@ function renderLimits() {
       continue;
     }
     const provider = Array.isArray(visibleProviders) ? visibleProviders[0] : visibleProviders;
+    if (provider.status === 'awaitingFirstData') {
+      nodes.push(renderLimitProviderPending(id, label, color, storedLimitRowShapes()[id]));
+      continue;
+    }
     nodes.push(renderLimitProviderSolo(id, label, provider, color));
   }
   nodes.forEach((node, index) => { node.dataset.key = rows[index].id; });
+  rememberLimitRowShapes(nodes);
   rendererDom.reconcileChildren(els.limitsPanel, nodes);
   animateLimitResets(resetMotionSnapshot);
 }
@@ -6523,6 +6642,36 @@ function bindTrendTooltip(spark, model, points, labelKey, metric) {
   select(points.length - 1);
 }
 
+// Trends with no history keeps its layout: the reason in the caption, an empty
+// plot, and the stat cards with their labels but no readings.
+function trendsGhostNodes() {
+  const pending = state.trendsActivating || state.stats?.nativeRangesPending === true;
+  const cap = document.createElement('div');
+  cap.className = 'trends-cap is-reason';
+  cap.setAttribute('role', 'status');
+  const reason = document.createElement('span');
+  reason.textContent = t(pending ? 'home.historyLoading' : 'trends.empty');
+  cap.append(reason);
+  const ghost = document.createElement('div');
+  ghost.className = `ghost-list trends-ghost${pending ? ' is-pending' : ''}`;
+  ghost.setAttribute('aria-hidden', 'true');
+  const plot = document.createElement('div');
+  plot.className = 'trends-ghost-plot';
+  const axis = document.createElement('div');
+  axis.className = 'trends-axis';
+  axis.append(ghostBar('num-sm'), ghostBar('num-sm'));
+  const stats = document.createElement('div');
+  stats.className = 'trends-stats';
+  for (const key of ['trends.activeDays', 'trends.currentStreak', 'trends.activeTime', 'trends.peakDay']) {
+    const stat = document.createElement('div');
+    stat.className = 'trends-stat';
+    stat.append(ghostCell('trends-stat-v', ghostBar('num')), ghostCell('trends-stat-k', document.createTextNode(t(key))));
+    stats.append(stat);
+  }
+  ghost.append(plot, axis, stats);
+  return [cap, ghost];
+}
+
 function renderTrends() {
   const charts = window.TokenMonitorUsageCharts;
   const previousBars = captureTrendBarMotion();
@@ -6539,9 +6688,7 @@ function renderTrends() {
   if (finalPoints.length === 0) {
     hideTrendTooltip();
     state.trendTooltipBinding = null;
-    const empty = document.createElement('div');
-    empty.className = 'trends-empty'; empty.textContent = t('trends.empty');
-    rendererDom.reconcileChildren(els.trendsPanel, [empty]);
+    rendererDom.reconcileChildren(els.trendsPanel, trendsGhostNodes());
     return;
   }
 
@@ -7696,12 +7843,7 @@ function homeLimitResetText(window, nowMs = Date.now()) {
 function renderHomeLimitModule() {
   const rows = homeLimitRows();
   const showUsed = Boolean(state.settings?.showLimitUsed);
-  // Readings are bare percentages, so the heading says once which way they count.
-  const { module, body } = homeModuleShell('limits', t('home.limits'), 'limits',
-    rows.length ? t(showUsed ? 'settings.limits.barsUsed' : 'settings.limits.barsRemaining') : '');
   if (rows.length === 0) {
-    const empty = document.createElement('div');
-    empty.className = 'home-module-empty';
     const providerOrder = state.settings?.homeLimitProviderOrder || state.settings?.limitProviderOrder;
     const awaitingFirstData = homeOverviewApi.homeLimitsAwaitingFirstData({
       providers: desktopLimitRecords(),
@@ -7709,10 +7851,17 @@ function renderHomeLimitModule() {
       enabledProviderIds: Array.from(enabledLimitProviderSet()),
       hiddenProviderIds: Array.from(hiddenHomeLimitProviderSet())
     });
-    empty.textContent = t(awaitingFirstData ? 'home.limitsInitializing' : 'home.noLimits');
-    body.append(empty);
-    return module;
+    return homeGhostModule('limits', t('home.limits'), 'limits', {
+      reason: t(awaitingFirstData ? 'home.limitsInitializing' : 'home.noLimits'),
+      // Synced readings arrive only if another device sends them, so only a
+      // local first probe is known to be on its way.
+      pending: awaitingFirstData && state.mode !== 'sync',
+      count: 2
+    });
   }
+  // Readings are bare percentages, so the heading says once which way they count.
+  const { module, body } = homeModuleShell('limits', t('home.limits'), 'limits',
+    t(showUsed ? 'settings.limits.barsUsed' : 'settings.limits.barsRemaining'));
   // Low-limit colour is opt-in in every layout; the reading and meter length
   // already show how much is left.
   const highlightLow = state.settings?.showHomeLimitBars === true;
@@ -8010,6 +8159,110 @@ function homeListMarkColor(color) {
   return homeVendorColorsEnabled() ? homeVendorRevealColor(color) : 'rgba(var(--overlay-rgb), 0.5)';
 }
 
+// An empty module keeps its shape: static ghosts of its real rows (same
+// classes, so they keep the live geometry) stand in for the content, and the
+// head's meta says why. Only data that is still on its way pulses; settled
+// emptiness stays still, so a ghost never promises content that is not coming.
+const HOME_GHOST_ROWS = 3;
+
+function ghostCell(className, child) {
+  const cell = document.createElement('span');
+  cell.className = className;
+  if (child) cell.append(child);
+  return cell;
+}
+
+function ghostBar(size) {
+  return ghostCell(`ghost-bar is-${size}`);
+}
+
+function homeGhostRow(kind) {
+  const row = document.createElement('div');
+  const mark = ghostCell('home-list-mark');
+  const value = ghostCell('home-list-value', ghostBar('num'));
+  if (kind === 'limits') {
+    row.className = 'home-limit-account is-ghost';
+    const head = document.createElement('div');
+    head.className = 'home-limit-account-head';
+    head.append(mark, ghostCell('home-list-name', ghostBar('name')));
+    const windows = document.createElement('div');
+    windows.className = 'home-limit-windows';
+    const limitWindow = document.createElement('div');
+    limitWindow.className = 'home-limit-window';
+    const track = document.createElement('div');
+    track.className = 'home-limit-track';
+    limitWindow.append(ghostCell('home-limit-window-label', ghostBar('label')), ghostCell('home-limit-reset'), track, value);
+    windows.append(limitWindow);
+    row.append(head, windows);
+  } else if (kind === 'session') {
+    // The Detailed setting gives every row its details line, so its ghosts do too.
+    const detailed = homeModulePreferencesApi.normalizeHomeSessionDisplayMode(state.settings?.homeSessionDisplayMode) === 'detailed';
+    row.className = `home-list-row home-session-row${detailed ? '' : ' is-compact'} is-ghost`;
+    const name = ghostCell('home-list-name', ghostBar('title'));
+    if (detailed) {
+      const meta = document.createElement('div');
+      meta.className = 'home-session-meta';
+      meta.append(ghostCell('home-list-sub', ghostBar('sub')));
+      row.append(mark, ghostCell('home-session-state'), name, value, meta);
+    } else {
+      row.append(mark, ghostCell('home-session-state'), name, ghostCell('home-list-aux home-session-ago', ghostBar('num-sm')), value);
+    }
+  } else {
+    row.className = `home-list-row home-${kind}-row is-ghost`;
+    row.append(mark, ghostCell('home-list-name', ghostBar('name')), value);
+    if (kind !== 'device') row.append(ghostCell('home-list-aux', ghostBar('num-sm')));
+  }
+  return row;
+}
+
+// The activity card's ghost is the real heatmap with no days filled in, over
+// an empty trend plot, so the card is already its populated height.
+function homeTrendGhostParts() {
+  const charts = window.TokenMonitorUsageCharts;
+  const layout = homeOverviewApi.homeActivityHeatmapLayout();
+  const activity = document.createElement('div');
+  activity.className = 'home-ghost-activity';
+  const canvas = document.createElement('div');
+  canvas.className = 'home-activity-canvas';
+  activity.append(canvas);
+  canvas.innerHTML = charts.heatmapSvg(
+    charts.rollingYearHeatmap([], { endDate: charts.localDayKey(), cell: layout.cell, gap: layout.gap }),
+    { monthLabel: (month) => compactMonthLabel(month.label), radius: layout.radius }
+  );
+  const head = document.createElement('div');
+  head.className = 'home-trend-head';
+  head.textContent = t('home.trend');
+  const plot = document.createElement('div');
+  plot.className = 'home-ghost-plot';
+  const dates = document.createElement('div');
+  dates.className = 'home-trend-dates';
+  for (let index = 0; index < 3; index++) dates.append(ghostCell('home-trend-date', ghostBar('num-sm')));
+  return [activity, head, plot, dates];
+}
+
+function homeGhostModule(kind, title, viewId, { reason, pending = false, count = HOME_GHOST_ROWS }) {
+  const { module, body } = homeModuleShell(kind, title, viewId, reason);
+  if (pending) module.classList.add('is-pending');
+  const list = document.createElement('div');
+  list.className = `ghost-list home-ghost-list home-ghost-list--${kind}`;
+  list.setAttribute('aria-hidden', 'true');
+  if (kind === 'trends') list.append(...homeTrendGhostParts());
+  else for (let index = 0; index < count; index++) list.append(homeGhostRow(kind));
+  body.append(list);
+  return module;
+}
+
+// A cold start publishes each scan window as it lands, so until the full
+// record is in, an empty usage module may only be waiting for its window.
+function homeUsageGhostModule(kind, title, emptyKey) {
+  const pending = state.stats?.nativeRangesPending === true;
+  return homeGhostModule(kind, title, kind, {
+    reason: t(pending ? 'home.usageCollecting' : emptyKey),
+    pending,
+    count: Math.min(HOME_GHOST_ROWS, homeModulePreferencesApi.homeModuleCount(state.settings, kind))
+  });
+}
+
 // Tools and Models list their split as aligned rows; the share column carries
 // the proportion, so Home keeps horizontal bars for limits alone.
 function homeSplitRow(className, row, iconKind) {
@@ -8032,15 +8285,9 @@ function homeSplitRow(className, row, iconKind) {
 }
 
 function renderHomeModelModule(period) {
-  const { module, body } = homeModuleShell('model', t('home.models'), 'model');
   const rows = homeOverviewApi.homeModelRows(modelRowsForPeriod(period, 'tokens'), period?.totalTokens, homeModulePreferencesApi.homeModuleCount(state.settings, 'model'));
-  if (rows.length === 0) {
-    const empty = document.createElement('div');
-    empty.className = 'home-module-empty';
-    empty.textContent = t('home.noModels');
-    body.append(empty);
-    return module;
-  }
+  if (rows.length === 0) return homeUsageGhostModule('model', t('home.models'), 'home.noModels');
+  const { module, body } = homeModuleShell('model', t('home.models'), 'model');
   for (const row of rows) {
     body.append(homeSplitRow('home-model-row', row, iconKindFor({ key: row.key || row.name, modelSource: row.modelSource }, 'model')));
   }
@@ -8057,15 +8304,9 @@ function homeToolSourceRows(period) {
 }
 
 function renderHomeToolModule(period) {
-  const { module, body } = homeModuleShell('tool', t('home.tools'), 'tool');
   const rows = homeOverviewApi.homeToolRows(homeToolSourceRows(period), period?.totalTokens, homeModulePreferencesApi.homeModuleCount(state.settings, 'tool'));
-  if (rows.length === 0) {
-    const empty = document.createElement('div');
-    empty.className = 'home-module-empty';
-    empty.textContent = t('home.noTools');
-    body.append(empty);
-    return module;
-  }
+  if (rows.length === 0) return homeUsageGhostModule('tool', t('home.tools'), 'home.noTools');
+  const { module, body } = homeModuleShell('tool', t('home.tools'), 'tool');
   for (const row of rows) {
     body.append(homeSplitRow('home-tool-row', row, iconKindFor({ key: row.key }, 'tool')));
   }
@@ -8135,16 +8376,10 @@ function scheduleSessionStatusRepaint(period, incompleteHint = '') {
 
 function renderHomeSessionModule(rows) {
   rows ||= window.TokenMonitorEdgeDockPresentation.recentSessionRows(state.stats, homeModulePreferencesApi.homeModuleCount(state.settings, 'session'), { ...sessionPresentationOptions(), includeRunningBeyondCap: true });
+  if (rows.length === 0) return homeUsageGhostModule('session', t('home.sessions'), 'home.noSessions');
   const runningCount = window.TokenMonitorEdgeDockPresentation.runningSessionSummary(rows).count;
   const meta = runningCount > 0 ? t('home.runningSessions', { count: runningCount }) : '';
   const { module, body } = homeModuleShell('session', t('home.sessions'), 'session', meta);
-  if (rows.length === 0) {
-    const empty = document.createElement('div');
-    empty.className = 'home-module-empty';
-    empty.textContent = t('home.noSessions');
-    body.append(empty);
-    return module;
-  }
   // Live sessions (running, waiting) lead with their full details; the rest
   // close the list one line each. When both are present, the first quiet row
   // carries the Recent heading, drawn by CSS so the rows stay the module's only
@@ -8265,7 +8500,6 @@ function renderHomeSessionModule(rows) {
 }
 
 function renderHomeDeviceModule() {
-  const { module, body } = homeModuleShell('device', t('home.devices'), 'device');
   // Shares are of every device's usage; the count setting only caps the rows.
   const allRows = homeOverviewApi.homeDeviceRows(fixedPeriodDevices(), {
     localDeviceId: state.settings?.deviceId || '',
@@ -8273,13 +8507,8 @@ function renderHomeDeviceModule() {
     limit: Infinity
   });
   const rows = allRows.slice(0, homeModulePreferencesApi.homeModuleCount(state.settings, 'device'));
-  if (rows.length === 0) {
-    const empty = document.createElement('div');
-    empty.className = 'home-module-empty';
-    empty.textContent = t('home.noDevices');
-    body.append(empty);
-    return module;
-  }
+  if (rows.length === 0) return homeUsageGhostModule('device', t('home.devices'), 'home.noDevices');
+  const { module, body } = homeModuleShell('device', t('home.devices'), 'device');
   // Devices take the same rows as Tools and Models, with the local device
   // badged and offline ones muted. A lone device owns 100%, which says
   // nothing, so a share column appears only beside another device.
@@ -8744,14 +8973,12 @@ function renderHomeTrendsModule() {
   const summary = state.stats?.historyPreview?.summary;
   const hasLifetimeActivity = summary?.activeDaysComplete === true && summary.activeDays > 0;
   if (!historyEnabled || (rawDaily.length === 0 && !hasLifetimeActivity)) {
-    const { module, body } = homeModuleShell('trends', t('home.activity'), 'trends');
-    const empty = document.createElement('div');
-    empty.className = 'home-module-empty';
-    if (historyEnabled) {
-      empty.textContent = state.trendsActivating ? t('home.historyLoading') : t('home.noHistory');
-    } else {
-      const text = document.createElement('span');
-      text.textContent = t('home.historyDisabled');
+    const pending = historyEnabled && (state.trendsActivating || state.stats?.nativeRangesPending === true);
+    const module = homeGhostModule('trends', t('home.activity'), 'trends', {
+      reason: t(!historyEnabled ? 'home.historyDisabled' : pending ? 'home.historyLoading' : 'home.noHistory'),
+      pending
+    });
+    if (!historyEnabled) {
       const action = document.createElement('button');
       action.type = 'button';
       action.className = 'home-module-empty-action';
@@ -8760,9 +8987,8 @@ function renderHomeTrendsModule() {
         event.stopPropagation();
         openTrendSettings();
       });
-      empty.append(text, action);
+      module.querySelector('.home-module-meta').after(action);
     }
-    body.append(empty);
     return module;
   }
   // The snapshot's today bucket lags the live headline total between history ticks;

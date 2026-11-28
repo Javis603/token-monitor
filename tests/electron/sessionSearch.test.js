@@ -342,8 +342,9 @@ test('search renders reuse matching rows without layout motion or rebuilding too
   const calls = { capture: 0, animate: 0, tools: 0, replace: 0, update: 0 };
   const breakdown = {
     children: [],
+    dataset: {},
     replaceChildren(...children) { this.children = children; calls.replace++; },
-    append(child) { this.children.push(child); }
+    append(...children) { this.children.push(...children); }
   };
   const noop = () => {};
   const batch = { active: false, calls: 0 };
@@ -384,6 +385,7 @@ test('search renders reuse matching rows without layout motion or rebuilding too
     },
     renderToolDetailFooter: noop,
     renderProjectBreakdownFooter: noop,
+    breakdownGhostNodes: pending => [{ textContent: pending ? 'home.usageCollecting' : 'home.noSessions' }, { textContent: '' }],
     sessionSearchEmptyNode: query => ({
       query, dataset: {}, classList: { contains: () => false }, querySelector: () => null
     }),
@@ -461,7 +463,18 @@ test('search renders reuse matching rows without layout motion or rebuilding too
 
   state.period = 'today';
   state.sessionSearchQuery = '';
+  renderRows([], { fromSearch: true });
+  assert.deepEqual(breakdown.children.map(child => child.textContent), ['sessions.reasonixReadFailed', ''],
+    'an empty list with a failure keeps the failure as its reason over the ghosts');
+
+  state.stats = { nativeRangesPending: true };
+  renderRows([], { fromSearch: true });
+  assert.deepEqual(breakdown.children.map(child => child.textContent), ['home.usageCollecting sessions.reasonixReadFailed', ''],
+    'during the first scan the failure line also says usage is still being collected');
+  delete state.stats;
+
   reasonixSessionList.failed = false;
   renderRows([], { fromSearch: true });
-  assert.equal(breakdown.children.length, 0, 'a successful empty result does not display a failure');
+  assert.deepEqual(breakdown.children.map(child => child.textContent), ['home.noSessions', ''],
+    'a successful empty result shows its reason and ghosts, not a failure');
 });

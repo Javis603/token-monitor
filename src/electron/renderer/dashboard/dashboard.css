@@ -2130,12 +2130,8 @@ html.native-liquid-glass .dash-skyline-reset-btn {
   min-height: 320px;
 }
 
-/* Empty states: static ghosts of the real rows; the card head says why. */
-.dash-ghost-list {
-  -webkit-mask-image: linear-gradient(to bottom, #000 35%, rgba(0, 0, 0, 0.3) 100%);
-  mask-image: linear-gradient(to bottom, #000 35%, rgba(0, 0, 0, 0.3) 100%);
-}
-
+/* Empty states: static ghosts of the real rows; the card head says why. The
+   shared ghost primitives live in styles.css beside Home's. */
 .dash-ghost-list--attribution {
   display: flex;
   flex-direction: column;
@@ -2157,37 +2153,7 @@ html.native-liquid-glass .dash-skyline-reset-btn {
   grid-column: 1 / -1;
 }
 
-.is-ghost {
-  pointer-events: none;
-  cursor: default;
-}
-
-.dash-ghost-bar {
-  display: inline-block;
-  flex: none;
-  max-width: 100%;
-  height: 7px;
-  border-radius: 4px;
-  vertical-align: middle;
-  background: rgba(var(--line-rgb), 0.09);
-}
-
-.dash-ghost-fill {
-  background: rgba(var(--line-rgb), 0.09);
-}
-
-.dash-session-brand.dash-ghost-fill { border-radius: 4px; }
-
-.dash-ghost-bar.is-title { width: 148px; height: 8px; }
-.dash-ghost-bar.is-sub { width: 96px; height: 6px; opacity: 0.7; }
-.dash-ghost-bar.is-name { width: 92px; }
-.dash-ghost-bar.is-label { width: 48px; height: 6px; }
-.dash-ghost-bar.is-num { width: 34px; }
-.dash-ghost-bar.is-num-sm { width: 24px; height: 6px; }
-
-.is-ghost:nth-child(even) .dash-ghost-bar.is-title { width: 112px; }
-.is-ghost:nth-child(even) .dash-ghost-bar.is-name { width: 68px; }
-.is-ghost:nth-child(even) .dash-ghost-bar.is-sub { width: 72px; }
+.dash-session-brand.ghost-fill { border-radius: 4px; }
 
 .dash-session-row.is-ghost { min-height: 46px; }
 .dash-session-row.is-ghost .dash-session-body { gap: 7px; }
@@ -2195,15 +2161,6 @@ html.native-liquid-glass .dash-skyline-reset-btn {
 .dash-bd-row.is-ghost { min-height: 26px; }
 .topo-node.is-ghost .topo-node-top { min-height: 15px; }
 .topo-node.is-ghost .topo-node-sub { min-height: 13px; }
-.home-limit-account.is-ghost .home-limit-account-head { min-height: 16px; }
-.home-limit-account.is-ghost .home-limit-track {
-  border-radius: 4px;
-  background: rgba(var(--line-rgb), 0.07);
-}
-.home-limit-account.is-ghost .home-list-mark {
-  background: rgba(var(--line-rgb), 0.14);
-  box-shadow: none;
-}
 
 .dash-breakdown {
   display: flex;

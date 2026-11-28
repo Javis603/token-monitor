@@ -416,24 +416,48 @@ test('homeLimitsAwaitingFirstData is false when no provider is enabled', () => {
   }), false);
 });
 
-for (const { name, settings, expected } of [
-  { name: 'limits are globally disabled', settings: { limitsEnabled: false, limitProviders: 'claude' }, expected: 'home.noLimits' },
-  { name: 'all providers are deselected', settings: { limitsEnabled: true, limitProviders: '' }, expected: 'home.noLimits' },
-  { name: 'an enabled provider is awaiting its first data', settings: { limitsEnabled: true, limitProviders: 'claude' }, expected: 'home.limitsInitializing' }
+const HOME_GHOST_FUNCTIONS = ['ghostCell', 'ghostBar', 'homeGhostRow', 'homeGhostModule'];
+
+function appFunctions(names) {
+  const source = fs.readFileSync(path.join(__dirname, '../../src/electron/renderer/app.js'), 'utf8');
+  return names.map((functionName) => {
+    const start = source.indexOf(`function ${functionName}(`);
+    assert.notEqual(start, -1, `${functionName} exists`);
+    const end = source.indexOf('\n}\n', start);
+    assert.notEqual(end, -1, `${functionName} closes`);
+    return source.slice(start, end + 2);
+  }).join('\n');
+}
+
+function fakeElement() {
+  const classes = new Set();
+  return {
+    className: '',
+    children: [],
+    attributes: {},
+    classList: { add: (name) => classes.add(name), contains: (name) => classes.has(name) },
+    append(...children) { this.children.push(...children); },
+    setAttribute(name, value) { this.attributes[name] = value; }
+  };
+}
+
+// The shell records what the module's head says; the body holds the ghosts.
+function fakeHomeShell() {
+  const shell = { module: fakeElement(), body: fakeElement(), meta: undefined };
+  return { shell, homeModuleShell: (kind, title, viewId, meta) => { shell.meta = meta; return shell; } };
+}
+
+for (const { name, settings, mode = 'local', expected, pending } of [
+  { name: 'limits are globally disabled', settings: { limitsEnabled: false, limitProviders: 'claude' }, expected: 'home.noLimits', pending: false },
+  { name: 'all providers are deselected', settings: { limitsEnabled: true, limitProviders: '' }, expected: 'home.noLimits', pending: false },
+  { name: 'an enabled provider is awaiting its first data', settings: { limitsEnabled: true, limitProviders: 'claude' }, expected: 'home.limitsInitializing', pending: true },
+  { name: 'a synced view has no reading for an enabled provider', settings: { limitsEnabled: true, limitProviders: 'claude' }, mode: 'sync', expected: 'home.limitsInitializing', pending: false }
 ]) {
-  test(`Home limits empty-state copy when ${name}`, () => {
-    const source = fs.readFileSync(path.join(__dirname, '../../src/electron/renderer/app.js'), 'utf8');
-    const functions = ['desktopLimitProviders', 'desktopLimitRecords', 'configuredLimitProviderSelection', 'enabledLimitProviderSet', 'homeLimitRows', 'renderHomeLimitModule']
-      .map((functionName) => {
-        const start = source.indexOf(`function ${functionName}(`);
-        assert.notEqual(start, -1, `${functionName} exists`);
-        const end = source.indexOf('\n}\n', start);
-        assert.notEqual(end, -1, `${functionName} closes`);
-        return source.slice(start, end + 2);
-      }).join('\n');
-    const body = { children: [], append(element) { this.children.push(element); } };
-    vm.runInNewContext(`${functions}\nrenderHomeLimitModule();`, {
-      state: { settings, stats: { limits: { providers: [] } } },
+  test(`Home limits empty state when ${name}`, () => {
+    const functions = appFunctions(['desktopLimitProviders', 'desktopLimitRecords', 'configuredLimitProviderSelection', 'enabledLimitProviderSet', 'homeLimitRows', 'renderHomeLimitModule', ...HOME_GHOST_FUNCTIONS]);
+    const { shell, homeModuleShell } = fakeHomeShell();
+    vm.runInNewContext(`const HOME_GHOST_ROWS = 3;\n${functions}\nrenderHomeLimitModule();`, {
+      state: { settings, mode, stats: { limits: { providers: [] } } },
       accountSlotLists: {},
       window: { TokenMonitorAccountSlotsPanel: require('../../src/electron/renderer/limits/accountSlotsPanel') },
       homeModulePreferencesApi: require('../../src/electron/renderer/homeModulePreferences'),
@@ -447,12 +471,96 @@ for (const { name, settings, expected } of [
       }),
       clientColors: {},
       hiddenHomeLimitProviderSet: () => new Set(),
-      homeModuleShell: () => ({ module: {}, body }),
-      document: { createElement: () => ({}) },
+      homeModuleShell,
+      document: { createElement: fakeElement },
       t: (key) => key
     });
-    assert.equal(body.children.length, 1);
-    assert.equal(body.children[0].textContent, expected);
+    assert.equal(shell.meta, expected);
+    assert.equal(shell.module.classList.contains('is-pending'), pending);
+    const [list] = shell.body.children;
+    assert.equal(list.attributes['aria-hidden'], 'true');
+    assert.deepEqual(list.children.map((row) => row.className), ['home-limit-account is-ghost', 'home-limit-account is-ghost']);
+  });
+}
+
+for (const { name, nativeRangesPending, expected } of [
+  { name: 'the first scan is still landing', nativeRangesPending: true, expected: 'home.usageCollecting' },
+  { name: 'the scan settled with no usage', nativeRangesPending: undefined, expected: 'home.noTools' }
+]) {
+  test(`Home usage modules say why they are empty when ${name}`, () => {
+    const { shell, homeModuleShell } = fakeHomeShell();
+    vm.runInNewContext(`const HOME_GHOST_ROWS = 3;\n${appFunctions([...HOME_GHOST_FUNCTIONS, 'homeUsageGhostModule'])}\nhomeUsageGhostModule('tool', 'home.tools', 'home.noTools');`, {
+      state: { settings: { homeModuleCounts: { tool: 5 } }, stats: { nativeRangesPending } },
+      homeModulePreferencesApi: require('../../src/electron/renderer/homeModulePreferences'),
+      homeModuleShell,
+      document: { createElement: fakeElement },
+      t: (key) => key
+    });
+    assert.equal(shell.meta, expected);
+    assert.equal(shell.module.classList.contains('is-pending'), nativeRangesPending === true);
+    const [list] = shell.body.children;
+    assert.equal(list.children.length, 3, 'ghosts cap at three rows');
+    assert.ok(list.children.every((row) => row.className === 'home-list-row home-tool-row is-ghost'));
+  });
+}
+
+for (const { mode, compact } of [{ mode: 'compact', compact: true }, { mode: 'detailed', compact: false }]) {
+  test(`Home session ghosts follow the ${mode} session layout`, () => {
+    const { shell, homeModuleShell } = fakeHomeShell();
+    vm.runInNewContext(`const HOME_GHOST_ROWS = 3;\n${appFunctions([...HOME_GHOST_FUNCTIONS, 'homeUsageGhostModule'])}\nhomeUsageGhostModule('session', 'home.sessions', 'home.noSessions');`, {
+      state: { settings: { homeSessionDisplayMode: mode }, stats: {} },
+      homeModulePreferencesApi: require('../../src/electron/renderer/homeModulePreferences'),
+      homeModuleShell,
+      document: { createElement: fakeElement },
+      t: (key) => key
+    });
+    const [row] = shell.body.children[0].children;
+    assert.equal(row.className.split(' ').includes('is-compact'), compact);
+    assert.equal(row.children.some((child) => child.className === 'home-session-meta'), !compact);
+  });
+}
+
+function appConstants(names) {
+  const source = fs.readFileSync(path.join(__dirname, '../../src/electron/renderer/app.js'), 'utf8');
+  return names.map((name) => {
+    const start = source.indexOf(`const ${name} = `);
+    assert.notEqual(start, -1, `${name} exists`);
+    return source.slice(start, source.indexOf(';\n', start) + 2);
+  }).join('\n');
+}
+
+for (const { breakdown, pending, expected } of [
+  { breakdown: 'project', pending: true, expected: 'home.usageCollecting' },
+  { breakdown: 'project', pending: false, expected: 'projects.empty' },
+  { breakdown: 'model', pending: false, expected: 'home.noModels' }
+]) {
+  test(`an empty ${breakdown} list ghosts its rows and says ${expected}`, () => {
+    const [reason, list] = vm.runInNewContext(`${appConstants(['BREAKDOWN_EMPTY_KEYS', 'BREAKDOWN_GHOST_ROWS'])}\n${appFunctions(['ghostCell', 'ghostBar', 'breakdownGhostRow', 'breakdownGhostNodes'])}\nbreakdownGhostNodes(${pending});`, {
+      state: { breakdown },
+      document: { createElement: fakeElement },
+      t: (key) => key
+    });
+    assert.equal(reason.textContent, expected);
+    assert.equal(reason.attributes.role, 'status');
+    assert.equal(list.attributes['aria-hidden'], 'true');
+    assert.equal(list.className.split(' ').includes('is-pending'), pending);
+    assert.ok(list.children.length > 0 && list.children.every((row) => row.className === 'row is-ghost'));
+  });
+}
+
+for (const { name, stats, trendsActivating, expected } of [
+  { name: 'history is still being scanned', stats: { nativeRangesPending: true }, trendsActivating: false, expected: 'home.historyLoading' },
+  { name: 'there is no history', stats: {}, trendsActivating: false, expected: 'trends.empty' }
+]) {
+  test(`empty Trends keeps its layout when ${name}`, () => {
+    const [cap, ghost] = vm.runInNewContext(`${appFunctions(['ghostCell', 'ghostBar', 'trendsGhostNodes'])}\ntrendsGhostNodes();`, {
+      state: { stats, trendsActivating },
+      document: { createElement: fakeElement, createTextNode: (text) => ({ text }) },
+      t: (key) => key
+    });
+    assert.equal(cap.children[0].textContent, expected);
+    assert.equal(ghost.className.split(' ').includes('is-pending'), expected === 'home.historyLoading');
+    assert.deepEqual(ghost.children.map((child) => child.className), ['trends-ghost-plot', 'trends-axis', 'trends-stats']);
   });
 }
 
