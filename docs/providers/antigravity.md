@@ -117,6 +117,8 @@ Local quota comes from the grouped quota summary. If a source cannot provide a u
 
 Identity lookup may fail while quota lookup succeeds. Such a row is valid but anonymous; it must remain device-scoped during hub aggregation. Do not give anonymous RPC rows a cross-device-stable fallback key, because two unrelated Google accounts could otherwise collapse into one row. An anonymous local row also cannot be safely matched to a managed OAuth account, so both rows may be visible until local identity becomes available.
 
+When local detection is enabled, the Electron host persists the normalized email address last reported by a live local RPC probe (address only, never credentials) and emits it as an identity-only `notConfigured` RPC row while the language server is closed so this device's sign-in remains selectable across restarts. That remembered row is omitted when the address is already a managed OAuth account (including disabled accounts), when local detection is turned off, or during an account-scoped refresh.
+
 ### Standalone OAuth
 
 The Electron main process owns the browser OAuth flow:

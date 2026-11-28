@@ -989,3 +989,254 @@ test('fetchAntigravityLimits keeps OAuth-only groups when service names share a 
   assert.ok(extra.every(({ label }) => label.endsWith(' 5-hour') && label.length <= 32));
   assert.notEqual(extra[0].label, extra[1].label);
 });
+
+const antigravityOAuthForTests = require('../../src/shared/providers/antigravity/oauth');
+
+function notRunningProbe() {
+  return async () => {
+    const err = new Error('not running');
+    err.status = 'notConfigured';
+    throw err;
+  };
+}
+
+function oauthQuotaFetch() {
+  return async (url) => {
+    if (url.endsWith(':loadCodeAssist')) {
+      return { ok: true, status: 200, json: async () => ({ currentTier: { id: 'standard-tier' } }) };
+    }
+    if (url.endsWith(':retrieveUserQuotaSummary')) {
+      return {
+        ok: true,
+        status: 200,
+        json: async () => ({
+          groups: [{
+            displayName: 'Gemini Models',
+            buckets: [{ displayName: 'Weekly Limit', window: 'weekly', remainingFraction: 0.41 }]
+          }]
+        })
+      };
+    }
+    throw new Error(`Unexpected URL ${url}`);
+  };
+}
+
+function managedOAuthAccount(email = 'oauth@example.com', id = 'oauth-account') {
+  return {
+    id,
+    accountEmail: email,
+    enabled: true,
+    credentials: {
+      accessToken: 'token-oauth',
+      refreshToken: 'refresh-oauth',
+      expiresAt: Date.now() + 3600_000,
+      clientId: 'client',
+      clientSecret: 'secret',
+      projectId: 'project-oauth'
+    }
+  };
+}
+
+function managedOAuthSlot(email, { id = 'slot-account', enabled = true } = {}) {
+  const account = managedOAuthAccount(email, id);
+  return {
+    id,
+    enabled,
+    values: {},
+    accountKey: antigravityOAuthForTests.accountKey(email),
+    owner: {
+      metadata: { id, accountEmail: email, enabled },
+      credential: account.credentials
+    }
+  };
+}
+
+test('fetchAntigravityLimits reports the live local account address to the host and skips anonymous or aborted probes', async () => {
+  const observed = [];
+  const result = await fetchAntigravityLimits({}, {
+    antigravityProbe: async () => ({
+      accountPlan: 'Google AI Pro',
+      accountEmail: 'local@example.com',
+      windows: [{ name: 'Gemini weekly', kind: 'weekly', remainingFraction: 0.7 }]
+    }),
+    onAntigravityLocalAccountObserved: (identity) => observed.push(identity)
+  });
+  assert.equal(result.accountEmail, 'local@example.com');
+  assert.deepEqual(observed, [{ accountEmail: 'local@example.com' }]);
+
+  await fetchAntigravityLimits({}, {
+    antigravityProbe: async () => ({
+      accountPlan: 'Google AI Pro',
+      windows: [{ name: 'Gemini weekly', kind: 'weekly', remainingFraction: 0.7 }]
+    }),
+    onAntigravityLocalAccountObserved: (identity) => observed.push(identity)
+  });
+  assert.equal(observed.length, 1);
+
+  const controller = new AbortController();
+  controller.abort(new Error('superseded'));
+  await fetchAntigravityLimits({}, {
+    signal: controller.signal,
+    antigravityProbe: async () => ({
+      accountPlan: 'Google AI Pro',
+      accountEmail: 'stale@example.com',
+      windows: [{ name: 'Gemini weekly', kind: 'weekly', remainingFraction: 0.7 }]
+    }),
+    onAntigravityLocalAccountObserved: (identity) => observed.push(identity)
+  });
+  assert.equal(observed.length, 1);
+});
+
+test('fetchAntigravityLimits keeps the remembered local account selectable while the language server is closed', async () => {
+  const result = await fetchAntigravityLimits({}, {
+    antigravityProbe: notRunningProbe(),
+    resolveAntigravityLocalAccount: () => ({ accountEmail: 'Local@Example.com' })
+  });
+  assert.equal(result.provider, 'antigravity');
+  assert.equal(result.status, 'notConfigured');
+  assert.equal(result.accountEmail, 'local@example.com');
+  assert.equal(result.accountKey, antigravityOAuthForTests.accountKey('local@example.com'));
+  assert.equal(result.source, 'rpc');
+  assert.equal(result.windows.length, 0);
+});
+
+test('fetchAntigravityLimits puts the remembered local account ahead of a different managed OAuth account', async () => {
+  const result = await fetchAntigravityLimits({
+    antigravityManagedAccounts: [managedOAuthAccount('oauth@example.com')]
+  }, {
+    antigravityProbe: notRunningProbe(),
+    resolveAntigravityLocalAccount: () => ({ accountEmail: 'local@example.com' }),
+    fetch: oauthQuotaFetch()
+  });
+  assert.equal(result.length, 2);
+  assert.equal(result[0].accountEmail, 'local@example.com');
+  assert.equal(result[0].source, 'rpc');
+  assert.equal(result[0].status, 'notConfigured');
+  assert.equal(result[1].accountEmail, 'oauth@example.com');
+  assert.equal(result[1].source, 'oauth');
+});
+
+test('fetchAntigravityLimits does not duplicate a remembered local account that is already managed or in account slots', async () => {
+  const disabled = { ...managedOAuthAccount('local@example.com', 'other'), enabled: false };
+  const fromLegacy = await fetchAntigravityLimits({
+    antigravityManagedAccounts: [managedOAuthAccount('oauth@example.com'), disabled]
+  }, {
+    antigravityProbe: notRunningProbe(),
+    resolveAntigravityLocalAccount: () => ({ accountEmail: 'local@example.com' }),
+    fetch: oauthQuotaFetch()
+  });
+  assert.deepEqual(fromLegacy.map((row) => row.accountEmail), ['oauth@example.com']);
+
+  const fromSlots = await fetchAntigravityLimits({
+    antigravityAccountSlots: [
+      managedOAuthSlot('oauth@example.com', { id: 'slot-oauth', enabled: true }),
+      managedOAuthSlot('local@example.com', { id: 'slot-local', enabled: false })
+    ]
+  }, {
+    antigravityProbe: notRunningProbe(),
+    resolveAntigravityLocalAccount: () => ({ accountEmail: 'local@example.com' }),
+    fetch: oauthQuotaFetch()
+  });
+  assert.deepEqual(fromSlots.map((row) => row.accountEmail), ['oauth@example.com']);
+});
+
+test('fetchAntigravityLimits prefers the live local snapshot over the remembered address', async () => {
+  const observed = [];
+  const result = await fetchAntigravityLimits({
+    antigravityManagedAccounts: [managedOAuthAccount('oauth@example.com')]
+  }, {
+    antigravityProbe: async () => ({
+      accountPlan: 'Google AI Pro',
+      accountEmail: 'new-local@example.com',
+      windows: [{ name: 'Gemini weekly', kind: 'weekly', remainingFraction: 0.7 }]
+    }),
+    resolveAntigravityLocalAccount: () => ({ accountEmail: 'old-local@example.com' }),
+    onAntigravityLocalAccountObserved: (identity) => observed.push(identity),
+    fetch: oauthQuotaFetch()
+  });
+  assert.deepEqual(result.map((row) => row.accountEmail), ['new-local@example.com', 'oauth@example.com']);
+  assert.deepEqual(observed, [{ accountEmail: 'new-local@example.com' }]);
+});
+
+test('fetchAntigravityLimits skips the remembered local account when local detection is disabled', async (t) => {
+  const standalone = await fetchAntigravityLimits({
+    antigravityLocalLimitsEnabled: false
+  }, {
+    antigravityProbe: notRunningProbe(),
+    resolveAntigravityLocalAccount: () => ({ accountEmail: 'local@example.com' })
+  });
+  assert.deepEqual(standalone, []);
+
+  const withManaged = await fetchAntigravityLimits({
+    antigravityLocalLimitsEnabled: false,
+    antigravityManagedAccounts: [managedOAuthAccount('oauth@example.com')]
+  }, {
+    antigravityProbe: notRunningProbe(),
+    resolveAntigravityLocalAccount: () => ({ accountEmail: 'local@example.com' }),
+    fetch: oauthQuotaFetch()
+  });
+  assert.deepEqual(withManaged.map((row) => [row.accountEmail, row.source]), [['oauth@example.com', 'oauth']]);
+
+  const runtime = createLimitsRuntime({
+    limitProviders: ['antigravity'],
+    antigravityManagedAccounts: [managedOAuthAccount('oauth@example.com')]
+  }, {
+    autoStart: false,
+    autoRetry: false,
+    antigravityProbe: notRunningProbe(),
+    resolveAntigravityLocalAccount: () => ({ accountEmail: 'local@example.com' }),
+    fetch: oauthQuotaFetch()
+  });
+  t.after(() => runtime.stop());
+  await runtime.refresh({ provider: 'antigravity' }, 'manual');
+  assert.deepEqual(
+    runtime.getSnapshot().providers.map((row) => [row.accountEmail, row.source, row.status]),
+    [['local@example.com', 'rpc', 'notConfigured'], ['oauth@example.com', 'oauth', 'ok']]
+  );
+  runtime.reconfigure({ antigravityLocalLimitsEnabled: false });
+  assert.deepEqual(
+    runtime.getSnapshot().providers.map((row) => [row.accountEmail, row.source]),
+    [['oauth@example.com', 'oauth']]
+  );
+});
+
+test('fetchAntigravityLimits skips the remembered local account during an account-scoped refresh', async () => {
+  const oauthKey = antigravityOAuthForTests.accountKey('oauth@example.com');
+  const oauthScoped = await fetchAntigravityLimits({
+    antigravityManagedAccounts: [managedOAuthAccount('oauth@example.com')],
+    limitRefreshScope: { provider: 'antigravity', accountKey: oauthKey, accountEmail: 'oauth@example.com', sourceDetail: 'oauth' }
+  }, {
+    antigravityProbe: notRunningProbe(),
+    resolveAntigravityLocalAccount: () => ({ accountEmail: 'local@example.com' }),
+    fetch: oauthQuotaFetch()
+  });
+  assert.deepEqual(oauthScoped.map((row) => [row.accountEmail, row.source]), [['oauth@example.com', 'oauth']]);
+
+  const keyScoped = await fetchAntigravityLimits({
+    antigravityManagedAccounts: [managedOAuthAccount('oauth@example.com')],
+    limitRefreshScope: { provider: 'antigravity', accountKey: oauthKey }
+  }, {
+    antigravityProbe: notRunningProbe(),
+    resolveAntigravityLocalAccount: () => ({ accountEmail: 'local@example.com' }),
+    fetch: oauthQuotaFetch()
+  });
+  assert.deepEqual(keyScoped.map((row) => [row.accountEmail, row.source]), [['oauth@example.com', 'oauth']]);
+});
+
+test('fetchAntigravityLimits keeps transient local failure status for remembered account alongside managed OAuth', async () => {
+  const result = await fetchAntigravityLimits({
+    antigravityManagedAccounts: [managedOAuthAccount('oauth@example.com')]
+  }, {
+    antigravityProbe: async () => {
+      const err = new Error('RPC 503');
+      err.status = 'unavailable';
+      throw err;
+    },
+    resolveAntigravityLocalAccount: () => ({ accountEmail: 'local@example.com' }),
+    fetch: oauthQuotaFetch()
+  });
+  assert.deepEqual(
+    result.map((row) => [row.accountEmail, row.source, row.status]),
+    [['local@example.com', 'rpc', 'unavailable'], ['oauth@example.com', 'oauth', 'ok']]
+  );
+});

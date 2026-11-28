@@ -1059,6 +1059,17 @@ function cancelAntigravityManagedAccountLogin(...args) { return antigravityAccou
 function removeAntigravityManagedAccount(...args) { return antigravityAccountService().removeAntigravityManagedAccount(...args); }
 function setAntigravityManagedAccountEnabled(...args) { return antigravityAccountService().setAntigravityManagedAccountEnabled(...args); }
 
+// The address (never a token) the local Antigravity language server last
+// reported, so this device's own sign-in stays selectable while Antigravity is
+// closed and across restarts. Only written when it changes.
+function persistAntigravityLocalAccount({ accountEmail } = {}) {
+  const email = String(accountEmail || '').trim().toLowerCase();
+  if (!settings || !email || !email.includes('@')) return false;
+  if (String(settings.antigravityLocalAccount?.accountEmail || '').toLowerCase() === email) return true;
+  settings.antigravityLocalAccount = { accountEmail: email, seenAt: new Date().toISOString() };
+  return saveSettings();
+}
+
 const { createMimoAccountService } = require('./providers/mimo/accountService');
 let mimoAccountsOwner;
 function mimoAccountService() {
@@ -1255,6 +1266,8 @@ function electronLimitsDeps() {
     resolveClaudeWebCredential: (account) => claudeAccountService().resolveCredential(account),
     onStepfunTokenRenewed: persistStepfunTokenRenewal,
     onAntigravityCredentialsRenewed: persistAntigravityCredentialsRenewal,
+    resolveAntigravityLocalAccount: () => settings?.antigravityLocalAccount || null,
+    onAntigravityLocalAccountObserved: persistAntigravityLocalAccount,
     resolveWorkbuddyManagedCredential: (account, options) => workbuddyAccountService().resolveCredential(account, options),
     onThirdPartyCredentialsRenewed: persistThirdPartyCredentialsRenewal,
     onThirdPartyAccountKeyResolved: persistThirdPartyAccountKey,
@@ -5473,6 +5486,7 @@ function settingsForRenderer() {
   delete rendererSettings.limitAccountPresentationPending;
   delete rendererSettings.syncContentState;
   delete rendererSettings.pluginSkinRef;
+  delete rendererSettings.antigravityLocalAccount;
   // Usage retained for untracked clients: only the collector transform reads
   // it, and it is most of the settings payload a renderer would clone and keep.
   delete rendererSettings.archivedClientUsage;
@@ -8546,6 +8560,7 @@ app.whenReady().then(() => {
     const normalizedPatch = { ...patch, currency: normalizedCurrency };
     // Only Cursor's explicit account lifecycle can assign manual ownership.
     delete normalizedPatch.cursorManualAccountIds;
+    delete normalizedPatch.antigravityLocalAccount;
     delete normalizedPatch.windowMaximized;
     delete normalizedPatch.workbuddyEndpoint;
     delete normalizedPatch.workbuddyLocalAppEnabled;
