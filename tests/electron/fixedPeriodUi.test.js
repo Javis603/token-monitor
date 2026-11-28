@@ -17,6 +17,8 @@ test('reset restores the configured middle range from a custom selection', () =>
   for (const [active, configured, expected] of [
     ['last7', 'month', 'month'],
     ['last30', 'week', 'week'],
+    ['cycle', 'month', 'month'],
+    ['last7', 'cycle', 'cycle'],
     ['today', 'month', 'today'],
     ['allTime', 'month', 'allTime']
   ]) {
@@ -52,7 +54,7 @@ test('the middle-slot menu and Settings expose the same fixed choices', () => {
   const html = read('index.html');
   const menu = html.slice(html.indexOf('id="monthPeriodMenu"'), html.indexOf('class="actions-hotspot"'));
   const setting = html.slice(html.indexOf('id="periodMonthModeInput"'), html.indexOf('</select>', html.indexOf('id="periodMonthModeInput"')));
-  const expected = ['month', 'yesterday', 'week', 'last7', 'last30'];
+  const expected = ['month', 'yesterday', 'week', 'last7', 'last30', 'cycle'];
   assert.deepEqual([...menu.matchAll(/data-fixed-period="([^"]+)"/g)].map((match) => match[1]), expected);
   assert.deepEqual([...setting.matchAll(/option value="([^"]+)"/g)].map((match) => match[1]), expected);
 });
@@ -65,7 +67,7 @@ test('fixed-period menu follows the glass theme and keeps labels left aligned', 
   const boot = read('floatingBubbleBoot.js');
   assert.ok(html.indexOf('src="fixedPeriodRanges.js"') < html.indexOf('src="app.js"'));
   assert.match(html, /id="monthPeriodMenu" class="view-switcher-menu period-menu hidden"/);
-  assert.equal((html.match(/class="view-switcher-menu-item"/g) || []).length, 5);
+  assert.equal((html.match(/class="view-switcher-menu-item"/g) || []).length, 6);
   assert.match(css, /\.view-switcher-menu-item\s*\{[^}]*font-size:\s*0\.6875rem;[^}]*text-align:\s*left;/s);
   assert.ok(css.lastIndexOf('.period-menu {') > css.indexOf('.view-switcher-menu {'));
   assert.match(css, /\.titlebar\.period-menu-open\s*\{\s*z-index:\s*13;/);
@@ -96,13 +98,13 @@ test('fixed-period menu follows the glass theme and keeps labels left aligned', 
   assert.match(app, /force: forceFixedPeriodHistory,[\s\S]*?retryFailed: forceFixedPeriodHistory/);
   assert.match(app, /isDerived\(next\) && state\.fixedPeriodHistoryFailed[\s\S]*?warmFixedPeriodHistory\(\{ retryFailed: true, renderOnComplete: true \}\)/);
   assert.match(app, /fixedPeriodHistorySignature !== signature[\s\S]*?\|\| state\.fixedPeriodHistoryBusy\) \{[\s\S]*?void loadFixedPeriodHistory\(\);/);
-  assert.match(boot, /\['today', 'month', 'yesterday', 'week', 'last7', 'last30', 'allTime'\]\.includes\(period\)/);
+  assert.match(boot, /\['today', 'month', 'yesterday', 'week', 'last7', 'last30', 'cycle', 'allTime'\]\.includes\(period\)/);
   assert.match(app, /function fixedPeriodDevices\(\)/);
-  assert.match(app, /devicesForReadySnapshot\(state\.fixedPeriodSnapshot, state\.period, localDevice\)/);
+  assert.match(app, /devicesForReadySnapshot\(state\.fixedPeriodSnapshot, state\.period, localDevice, \{[\s\S]*?cycleStartDay: state\.settings\?\.billingCycleStartDay/);
   assert.match(app, /fixedPeriodSnapshotFromDevices\(state\.period, fixedPeriodSources\(\)/);
   const snapshotBuilder = app.slice(app.indexOf('function buildFixedPeriodSnapshot()'), app.indexOf('async function loadFixedPeriodHistory'));
   assert.ok(snapshotBuilder.indexOf('historyEnabled === false') < snapshotBuilder.indexOf('fixedPeriodHistoryRequested'));
-  assert.match(snapshotBuilder, /readySnapshotForSelection\([\s\S]*?state\.fixedPeriodSnapshot,[\s\S]*?state\.period/);
+  assert.match(snapshotBuilder, /readySnapshotForSelection\([\s\S]*?state\.fixedPeriodSnapshot,[\s\S]*?state\.period,[\s\S]*?cycleStartDay: state\.settings\?\.billingCycleStartDay/);
   assert.doesNotMatch(css, /\.period-menu button\s*\{/);
   assert.match(html, /id="fixedPeriodMessage"[^>]*role="status"[^>]*aria-live="polite"/);
   assert.doesNotMatch(app, /periodRange\.tokenComponentsUnavailable/);
@@ -131,9 +133,49 @@ test('the Settings default uses the standard title-control-description row', () 
   assert.match(i18n, /'periodRange\.settingsNote': '選擇主畫面預設顯示的統計範圍。也可在主畫面再次點擊上方目前選取的時段，開啟選單快速切換。'/);
 });
 
+test('billing cycle start day is a numeric Settings row passed to fixed ranges', () => {
+  const html = read('index.html');
+  const app = read('app.js');
+  assert.match(html, /id="billingCycleStartDayInput" type="number" min="1" max="31" step="1"/);
+  assert.match(html, /data-i18n="periodRange\.cycleStartTitle"/);
+  assert.match(app, /cycleStartDay: state\.settings\?\.billingCycleStartDay/);
+  assert.match(app, /saveSettings\(\{ billingCycleStartDay: day \}\)/);
+});
+
+test('the billing cycle setting references its localized help', () => {
+  const html = read('index.html');
+  assert.match(html, /<input id="billingCycleStartDayInput"[^>]* aria-describedby="billingCycleStartDayNote"[^>]*>/);
+  assert.match(html, /<span id="billingCycleStartDayNote"[^>]* data-i18n="periodRange\.cycleStartNote"[^>]*>[^<]+<\/span>/);
+  assert.equal((html.match(/\sid="billingCycleStartDayNote"/g) || []).length, 1);
+});
+
+test('main settings normalization safely defaults non-primitive billingCycleStartDay values', () => {
+  const main = fs.readFileSync(path.join(rendererDir, '..', 'main.js'), 'utf8');
+  const start = main.indexOf('function normalizeBillingCycleStartDay(');
+  const end = main.indexOf('\nfunction normalizeHomeLimitAccountCount(', start);
+  assert.ok(start >= 0 && end > start);
+  const context = {};
+  vm.runInNewContext(main.slice(start, end), context);
+  assert.equal(context.normalizeBillingCycleStartDay(15), 15);
+  assert.equal(context.normalizeBillingCycleStartDay('9'), 9);
+  assert.equal(context.normalizeBillingCycleStartDay({ valueOf: null, toString: null }), 1);
+  assert.equal(context.normalizeBillingCycleStartDay(Object.create(null)), 1);
+  assert.equal(context.normalizeBillingCycleStartDay(Symbol('day')), 1);
+  assert.equal(context.normalizeBillingCycleStartDay([15]), 1);
+  assert.equal(context.normalizeBillingCycleStartDay(null), 1);
+  assert.equal(context.normalizeBillingCycleStartDay(undefined), 1);
+  const readStart = main.indexOf('function readSettings()');
+  const readEnd = main.indexOf('\nfunction saveSettings(', readStart);
+  const readLine = main.slice(readStart, readEnd).split('\n').find((line) => line.includes('merged.billingCycleStartDay'));
+  assert.ok(readLine);
+  context.merged = { currency: 'EUR', billingCycleStartDay: { valueOf: null, toString: null } };
+  vm.runInNewContext(readLine, context);
+  assert.deepEqual(context.merged, { currency: 'EUR', billingCycleStartDay: 1 });
+});
+
 test('cold-start boot restores every fixed middle-slot selection', () => {
   const boot = read('floatingBubbleBoot.js');
-  for (const period of ['week', 'last7', 'last30']) {
+  for (const period of ['week', 'last7', 'last30', 'cycle']) {
     const window = { location: { search: `?period=${period}&breakdown=home` } };
     const document = { documentElement: { classList: { add() {} } } };
     vm.runInNewContext(boot, { document, URLSearchParams, window });

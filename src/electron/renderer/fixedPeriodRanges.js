@@ -3,8 +3,8 @@
   if (typeof module === 'object' && module.exports) module.exports = api;
   if (root) root.TokenMonitorFixedPeriodRanges = api;
 })(typeof window !== 'undefined' ? window : null, function createFixedPeriodRangesApi() {
-  const MONTH_MODES = Object.freeze(['month', 'yesterday', 'week', 'last7', 'last30']);
-  const PERIOD_TAB_OPTIONS = Object.freeze(['today', 'yesterday', 'week', 'last7', 'month', 'last30', 'allTime']);
+  const MONTH_MODES = Object.freeze(['month', 'yesterday', 'week', 'last7', 'last30', 'cycle']);
+  const PERIOD_TAB_OPTIONS = Object.freeze(['today', 'yesterday', 'week', 'last7', 'month', 'last30', 'cycle', 'allTime']);
   const MIN_PERIOD_TABS = 3;
   const MAX_PERIOD_TABS = 6;
   const LABELS = Object.freeze({
@@ -14,7 +14,8 @@
     yesterday: 'YDAY',
     week: 'WEEK',
     last7: '7D',
-    last30: '30D'
+    last30: '30D',
+    cycle: 'CYCLE'
   });
 
   function finiteNumber(value) {
@@ -66,6 +67,19 @@
     return 1;
   }
 
+  function normalizeCycleStartDay(value) {
+    if (typeof value !== 'number' && typeof value !== 'string') return 1;
+    const day = Number(value);
+    return Number.isInteger(day) && day >= 1 && day <= 31 ? day : 1;
+  }
+
+  // The billing cycle starts on the same day each month; months without that
+  // day (a 31st in April, a 29th in a common February) start on their last day.
+  function cycleStartKey(year, monthIndex, startDay) {
+    const lastDay = new Date(Date.UTC(year, monthIndex + 1, 0)).getUTCDate();
+    return new Date(Date.UTC(year, monthIndex, Math.min(startDay, lastDay))).toISOString().slice(0, 10);
+  }
+
   function normalizeMonthMode(value) {
     return MONTH_MODES.includes(value) ? value : 'month';
   }
@@ -90,7 +104,7 @@
   }
 
   function isDerived(value) {
-    return value === 'yesterday' || value === 'week' || value === 'last7' || value === 'last30';
+    return value === 'yesterday' || value === 'week' || value === 'last7' || value === 'last30' || value === 'cycle';
   }
 
   function slotForSelection(value) {
@@ -123,6 +137,14 @@
     }
     if (selection === 'last7') return { start: dayKeyAddDays(todayKey, -6), end: todayKey };
     if (selection === 'last30') return { start: dayKeyAddDays(todayKey, -29), end: todayKey };
+    if (selection === 'cycle') {
+      const startDay = normalizeCycleStartDay(options.cycleStartDay);
+      const today = new Date(`${todayKey}T00:00:00Z`);
+      const year = today.getUTCFullYear();
+      const month = today.getUTCMonth();
+      const current = cycleStartKey(year, month, startDay);
+      return { start: current <= todayKey ? current : cycleStartKey(year, month - 1, startDay), end: todayKey };
+    }
     return null;
   }
 
@@ -473,12 +495,17 @@
     return high;
   }
 
-  function readySnapshotForSelection(snapshot, selection) {
-    return snapshot?.status === 'ready' && snapshot.selection === selection ? snapshot : null;
+  // A Billing cycle snapshot also belongs to the start day it was computed
+  // for, so a changed start day never reuses the previous cycle's totals.
+  function readySnapshotForSelection(snapshot, selection, options = {}) {
+    if (snapshot?.status !== 'ready' || snapshot.selection !== selection) return null;
+    if (selection === 'cycle' && options.cycleStartDay !== undefined
+      && snapshot.cycleStartDay !== normalizeCycleStartDay(options.cycleStartDay)) return null;
+    return snapshot;
   }
 
-  function devicesForReadySnapshot(snapshot, selection, localDevice) {
-    const ready = readySnapshotForSelection(snapshot, selection);
+  function devicesForReadySnapshot(snapshot, selection, localDevice, options = {}) {
+    const ready = readySnapshotForSelection(snapshot, selection, options);
     // Native snapshots describe this machine alone. Build its row from the
     // stats inventory even if History has no rows for the selected range.
     if (ready?.native && localDevice) {
@@ -607,6 +634,7 @@
     return {
       status: 'ready',
       selection,
+      ...cycleStartDayIdentity(selection, options),
       reason: '',
       range,
       daily,
@@ -711,6 +739,10 @@
     return period;
   }
 
+  function cycleStartDayIdentity(selection, options = {}) {
+    return selection === 'cycle' ? { cycleStartDay: normalizeCycleStartDay(options.cycleStartDay) } : {};
+  }
+
   function fixedPeriodSnapshot(selection, options = {}) {
     if (!isDerived(selection)) return { status: 'native', selection, period: null, range: null };
     if (options.historyEnabled === false) return { status: 'unavailable', selection, reason: 'historyDisabled', period: null, range: null };
@@ -721,6 +753,7 @@
     return {
       status: 'ready',
       selection,
+      ...cycleStartDayIdentity(selection, options),
       reason: '',
       range,
       daily,
@@ -796,6 +829,7 @@
     nativeRangeSnapshot,
     nativeRangeWithHistory,
     handlePeriodMenuNavigation,
+    normalizeCycleStartDay,
     normalizeMonthMode,
     normalizePeriodTabOrder,
     periodMenuTargetIndex,
