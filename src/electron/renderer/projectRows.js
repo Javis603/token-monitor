@@ -30,6 +30,11 @@
     }
   }
 
+  // Unknown client slugs such as `constructor` must not resolve to Object.prototype members.
+  function ownLabel(labels, key) {
+    return labels && Object.prototype.hasOwnProperty.call(labels, key) ? labels[key] : '';
+  }
+
   function projectBreakdownIncomplete(stats, period) {
     if (period === 'allTime') return stats?.projectsIncomplete === true;
     return Number(stats?.periodProjectsOmitted?.[period] || 0) > 0;
@@ -60,6 +65,8 @@
 
   function projectRowsForPeriod(period, options = {}) {
     const projects = new Map();
+    // Callers may fold client aliases so the bar, drawer and legend share one attribution.
+    const clientKey = typeof options.clientKey === 'function' ? options.clientKey : (client) => client;
     const rollupEntries = Object.entries(period?.projects || {});
     if (rollupEntries.length > 0) {
       for (const [rawKey, entry] of rollupEntries) {
@@ -68,9 +75,10 @@
         const key = canonicalProjectKey(name || rawKey);
         if (!key || !name) continue;
         const clientTokens = Object.create(null);
-        for (const [client, value] of Object.entries(entry.clients || {})) {
+        for (const [rawClient, value] of Object.entries(entry.clients || {})) {
           const tokens = Math.max(0, Number(value || 0));
-          if (tokens > 0) clientTokens[client] = tokens;
+          const client = clientKey(rawClient);
+          if (tokens > 0) clientTokens[client] = (clientTokens[client] || 0) + tokens;
         }
         if (!projects.has(key)) projects.set(key, { key, name, value: 0, cost: 0, clients: new Set(), clientTokens: Object.create(null), modelTokens: Object.create(null) });
         const project = projects.get(key);
@@ -103,8 +111,9 @@
           addModelTokens(project.modelTokens, session.models, sessionTokens);
         }
         if (session.client) {
-          project.clients.add(session.client);
-          project.clientTokens[session.client] = (Object.prototype.hasOwnProperty.call(project.clientTokens, session.client) ? project.clientTokens[session.client] : 0) + sessionTokens;
+          const client = clientKey(session.client);
+          project.clients.add(client);
+          project.clientTokens[client] = (Object.prototype.hasOwnProperty.call(project.clientTokens, client) ? project.clientTokens[client] : 0) + sessionTokens;
         }
       }
     }
@@ -121,9 +130,10 @@
       // Native project telemetry is local reference data only; never promote
       // it to generic project cost.
       addModelTokens(project.modelTokens, entry.models, tokens);
-      for (const [client, value] of Object.entries(entry.clients || {})) {
+      for (const [rawClient, value] of Object.entries(entry.clients || {})) {
         const tokens = Math.max(0, Number(value || 0));
         if (tokens <= 0) continue;
+        const client = clientKey(rawClient);
         project.clients.add(client);
         project.clientTokens[client] = (project.clientTokens[client] || 0) + tokens;
       }
@@ -150,7 +160,7 @@
         .map(([share, value]) => ({
           key: share || 'unknown',
           name: share
-            ? (shareBy === 'model' ? share : (options.clientLabels?.[share] || share))
+            ? (shareBy === 'model' ? share : (ownLabel(options.clientLabels, share) || share))
             : (shareBy === 'model' ? (options.unknownModelLabel || 'Unknown model') : (options.unknownClientLabel || 'Unknown')),
           value: Number(value),
           percent: project.value > 0 ? Number(value) / project.value * 100 : 0,

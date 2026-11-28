@@ -1862,6 +1862,40 @@ function topologyEndpointSubText(ep, isSessionMode) {
   return [modelOrClient, countLabel].filter(Boolean).join(' · ');
 }
 
+const CLIENT_MARK_LIMIT = 3;
+
+function sharePercent(share) {
+  const percent = share * 100;
+  return percent > 0 && percent < 1 ? '<1%' : `${Math.round(percent)}%`;
+}
+
+// Brand marks replace the "claude · codex" text, which truncated in narrow cards.
+// With `shares`, each mark also gets its bar colour (unlifted, exactly as the bar
+// draws it) and token share (Work Panel).
+function clientMarksHtml(marks, { shares = false } = {}) {
+  if (!marks?.length) return '';
+  const withShares = shares && marks.every(mark => mark.share !== null && mark.share !== undefined);
+  const names = marks.map(mark => (withShares ? `${mark.label} ${sharePercent(mark.share)}` : mark.label)).join(', ');
+  const items = marks.slice(0, CLIENT_MARK_LIMIT).map((mark) => {
+    const icon = mark.iconClass
+      ? `<span class="dash-client-mark row-icon ${escapeHtml(mark.iconClass)}"></span>`
+      : `<span class="dash-client-mark dash-client-mark--initial">${escapeHtml(mark.label.slice(0, 1).toUpperCase())}</span>`;
+    if (!withShares) return icon;
+    return `<span class="dash-client-share"><span class="dash-client-share-swatch" data-c="${escapeHtml(mark.color)}"></span>${icon}<span class="dash-client-share-value">${sharePercent(mark.share)}</span></span>`;
+  }).join('');
+  const more = marks.length > CLIENT_MARK_LIMIT ? `<span class="dash-client-mark-more">+${marks.length - CLIENT_MARK_LIMIT}</span>` : '';
+  return `<span class="dash-client-marks${withShares ? ' has-shares' : ''}" role="img" aria-label="${escapeHtml(names)}">${items}${more}</span>`;
+}
+
+function setClientMarks(container, marks, options) {
+  const html = clientMarksHtml(marks, options);
+  if (container.dataset.marks !== html) {
+    container.dataset.marks = html;
+    container.innerHTML = html;
+    applySwatchColors(container);
+  }
+}
+
 function sessionStateIconHtml(activityState) {
   if (!sessionLiveApi?.sessionStateMarkup) return '';
   return `<span class="home-session-state" data-state="${escapeHtml(activityState)}">`
@@ -2089,22 +2123,37 @@ function renderWorkPanel(overview) {
       return;
     }
     const visibleWs = workspaces.slice(0, 12);
-    const nextSig = JSON.stringify(['workspaces', state.locale, visibleWs.map((w) => [w.key, w.activeSessionCount > 0])]);
+    // A device name only distinguishes rows when more than one device appears.
+    const showDevices = new Set(visibleWs.flatMap((w) => w.devices || [])).size > 1;
+    const deviceKinds = new Map((overview?.fleet?.machines || []).map((m) => [m.name, m.deviceKind]));
+    // Devices sit beside the name (where the work ran); the second row is the tool mix.
+    const devicesHtml = (ws) => {
+      if (!showDevices) return '';
+      const names = ws.devices || [];
+      const shown = names.slice(0, 2).map((name) => `<span class="dash-project-device">`
+        + `<span class="dash-session-dev-icon device-kind-icon device-kind-${escapeHtml(deviceKinds.get(name) || 'desktop')}" aria-hidden="true"></span>`
+        + `<span class="dash-project-device-name">${escapeHtml(name)}</span></span>`).join('');
+      return shown + (names.length > 2 ? `<span class="dash-project-device">+${names.length - 2}</span>` : '');
+    };
+    const nextSig = JSON.stringify(['workspaces', state.locale, showDevices, visibleWs.map((w) => [w.key, w.activeSessionCount > 0])]);
     if (nextSig === lastWorkStructureSig) {
       const rowMap = new Map();
       els.workPanel.querySelectorAll('.dash-project-row').forEach((r) => rowMap.set(r.dataset.wsKey, r));
       visibleWs.forEach((ws) => {
         const row = rowMap.get(ws.key);
         if (!row) return;
-        const clientsLabel = (ws.clients || []).slice(0, 3).join(' · ');
-        const devsLabel = (ws.devices || []).slice(0, 2).join(', ');
-        const subParts = [devsLabel, clientsLabel].filter(Boolean).join(' · ');
-        const metaEl = row.querySelector('.dash-session-meta-text');
+        const devsHtml = devicesHtml(ws);
+        const devicesEl = row.querySelector('.dash-project-devices');
+        const marksEl = row.querySelector('.dash-project-marks');
         const chipEl = row.querySelector('.dash-live-chip');
         const fillEl = row.querySelector('.dash-project-bar-fill');
         const tokEl = row.querySelector('.dash-row-tokens');
         const costEl = row.querySelector('.dash-row-cost');
-        if (metaEl) metaEl.textContent = subParts;
+        if (devicesEl && devicesEl.dataset.devices !== devsHtml) {
+          devicesEl.dataset.devices = devsHtml;
+          devicesEl.innerHTML = devsHtml;
+        }
+        if (marksEl) setClientMarks(marksEl, ws.clientMarks, { shares: true });
         if (chipEl && ws.activeSessionCount > 0) chipEl.textContent = t('dashboard.fleet.activeAgents', { count: ws.activeSessionCount });
         if (fillEl) {
           const w = ws.relWidth.toFixed(4);
@@ -2127,22 +2176,24 @@ function renderWorkPanel(overview) {
 
     withPreservedFocus(els.workPanel, '.dash-project-row[data-ws-key]', (r) => r.dataset.wsKey || '', () => {
       els.workPanel.innerHTML = visibleWs.map((ws) => {
-        const clientsLabel = (ws.clients || []).slice(0, 3).join(' · ');
-        const devsLabel = (ws.devices || []).slice(0, 2).join(', ');
-        const subParts = [devsLabel, clientsLabel].filter(Boolean).join(' · ');
+        const devsHtml = devicesHtml(ws);
+        const marksHtml = clientMarksHtml(ws.clientMarks, { shares: true });
         const liveChip = ws.activeSessionCount > 0
           ? `<span class="dash-live-chip">${escapeHtml(t('dashboard.fleet.activeAgents', { count: ws.activeSessionCount }))}</span>`
           : '';
+        // Left column: name, devices and status, then the tool mix. Right column: tokens, then cost.
         return `<div class="dash-project-row" data-ws-key="${escapeHtml(ws.key)}" tabindex="0" role="button">`
-          + `<span class="dash-session-lead"><span class="row-icon row-icon-project" aria-hidden="true"></span></span>`
           + `<div class="dash-project-body">`
-          + `<div class="dash-project-title"><span class="dash-session-title-text">${escapeHtml(ws.name)}</span>${liveChip}</div>`
-          + `<div class="dash-project-sub"><span class="dash-session-meta-text">${escapeHtml(subParts || '')}</span></div>`
-          + `<div class="dash-project-bar"><div class="dash-project-bar-fill" data-w="${ws.relWidth.toFixed(4)}" data-bg="${escapeHtml(ws.barBackground)}"></div></div>`
-          + `</div>`
-          + `<div class="dash-project-metrics">`
+          + `<div class="dash-project-line">`
+          + `<div class="dash-project-title"><span class="dash-session-title-text">${escapeHtml(ws.name)}</span>`
+          + `<span class="dash-project-devices" data-devices="${escapeHtml(devsHtml)}">${devsHtml}</span>${liveChip}</div>`
           + `<span class="dash-row-tokens">${escapeHtml(formatCompact(ws.tokens))}</span>`
+          + `</div>`
+          + `<div class="dash-project-line">`
+          + `<div class="dash-project-sub"><span class="dash-project-marks" data-marks="${escapeHtml(marksHtml)}">${marksHtml}</span></div>`
           + `<span class="dash-row-cost">${escapeHtml(formatCost(ws.cost, ws.unpricedTokens))}</span>`
+          + `</div>`
+          + `<div class="dash-project-bar"><div class="dash-project-bar-fill" data-w="${ws.relWidth.toFixed(4)}" data-bg="${escapeHtml(ws.barBackground)}"></div></div>`
           + `</div>`
           + `</div>`;
       }).join('');
@@ -2532,8 +2583,10 @@ function renderTopology(overview, revealed = false, cardRateSamples = {}) {
     const iconHtml = isSessionMode
       ? `<span class="row-icon row-icon-project" aria-hidden="true"></span>`
       : (h.iconClass ? `<span class="dash-bd-icon row-icon ${escapeHtml(h.iconClass)}" aria-hidden="true"></span>` : `<span class="dash-bd-swatch" data-c="${accent}"></span>`);
-    const subLeft = isSessionMode ? (h.clients || []).slice(0, 2).join(' · ') : '';
-    const subRight = active ? `<span class="topo-live-rate">${escapeHtml(t('dashboard.fleet.activeAgents', { count: h.activeSessionCount }))}</span>` : escapeHtml(formatCost(h.cost, h.unpricedTokens));
+    const subLeft = isSessionMode ? clientMarksHtml(h.clientMarks) : '';
+    // Running counts live on the device card and the session column; the active
+    // border marks this workspace, so the right column stays tokens over cost.
+    const subRight = escapeHtml(formatCost(h.cost, h.unpricedTokens));
     const fillScale = Math.max(0.04, Math.min(1, h.tokens / maxHubTokens)).toFixed(3);
     const barAttr = h.barBackground ? `data-bg="${escapeHtml(h.barBackground)}"` : `data-c="${accent}"`;
     const borderAttr = border ? ` data-workspace-gradient="${escapeHtml(border)}"` : '';
@@ -2543,7 +2596,7 @@ function renderTopology(overview, revealed = false, cardRateSamples = {}) {
       + `<span class="topo-node-ident">${iconHtml}<span class="topo-node-title">${escapeHtml(titleText)}</span></span>`
       + `<span class="topo-node-val">${escapeHtml(formatCompact(h.tokens))}</span>`
       + `</div>`
-      + `<div class="topo-node-sub"><span class="topo-node-sub-text">${escapeHtml(subLeft)}</span><span>${subRight}</span></div>`
+      + `<div class="topo-node-sub"><span class="topo-node-sub-text">${subLeft}</span><span>${subRight}</span></div>`
       + `<div class="topo-mini-bar"><div class="topo-mini-bar-fill" data-w="${fillScale}" ${barAttr}></div></div>`
       + (border ? '<span class="topo-workspace-border" aria-hidden="true"></span>' : '')
       + `<span class="topo-port topo-port--out${active ? ' is-live' : ''}" data-port="hub-out:${escapeHtml(h.id)}"></span>`

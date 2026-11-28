@@ -1319,6 +1319,92 @@ html.native-high-contrast .dash-stage {
   white-space: nowrap;
 }
 
+.dash-client-marks {
+  display: inline-flex;
+  align-items: center;
+  gap: 4.5px;
+  flex: none;
+  vertical-align: middle;
+}
+
+.dash-shell .dash-client-mark {
+  width: 10.5px;
+  height: 10.5px;
+  flex: none;
+  color: var(--readable-muted, var(--muted));
+  opacity: 0.82;
+}
+
+.dash-client-mark--initial {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 3px;
+  background: rgba(var(--overlay-rgb), 0.14);
+  font-size: 8px;
+  font-weight: 700;
+  line-height: 1;
+}
+
+.dash-project-devices {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  overflow: hidden;
+  font-size: 10.5px;
+  font-weight: 400;
+  color: var(--readable-muted, var(--muted));
+}
+
+.dash-project-devices:empty {
+  display: none;
+}
+
+.dash-project-device {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+  white-space: nowrap;
+}
+
+.dash-project-device-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.dash-client-marks.has-shares {
+  gap: 10px;
+}
+
+.dash-client-share {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 10px;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.dash-client-share-swatch {
+  width: 7px;
+  height: 2.5px;
+  border-radius: 2px;
+  flex: none;
+}
+
+.dash-client-mark-more {
+  font-size: 10px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+.topo-node.is-active .dash-client-mark,
+.dash-project-row:hover .dash-client-mark {
+  opacity: 0.94;
+}
+
 .topo-live-rate {
   display: inline-flex;
   align-items: center;
@@ -2405,8 +2491,25 @@ html.native-liquid-glass .dash-skyline-reset-btn {
   box-shadow: 0 0 5px color-mix(in srgb, var(--success, #34d399) 46%, transparent);
 }
 
-.dash-session-metrics,
-.dash-project-metrics {
+.dash-project-row {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.dash-project-line {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  min-width: 0;
+}
+
+.dash-project-line > .dash-row-tokens,
+.dash-project-line > .dash-row-cost {
+  flex: none;
+  font-variant-numeric: tabular-nums;
+}
+
+.dash-session-metrics {
   text-align: right;
   display: flex;
   flex-direction: column;

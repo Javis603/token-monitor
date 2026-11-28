@@ -123,14 +123,46 @@
   /** @param {string} id */
   function clientDisplayLabel(id) {
     if (!id) return '';
-    return vendorPresentation?.VENDOR_LABELS?.[id]
-      || clientCatalog?.CLIENT_LABELS?.[id]
+    // Unknown client slugs pass normalization, so `constructor` must not hit Object.prototype.
+    return ownValue(vendorPresentation?.VENDOR_LABELS, id)
+      || ownValue(clientCatalog?.CLIENT_LABELS, id)
       || id;
+  }
+
+  /** @param {Record<string, any> | undefined} map @param {string} key */
+  function ownValue(map, key) {
+    return map && Object.hasOwn(map, key) ? map[key] : undefined;
+  }
+
+  /**
+   * Brand marks for the tools used in a workspace, largest share first.
+   * @param {string[]} ids
+   * @param {Record<string, number>} [tokensById]
+   * @param {{ total?: number, colors?: Map<string, string> }} [options] share denominator
+   *   (defaults to the attributed sum) and the colours the usage bar already drew
+   */
+  function clientMarks(ids, tokensById = {}, { total: totalTokens, colors } = {}) {
+    /** @type {Map<string, number>} */
+    const tokens = new Map();
+    for (const raw of ids || []) {
+      const id = canonicalClientKey(raw);
+      if (id) tokens.set(id, (tokens.get(id) || 0) + n(tokensById?.[raw]));
+    }
+    const total = totalTokens ?? [...tokens.values()].reduce((sum, value) => sum + value, 0);
+    return [...tokens]
+      .sort(([a, x], [b, y]) => y - x || a.localeCompare(b))
+      .map(([id, value]) => ({
+        id,
+        label: clientDisplayLabel(id),
+        iconClass: hasBrandMask(id) ? `row-icon-${id}` : '',
+        color: colors?.get(id) || clientColor(id),
+        share: total > 0 ? value / total : null
+      }));
   }
 
   /** @param {string} id */
   function clientColor(id) {
-    return usageCharts?.clientColors?.[id]
+    return ownValue(usageCharts?.clientColors, id)
       || usageCharts?.clientColors?.default
       || '#6ab4f0';
   }
@@ -1492,6 +1524,7 @@
     }
 
     const rows = projectRowsApi.projectRowsForPeriod(scopedPeriod, {
+      clientKey: canonicalClientKey,
       clientColors: clientColorsMap,
       clientLabels: clientCatalog?.CLIENT_LABELS || {},
       modelColor,
@@ -1556,6 +1589,12 @@
       const meta = metaByProject.get(String(row.name || '').trim().toLowerCase());
       return {
         ...row,
+        // Marks are the bar's legend: same attribution, same colours, and
+        // unattributed tokens stay in the share denominator.
+        clientMarks: clientMarks(row.clients, row.clientTokens, {
+          total: n(row.value),
+          colors: new Map((row.accordionRows || []).map(/** @param {any} share */ (share) => [share.key, share.color]))
+        }),
         tokens: n(row.value),
         share: n(row.value) / totalTokens,
         relWidth: n(row.value) / maxTokens,
@@ -2309,6 +2348,7 @@
               activeSessionCount: ws ? n(ws.activeSessionCount) : 0,
               barBackground: String(ws?.barBackground || ''),
               clients: Array.isArray(ws?.clients) ? ws.clients : [],
+              clientTokens: /** @type {Record<string, number>} */ ({ ...ws?.clientTokens }),
               color: member.color || '#6ab4f0',
               activeToolColors: /** @type {string[]} */ ([]),
               sessionTokens: 0,
@@ -2333,9 +2373,14 @@
           if (!ws) {
             hub.tokens += Math.max(0, n(member.totalTokens));
             hub.cost += Math.max(0, n(member.costUsd));
+            hub.unpricedTokens += Math.max(0, n(member.unpricedTokens));
           }
-          if (member.clientLabel && !hub.clients.includes(member.clientLabel)) {
-            hub.clients = [...hub.clients, member.clientLabel];
+          const memberClient = String(member.client || '');
+          if (memberClient && !hub.clients.includes(memberClient)) {
+            hub.clients = [...hub.clients, memberClient];
+          }
+          if (memberClient && !ws) {
+            hub.clientTokens[memberClient] = n(hub.clientTokens[memberClient]) + Math.max(0, n(member.totalTokens));
           }
         }
       }
@@ -2356,6 +2401,7 @@
             activeSessionCount: n(ws.activeSessionCount),
             barBackground: String(ws.barBackground || ''),
             clients: Array.isArray(ws.clients) ? ws.clients : [],
+            clientTokens: { ...ws.clientTokens },
             color: '#6ab4f0',
             activeToolColors: [],
             sessionTokens: 0,
@@ -2373,7 +2419,10 @@
           || (b.sessionTokens - a.sessionTokens)
         );
       const hubs = sortedHubs.slice(0, maxHubs);
-      for (const hub of hubs) hub.activeToolColors.sort();
+      for (const hub of hubs) {
+        hub.activeToolColors.sort();
+        hub.clientMarks = clientMarks(hub.clients, hub.clientTokens);
+      }
       const visibleHubSet = new Set(hubs.map((h) => h.id));
 
       /** @param {any} session */
