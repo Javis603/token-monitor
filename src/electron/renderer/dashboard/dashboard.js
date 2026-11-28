@@ -263,12 +263,7 @@ function captureGeometry(root, selector = '[data-motion-key]') {
   return geometry;
 }
 
-function animateChartGeometry(previous, { fromZero = false } = {}) {
-  if (state.motion === 'none' || prefersReducedMotion()) return;
-  if (state.chartKind === 'candle') {
-    if (fromZero) animateCandles();
-    return;
-  }
+function animateBarGeometry(previous, { fromZero }) {
   const shapes = Array.from(els.chart.querySelectorAll('.bar-stack[data-motion-key]'));
   shapes.forEach((shape, index) => {
     for (const animation of shape.getAnimations()) animation.cancel();
@@ -741,7 +736,7 @@ function populateRangeSelect() {
       if (state.range === e.target.dataset.val) return;
       hideTooltip();
       state.range = e.target.dataset.val;
-      state.motion = 'update';
+      state.motion = 'range';
       els.rangeSelect.querySelectorAll('.range-btn').forEach((b) => b.classList.toggle('active', b === e.target));
       syncSegIndicator(els.rangeSelect);
       render();
@@ -942,8 +937,9 @@ function patchDashboardMarkup(container, html, beforePatch) {
 
 function renderTrends() {
   const previousKind = state.chartKind;
-  let previousGeometry;
-  const captureBars = () => { previousGeometry = captureGeometry(els.chart, '.bar-stack[data-motion-key]'); };
+  const entering = lastRenderedTab !== state.tab;
+  const entryMotion = entering || state.motion === 'entry';
+  const animate = (entering || state.motion !== 'none') && !prefersReducedMotion();
   const effectiveDeviceId = state.overview?.fleet
     ? (state.overview.fleet.isFleetMode && state.overview.activeMachine ? state.overview.activeMachine.deviceId : 'all')
     : state.selectedDeviceId;
@@ -973,9 +969,13 @@ function renderTrends() {
     state.chartModel = model; state.chartKind = 'candle';
     const every = axisEvery(model.candles);
     const html = charts.candleChartSvg(model, { yTicks: 4, formatTick: formatAxisTick, axisLabel: (c, i) => (i % every === 0 ? shortDate(c.key) : '') });
-    if (patchDashboardMarkup(els.chart, html)) {
-      animateChartGeometry(null, { fromZero: state.motion === 'entry' || previousKind !== 'candle' });
+    const changed = patchDashboardMarkup(els.chart, html);
+    const replay = animate && (state.motion === 'range' || (changed && (entryMotion || previousKind !== 'candle')));
+    if (changed || replay) {
+      // Retained wicks may have new lengths after reconciliation.
+      for (const animation of els.chart.getAnimations({ subtree: true })) animation.cancel();
     }
+    if (replay) animateCandles();
     return;
   }
 
@@ -987,12 +987,17 @@ function renderTrends() {
   state.chartModel = model; state.chartKind = 'bars';
   const every = axisEvery(model.bars);
   const html = charts.barsChartSvg(model, { colorFor, yTicks: 4, formatTick: formatAxisTick, axisLabel: (bar, i) => (i % every === 0 ? shortDate(bar.label) : '') });
+  const fromZero = entryMotion || state.motion === 'series' || previousKind !== 'bars';
+  let previousGeometry;
+  const captureBars = animate && !fromZero
+    ? () => { previousGeometry = captureGeometry(els.chart, '.bar-stack[data-motion-key]'); }
+    : undefined;
   const changed = patchDashboardMarkup(els.chart, html, captureBars);
   const soloColor = state.soloKey ? colorFor(state.soloKey) : '';
   els.chart.querySelectorAll('.bar-seg').forEach((seg) => {
     seg.classList.toggle('is-dimmed', Boolean(soloColor && seg.getAttribute('fill') !== soloColor));
   });
-  if (changed) animateChartGeometry(previousGeometry, { fromZero: state.motion === 'entry' || state.motion === 'series' || previousKind !== 'bars' });
+  if (animate && (changed || entering)) animateBarGeometry(previousGeometry, { fromZero });
 }
 
 function renderBreakdown(overview) {

@@ -844,7 +844,7 @@ test('dashboard motion is data-scoped and respects reduced-motion preferences', 
   const js = read('src', 'electron', 'renderer', 'dashboard', 'dashboard.js');
   const css = read('src', 'electron', 'renderer', 'dashboard', 'dashboard.css');
   assert.match(js, /prefers-reduced-motion: reduce/);
-  assert.match(js, /function animateChartGeometry/);
+  assert.match(js, /function animateBarGeometry/);
   assert.match(js, /function animateCandles/);
   assert.match(js, /function animateHeatmapEntry/);
   assert.match(js, /document\.hasFocus\(\)/);
