@@ -191,6 +191,7 @@ test('session detail renders its heading before loading, errors and empty result
   let invalidations = 0;
   let pulls = 0;
   context.tokenNumberAnimationApi = require('../../src/electron/tokenNumberAnimation');
+  context.invalidateHubPairingQr = () => {};
   context.detailTokenDisplayApi = { reset() {} };
   context.currentLocale = () => 'en';
   context.settleRowNumberAnimations = () => {};

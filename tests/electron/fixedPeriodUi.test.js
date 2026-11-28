@@ -25,6 +25,7 @@ test('reset restores the configured middle range from a custom selection', () =>
     const context = {
       state, fixedPeriodRangesApi, tokenNumberAnimationApi: { normalize: value => value },
       detailTokenDisplayApi: { reset() {} },
+      invalidateHubPairingQr() {},
       currentLocale: () => 'en',
       settleRowNumberAnimations() {},
       setPeriod(period) { state.period = period; return true; },

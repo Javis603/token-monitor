@@ -1075,6 +1075,7 @@ test('language changes refresh open session detail via resolved locale and never
     tokenNumberAnimationApi: require('../../src/electron/tokenNumberAnimation'),
     fixedPeriodRangesApi: require('../../src/electron/renderer/fixedPeriodRanges'),
     detailTokenDisplayApi: { reset() {} },
+    invalidateHubPairingQr() {},
     navigator: { languages: ['en-US'], language: 'en-US' },
     visibleStatsSurface: () => surface,
     isRendererWindowHidden: () => surface !== 'main',

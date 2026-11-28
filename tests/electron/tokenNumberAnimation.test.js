@@ -763,6 +763,7 @@ test('a pushed animation preference settles the current headline before the next
   context.state.currentTotal = 2000;
   let pluginRefreshes = 0;
   context.pluginViewHost = { refreshMotion: () => { pluginRefreshes++; } };
+  context.invalidateHubPairingQr = () => {};
   context.detailTokenDisplayApi = { reset() {} };
   context.currentLocale = () => 'en';
   api.animateTotalNumber(el, 1000, 2000, 1000);

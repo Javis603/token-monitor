@@ -524,7 +524,9 @@ Object.assign(els, {
   hubProfileNameInput: document.getElementById('hubProfileNameInput'),
   syncConnectionIdentity: document.getElementById('syncConnectionIdentity'),
   syncConnectionEndpoint: document.getElementById('syncConnectionEndpoint'),
+  syncConnectionActions: document.getElementById('syncConnectionActions'),
   syncConnectionEdit: document.getElementById('syncConnectionEdit'),
+  syncConnectionPairPhone: document.getElementById('syncConnectionPairPhone'),
   syncConnectionCancel: document.getElementById('syncConnectionCancel'),
   syncConnectionSaveError: document.getElementById('syncConnectionSaveError'),
   syncDeviceSettings: document.getElementById('syncDeviceSettings'),
@@ -535,6 +537,12 @@ Object.assign(els, {
   hubPortInput: document.getElementById('hubPortInput'),
   hubSecretInput: document.getElementById('hubSecretInput'),
   hubSecretCopyButton: document.getElementById('hubSecretCopyButton'),
+  hubPairingDialog: document.getElementById('hubPairingDialog'),
+  hubPairingAddress: document.getElementById('hubPairingAddress'),
+  hubPairingQr: document.getElementById('hubPairingQr'),
+  hubPairingHelp: document.getElementById('hubPairingHelp'),
+  hubPairingInternetHelp: document.getElementById('hubPairingInternetHelp'),
+  hubPairingError: document.getElementById('hubPairingError'),
   hubSecretRegenButton: document.getElementById('hubSecretRegenButton'),
   secretPasteButton: document.getElementById('secretPasteButton'),
   hubStatusRow: document.getElementById('hubStatusRow'),
@@ -847,7 +855,11 @@ function applySettingsTranslations() {
 let displaySettings = null;
 
 function applySettingsSectionDom(id, open) {
-  if (id === 'sync' && !open) { syncModeSelect?.close(); syncContentForm?.closeHelp(); }
+  if (id === 'sync' && !open) {
+    syncModeSelect?.close();
+    syncContentForm?.closeHelp();
+    closeHubPairingQr();
+  }
   if (id === 'appearance' && !open) appearanceColorPicker.close();
   if (id === 'window' && !open) { stopWindowShortcutRecording(); displaySettings?.close?.(); }
   const toggle = document.querySelector(`[data-settings-section="${id}"]`);
@@ -6711,6 +6723,7 @@ function openViewFromTray(viewId) {
   appearanceColorPicker.close();
   displaySettings?.close();
   els.settingsPanel?.classList.add('hidden');
+  closeHubPairingQr();
   els.shell.classList.remove('settings-open');
   state.untrackedWithDataProbed = null;
   syncPluginLimitsDemand();
@@ -8988,6 +9001,7 @@ function setRendererSettings(next) {
   const detailCompactChanged = (state.settings?.detailTokensUseCompactUnits === true) !== (next.detailTokensUseCompactUnits === true);
   const detailUnitsChanged = (state.settings?.compactTokenUnits === 'localized') !== (next.compactTokenUnits === 'localized');
   state.settings = next;
+  invalidateHubPairingQr();
   const localeChanged = previousLocale !== currentLocale();
   if (next.periodTabOrder?.length) ensureVisiblePeriod(next.periodTabOrder);
   else if (restoringPeriodTabs && fixedPeriodRangesApi.slotForSelection(state.period) === 'month') {
@@ -10161,6 +10175,7 @@ function applyFloatingBubbleState(payload = {}, options = {}) {
   const wasCollapsed = state.floatingBubble.collapsed;
   const side = payload?.collapsed && ['left', 'right'].includes(payload.side) ? payload.side : null;
   state.floatingBubble = { collapsed: Boolean(side), side };
+  invalidateHubPairingQr();
   syncPluginTrayDemand();
   syncPluginLimitsDemand();
   if (isRendererWindowHidden()) {
@@ -10630,6 +10645,7 @@ function renderHubStatus() {
   renderIcloudStatus();
   if (!els.hubStatusRow || !els.hubAddressList) return;
   const info = state.hubInfo;
+  invalidateHubPairingQr();
   const port = Number(state.settings.hubHostPort || 17321);
   if (!info) {
     els.hubStatusRow.textContent = t('settings.sync.starting');
@@ -10958,8 +10974,97 @@ function renderHubBuildStatus() {
 }
 
 let hubAddressesExpanded = false;
+let hubPairingSelection = null;
+
+function hubAddressUrl(address, port) {
+  return `http://${address}:${port}`;
+}
+
+function supportsHostPairing(address) {
+  const [network, subnet] = address.split('.').map(Number);
+  return network === 10 || (network === 192 && subnet === 168)
+    || (network === 172 && subnet >= 16 && subnet <= 31)
+    || (network === 100 && subnet >= 64 && subnet <= 127);
+}
+
+const privatePairingSuffixes = new Set([
+  'local', 'localhost', 'localdomain', 'internal', 'lan', 'home', 'arpa',
+  'intranet', 'corp', 'onion', 'alt', 'invalid', 'test', 'example'
+]);
+
+function isPublicHttpsHubPairingUrl(url) {
+  if (typeof url !== 'string' || url.length > 512 || /[\s\p{Cc}]/u.test(url)) return false;
+  // Match the Android pairing address rules without rewriting the saved URL.
+  const match = /^https:\/\/([a-z0-9.-]+)(?::([0-9]+))?\/?$/i.exec(url);
+  if (!match) return false;
+  const host = match[1].toLowerCase().replace(/\.$/, '');
+  const port = match[2] === undefined ? 443 : Number(match[2]);
+  const labels = host.split('.');
+  const suffix = labels.at(-1);
+  return port >= 1 && port <= 65535 && host.length <= 253 && labels.length >= 2
+    && labels.every(label => /^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/.test(label))
+    && !/^(?:\d+$|0x)/.test(suffix) && !privatePairingSuffixes.has(suffix)
+    && !host.endsWith('.ts.net');
+}
+
+function hasHubPairingSecret(secret) {
+  return typeof secret === 'string' && secret.length <= 512
+    && Boolean(secret.trim()) && !/[\u0000-\u001f\u007f]/.test(secret);
+}
+
+function currentClientHubForPairing() {
+  if (state.settings?.hubMode !== 'client' || els.hubModeOptions.value !== 'client'
+    || clientConnectionEditing || clientConnectionHasDraft() || hubSaveBusy) return null;
+  const { hubUrl: url, secret } = state.settings;
+  return isPublicHttpsHubPairingUrl(url) && hasHubPairingSecret(secret)
+    ? { mode: 'client', url, secret } : null;
+}
+
+function syncClientHubPairingUi() {
+  const { syncConnectionPairPhone: button, syncConnectionActions: actions } = els;
+  const pairing = currentClientHubForPairing();
+  if (button) {
+    button.hidden = !pairing;
+    if (pairing) button.setAttribute('aria-label', t('settings.sync.pairPhoneAt', { url: pairing.url }));
+  }
+  if (actions) actions.hidden = els.syncConnectionEdit.hidden && !pairing;
+  invalidateHubPairingQr();
+}
+
+function currentHubForPairing(url) {
+  if (state.settings?.hubMode !== 'host') {
+    const saved = currentClientHubForPairing();
+    return saved?.url === url ? saved : null;
+  }
+  const info = state.hubInfo;
+  const secret = els.hubSecretInput?.value;
+  if (els.hubModeOptions.value !== 'host' || !info?.listening || info.error || !hasHubPairingSecret(secret)) return null;
+  return (info.lanAddresses || []).some(({ address }) =>
+    supportsHostPairing(address) && hubAddressUrl(address, info.listeningPort) === url)
+    ? { mode: 'host', url, secret } : null;
+}
+
+function isHubPairingCurrent(selection) {
+  if (!state.settingsSections?.sync || !isSettingsSurfaceVisible()) return false;
+  const current = currentHubForPairing(selection.url);
+  return current?.mode === selection.mode && current.secret === selection.secret;
+}
+
+function closeHubPairingQr() {
+  hubPairingSelection = null;
+  const { hubPairingDialog: dialog, hubPairingAddress: address, hubPairingQr: canvas } = els;
+  if (!dialog) return;
+  canvas.width = 0;
+  address.textContent = '';
+  if (dialog.open) dialog.close();
+}
+
+function invalidateHubPairingQr() {
+  if (hubPairingSelection && !isHubPairingCurrent(hubPairingSelection)) closeHubPairingQr();
+}
+
 function hubAddressRow(addr, port) {
-  const url = `http://${addr.address}:${port}`;
+  const url = hubAddressUrl(addr.address, port);
   const row = document.createElement('div');
   row.className = 'hub-address-row';
   const code = document.createElement('code');
@@ -10974,6 +11079,15 @@ function hubAddressRow(addr, port) {
   copy.textContent = '⧉';
   copy.addEventListener('click', () => copyToClipboard(url, copy));
   row.append(code, ifaceLabel, copy);
+  if (supportsHostPairing(addr.address) && hasHubPairingSecret(els.hubSecretInput?.value) && els.hubPairingDialog) {
+    const pair = document.createElement('button');
+    pair.type = 'button';
+    pair.className = 'hub-pairing-button';
+    pair.textContent = t('settings.sync.pairPhone');
+    pair.setAttribute('aria-label', t('settings.sync.pairPhoneAt', { url }));
+    pair.addEventListener('click', () => showHubPairingQr(url, pair));
+    row.append(pair);
+  }
   return row;
 }
 
@@ -11015,6 +11129,46 @@ function renderHubAddresses(addresses, port) {
   // The toggle precedes the rows it reveals, so Tab reaches them next.
   els.hubAddressList.append(more, extra);
 }
+
+async function showHubPairingQr(url, trigger) {
+  const { hubPairingDialog: dialog, hubPairingAddress: address, hubPairingQr: canvas,
+    hubPairingHelp: help, hubPairingInternetHelp: internetHelp, hubPairingError: error } = els;
+  const selection = currentHubForPairing(url);
+  if (!dialog || dialog.open || !selection || !trigger.isConnected || !isHubPairingCurrent(selection)) return;
+  closeHubPairingQr();
+  hubPairingSelection = selection;
+
+  let draw;
+  try {
+    ({ drawHubPairingQr: draw } = await import('./hubPairingQr.mjs'));
+  } catch (_) {}
+  if (hubPairingSelection !== selection) return;
+  if (!trigger.isConnected || !isHubPairingCurrent(selection)) {
+    closeHubPairingQr();
+    return;
+  }
+
+  let rendered = false;
+  try {
+    if (draw) {
+      draw(canvas, selection.url, selection.secret);
+      rendered = true;
+    }
+  } catch (_) {
+    canvas.width = 0;
+  }
+  address.textContent = selection.url;
+  canvas.hidden = !rendered;
+  help.hidden = !rendered || selection.mode !== 'host';
+  internetHelp.hidden = !rendered || selection.mode !== 'client';
+  error.hidden = rendered;
+  dialog.showModal();
+}
+
+els.hubPairingDialog?.addEventListener('close', () => {
+  // A previously queued close event must not cancel a new encoder load.
+  if (!els.hubPairingDialog.open && els.hubPairingAddress.textContent) closeHubPairingQr();
+});
 
 async function copyToClipboard(text, button) {
   try {
@@ -11405,6 +11559,7 @@ function syncHubConnectionUi() {
     || els.syncDeviceSettings.contains(document.activeElement);
   els.syncConnectionEdit.hidden = !client || editing;
   els.syncConnectionEdit.disabled = hubSaveBusy;
+  syncClientHubPairingUi();
   if (client && !editing && focusedEditor && isSettingsSurfaceVisible()) {
     els.syncConnectionEdit.focus({ preventScroll: true });
   }
@@ -16270,6 +16425,7 @@ initFooterActionDisclosure();
 els.settingsButton.addEventListener('click', (event) => {
   if (state.viewSwitcherOpen) setViewSwitcherOpen(false);
   els.settingsPanel.classList.toggle('hidden');
+  if (!isSettingsPanelOpen()) closeHubPairingQr();
   const settingsOpen = isSettingsPanelOpen();
   // Settings is an overlay over a surface that keeps rendering behind it, so
   // closing it needs no catch-up repaint. Only the panel's own DOM has to be
@@ -16339,6 +16495,10 @@ els.saveSettingsButton.addEventListener('click', async () => {
 });
 
 // While a Hub switch is in flight the fields still hold the previous Hub.
+els.syncConnectionPairPhone?.addEventListener('click', event => {
+  const pairing = currentClientHubForPairing();
+  if (pairing) void showHubPairingQr(pairing.url, event.currentTarget);
+});
 els.syncConnectionEdit?.addEventListener('click', () => {
   if (!hubSaveBusy) beginClientConnectionEdit({ focus: true });
 });
@@ -16480,6 +16640,7 @@ els.hubSecretCopyButton?.addEventListener('click', () => {
 els.hubSecretRegenButton?.addEventListener('click', async () => {
   if (!window.tokenMonitor.regenerateHubSecret) return;
   const info = await window.tokenMonitor.regenerateHubSecret();
+  if (hubPairingSelection?.mode === 'host') closeHubPairingQr();
   state.hubInfo = info;
   state.settings = { ...state.settings, hubHostSecret: info.secret };
   els.hubSecretInput.value = info.secret;
@@ -17495,6 +17656,7 @@ window.tokenMonitor.onHubPush?.((payload) => {
   // value back into state + input — otherwise the Shared Secret field stays
   // blank and other devices can't pair until the user clicks Regenerate.
   if (payload.info.secret && payload.info.secret !== state.settings?.hubHostSecret) {
+    if (hubPairingSelection?.mode === 'host') closeHubPairingQr();
     state.settings = { ...state.settings, hubHostSecret: payload.info.secret };
     if (settingsVisible && els.hubSecretInput && state.settings.hubMode === 'host') {
       els.hubSecretInput.value = payload.info.secret;
@@ -17561,6 +17723,7 @@ const allTimeSessions = allTimeSessionsApi.createAllTimeSessionsLoader({
   onError: (error) => console.log(`[stats] all-time sessions failed: ${error?.message || error}`)
 });
 function handleWindowVisibilityChange() {
+  invalidateHubPairingQr();
   syncPluginLimitsDemand();
   syncPluginTrayDemand();
   pluginViewHost?.refreshDemand();

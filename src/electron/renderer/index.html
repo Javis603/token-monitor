@@ -1499,7 +1499,10 @@
                     <span id="syncPanelBuild" class="sync-panel-build sync-node-sub" hidden></span>
                     <span id="syncPanelDetail" class="sync-node-sub" role="status" aria-live="polite" hidden></span>
                   </div>
-                  <button id="syncConnectionEdit" type="button" class="sync-connection-edit" data-i18n="settings.sync.editConnection" data-i18n-aria-label="settings.sync.editConnection" aria-label="Change connection">Change connection</button>
+                  <div id="syncConnectionActions" class="sync-connection-actions" hidden>
+                    <button id="syncConnectionPairPhone" type="button" class="hub-pairing-button" data-i18n="settings.sync.pairPhone" hidden>Pair phone</button>
+                    <button id="syncConnectionEdit" type="button" class="sync-connection-edit" data-i18n="settings.sync.editConnection" data-i18n-aria-label="settings.sync.editConnection" aria-label="Change connection">Change connection</button>
+                  </div>
                 </div>
                 <div id="syncConnectionEditor" class="sync-connection-editor sync-map-form">
                   <label><span data-i18n="settings.sync.hubName">Hub name</span><input id="hubProfileNameInput" type="text" maxlength="120" spellcheck="false" placeholder="Home / Worker" data-i18n-placeholder="settings.sync.hubNamePlaceholder" /></label>
@@ -1536,6 +1539,17 @@
                   <p class="settings-note" data-i18n="settings.sync.hostNote">Other devices connect using one of the URLs above with the shared secret. For cross-network use, run Tailscale or ZeroTier on both sides - the virtual IP works the same.</p>
                 </div>
               </div>
+              <dialog id="hubPairingDialog" class="sync-content-dialog hub-pairing-dialog" aria-labelledby="hubPairingTitle">
+                <strong id="hubPairingTitle" data-i18n="settings.sync.pairPhone">Pair phone</strong>
+                <p id="hubPairingAddress"></p>
+                <canvas id="hubPairingQr" role="img" aria-label="Hub pairing QR" data-i18n-aria-label="settings.sync.pairingQr"></canvas>
+                <p id="hubPairingHelp" data-i18n="settings.sync.pairingHelp">Scan this QR code with a compatible client. Keep this code private. It contains your shared secret.</p>
+                <p id="hubPairingInternetHelp" data-i18n="settings.sync.pairingInternetHelp" hidden>Scan this QR code with a compatible client. This code works from anywhere. Anyone who photographs it can read your usage until you change the Hub secret. Keep it private and close it after pairing.</p>
+                <p id="hubPairingError" role="alert" data-i18n="settings.sync.pairingError" hidden>Could not show the QR. Use the address and shared secret to connect.</p>
+                <form method="dialog" class="settings-actions">
+                  <button autofocus data-i18n="settings.appUpdate.close">Close</button>
+                </form>
+              </dialog>
               <div id="icloudFields" class="hub-mode-fields sync-map-hub hidden">
                 <div class="sync-node">
                   <span class="sync-node-icon" data-sync-icon="icloud" aria-hidden="true"></span>

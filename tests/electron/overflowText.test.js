@@ -134,7 +134,7 @@ test('sync endpoint reuses hover reading and preserves its wrapper across settin
     document, window: { ...h.window, TokenMonitorOverflowText: { create } }, els, state,
     requestAnimationFrame: h.window.requestAnimationFrame, homeSessionRenderPending: false,
     prefersReducedMotion: () => reduced, clientConnectionEditing: false, hubSaveBusy: false, hubSaveError: false,
-    clientConnectionHasDraft: () => false, syncDevicePanelApi: require('../../src/electron/renderer/syncDevicePanel'),
+    clientConnectionHasDraft: () => false, syncClientHubPairingUi() {}, syncDevicePanelApi: require('../../src/electron/renderer/syncDevicePanel'),
     t: () => 'Saved Hub URL'
   });
   vm.runInContext(`${setup}\n${ui}`, context);

@@ -358,6 +358,15 @@ In the widget on one always-on machine, open Settings → Multi-device Sync and 
 
 The hub runs while Token Monitor is running — quitting (not just closing the window) stops it for all connected devices.
 
+In **Multi-device Sync**, choose **Pair phone** next to a private Wi-Fi or
+Tailscale address in **Host hub on this device**, or next to
+**Change connection** when a public HTTPS Hub is saved in **Connect to a hub**.
+Scan the code with a compatible client.
+
+The QR contains the Hub's shared secret. An internet Hub QR works from anywhere,
+so anyone who photographs it can read your usage until you change the secret.
+Keep the code private and close it after pairing.
+
 #### Option B — Self-hosted Node hub (always-on headless machine)
 
 ```bash
