@@ -4092,7 +4092,10 @@ function renderNow() {
 
 const dashboardRenderScheduler = statsRenderSchedulerApi.createStatsRenderScheduler({
   isHidden: () => dashboardReady && document.hidden,
-  render: renderNow
+  render: () => {
+    renderNow();
+    if (dashboardSettings.quotaOrder?.classList.contains('hidden') === false) renderDashboardQuotaOrder(state.settings);
+  }
 });
 
 function render() {

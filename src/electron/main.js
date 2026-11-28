@@ -531,6 +531,8 @@ function appWindowIcon() {
 
 const DEFAULT_WINDOW = { width: 340, height: 650 };
 const WINDOW_LIMITS = { minWidth: 240, minHeight: 140, maxWidth: 1200, maxHeight: 1400 };
+const DEFAULT_DASHBOARD_WINDOW = { width: 1180, height: 760 };
+const DASHBOARD_WINDOW_LIMITS = { minWidth: 720, minHeight: 520 };
 const ZOOM_LIMITS = { min: 0.7, max: 1.6, step: 0.1 };
 const TRAY_CONTENT_VALUES = new Set(['tokens', 'cost', 'both', 'tokensMonth', 'costMonth', 'bothMonth', 'tokensAll', 'costAll', 'bothAll', 'limitsAllSessions', 'liveTokenRate', 'bars', 'barsSession', 'barsWeekly', 'barsAllSessions', 'icon', 'custom']);
 const HUB_MODE_VALUES = new Set(['local', 'client', 'host', 'icloud']);
@@ -553,6 +555,7 @@ const TRAY_OPEN_VIEW_IDS = new Set(['home', 'project', 'session', 'limits', 'tre
 let mainWindow = null;
 let dashboardWindow = null;
 let dashboardWindowReady = false;
+let pendingDashboardWindowBounds = null;
 let settingsPath = null;
 let settings = null;
 let initialLimitProvidersPending = false;
@@ -652,6 +655,7 @@ function defaultSettings() {
     dashboardStageView: 'flow',
     dashboardBackdrop: 'inherit',
     dashboardWindowBehavior: 'normal',
+    dashboardWindowBounds: null,
     dashboardFlowMode: 'sync',
     dashboardFollowPeriodTabs: false,
     dashboardVisiblePeriods: [],
@@ -1543,11 +1547,10 @@ function isBoundsOnScreen(bounds) {
   } catch (_) { return false; }
 }
 
-function restoredBounds() {
-  const saved = settings?.windowBounds;
-  if (!saved || typeof saved.width !== 'number' || typeof saved.height !== 'number') return null;
-  const width = Math.min(WINDOW_LIMITS.maxWidth, Math.max(WINDOW_LIMITS.minWidth, saved.width));
-  const height = Math.min(WINDOW_LIMITS.maxHeight, Math.max(WINDOW_LIMITS.minHeight, saved.height));
+function restoredBounds(saved, { minWidth, minHeight, maxWidth = Infinity, maxHeight = Infinity } = WINDOW_LIMITS) {
+  if (!Number.isFinite(saved?.width) || !Number.isFinite(saved?.height)) return null;
+  const width = Math.min(maxWidth, Math.max(minWidth, saved.width));
+  const height = Math.min(maxHeight, Math.max(minHeight, saved.height));
   if (!isBoundsOnScreen({ ...saved, width, height })) return { width, height };
   return { x: saved.x, y: saved.y, width, height };
 }
@@ -1825,10 +1828,10 @@ function collapsedMargin() {
   return floatingBubbleCollapsedMargin(process.platform);
 }
 
-function persistWindowBounds(next) {
-  const prev = settings.windowBounds || {};
+function persistWindowBounds(next, key = 'windowBounds') {
+  const prev = settings[key] || {};
   if (prev.x === next.x && prev.y === next.y && prev.width === next.width && prev.height === next.height) return false;
-  settings.windowBounds = next;
+  settings[key] = next;
   saveSettings();
   return true;
 }
@@ -6610,7 +6613,7 @@ function exitTrayMode() {
     if (typeof mainWindow.setSkipTaskbar === 'function') mainWindow.setSkipTaskbar(skipTaskbarForSettings(settings));
     setWindowMaximizable(mainWindow, true);
     applyMacSpaceBehavior(false);
-    const restore = restoredBounds() || DEFAULT_WINDOW;
+    const restore = restoredBounds(settings?.windowBounds) || DEFAULT_WINDOW;
     mainWindow.setBounds({
       width: restore.width,
       height: restore.height,
@@ -6772,6 +6775,7 @@ function stopAll() {
   disposePluginRuntime();
   cancelMainWindowHibernate();
   stopPersistBoundsTimer();
+  persistDashboardWindowBounds(dashboardWindow);
   stopLocalCollector({ skipCloseWatchers: true });
   stopStatsStream();
   stopHostStats();
@@ -7560,7 +7564,7 @@ function createWindow(boundsOverride, options = {}) {
   cancelMainWindowHibernate();
   ensureSettingsLoaded();
   const collapsedFloatingBubble = options.collapsedFloatingBubble === true;
-  const bounds = boundsOverride || restoredBounds() || DEFAULT_WINDOW;
+  const bounds = boundsOverride || restoredBounds(settings?.windowBounds) || DEFAULT_WINDOW;
   const collapsedSizeLimits = {
     minWidth: bounds.width,
     minHeight: bounds.height,
@@ -7816,10 +7820,27 @@ function discardFailedDashboardWindow(win, reason) {
   win.destroy();
 }
 
-function showDashboardWindow(win) {
+function showDashboardWindow(win, bounds) {
   if (win.isMinimized()) win.restore();
   win.show();
   win.focus();
+  // macOS can reposition the window as it orders it front for the first time.
+  if (process.platform === 'darwin' && typeof bounds?.x === 'number') {
+    const [x, y] = win.getPosition();
+    if (x !== bounds.x || y !== bounds.y) win.setPosition(bounds.x, bounds.y);
+  }
+}
+
+function persistDashboardWindowBounds(win) {
+  if (!dashboardWindowReady || win !== dashboardWindow) return;
+  const bounds = normalWindowBounds(win) || pendingDashboardWindowBounds;
+  if (!bounds) return;
+  pendingDashboardWindowBounds = null;
+  if (!canPositionWindow()) {
+    bounds.x = settings.dashboardWindowBounds?.x;
+    bounds.y = settings.dashboardWindowBounds?.y;
+  }
+  persistWindowBounds(bounds, 'dashboardWindowBounds');
 }
 
 function createDashboardWindow() {
@@ -7829,11 +7850,10 @@ function createDashboardWindow() {
     if (dashboardWindowReady) showDashboardWindow(dashboardWindow);
     return dashboardWindow;
   }
+  const bounds = restoredBounds(settings?.dashboardWindowBounds, DASHBOARD_WINDOW_LIMITS) || DEFAULT_DASHBOARD_WINDOW;
   const windowOptions = {
-    width: 1180,
-    height: 760,
-    minWidth: 720,
-    minHeight: 520,
+    ...bounds,
+    ...DASHBOARD_WINDOW_LIMITS,
     frame: false,
     transparent: true,
     show: false,
@@ -7875,10 +7895,23 @@ function createDashboardWindow() {
   win.on('unresponsive', () => {
     if (!win.isVisible()) discardFailedDashboardWindow(win, 'renderer became unresponsive while opening');
   });
+  let boundsTimer;
+  const scheduleBoundsSave = () => {
+    if (!dashboardWindowReady || win !== dashboardWindow) return;
+    const bounds = normalWindowBounds(win);
+    if (!bounds) return;
+    pendingDashboardWindowBounds = bounds;
+    clearTimeout(boundsTimer);
+    boundsTimer = setTimeout(() => persistDashboardWindowBounds(win), 400);
+  };
+  for (const event of ['resize', 'resized', 'move', 'moved']) win.on(event, scheduleBoundsSave);
+  win.on('close', () => persistDashboardWindowBounds(win));
   win.on('closed', () => {
+    clearTimeout(boundsTimer);
     if (dashboardWindow === win) {
       dashboardWindow = null;
       dashboardWindowReady = false;
+      pendingDashboardWindowBounds = null;
     }
   });
   win.loadFile(path.join(__dirname, 'renderer', 'dashboard', 'dashboard.html'))
@@ -9320,8 +9353,9 @@ app.whenReady().then(() => {
     // A shared renderer can retain an opaque canvas over the native material.
     // Restore transparency after load, before revealing the prepared Dashboard.
     if (process.platform === 'darwin') win.setBackgroundColor('#00000000');
+    const bounds = dashboardWindowReady ? null : restoredBounds(settings?.dashboardWindowBounds, DASHBOARD_WINDOW_LIMITS);
     dashboardWindowReady = true;
-    showDashboardWindow(win);
+    showDashboardWindow(win, bounds);
   });
   ipcMain.on('dashboard:openAppSettings', (event) => {
     if (event.sender === dashboardWindow?.webContents && event.senderFrame === event.sender.mainFrame) openSettingsFromTray();
