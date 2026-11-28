@@ -1201,6 +1201,124 @@
     return limitPlanText(provider, policy.options);
   }
 
+  function ghostBarNode(size) {
+    const bar = document.createElement('span');
+    bar.className = `ghost-bar is-${size}`;
+    return bar;
+  }
+
+  // A row's layout, as the pending row redraws it: one string per account, one
+  // letter per window — 'h' half width, 'w' full width, 'n' a one-line note.
+  // Group titles inside a row are not kept; the shape is a placeholder, not a copy.
+  const LIMIT_SHAPE_MAX_ACCOUNTS = 6;
+  const LIMIT_SHAPE_MAX_WINDOWS = 8;
+  const LIMIT_SHAPE_PATTERN = /^[hwn]*$/;
+  const SINGLE_COLUMN_WINDOWS = ['limit-windows-cursor', 'limit-windows-antigravity-grouped'];
+
+  function limitRowShape(row) {
+    const accounts = row.classList.contains('limit-row-group')
+      ? [...row.querySelectorAll('.limit-account-row')]
+      : [row];
+    return accounts.slice(0, LIMIT_SHAPE_MAX_ACCOUNTS).map((account) => {
+      // Windows sit directly in a two-column list, or in a provider's own
+      // quota groups (Antigravity) that pair them the same way.
+      const kinds = [];
+      for (const list of account.querySelectorAll('.limit-windows, .limit-window-group-items')) {
+        const paired = !SINGLE_COLUMN_WINDOWS.some((name) => list.classList.contains(name));
+        for (const child of list.children) {
+          if (!child.classList.contains('limit-window')) continue;
+          kinds.push(child.classList.contains('limit-window-note') ? 'n'
+            : paired && !child.classList.contains('limit-window-wide') ? 'h' : 'w');
+        }
+      }
+      return kinds.slice(0, LIMIT_SHAPE_MAX_WINDOWS).join('');
+    });
+  }
+
+  // Shapes come back from storage, so anything else falls back to one window.
+  function normalizeLimitRowShape(shape) {
+    const valid = Array.isArray(shape) && shape.length > 0 && shape.length <= LIMIT_SHAPE_MAX_ACCOUNTS
+      && shape.every((account) => typeof account === 'string'
+        && account.length <= LIMIT_SHAPE_MAX_WINDOWS && LIMIT_SHAPE_PATTERN.test(account));
+    return valid ? shape : ['h'];
+  }
+
+  function ghostLimitWindows(shape) {
+    const windows = document.createElement('div');
+    windows.className = 'ghost-list limit-windows';
+    windows.setAttribute('aria-hidden', 'true');
+    for (const kind of shape) {
+      const item = document.createElement('div');
+      item.className = `limit-window is-ghost${kind === 'h' ? '' : ' limit-window-wide'}${kind === 'n' ? ' limit-window-note' : ''}`;
+      const text = document.createElement('div');
+      text.className = 'limit-window-text';
+      text.append(ghostBarNode('label'), ghostBarNode('num'));
+      item.append(text);
+      if (kind !== 'n') {
+        const meter = document.createElement('div');
+        meter.className = 'limit-meter';
+        const reset = document.createElement('div');
+        reset.className = 'limit-reset';
+        reset.append(ghostBarNode('num-sm'));
+        item.append(meter, reset);
+      }
+      windows.append(item);
+    }
+    return windows;
+  }
+
+  function ghostLimitHead(nameNodes, withMeta) {
+    const head = document.createElement('div');
+    head.className = 'limit-head';
+    const titleBlock = document.createElement('div');
+    titleBlock.className = 'limit-title';
+    const name = document.createElement('div');
+    name.className = 'limit-name';
+    name.append(...nameNodes);
+    titleBlock.append(name);
+    if (withMeta) {
+      const meta = document.createElement('div');
+      meta.className = 'limit-meta';
+      meta.append(ghostBarNode('label'));
+      titleBlock.append(meta);
+    }
+    head.append(titleBlock);
+    return head;
+  }
+
+  // A provider still waiting for its first reading keeps its mark and name over
+  // ghosts laid out the way its row looked last time (one window when it has
+  // never been seen), so the row fills in where it stands instead of reading as
+  // unconfigured and then growing when the reading lands.
+  function renderLimitProviderPending(id, label, color, shape) {
+    const accounts = normalizeLimitRowShape(shape);
+    const row = document.createElement('div');
+    row.setAttribute('aria-busy', 'true');
+    const title = document.createElement('span');
+    title.className = 'limit-name-title';
+    title.textContent = label;
+    const mark = renderLimitProviderMark(id, color);
+    if (accounts.length === 1) {
+      row.className = 'limit-row limit-row-pending';
+      row.append(ghostLimitHead([mark, title], true));
+      if (accounts[0]) row.append(ghostLimitWindows(accounts[0]));
+      return row;
+    }
+    row.className = 'limit-row limit-row-group limit-row-pending';
+    const list = document.createElement('div');
+    list.className = 'limit-account-list';
+    list.setAttribute('aria-hidden', 'true');
+    for (const account of accounts) {
+      const accountRow = document.createElement('div');
+      accountRow.className = 'limit-row limit-account-row';
+      accountRow.append(ghostLimitHead([ghostBarNode('name')], true));
+      if (account) accountRow.append(ghostLimitWindows(account));
+      list.append(accountRow);
+    }
+    row.append(ghostLimitHead([mark, title], false), list);
+    return row;
+  }
+
   // A provider's row standing on its own. Both surfaces call this rather than
   // renderLimitProviderRow, so the policy cannot be skipped by a caller that did
   // not know there was one to pass.
@@ -1676,7 +1794,9 @@
     limitStatusLabel,
     renderLimitProviderGroup,
     renderLimitProviderHead,
+    limitRowShape,
     renderLimitProviderMark,
+    renderLimitProviderPending,
     renderLimitProviderRow,
     renderLimitProviderSolo,
     syncLimitRefreshButtons,

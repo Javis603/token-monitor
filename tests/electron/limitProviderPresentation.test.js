@@ -2725,7 +2725,8 @@ test('main limits cache reuses unchanged data and repaints when token units chan
     animateLimitResets() {},
     limitProviderColor: () => '#0866FF',
     rendererDom: { reconcileChildren: (node, nodes) => node.replaceChildren(...nodes) },
-    renderLimitProviderSolo: () => ({ dataset: {} })
+    renderLimitProviderSolo: () => ({ dataset: {} }),
+    rememberLimitRowShapes() {}
   });
   vm.runInContext(source, context);
   const render = () => vm.runInContext('renderLimits()', context);

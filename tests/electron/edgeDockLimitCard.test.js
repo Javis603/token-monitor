@@ -3664,3 +3664,48 @@ test('rail quota rings preserve the selected vendor color against either glass t
     assert.equal(cell.children[0].style['--ring-color'], selected);
   }
 });
+
+test('a provider awaiting its first reading keeps its name over a one-window ghost', () => {
+  const view = dockView();
+  const row = view.renderLimitProviderPending('codex', 'Codex', '#888888');
+  assert.ok(row.classList.contains('limit-row-pending'));
+  assert.equal(row.getAttribute('aria-busy'), 'true');
+  assert.deepEqual(row.textOf('limit-name-title'), ['Codex']);
+  assert.equal(row.find('limit-windows').getAttribute('aria-hidden'), 'true');
+  assert.deepEqual(view.limitRowShape(row), ['h'], 'never seen: one window');
+  assert.doesNotMatch(row.text, /synced|configured/i, 'a pending provider is not described as missing');
+});
+
+test('a pending provider redraws the layout its row had last time', () => {
+  const view = dockView();
+  const solo = view.renderLimitProviderPending('opencode', 'OpenCode', '#888888', ['hhw']);
+  assert.deepEqual(view.limitRowShape(solo), ['hhw']);
+  assert.equal(solo.querySelectorAll('.limit-meter').length, 3);
+
+  const group = view.renderLimitProviderPending('cursor', 'Cursor', '#888888', ['hh', 'n']);
+  assert.ok(group.classList.contains('limit-row-group'));
+  assert.deepEqual(group.textOf('limit-name-title'), ['Cursor'], 'one provider name over the account ghosts');
+  assert.deepEqual(view.limitRowShape(group), ['hh', 'n']);
+  assert.equal(group.querySelectorAll('.limit-meter').length, 2, 'a note line has no meter');
+});
+
+test('a row whose windows sit in quota groups keeps their pairing in its shape', () => {
+  const element = (className, ...children) => {
+    const node = new FakeElement('div');
+    node.className = className;
+    node.append(...children);
+    return node;
+  };
+  const group = () => element('limit-window-group', element('limit-window-group-title'),
+    element('limit-window-group-items', element('limit-window'), element('limit-window')));
+  const row = element('limit-row', element('limit-head'),
+    element('limit-windows limit-windows-antigravity-grouped', group(), group()));
+  assert.deepEqual(dockView().limitRowShape(row), ['hhhh']);
+});
+
+for (const shape of [null, 'hh', [], ['hx'], ['h'.repeat(9)], Array(7).fill('h'), [1]]) {
+  test(`a stored limit shape of ${JSON.stringify(shape)} falls back to one window`, () => {
+    const view = dockView();
+    assert.deepEqual(view.limitRowShape(view.renderLimitProviderPending('grok', 'Grok', '#888888', shape)), ['h']);
+  });
+}
