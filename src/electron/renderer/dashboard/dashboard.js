@@ -127,6 +127,7 @@ const dashboardSettings = {
   follow: document.getElementById('dashFollowPeriods'),
   velocity: document.getElementById('dashShowVelocity'),
   quotas: document.getElementById('dashShowQuotas'),
+  highlightLowLimits: document.getElementById('dashHighlightLowLimits'),
   main: document.getElementById('dashSettingsMain'),
   backdrop: document.getElementById('dashBackdrop'),
   windowBehavior: document.getElementById('dashWindowBehavior'),
@@ -643,6 +644,7 @@ function syncDashboardSettings(settings) {
   dashboardSettings.follow.checked = settings.dashboardFollowPeriodTabs === true;
   dashboardSettings.velocity.checked = settings.dashboardShowVelocity !== false;
   dashboardSettings.quotas.checked = settings.dashboardShowQuotas !== false;
+  dashboardSettings.highlightLowLimits.checked = settings.dashboardHighlightLowLimits !== false;
   if (dashboardSettings.flowMode) dashboardSettings.flowMode.value = state.flowMode;
   if (dashboardSettings.quotaOrder?.classList.contains('hidden') === false) renderDashboardQuotaOrder(settings);
   if (dashboardSettings.backdrop) renderDashboardBackdrop(settings);
@@ -796,10 +798,6 @@ function applySwatchColors(root) {
       el.style.setProperty('--home-limit-bar', color);
       el.style.setProperty('--home-limit-tail', color);
     }
-  });
-  root.querySelectorAll('[data-limit-accent]').forEach((el) => {
-    const accent = el.getAttribute('data-limit-accent');
-    if (accent) el.style.setProperty('--home-limit-accent', accent);
   });
 }
 
@@ -1624,15 +1622,13 @@ function formatQuotaWindowLabel(win, providerId = '', visibleWindows = []) {
   return named && sharesPeriod ? `${label} ${period}` : period;
 }
 
-function quotaWindowFlags(win, { vendorColors, highlightLow }) {
-  const remaining = win.remainingPercent;
-  const clamped = remaining == null ? null : Math.max(0, Math.min(100, remaining));
-  const isExhausted = highlightLow && clamped === 0;
-  const isCritical = highlightLow && vendorColors && clamped != null && clamped > 0 && clamped < 20;
-  const isLow = highlightLow && !vendorColors && clamped != null && clamped > 0 && clamped < 20;
-  const isValueLow = highlightLow && vendorColors && clamped != null && clamped >= 20 && clamped < 50;
-  const isUntouched = Boolean(win.untouched && !win.isCredits);
-  return { isExhausted, isCritical, isLow, isValueLow, isUntouched };
+function quotaWindowFlags(win, highlightLow) {
+  const warning = highlightLow ? window.TokenMonitorHomeOverview.limitWarning(win.remainingPercent) : null;
+  return {
+    isExhausted: warning === 'exhausted',
+    isLow: warning === 'low',
+    isUntouched: Boolean(win.untouched && !win.isCredits)
+  };
 }
 
 function quotaMotionKey(acc, win) {
@@ -1654,11 +1650,7 @@ function renderQuotas(overview) {
   const prevScrollTop = els.quotas.scrollTop || 0;
   const motionSnapshot = homeLimitMotion ? homeLimitMotion.capture(els.quotas) : null;
   const showUsed = Boolean(state.settings?.showLimitUsed);
-  // Dashboard Quotas always reflect provider brand identity alongside status highlights,
-  // matching Hero, Live Neural Flow, and Attribution regardless of Home's monochrome setting.
-  const vendorColors = true;
-  const highlightLow = true;
-
+  const highlightLow = state.settings?.dashboardHighlightLowLimits !== false;
   if (els.quotasCount) {
     els.quotasCount.textContent = accounts.length
       ? t(showUsed ? 'settings.limits.barsUsed' : 'settings.limits.barsRemaining')
@@ -1673,8 +1665,6 @@ function renderQuotas(overview) {
 
   const nextSig = JSON.stringify([
     state.locale,
-    vendorColors,
-    highlightLow,
     accounts.map((acc) => [
       acc.key,
       acc.name,
@@ -1700,7 +1690,6 @@ function renderQuotas(overview) {
       rowByKey.set(row.dataset.limitMotionKey, row);
     });
     for (const acc of accounts) {
-      const accColor = displayColor(acc.color || charts.clientColors[acc.providerId] || '#6ab4f0');
       for (const win of acc.windows || []) {
         const motionKey = quotaMotionKey(acc, win);
         const row = rowByKey.get(motionKey);
@@ -1712,10 +1701,9 @@ function renderQuotas(overview) {
           ? (win.showUsed ? Math.round(100 - win.remainingPercent) : Math.round(win.remainingPercent))
           : 0;
         const readingText = formatQuotaWindowReading(win, shownPct);
-        const flags = quotaWindowFlags(win, { vendorColors, highlightLow });
+        const flags = quotaWindowFlags(win, highlightLow);
 
         row.classList.toggle('is-low', flags.isLow);
-        row.classList.toggle('is-critical', flags.isCritical);
         row.classList.toggle('is-exhausted', flags.isExhausted);
         row.classList.toggle('is-untouched', flags.isUntouched);
         if (win.remainingPercent != null) row.setAttribute('data-limit-remaining-percent', String(win.remainingPercent));
@@ -1734,24 +1722,12 @@ function renderQuotas(overview) {
             track.removeAttribute('data-limit-pace');
             track.style.removeProperty('--home-limit-pace');
           }
-          if (!flags.isExhausted) {
-            track.setAttribute('data-limit-color', accColor);
-          } else {
-            track.removeAttribute('data-limit-color');
-            track.style.removeProperty('--home-limit-bar');
-            track.style.removeProperty('--home-limit-tail');
-          }
         }
 
         const valEl = row.querySelector('.home-list-value');
         if (valEl) {
-          valEl.classList.toggle('home-limit-value-critical', flags.isExhausted || flags.isCritical);
-          valEl.classList.toggle('home-limit-value-low', flags.isLow || flags.isValueLow);
-          if (flags.isValueLow) valEl.setAttribute('data-limit-accent', accColor);
-          else {
-            valEl.removeAttribute('data-limit-accent');
-            valEl.style.removeProperty('--home-limit-accent');
-          }
+          valEl.classList.toggle('home-limit-value-critical', flags.isExhausted);
+          valEl.classList.toggle('home-limit-value-low', flags.isLow);
           if (isPercent) {
             valEl.setAttribute('data-limit-motion-value', String(shownPct));
             valEl.setAttribute('data-limit-motion-text', readingText);
@@ -1777,7 +1753,7 @@ function renderQuotas(overview) {
     const accColor = displayColor(acc.color || charts.clientColors[acc.providerId] || '#6ab4f0');
     const iconHtml = acc.iconClass
       ? `<span class="${escapeHtml(acc.iconClass)}" aria-hidden="true"></span>`
-      : `<span class="home-list-mark" data-c="${accColor}" aria-hidden="true"></span>`;
+      : `<span class="home-list-mark dash-quota-mark" aria-hidden="true"></span>`;
     const resetsCount = Math.max(0, Number(acc.resetCount || 0));
     const accountDisplayName = escapeHtml(acc.name || acc.providerId);
     const titleHtml = resetsCount > 0
@@ -1796,11 +1772,10 @@ function renderQuotas(overview) {
         ? (win.showUsed ? Math.round(100 - win.remainingPercent) : Math.round(win.remainingPercent))
         : 0;
       const readingText = formatQuotaWindowReading(win, shownPct);
-      const flags = quotaWindowFlags(win, { vendorColors, highlightLow });
+      const flags = quotaWindowFlags(win, highlightLow);
       const rowClasses = [
         'home-limit-window',
         flags.isLow ? 'is-low' : '',
-        flags.isCritical ? 'is-critical' : '',
         flags.isExhausted ? 'is-exhausted' : '',
         flags.isUntouched ? 'is-untouched' : ''
       ].filter(Boolean).join(' ');
@@ -1812,19 +1787,18 @@ function renderQuotas(overview) {
         'class="home-limit-track' + (win.pacePercent != null ? ' has-pace' : '') + '"',
         `data-limit-fill="${win.fillPercent.toFixed(1)}"`,
         win.pacePercent != null ? `data-limit-pace="${win.pacePercent.toFixed(1)}"` : '',
-        !flags.isExhausted ? `data-limit-color="${accColor}"` : ''
+        `data-limit-color="${accColor}"`
       ].filter(Boolean).join(' ');
       const trackHtml = hasMeter
         ? `<div ${trackAttrs}><div class="home-limit-meter" aria-hidden="true"><span class="home-limit-ghost"></span><span class="home-limit-fill"></span></div><span class="home-limit-tip" aria-hidden="true"></span>${paceHtml}</div>`
         : '';
       const valClasses = [
         'home-list-value',
-        (flags.isExhausted || flags.isCritical) ? 'home-limit-value-critical' : '',
-        (flags.isLow || flags.isValueLow) ? 'home-limit-value-low' : ''
+        (flags.isExhausted) ? 'home-limit-value-critical' : '',
+        (flags.isLow) ? 'home-limit-value-low' : ''
       ].filter(Boolean).join(' ');
       const readingAttrs = [
         `class="${valClasses}"`,
-        flags.isValueLow ? `data-limit-accent="${accColor}"` : '',
         isPercent ? `data-limit-motion-value="${shownPct}" data-limit-motion-text="${escapeHtml(readingText)}"` : ''
       ].filter(Boolean).join(' ');
 
@@ -4873,6 +4847,7 @@ window.tokenMonitor.onSettingsPush?.((next) => {
   if (typeof syncDashboardSettings === 'function') syncDashboardSettings(state.settings);
   if (next.dashboardShowVelocity !== undefined && next.dashboardShowVelocity !== previousSettings?.dashboardShowVelocity
     || next.dashboardShowQuotas !== undefined && next.dashboardShowQuotas !== previousSettings?.dashboardShowQuotas
+    || next.dashboardHighlightLowLimits !== undefined && next.dashboardHighlightLowLimits !== previousSettings?.dashboardHighlightLowLimits
     || next.dashboardQuotaProviderOrder !== undefined && next.dashboardQuotaProviderOrder !== previousSettings?.dashboardQuotaProviderOrder) needsRender = true;
   if (needsRender) render();
 });
@@ -5124,6 +5099,8 @@ dashboardSettings.popover?.addEventListener('change', (event) => {
     void saveDashboardSettings({ dashboardShowVelocity: input.checked });
   } else if (input === dashboardSettings.quotas) {
     void saveDashboardSettings({ dashboardShowQuotas: input.checked });
+  } else if (input === dashboardSettings.highlightLowLimits) {
+    void saveDashboardSettings({ dashboardHighlightLowLimits: input.checked });
   } else if (input === dashboardSettings.windowBehavior) {
     void saveDashboardSettings({ dashboardWindowBehavior: input.value });
   } else if (input === dashboardSettings.backdrop) {

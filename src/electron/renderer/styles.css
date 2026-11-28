@@ -4773,6 +4773,7 @@ html.is-windows .settings-panel select option {
   background: var(--blue);
   box-shadow: 0 0 0 2px rgba(var(--overlay-rgb), 0.03);
 }
+.home-list-mark.dash-quota-mark { background: rgba(var(--overlay-rgb), 0.5); }
 .home-list-mark.row-icon {
   width: 10px;
   height: 10px;
@@ -5200,12 +5201,7 @@ html.is-windows .settings-panel select option {
   opacity: 0;
 }
 /* A window close to running out keeps its tail lit; nothing else glows. */
-.home-limit-window:is(.is-low, .is-critical) .home-limit-tip::after { opacity: 1; }
-/* Mixed toward the text colour so amber reads on light panels as well as dark. */
-.home-limit-window.is-low > .home-list-value,
-.home-limit-window.is-low .home-limit-window-value .home-list-value {
-  color: color-mix(in srgb, var(--yellow) 62%, var(--text));
-}
+.home-limit-window.is-low .home-limit-tip::after { opacity: 1; }
 /* The notch's tick, above the groove; shown with the notch while the account is hovered, like its vendor colour. */
 .home-limit-pace {
   position: absolute;
@@ -5242,8 +5238,9 @@ html.is-windows .settings-panel select option {
 .home-limit-window.is-untouched > .home-list-value {
   color: var(--readable-muted);
 }
+/* Mix toward the text colour for contrast on light and dark panels. */
 .home-limit-value-low {
-  color: var(--home-limit-accent, var(--yellow));
+  color: color-mix(in srgb, var(--yellow) 62%, var(--text));
 }
 .home-limit-value-critical {
   color: var(--red);
@@ -5262,7 +5259,7 @@ html.is-windows .settings-panel select option {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.home-limit-window.is-exhausted .home-limit-reset {
+.home-limit-window.is-exhausted:not(.home-module-limits-classic *) .home-limit-reset {
   color: var(--red);
 }
 /* Classic Text / Progress bars layouts: two windows per row, the reading

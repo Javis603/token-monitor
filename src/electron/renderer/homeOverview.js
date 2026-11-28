@@ -130,6 +130,13 @@
         : window);
   }
 
+  function limitWarning(remainingPercent) {
+    if (!Number.isFinite(remainingPercent)) return null;
+    if (remainingPercent <= 0) return 'exhausted';
+    if (remainingPercent < 20) return 'low';
+    return null;
+  }
+
   // Where an even burn through the window would leave the remaining share now:
   // the time left until the reset over the window's length. Only a rolling
   // window with a known length and a reset (not an expiry) has such a pace.
@@ -608,6 +615,7 @@
     homeActivityScrollTarget,
     homeActivityScrollRecord,
     homeActiveDaysPresentation,
+    limitWarning,
     limitWindowPaceRemainingPercent,
     remainingPercent,
     usedPercent
