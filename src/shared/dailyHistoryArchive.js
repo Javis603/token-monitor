@@ -93,6 +93,14 @@ function addObservation(previous, candidate) {
   });
 }
 
+// Pick one of two stored snapshots of the same model and day, using the same
+// order a rescan uses to replace a stored row (see shouldReplaceObservation).
+function largerSnapshot(previous, candidate) {
+  const winner = shouldReplaceObservation(previous, candidate) ? candidate : previous;
+  const other = winner === candidate ? previous : candidate;
+  return winner.providerId || !other.providerId ? winner : { ...winner, providerId: other.providerId };
+}
+
 function normalizeComponentValues(value, totalTokens, exact) {
   const cacheReadTokens = Math.max(0, Math.round(num(value?.cacheReadTokens)));
   const cacheWriteTokens = Math.max(0, Math.round(num(value?.cacheWriteTokens)));
@@ -176,17 +184,32 @@ function normalizeDay(value, fallbackDate = '') {
   const date = String(value?.date || fallbackDate).slice(0, 10);
   if (!DAY_KEY_RE.test(date)) return null;
   const observations = {};
-  const source = Array.isArray(value?.observations)
+  // An array is one scan's rows: two rows for the same model are separate
+  // sessions and add up. A keyed object is a stored day, which already holds one
+  // snapshot per model. Two of its keys meet only when an older build stored the
+  // same model under another spelling (Cursor `auto`/`default` beside
+  // `cursor-auto`, or an aliased or differently cased client id). Those are the
+  // same usage seen twice, so keep the larger snapshot instead of summing them.
+  const scanRows = Array.isArray(value?.observations);
+  const source = scanRows
     ? value.observations
     : Object.values(value?.observations || {});
+  let aliasCollapsed = false;
   for (const raw of source) {
     const observation = normalizeObservation(raw);
     if (!observation) continue;
     const key = observationKey(observation);
-    observations[key] = addObservation(observations[key], observation);
+    if (scanRows || !observations[key]) {
+      observations[key] = addObservation(observations[key], observation);
+    } else {
+      aliasCollapsed = true;
+      observations[key] = largerSnapshot(observations[key], observation);
+    }
   }
   if (Object.keys(observations).length === 0 && num(value?.activeTimeMs) <= 0) return null;
-  const componentSummary = normalizeComponentSummary(
+  // The stored summary counted both spellings, so it no longer fits the
+  // deduplicated rows; each row still carries its own components.
+  const componentSummary = aliasCollapsed ? null : normalizeComponentSummary(
     normalizeTokscaleModelComponentSummary(value?.componentSummary, source), observations
   );
   return {
