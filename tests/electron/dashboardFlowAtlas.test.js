@@ -85,6 +85,7 @@ function atlasPlaybackFixture({ secondY = 90, atlasSize = 20 } = {}) {
     querySelectorAll: () => edges.filter(edge => edge.active)
   };
   const window = {};
+  let now = 0;
   let runScheduled;
   let rejectPlayback = false;
   let failNextBuild = false;
@@ -93,7 +94,8 @@ function atlasPlaybackFixture({ secondY = 90, atlasSize = 20 } = {}) {
     window,
     devicePixelRatio: 1,
     getComputedStyle: () => ({ getPropertyValue: () => '2.9s', stroke: '#123456' }),
-    setTimeout: run => { runScheduled = run; return 1; },
+    performance: { now: () => now },
+    setTimeout: (run, delay) => { runScheduled = { run, at: now + delay }; return 1; },
     clearTimeout: () => { runScheduled = undefined; },
     document: {
       createElementNS(namespace, name) {
@@ -123,18 +125,45 @@ function atlasPlaybackFixture({ secondY = 90, atlasSize = 20 } = {}) {
     return beams.map(() => ({ width: atlasSize, height: atlasSize, rows: 7, columns: 8, frameCount: 54, left: 0, top: 0, stop: 870, step: 1000 / 60, png: 'fixture' }));
   };
   const update = () => window.dashboardFlowAtlas.update(canvas, svg, true, false, build);
+  async function advance(ms) {
+    const until = now + ms;
+    while (runScheduled && runScheduled.at <= until) {
+      const task = runScheduled;
+      runScheduled = undefined;
+      now = task.at;
+      await task.run();
+    }
+    now = until;
+  }
   async function flush() {
-    const task = runScheduled;
-    runScheduled = undefined;
-    await task?.();
+    if (runScheduled) await advance(runScheduled.at - now);
   }
   return {
-    overlays, edges, batches, update, flush,
+    overlays, edges, batches, update, flush, advance,
     failBuildOnce: () => { failNextBuild = true; },
     rejectPlayback: () => { rejectPlayback = true; },
     clear: () => window.dashboardFlowAtlas.clear()
   };
 }
+
+test('Live Flow builds stable edges while another edge keeps changing', async () => {
+  const { edges, batches, update, advance } = atlasPlaybackFixture();
+  update();
+  for (let i = 1; i <= 50; i++) {
+    await advance(100);
+    edges[1].width = String(3 + i / 100);
+    update();
+  }
+  assert.deepEqual(batches, [[3]]);
+  assert.equal(edges[0].hasAttribute('data-atlas'), true);
+  assert.equal(edges[1].hasAttribute('data-atlas'), false);
+
+  await advance(179);
+  assert.deepEqual(batches, [[3]]);
+  await advance(1);
+  assert.deepEqual(batches, [[3], [3.5]]);
+  assert.equal(edges[1].hasAttribute('data-atlas'), true);
+});
 
 test('Live Flow keeps steady edges cached when one edge changes or its playback fails', async () => {
   const { overlays, edges, batches, update, flush, rejectPlayback, clear } = atlasPlaybackFixture();

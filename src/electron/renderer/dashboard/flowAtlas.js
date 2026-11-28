@@ -5,11 +5,12 @@ const dashboardFlowAtlas = (() => {
   /** @typedef {import('../../dashboardFlowAtlas').AtlasBeam} AtlasBeam */
   /** @typedef {import('../../dashboardFlowAtlas').BeamAtlas} BeamAtlas */
   /** @typedef {{overlay:SVGForeignObjectElement, animation:Animation, bytes:number}} Playback */
-  /** @typedef {{beam:AtlasBeam, edge:SVGGElement, delay:number, key:string, playback?:Playback, blockedBytes?:number, retry?:'pending'|'used'}} Plan */
+  /** @typedef {{beam:AtlasBeam, edge:SVGGElement, delay:number, key:string, readyAt:number, playback?:Playback, blockedBytes?:number, retry?:'pending'|'used'}} Plan */
   /** @type {Map<SVGGElement, Plan>} */
   const current = new Map();
   /** @type {Set<Plan>} */
   const pending = new Set();
+  const stabilityMs = 180;
   const maxPlaybackBytes = 12 * 1024 * 1024;
   let playbackBytes = 0;
   let busy = false;
@@ -68,11 +69,16 @@ const dashboardFlowAtlas = (() => {
   /** @param {(beams:AtlasBeam[]) => Promise<(BeamAtlas|null)[]|null>} build */
   function schedule(build) {
     if (timer !== undefined || busy || !pending.size) return;
+    const nextReadyAt = Math.min(...Array.from(pending, plan => plan.readyAt));
     timer = setTimeout(async () => {
       timer = undefined;
-      const plans = [...pending];
-      pending.clear();
-      if (!plans.length) return;
+      const now = performance.now();
+      const plans = [...pending].filter(plan => plan.readyAt <= now);
+      if (!plans.length) {
+        schedule(build);
+        return;
+      }
+      for (const plan of plans) pending.delete(plan);
       busy = true;
       try {
         let atlases;
@@ -110,7 +116,7 @@ const dashboardFlowAtlas = (() => {
         busy = false;
         schedule(build);
       }
-    }, 180);
+    }, Math.max(0, Math.ceil(nextReadyAt - performance.now())));
   }
 
   /**
@@ -127,6 +133,7 @@ const dashboardFlowAtlas = (() => {
     const view = svg.viewBox.baseVal;
     const scale = Math.min(bounds.width / view.width, bounds.height / view.height) * devicePixelRatio;
     const duration = parseFloat(getComputedStyle(canvas).getPropertyValue('--topo-dur')) * 1000;
+    const readyAt = performance.now() + stabilityMs;
     /** @type {Plan[]} */
     const plans = [];
     let pixels = 0;
@@ -153,7 +160,7 @@ const dashboardFlowAtlas = (() => {
         strokes:paths.map(path=>({stroke:getComputedStyle(path).stroke,width:Number(path.getAttribute('stroke-width'))}))};
       const delay = duration * (phase + (edge.classList.contains('topo-edge--hop1') ? .16 : .62));
       const key = JSON.stringify([beam, delay]);
-      plans.push({beam, edge, delay, key});
+      plans.push({beam, edge, delay, key, readyAt});
     }
     for (const plan of current.values()) {
       if (!plans.some(next => next.edge === plan.edge && next.key === plan.key)) retire(plan);
