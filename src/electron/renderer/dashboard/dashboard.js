@@ -1870,7 +1870,8 @@ function sharePercent(share) {
 }
 
 // Brand marks replace the "claude · codex" text, which truncated in narrow cards.
-// With `shares`, each mark also gets its bar colour and token share (Work Panel).
+// With `shares`, each mark also gets its bar colour (unlifted, exactly as the bar
+// draws it) and token share (Work Panel).
 function clientMarksHtml(marks, { shares = false } = {}) {
   if (!marks?.length) return '';
   const withShares = shares && marks.every(mark => mark.share !== null && mark.share !== undefined);
@@ -1880,7 +1881,7 @@ function clientMarksHtml(marks, { shares = false } = {}) {
       ? `<span class="dash-client-mark row-icon ${escapeHtml(mark.iconClass)}"></span>`
       : `<span class="dash-client-mark dash-client-mark--initial">${escapeHtml(mark.label.slice(0, 1).toUpperCase())}</span>`;
     if (!withShares) return icon;
-    return `<span class="dash-client-share"><span class="dash-client-share-swatch" data-c="${escapeHtml(displayColor(mark.color))}"></span>${icon}<span class="dash-client-share-value">${sharePercent(mark.share)}</span></span>`;
+    return `<span class="dash-client-share"><span class="dash-client-share-swatch" data-c="${escapeHtml(mark.color)}"></span>${icon}<span class="dash-client-share-value">${sharePercent(mark.share)}</span></span>`;
   }).join('');
   const more = marks.length > CLIENT_MARK_LIMIT ? `<span class="dash-client-mark-more">+${marks.length - CLIENT_MARK_LIMIT}</span>` : '';
   return `<span class="dash-client-marks${withShares ? ' has-shares' : ''}" role="img" aria-label="${escapeHtml(names)}">${items}${more}</span>`;
@@ -4093,8 +4094,6 @@ function renderNow() {
     rateSamplesByDevice,
     syncedPagesLoaded: isSyncedSessionPagesLoaded(),
     rateMode: state.rateMode,
-    // Workspace bars, drawer shares and tool swatches use the same lifted palette.
-    clientColorFor: (client) => displayColor(charts.clientColors[client] || charts.clientColors.default),
     sessionLabels: {
       subagent: t('sessions.subagent'),
       subagentCount: (count) => t('sessions.subagentCount', { count }),

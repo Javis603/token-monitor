@@ -2383,19 +2383,6 @@ test('workspace and Flow hub client marks use canonical ids ordered by tokens', 
   ]);
   assert.equal(bar.has('antigravity-cli'), false);
 
-  // Dark brands (Cursor is #000000) get the renderer's lifted palette in the bar and the swatch alike.
-  const lifted = color => (color === '#000000' ? '#7f7f7f' : color);
-  const { workspaces } = model.buildScopedOverview({
-    stats: { periods: { today: { totalTokens: 20, sessions: {
-      x: session('x', 'cursor', 10), y: session('y', 'claude', 10)
-    } } } },
-    clientColorFor: client => lifted(usageCharts.clientColors[client])
-  });
-  const cursor = workspaces[0].clientMarks.find(mark => mark.id === 'cursor');
-  assert.equal(cursor.color, '#7f7f7f');
-  assert.match(workspaces[0].barBackground, /#7f7f7f/);
-  assert.doesNotMatch(workspaces[0].barBackground, /#000000/);
-
   const unknown = model.buildWorkspaceList({ periodData: { sessions: { k: session('k', 'constructor', 5) } } });
   assert.deepEqual(unknown[0].clientMarks.map(mark => [mark.label, typeof mark.color]), [['constructor', 'string']]);
 
