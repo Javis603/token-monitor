@@ -526,11 +526,17 @@ html.native-high-contrast .dash-stage {
 }
 
 .dash-heatmap-title-group,
+/* A subtitle that does not fit beside the title drops below it instead of truncating. */
 .dash-work-heading {
   display: flex;
+  flex-wrap: wrap;
   align-items: baseline;
-  gap: 10px;
+  gap: 2px 10px;
   min-width: 0;
+}
+
+.dash-work-heading > .dash-surface-sub {
+  white-space: normal;
 }
 
 .dash-activity-col[data-stage="flow"] .dash-heatmap-title-group {
@@ -943,14 +949,23 @@ html.native-high-contrast .dash-stage {
   opacity: 0.25;
 }
 
+/* Exactly three rows tall whatever the model count, so the band never changes
+   height; further models scroll. */
 .dash-velocity-models {
   display: flex;
   flex-direction: column;
   gap: 5px;
-  min-height: 18px;
+  height: calc(3 * 11px * 1.3 + 2 * 5px);
+  overflow-y: auto;
+  scrollbar-width: none;
 }
+.dash-velocity-models::-webkit-scrollbar { display: none; }
+/* Few models sit at the bottom, as before the list had a fixed height. An auto
+   margin (not justify-content: flex-end) keeps an overflowing list scrollable. */
+.dash-velocity-models > :first-child { margin-top: auto; }
 
 .dash-velocity-model {
+  flex: none;
   display: grid;
   grid-template-columns: 12px minmax(0, 1fr) auto;
   align-items: center;
@@ -1004,18 +1019,6 @@ html.native-high-contrast .dash-stage {
   overflow: hidden;
   background: transparent;
   border: none;
-}
-
-.dash-topo-wrap::before {
-  content: '';
-  position: absolute;
-  inset: 0;
-  background-image: radial-gradient(rgba(var(--line-rgb), 0.12) 1px, transparent 1px);
-  background-size: 18px 18px;
-  opacity: 0.42;
-  -webkit-mask-image: radial-gradient(ellipse 84% 82% at 50% 50%, #000 35%, transparent 100%);
-  mask-image: radial-gradient(ellipse 84% 82% at 50% 50%, #000 35%, transparent 100%);
-  pointer-events: none;
 }
 
 .dash-topo-canvas {
@@ -1081,15 +1084,18 @@ html.native-high-contrast .dash-stage {
   display: none;
 }
 
-.dash-topo-col-scroll.has-bottom-fade {
+.dash-topo-col-scroll.has-bottom-fade,
+.dash-velocity-models.has-bottom-fade {
   -webkit-mask-image: linear-gradient(to bottom, #000 0, #000 calc(100% - 18px), transparent 100%);
   mask-image: linear-gradient(to bottom, #000 0, #000 calc(100% - 18px), transparent 100%);
 }
-.dash-topo-col-scroll.has-top-fade {
+.dash-topo-col-scroll.has-top-fade,
+.dash-velocity-models.has-top-fade {
   -webkit-mask-image: linear-gradient(to bottom, transparent 0, #000 18px, #000 100%);
   mask-image: linear-gradient(to bottom, transparent 0, #000 18px, #000 100%);
 }
-.dash-topo-col-scroll.has-top-fade.has-bottom-fade {
+.dash-topo-col-scroll.has-top-fade.has-bottom-fade,
+.dash-velocity-models.has-top-fade.has-bottom-fade {
   -webkit-mask-image: linear-gradient(to bottom, transparent 0, #000 18px, #000 calc(100% - 18px), transparent 100%);
   mask-image: linear-gradient(to bottom, transparent 0, #000 18px, #000 calc(100% - 18px), transparent 100%);
 }
@@ -2033,6 +2039,81 @@ html.native-liquid-glass .dash-skyline-reset-btn {
   display: flex;
   flex-direction: column;
   min-height: 320px;
+}
+
+/* Empty states: static ghosts of the real rows; the card head says why. */
+.dash-ghost-list {
+  -webkit-mask-image: linear-gradient(to bottom, #000 35%, rgba(0, 0, 0, 0.3) 100%);
+  mask-image: linear-gradient(to bottom, #000 35%, rgba(0, 0, 0, 0.3) 100%);
+}
+
+.dash-ghost-list--attribution {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.dash-ghost-list--work {
+  display: flex;
+  flex-direction: column;
+}
+
+.dash-ghost-list--quotas {
+  display: grid;
+  grid-template-columns: subgrid;
+  row-gap: inherit;
+}
+
+.dash-ghost-list--quotas > * {
+  grid-column: 1 / -1;
+}
+
+.is-ghost {
+  pointer-events: none;
+  cursor: default;
+}
+
+.dash-ghost-bar {
+  display: inline-block;
+  flex: none;
+  max-width: 100%;
+  height: 7px;
+  border-radius: 4px;
+  vertical-align: middle;
+  background: rgba(var(--line-rgb), 0.09);
+}
+
+.dash-ghost-fill {
+  background: rgba(var(--line-rgb), 0.09);
+}
+
+.dash-session-brand.dash-ghost-fill { border-radius: 4px; }
+
+.dash-ghost-bar.is-title { width: 148px; height: 8px; }
+.dash-ghost-bar.is-sub { width: 96px; height: 6px; opacity: 0.7; }
+.dash-ghost-bar.is-name { width: 92px; }
+.dash-ghost-bar.is-label { width: 48px; height: 6px; }
+.dash-ghost-bar.is-num { width: 34px; }
+.dash-ghost-bar.is-num-sm { width: 24px; height: 6px; }
+
+.is-ghost:nth-child(even) .dash-ghost-bar.is-title { width: 112px; }
+.is-ghost:nth-child(even) .dash-ghost-bar.is-name { width: 68px; }
+.is-ghost:nth-child(even) .dash-ghost-bar.is-sub { width: 72px; }
+
+.dash-session-row.is-ghost { min-height: 46px; }
+.dash-session-row.is-ghost .dash-session-body { gap: 7px; }
+.dash-session-row.is-ghost .dash-session-metrics { gap: 6px; }
+.dash-bd-row.is-ghost { min-height: 26px; }
+.topo-node.is-ghost .topo-node-top { min-height: 15px; }
+.topo-node.is-ghost .topo-node-sub { min-height: 13px; }
+.home-limit-account.is-ghost .home-limit-account-head { min-height: 16px; }
+.home-limit-account.is-ghost .home-limit-track {
+  border-radius: 4px;
+  background: rgba(var(--line-rgb), 0.07);
+}
+.home-limit-account.is-ghost .home-list-mark {
+  background: rgba(var(--line-rgb), 0.14);
+  box-shadow: none;
 }
 
 .dash-breakdown {

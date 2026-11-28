@@ -1673,7 +1673,6 @@
 
     const models = Array.from(folded.values())
       .sort((a, b) => b.value - a.value || a.id.localeCompare(b.id))
-      .slice(0, 4)
       .map((entry) => {
         const vendor = usageCharts?.modelVendorFor?.(entry.id) || '';
         return {

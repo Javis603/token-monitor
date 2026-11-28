@@ -1529,6 +1529,39 @@ test('remote sessions never read local transcripts, delayed Hub A history is fen
   assert.equal(context.state.stats.snapshot.source, 2);
 });
 
+test('Attribution says "no usage history" only for confirmed zero usage', () => {
+  const js = read('src', 'electron', 'renderer', 'dashboard', 'dashboard.js');
+  const breakdown = { innerHTML: '' };
+  const summary = { textContent: '' };
+  const context = {
+    els: { breakdown, breakdownSummary: summary },
+    state: { breakdownMode: 'both', locale: 'en' },
+    lastBreakdownStructureSig: '',
+    escapeHtml: (s) => String(s ?? ''),
+    t: (k) => k
+  };
+  vm.runInNewContext(js.slice(js.indexOf('function renderBreakdown('), js.indexOf('\nfunction captureListSnapshot(')), context);
+  vm.runInNewContext(js.slice(js.indexOf('function ghostBar('), js.indexOf('\nfunction ghostTopologyNodeHtml')), context);
+  const ghosts = () => breakdown.innerHTML.match(/dash-bd-row is-ghost/g)?.length || 0;
+
+  context.renderBreakdown({ hero: { accountingStatus: 'ready', tokens: 0 }, tools: [], models: [] });
+  assert.equal(summary.textContent, 'dashboard.empty');
+  assert.equal(ghosts(), 6);
+
+  // Usage without breakdown detail, or not yet accounted, must not claim there is no history.
+  context.renderBreakdown({ hero: { accountingStatus: 'ready', tokens: 40 }, tools: [], models: [] });
+  assert.equal(summary.textContent, '');
+  assert.equal(ghosts(), 6);
+  context.renderBreakdown({ hero: { accountingStatus: 'unavailable', tokens: 0 }, tools: [], models: [] });
+  assert.equal(summary.textContent, '');
+
+  // A filtered-out kind with data in the other kind is not "no history" either.
+  context.state.breakdownMode = 'model';
+  context.renderBreakdown({ hero: { accountingStatus: 'ready', tokens: 40 }, tools: [{ id: 'codex', tokens: 40 }], models: [] });
+  assert.equal(summary.textContent, '');
+  assert.equal(ghosts(), 5);
+});
+
 test('renderQuotas renders expired plan status without meter, hover refresh handles quotes, rate expiry clears idle topology rates, and ledger matches chart range and focus', async () => {
   const js = read('src', 'electron', 'renderer', 'dashboard', 'dashboard.js');
   const charts = require('../../src/electron/renderer/usageCharts');
@@ -1552,6 +1585,18 @@ test('renderQuotas renders expired plan status without meter, hover refresh hand
     t: (k) => (k === 'limits.mimo.planExpired' ? 'Expired' : k)
   };
   vm.runInNewContext(js.slice(js.indexOf('function quotaWindowFlags'), js.indexOf('\nfunction sessionStateIconHtml')), quotaContext);
+  vm.runInNewContext(js.slice(js.indexOf('function ghostBar('), js.indexOf('\nfunction ghostTopologyNodeHtml')), quotaContext);
+
+  // Empty quotas show the ghost rows again after accounts come and go.
+  const ghostQuotas = () => quotasEl.innerHTML.match(/home-limit-account is-ghost/g)?.length || 0;
+  quotaContext.renderQuotas({ quotas: [] });
+  assert.equal(ghostQuotas(), 3);
+  assert.equal(qCountEl.textContent, 'dashboard.quotas.empty');
+  quotaContext.renderQuotas({ quotas: [{ key: 'codex:0', providerId: 'codex', name: 'Codex', windows: [] }] });
+  assert.equal(ghostQuotas(), 0);
+  quotaContext.renderQuotas({ quotas: [] });
+  assert.equal(ghostQuotas(), 3);
+
   quotaContext.renderQuotas({
     quotas: [{
       key: 'mimo:1',
@@ -3207,6 +3252,22 @@ test('dashboard groups subagent hierarchies and review groups in Work Panel, Top
   context.renderTopology(syntheticOverview, false, { [localDeviceId]: { speed: 150, idle: true } });
   assert.match(topology.innerHTML, /class="topo-live-rate is-rate is-idle">150 tok\/s/);
 
+  const emptyFlow = {
+    hero: { accountingStatus: 'ready', tokens: 0 },
+    topology: {
+      devices: [{ ...device, tokens: 0, activeToolColors: [], activeSessionCount: 0 }],
+      hubs: [], endpoints: [],
+      counts: { devices: 1, hubs: 0, endpoints: 0 }
+    }
+  };
+  context.renderTopology(emptyFlow);
+  assert.equal(topology.innerHTML.match(/class="topo-node is-ghost" aria-hidden="true"/g)?.length, 2);
+  assert.doesNotMatch(topology.innerHTML.slice(topology.innerHTML.indexOf('is-ghost')), /data-topo-kind/);
+  context.renderTopology({ ...emptyFlow, hero: { accountingStatus: 'unavailable', tokens: 0 } });
+  assert.doesNotMatch(topology.innerHTML, /is-ghost/);
+  context.renderTopology(overview);
+  assert.doesNotMatch(topology.innerHTML, /is-ghost/);
+
   const groupedParent = overview.sessions.find((s) => s.subagentGroup);
   context.openDrawer({ kind: 'session', session: groupedParent });
   assert.equal(detailCalls.length, 0, 'opening group drawer must not invoke local transcript IPC on wrapper');
@@ -3275,6 +3336,10 @@ test('dashboard Trends and device selector recover to All Devices when selected 
     querySelectorAll: () => [],
     contains: () => false
   });
+  const deviceScope = makeEl();
+  const scopeClasses = new Set(['hidden']);
+  deviceScope.classList.add = (name) => scopeClasses.add(name);
+  deviceScope.classList.remove = (name) => scopeClasses.delete(name);
   const deviceMenu = makeEl();
   const deviceTrigger = makeEl();
   const chartEl = makeEl();
@@ -3312,7 +3377,7 @@ test('dashboard Trends and device selector recover to All Devices when selected 
       drawer: null
     },
     els: {
-      deviceScope: makeEl(),
+      deviceScope,
       deviceTrigger,
       deviceMenu,
       empty: makeEl(),
@@ -3384,6 +3449,8 @@ test('dashboard Trends and device selector recover to All Devices when selected 
     + '\n'
     + js.slice(js.indexOf('function renderDeviceSelector('), js.indexOf('\nfunction animateMetricText('))
     + '\n'
+    + js.slice(js.indexOf('function isSyncedStatsContext('), js.indexOf('\nfunction hasPendingSyncedOwnership('))
+    + '\n'
     + js.slice(js.indexOf('function closeRolledOverAccountingDrawer('), js.indexOf('\nconst dashboardRenderScheduler'));
   vm.runInNewContext(snippet, context);
 
@@ -3427,6 +3494,13 @@ test('dashboard Trends and device selector recover to All Devices when selected 
   assert.doesNotMatch(dailyLedgerEl.innerHTML, />300</);
   const aggregateBar = context.state.chartModel?.bars?.find((b) => b.label === today);
   assert.equal(aggregateBar?.total, 900);
+  assert.equal(scopeClasses.has('hidden'), false, 'a single synced device still has a details shortcut');
+
+  context.state.statsMode = 'local';
+  context.renderNow();
+  assert.ok(scopeClasses.has('hidden'), 'local mode hides the header device shortcut');
+  assert.equal(context.state.overview?.dailyLedger?.[0]?.tokens, 900);
+  context.state.statsMode = 'sync';
 
   const now = Date.now();
   const expiredStats = mkStats(['dev-a', 'dev-b']);
@@ -3436,6 +3510,7 @@ test('dashboard Trends and device selector recover to All Devices when selected 
   context.state.stats = expiredStats;
   context.renderNow();
   context.renderNow();
+  assert.equal(scopeClasses.has('hidden'), false, 'the selector returns when the fleet changes');
   assert.equal(boundaryRefreshes, 1, 'the first repaint queues refresh even if it beat the timer');
   assert.match(deviceMenu.innerHTML, /dash-device-menu-val">—<\/span><span class="dash-device-menu-share">—/);
   assert.match(deviceMenu.innerHTML, /dash-device-menu-val">600<\/span><span class="dash-device-menu-share">—/);
