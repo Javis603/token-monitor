@@ -2374,6 +2374,15 @@ test('workspace and Flow hub client marks use canonical ids ordered by tokens', 
   });
   assert.deepEqual(partial[0].clientMarks.map(mark => [mark.id, mark.share]), [['codex', 0.5]]);
 
+  const legacy = model.buildWorkspaceList({ periodData: { sessions: {
+    l: session('l', 'antigravity-cli', 10), g: session('g', 'antigravity', 20), c: session('c', 'claude', 30)
+  } } });
+  const bar = new Map(legacy[0].accordionRows.map(share => [share.key, share]));
+  assert.deepEqual(legacy[0].clientMarks.map(mark => [mark.id, mark.share, mark.color]), [
+    ['antigravity', 0.5, bar.get('antigravity').color], ['claude', 0.5, bar.get('claude').color]
+  ]);
+  assert.equal(bar.has('antigravity-cli'), false);
+
   const unknown = model.buildWorkspaceList({ periodData: { sessions: { k: session('k', 'constructor', 5) } } });
   assert.deepEqual(unknown[0].clientMarks.map(mark => [mark.label, typeof mark.color]), [['constructor', 'string']]);
 

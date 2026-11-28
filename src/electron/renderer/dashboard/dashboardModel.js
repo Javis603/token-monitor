@@ -138,9 +138,10 @@
    * Brand marks for the tools used in a workspace, largest share first.
    * @param {string[]} ids
    * @param {Record<string, number>} [tokensById]
-   * @param {number} [totalTokens] share denominator; defaults to the attributed sum
+   * @param {{ total?: number, colors?: Map<string, string> }} [options] share denominator
+   *   (defaults to the attributed sum) and the colours the usage bar already drew
    */
-  function clientMarks(ids, tokensById = {}, totalTokens) {
+  function clientMarks(ids, tokensById = {}, { total: totalTokens, colors } = {}) {
     /** @type {Map<string, number>} */
     const tokens = new Map();
     for (const raw of ids || []) {
@@ -154,7 +155,7 @@
         id,
         label: clientDisplayLabel(id),
         iconClass: hasBrandMask(id) ? `row-icon-${id}` : '',
-        color: clientColor(id),
+        color: colors?.get(id) || clientColor(id),
         share: total > 0 ? value / total : null
       }));
   }
@@ -1523,6 +1524,7 @@
     }
 
     const rows = projectRowsApi.projectRowsForPeriod(scopedPeriod, {
+      clientKey: canonicalClientKey,
       clientColors: clientColorsMap,
       clientLabels: clientCatalog?.CLIENT_LABELS || {},
       modelColor,
@@ -1587,8 +1589,12 @@
       const meta = metaByProject.get(String(row.name || '').trim().toLowerCase());
       return {
         ...row,
-        // Shares match the bar: unattributed tokens stay in the denominator.
-        clientMarks: clientMarks(row.clients, row.clientTokens, n(row.value)),
+        // Marks are the bar's legend: same attribution, same colours, and
+        // unattributed tokens stay in the share denominator.
+        clientMarks: clientMarks(row.clients, row.clientTokens, {
+          total: n(row.value),
+          colors: new Map((row.accordionRows || []).map(/** @param {any} share */ (share) => [share.key, share.color]))
+        }),
         tokens: n(row.value),
         share: n(row.value) / totalTokens,
         relWidth: n(row.value) / maxTokens,
