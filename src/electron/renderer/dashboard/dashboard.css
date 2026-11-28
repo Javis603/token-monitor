@@ -950,7 +950,8 @@ html.native-high-contrast .dash-stage {
 }
 
 /* Exactly three rows tall whatever the model count, so the band never changes
-   height; further models scroll. */
+   height; further models scroll. Rows fill from the top, so a model keeps its
+   place while others start or stop. */
 .dash-velocity-models {
   display: flex;
   flex-direction: column;
@@ -960,9 +961,6 @@ html.native-high-contrast .dash-stage {
   scrollbar-width: none;
 }
 .dash-velocity-models::-webkit-scrollbar { display: none; }
-/* Few models sit at the bottom, as before the list had a fixed height. An auto
-   margin (not justify-content: flex-end) keeps an overflowing list scrollable. */
-.dash-velocity-models > :first-child { margin-top: auto; }
 
 .dash-velocity-model {
   flex: none;
