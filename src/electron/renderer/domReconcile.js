@@ -29,7 +29,7 @@
       const attrs = attributes(node);
       // Read identity from the same renderer snapshot as the diff, rather than
       // repeatedly crossing into live dataset/classList getters for each child.
-      const identity = attrs.get('data-key') ?? attrs.get('data-exchange-key') ?? attrs.get('data-focus-key') ?? attrs.get('data-limit-motion-key') ?? attrs.get('data-usage-item') ?? attrs.get('data-d') ?? (attrs.get('id') || undefined);
+      const identity = attrs.get('data-key') ?? attrs.get('data-motion-key') ?? attrs.get('data-exchange-key') ?? attrs.get('data-focus-key') ?? attrs.get('data-limit-motion-key') ?? attrs.get('data-usage-item') ?? attrs.get('data-d') ?? (attrs.get('id') || undefined);
       const slot = (attrs.get('class') || '').trim().split(/\s+/, 1)[0];
       const key = `${node.namespaceURI}:${node.localName}:${identity === undefined ? `slot:${slot}` : `key:${identity}`}:${attrs.get('data-dom-kind') || ''}:${attrs.get('data-limit-history') || ''}:${attrs.get('data-dom-island') || ''}`;
       record = { attributes: attrs, styles: styles(node), children: [...node.childNodes], key };

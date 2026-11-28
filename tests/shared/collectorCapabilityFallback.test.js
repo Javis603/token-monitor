@@ -11,6 +11,7 @@ const assert = require('node:assert/strict');
 const test = require('node:test');
 const { EventEmitter } = require('node:events');
 const { referencedTerminationOptions } = require('../helpers/referencedTerminationTimers');
+const { withoutWindowedScan } = require('../helpers/tokscaleWithoutWindows');
 
 const collectorPath = require.resolve('../../src/shared/collector');
 
@@ -76,10 +77,10 @@ test('a binary that supports every requested client never spawns a capability pr
   const childProcess = require('node:child_process');
   const originalSpawn = childProcess.spawn;
   const calls = [];
-  childProcess.spawn = (_bin, args) => {
+  childProcess.spawn = withoutWindowedScan((_bin, args) => {
     calls.push(args);
     return jsonChild({ entries: [] });
-  };
+  });
 
   try {
     const { collectUsageOnce } = freshCollector();
@@ -106,7 +107,7 @@ test('an unknown-client rejection probes once, retries, then filters proactively
   let helpProbes = 0;
   let forkOnlyProbes = 0;
 
-  childProcess.spawn = (_bin, args) => {
+  childProcess.spawn = withoutWindowedScan((_bin, args) => {
     calls.push(args);
     if (args.includes('--help')) {
       helpProbes += 1;
@@ -119,7 +120,7 @@ test('an unknown-client rejection probes once, retries, then filters proactively
       return exitChild(2, 'error: invalid value \'dsh\' for --client');
     }
     return jsonChild({ entries: [] });
-  };
+  });
 
   try {
     const { collectUsageOnce } = freshCollector();
@@ -157,10 +158,10 @@ test('an exit-2 failure unrelated to --client never triggers a probe', async () 
   const originalSpawn = childProcess.spawn;
   let helpProbes = 0;
 
-  childProcess.spawn = (_bin, args) => {
+  childProcess.spawn = withoutWindowedScan((_bin, args) => {
     if (args.includes('--help')) { helpProbes += 1; return jsonChild({}); }
     return exitChild(2, 'error: invalid value for --since');
-  };
+  });
 
   try {
     const { collectUsageOnce } = freshCollector();
@@ -186,10 +187,10 @@ test('a probe that itself fails surfaces the original tokscale error, not a sile
   const childProcess = require('node:child_process');
   const originalSpawn = childProcess.spawn;
 
-  childProcess.spawn = (_bin, args) => {
+  childProcess.spawn = withoutWindowedScan((_bin, args) => {
     if (args.includes('--help')) return jsonChild({ not: 'a help payload' });
     return exitChild(2, 'error: invalid value \'dsh\' for --client');
-  };
+  });
 
   try {
     const { collectUsageOnce } = freshCollector();
@@ -287,7 +288,7 @@ test('an old binary that rejects both the join and a client retries once per rej
   const originalSpawn = childProcess.spawn;
   const calls = [];
 
-  childProcess.spawn = (_bin, args) => {
+  childProcess.spawn = withoutWindowedScan((_bin, args) => {
     calls.push(args);
     if (args.includes('--help')) return helpChild(['claude']);
     const groupBy = args[args.indexOf('--group-by') + 1];
@@ -299,7 +300,7 @@ test('an old binary that rejects both the join and a client retries once per rej
       return exitChild(2, 'error: invalid value \'dsh\' for --client');
     }
     return jsonChild({ entries: [] });
-  };
+  });
 
   try {
     const { collectUsageOnce } = freshCollector();
@@ -334,7 +335,7 @@ async function collectWithFallback(clients, acceptsForkOnly, rejectedForkClients
   const childProcess = require('node:child_process');
   const originalSpawn = childProcess.spawn;
   const calls = [];
-  childProcess.spawn = (_bin, args) => {
+  childProcess.spawn = withoutWindowedScan((_bin, args) => {
     if (args.includes('--help')) return helpChild(['claude', 'dsh']);
     const requested = args[args.indexOf('--client') + 1].split(',');
     if (!isForkOnlyProbe(args)) calls.push(requested.join(','));
@@ -343,7 +344,7 @@ async function collectWithFallback(clients, acceptsForkOnly, rejectedForkClients
       return exitChild(2, "error: invalid value 'catpaw' for --client");
     }
     return jsonChild({ entries: [] });
-  };
+  });
   try {
     const { collectUsageOnce } = freshCollector();
     await collectUsageOnce({

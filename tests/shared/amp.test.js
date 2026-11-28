@@ -7,13 +7,13 @@ const path = require('node:path');
 const test = require('node:test');
 
 const { installSourceEnvGuard } = require('../helpers/sourceEnv');
-const { tokscaleConfigDir } = require('../../src/shared/tokscaleConfig');
 
 const {
   clientSourceChecks,
   clientSourceRoots,
   clientWatchCandidates,
   deriveClientHealth,
+  startCollector,
   watchPathsForClients
 } = require('../../src/shared/collector');
 const { CLIENT_LABELS } = require('../../src/shared/clientCatalog');
@@ -27,6 +27,133 @@ const { homeHasData } = require('../../src/shared/wslUsage');
 // XDG_DATA_HOME is an input to the path assertions below. Clear it per test and
 // set it explicitly where a case wants one.
 installSourceEnvGuard(test);
+
+test('Amp imports in the background and rescans historical usage after a partial sync', { timeout: 15_000 }, async (t) => {
+  const config = fs.mkdtempSync(path.join(os.tmpdir(), 'amp-active-cache-'));
+  process.env.TOKSCALE_CONFIG_DIR = config;
+  const firstImport = Promise.withResolvers();
+  const localUpdate = Promise.withResolvers();
+  const importScanFailure = Promise.withResolvers();
+  const importedUpdate = Promise.withResolvers();
+  const manualUpdate = Promise.withResolvers();
+  let imports = 0;
+  let cacheHasUsage = false;
+  let failNextScan = false;
+  let allTimeScans = 0;
+  const collector = startCollector({
+    clients: 'codex,amp',
+    deviceId: 'amp-test',
+    historyEnabled: false,
+    allTimeSince: '2020-01-01',
+    intervalRequiresActivity: true,
+    runAmpSync: () => ++imports === 1 ? firstImport.promise : Promise.resolve({ complete: true, exported: 0 }),
+    async runTokscale({ clients, flags }) {
+      if (flags.includes('--since')) allTimeScans++;
+      if (failNextScan) {
+        failNextScan = false;
+        throw new Error('fixture scan failed after Amp export');
+      }
+      const entries = [];
+      if (clients.includes('codex')) entries.push({ source: 'codex', model: 'gpt-5', input: 10 });
+      if (cacheHasUsage && clients.includes('amp') && !flags.includes('--today')) {
+        entries.push({ source: 'amp', model: 'claude-sonnet-4-0', input: 123, output: 7 });
+      }
+      return { entries };
+    },
+    onUpdate(summary, reason) {
+      if (reason === 'interval') localUpdate.resolve(summary);
+      if (cacheHasUsage && (reason === 'coalesced' || reason === 'watch:amp-fixture')) importedUpdate.resolve(summary);
+      if (reason === 'manual') manualUpdate.resolve(summary);
+    },
+    onError(error, reason) {
+      if (reason === 'source-sync') importScanFailure.resolve(error);
+    }
+  });
+  t.after(async () => {
+    firstImport.resolve({ complete: true, exported: 0 });
+    collector.stop();
+    await collector.whenIdle();
+    fs.rmSync(config, { recursive: true, force: true });
+  });
+
+  const initial = await localUpdate.promise;
+  assert.equal(imports, 1);
+  assert.equal(initial.today.clients.codex, 10);
+  assert.equal(initial.clientHealth.clients.amp.collection.state, 'pending');
+  const cache = path.join(config, 'amp-cache', 'threads');
+  fs.mkdirSync(cache, { recursive: true });
+  const beforeImport = allTimeScans;
+  for (const file of ['T-first.json', 'T-second.json']) {
+    fs.writeFileSync(path.join(cache, file), '{}');
+    assert.equal(await collector.tick('watch:codex', { todayOnly: true, targetClients: ['codex'] }), true);
+    assert.equal(allTimeScans, beforeImport);
+  }
+  cacheHasUsage = true;
+  failNextScan = true;
+  firstImport.reject(Object.assign(new Error('Amp sync incomplete'), {
+    tokscaleExitCode: 1,
+    tokscaleJson: { complete: false, exported: 1, remaining: 1, error: 'export timed out' }
+  }));
+  assert.match((await importScanFailure.promise).message, /fixture scan failed/);
+  assert.equal(await collector.tick('watch:amp-fixture', { todayOnly: true, targetClients: ['codex'] }), true);
+  const imported = await importedUpdate.promise;
+  assert.equal(imported.allTime.clients.amp, 130);
+  assert.equal(imported.today.clients.amp, undefined);
+  assert.equal(imported.clientHealth.clients.amp.collection.state, 'failed');
+  assert.equal(imported.clientHealth.clients.amp.collection.syncFailureStage, 'timeout');
+  assert.equal(imported.clientHealth.clients.amp.collection.lastSuccessAt, undefined);
+
+  assert.equal(await collector.tick('manual', { forceSelfSync: true }), true);
+  const refreshed = await manualUpdate.promise;
+  assert.equal(imports, 2);
+  assert.equal(refreshed.allTime.clients.amp, 130);
+  assert.equal(refreshed.clientHealth.clients.amp.collection.state, 'ok');
+  assert.ok(refreshed.clientHealth.clients.amp.collection.lastSuccessAt);
+});
+
+test('an externally imported Amp cache forces History to retry after a graph error', { timeout: 15_000 }, async (t) => {
+  const config = fs.mkdtempSync(path.join(os.tmpdir(), 'amp-external-cache-'));
+  process.env.TOKSCALE_CONFIG_DIR = config;
+  const firstUpdate = Promise.withResolvers();
+  let graphAttempts = 0;
+  let scannedAllTime = false;
+  const collector = startCollector({
+    clients: 'amp', deviceId: 'amp-external-cache', allTimeSince: '2020-01-01',
+    async runTokscale({ flags }) {
+      if (flags.includes('--since')) scannedAllTime = true;
+      return { entries: [] };
+    },
+    async runGraph() {
+      if (++graphAttempts === 2) throw new Error('fixture graph unavailable');
+      return { contributions: [] };
+    },
+    onUpdate() { firstUpdate.resolve(); }
+  });
+  t.after(async () => {
+    collector.stop();
+    await collector.whenIdle();
+    fs.rmSync(config, { recursive: true, force: true });
+  });
+
+  await firstUpdate.promise;
+  await collector.whenIdle();
+  assert.equal(graphAttempts, 1);
+  assert.equal(scannedAllTime, true);
+  const cache = path.join(config, 'amp-cache', 'threads');
+  fs.mkdirSync(cache, { recursive: true });
+  fs.writeFileSync(path.join(cache, 'T-external.json'), '{}');
+
+  for (const expectedAttempts of [2, 3]) {
+    scannedAllTime = false;
+    assert.equal(await collector.tick('watch:amp-external', { todayOnly: true, targetClients: ['amp'] }), true);
+    assert.equal(graphAttempts, expectedAttempts);
+    assert.equal(scannedAllTime, true);
+  }
+  scannedAllTime = false;
+  assert.equal(await collector.tick('watch:amp-external', { todayOnly: true }), true);
+  assert.equal(graphAttempts, 3);
+  assert.equal(scannedAllTime, false);
+});
 
 test('Amp keeps the canonical amp id without matching unrelated client names', () => {
   assert.equal(CLIENT_LABELS.amp, 'Amp');
@@ -53,7 +180,7 @@ test('Amp threads feed the XDG source root, watcher, and health paths', () => {
     assert.deepEqual(clientSourceRoots('amp', options).amp.filter(({ optional }) => !optional), [
       { id: 'amp-threads', dir: threads }
     ]);
-    assert.deepEqual(clientWatchCandidates('amp', options).amp, [threads, path.join(tokscaleConfigDir(options), 'amp-cache', 'threads')]);
+    assert.deepEqual(clientWatchCandidates('amp', options).amp, [threads]);
     assert.deepEqual(watchPathsForClients('amp', options), [threads]);
     const checks = clientSourceChecks('amp', options);
     assert.deepEqual(checks.amp, [{ id: 'amp-threads', exists: true }]);

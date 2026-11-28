@@ -1212,3 +1212,93 @@ test('iCloud device write and read preserve the normalized multi-account signal'
     root.cleanup();
   }
 });
+
+test('iCloud selected range pages are bound to the visible device revision', async (t) => {
+  const root = makeRoot();
+  t.after(root.cleanup);
+  fs.mkdirSync(path.join(root.root, 'CloudDocs'), { recursive: true });
+  const first = storeFor(root.root, 'writer-a');
+  const second = storeFor(root.root, 'writer-b');
+  const record = {
+    ...device('mac-a'),
+    periodWindows: { today: { key: '2026-09-06', endsAt: '2026-09-07T00:00:00.000Z' }, timeZone: 'UTC' },
+    nativeRangeWindows: { yesterday: { start: '2026-09-05', end: '2026-09-05' } },
+    nativeRanges: { yesterday: { totalTokens: 10, sessions: { 'claude:s': {
+      client: 'claude', sessionId: 's', totalTokens: 10, title: 'local only', projectLabel: 'Project'
+    } } } }
+  };
+  const firstWrite = await first.writeDevice(record);
+  await second.discoverDevices();
+  const window = record.nativeRangeWindows.yesterday;
+  assert.deepEqual(second.fixedRangeRevisions(), { 'mac-a': String(firstWrite.revision) });
+  const initial = await second.readFixedRange('mac-a', 'yesterday', window, String(firstWrite.revision));
+  assert.equal(initial.totalTokens, 10);
+  assert.equal(initial.sessions['claude:s'].title, '');
+  assert.equal(initial.projects.project.tokens, 10);
+
+  const secondWrite = await first.writeDevice({
+    ...record, nativeRanges: { yesterday: { totalTokens: 20, sessions: {} } }
+  });
+  assert.ok(secondWrite.revision > firstWrite.revision);
+  assert.equal((await second.readFixedRange('mac-a', 'yesterday', window, String(firstWrite.revision))).totalTokens, 10);
+  await second.discoverDevices();
+  assert.equal(await second.readFixedRange('mac-a', 'yesterday', window, String(firstWrite.revision)), null);
+  assert.equal((await second.readFixedRange('mac-a', 'yesterday', window, String(secondWrite.revision))).totalTokens, 20);
+  await second.deleteDevice('mac-a');
+  assert.equal(await second.readFixedRange('mac-a', 'yesterday', window, String(secondWrite.revision)), null);
+  assert.deepEqual(second.fixedRangeRevisions(), {});
+});
+
+test('an interrupted iCloud range publication leaves the previous device revision readable', async (t) => {
+  const root = makeRoot();
+  t.after(root.cleanup);
+  const cloudDocsRoot = path.join(root.root, 'CloudDocs');
+  fs.mkdirSync(cloudDocsRoot, { recursive: true });
+  let rejectDeviceWrite = false;
+  let rejectRangeIndex = false;
+  const first = createIcloudSyncStore({
+    platform: 'darwin', home: root.root, cloudDocsRoot, writerId: 'writer-a',
+    fsApi: {
+      ...fs.promises,
+      rename(from, to) {
+        if (rejectRangeIndex && to.endsWith('-index.json')) throw new Error('range index write interrupted');
+        if (rejectDeviceWrite && path.dirname(to).endsWith(path.sep + 'devices')) throw new Error('device write interrupted');
+        return fs.promises.rename(from, to);
+      }
+    }
+  });
+  const second = storeFor(root.root, 'writer-b');
+  const makeRecord = totalTokens => ({
+    ...device('mac-a'),
+    periodWindows: { today: { key: '2026-09-06', endsAt: '2026-09-07T00:00:00.000Z' }, timeZone: 'UTC' },
+    nativeRangeWindows: { yesterday: { start: '2026-09-05', end: '2026-09-05' } },
+    nativeRanges: { yesterday: { totalTokens, sessions: { 'claude:s': {
+      client: 'claude', sessionId: 's', totalTokens, projectLabel: 'Project'
+    } } } }
+  });
+  const rangeFiles = () => fs.readdirSync(path.join(cloudDocsRoot, 'Token Monitor', 'sync-v1', 'fixed-ranges')).sort();
+  rejectRangeIndex = true;
+  const partial = await first.writeDevice(makeRecord(5));
+  assert.equal(partial.fixedRanges, false);
+  assert.deepEqual(rangeFiles(), []);
+  rejectRangeIndex = false;
+
+  const record = makeRecord(10);
+  const written = await first.writeDevice(record);
+  const revision = String(written.revision);
+  const range = record.nativeRangeWindows.yesterday;
+  await second.discoverDevices();
+  const publishedFiles = rangeFiles();
+  rejectDeviceWrite = true;
+  await assert.rejects(first.writeDevice(makeRecord(20)), /device write interrupted/);
+  assert.deepEqual(rangeFiles(), publishedFiles);
+  assert.deepEqual(second.fixedRangeRevisions(), { 'mac-a': revision });
+  const retained = await second.readFixedRange('mac-a', 'yesterday', range, revision);
+  assert.equal(retained.totalTokens, 10);
+  assert.equal(retained.sessions['claude:s'].totalTokens, 10);
+  assert.equal(retained.projects.project.tokens, 10);
+  rejectDeviceWrite = false;
+  const retried = await first.writeDevice(makeRecord(30));
+  await second.discoverDevices();
+  assert.equal((await second.readFixedRange('mac-a', 'yesterday', range, String(retried.revision))).totalTokens, 30);
+});

@@ -14,6 +14,23 @@ function nonNegativeNumber(value) {
   return Number.isFinite(numeric) && numeric >= 0 ? numeric : null;
 }
 
+// Local mode only: this machine's native Yesterday / Week / Last 7 days / Last 30 days are
+// periods of the same stats, so every presentation step and the session deltas
+// treat them like Today and Month. A Hub aggregate spans devices, so ranges
+// there keep coming from History.
+function attachLocalNativeRanges(stats, localDevice) {
+  if (!stats || typeof stats !== 'object') return stats;
+  const ranges = localDevice?.nativeRanges;
+  const windows = localDevice?.nativeRangeWindows;
+  if (!ranges || typeof ranges !== 'object' || !windows || typeof windows !== 'object') return stats;
+  stats.periods = { ...stats.periods };
+  for (const [name, period] of Object.entries(ranges)) {
+    if (period && typeof period === 'object' && windows[name]) stats.periods[name] = period;
+  }
+  stats.nativeRangeWindows = windows;
+  return stats;
+}
+
 function attachLocalNativeViews(stats, localDevice) {
   if (!stats || typeof stats !== 'object') return stats;
   // Hub aggregates intentionally discard these fields. Remove any accidental
@@ -173,7 +190,8 @@ function composeLocalSyncStats(hubStats, localDevice, options = {}) {
   const summarize = (record) => (record === localDevice
     ? normalizedLocalSummary(localDevice)
     : withoutAllTimeSessions(normalizedHubRecord(record)));
-  const aggregate = aggregateDevices(devices, hubStaleAfterMs ?? 0, options.nowMs, {
+  const nowMs = options.nowMs ?? Date.now();
+  const aggregate = aggregateDevices(devices, hubStaleAfterMs ?? 0, nowMs, {
     normalizeRecord: options.allTimeSessions === false ? summarize : normalize,
     copyNormalizedMonthSessions: true
   });
@@ -184,7 +202,9 @@ function composeLocalSyncStats(hubStats, localDevice, options = {}) {
     // time; the Hub's copy is the only proof an upload landed, so it travels
     // alongside for the sync settings panel (null until the Hub has one).
     if (device.deviceId === localDeviceId) {
-      return { ...previous, ...device, hubReceivedAt: previous?.receivedAt || null };
+      const merged = { ...previous, ...device, hubReceivedAt: previous?.receivedAt || null };
+      if (!hasOwn(device, 'sessionDetailsOmitted')) delete merged.sessionDetailsOmitted;
+      return merged;
     }
     if (!previous) return device;
     if (hasHubStaleAfterMs) return { ...previous, ...device };
@@ -198,7 +218,7 @@ function composeLocalSyncStats(hubStats, localDevice, options = {}) {
 
   const displayStats = {
     ...(hubStats || {}),
-    updatedAt: aggregate.updatedAt,
+    updatedAt: new Date(nowMs).toISOString(),
     periods: aggregate.periods,
     devices: aggregate.devices,
     projectsIncomplete: aggregate.projectsIncomplete,
@@ -262,9 +282,13 @@ function composeLocalSyncSummary(hubStats, localDevice, options = {}) {
 // to its completion when that is asked for.
 function composeLocalOnlySummary(localDevice, finish, options = {}) {
   const nowMs = options.nowMs ?? Date.now();
-  const compose = (normalizeRecord) => finish(aggregateDevices([localDevice], 0, nowMs, {
-    normalizeRecord, copyNormalizedMonthSessions: true
-  }));
+  const compose = (normalizeRecord) => {
+    const aggregate = aggregateDevices([localDevice], 0, nowMs, {
+      normalizeRecord, copyNormalizedMonthSessions: true
+    });
+    aggregate.updatedAt = new Date(nowMs).toISOString();
+    return finish(aggregate);
+  };
   const summary = compose(normalizedLocalSummary);
   completions.set(summary, { compose: () => compose(normalizedLocalRecord), complete: null });
   return summary;
@@ -279,6 +303,7 @@ function completeLocalSyncStats(stats) {
 }
 
 module.exports = {
+  attachLocalNativeRanges,
   attachLocalNativeViews,
   attachLocalPresentationNativeViews,
   completeLocalSyncStats,

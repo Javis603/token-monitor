@@ -203,7 +203,7 @@ html:not(.notch-black) .is-notch-attached .notch-panel :is(.notch-week-dates .is
 .notch-now-body { min-width: 0; }
 .notch-now-title { display: block; font-size: 12px; line-height: 1.25; white-space: nowrap; overflow: hidden; }
 .notch-now-meta { margin-top: 5px; display: flex; align-items: center; gap: 7px; font-size: 10.5px; color: var(--notch-dim); white-space: nowrap; overflow: hidden; }
-.notch-waiting-note { color: var(--yellow); }
+.notch-waiting-note { flex: none; color: var(--yellow); }
 .notch-now-value { display: flex; flex-direction: column; align-items: flex-end; gap: 5px; text-align: right; }
 .notch-now-tokens { display: block; font-size: 14px; line-height: 1.15; }
 .notch-fuel { display: flex; align-items: center; gap: 12px; padding-top: 10px; border-top: 1px solid var(--notch-rule); font-size: 11.5px; color: var(--notch-dim); white-space: nowrap; }
@@ -317,17 +317,16 @@ html:not(.notch-black) .is-notch-attached .notch-panel :is(.notch-week-dates .is
 .notch-sessions-active { display: flex; flex-direction: column; gap: 8px; min-width: 0; min-height: 0; }
 .notch-page-sessions .notch-section-head { height: 18px; flex: 0 0 auto; margin-bottom: 10px; }
 .notch-sessions-active .notch-section-head { margin-bottom: 2px; }
-.notch-active { position: relative; isolation: isolate; display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 12px; align-items: center; padding: 12px 8px; margin-left: -8px; border-radius: 14px; }
+.notch-active { position: relative; isolation: isolate; display: grid; gap: 6px; padding: 12px 8px; margin-left: -8px; border-radius: 14px; }
 .notch-active.is-running::before { content: ''; position: absolute; inset: 0; z-index: -1; border-radius: inherit; pointer-events: none;
   background: linear-gradient(100deg, color-mix(in srgb, var(--notch-accent) 18%, transparent), color-mix(in srgb, var(--notch-accent) 5%, transparent) 44%, transparent 74%); }
 .notch-session-heading { display: flex; align-items: center; gap: 7px; min-width: 0; }
 .notch-session-heading .edge-dock-mark { width: 13px; height: 13px; }
 .notch-session-heading .fade-overflow { flex: 1; min-width: 0; }
-.notch-active-body { min-width: 0; }
+.notch-active-head { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 12px; }
 .notch-active-title { display: block; font-size: 12px; line-height: 1.25; white-space: nowrap; overflow: hidden; }
-.notch-active-meta { margin-top: 6px; display: flex; align-items: center; gap: 6px; font-size: 9.5px; line-height: 13px; color: var(--notch-dim); white-space: nowrap; overflow: hidden; }
-.notch-active-meta > span:last-child { overflow: hidden; text-overflow: ellipsis; }
-.notch-active-value { display: flex; flex-direction: column; align-items: flex-end; gap: 5px; text-align: right; }
+.notch-active-reading { display: flex; justify-content: space-between; align-items: center; gap: 6px; min-width: 0; }
+.notch-active-meta { min-width: 0; display: flex; align-items: center; gap: 6px; font-size: 9.5px; line-height: 13px; color: var(--notch-dim); white-space: nowrap; overflow: hidden; }
 .notch-active-tokens { display: block; font-size: 13px; line-height: 1.15; }
 .notch-active-list { display: flex; flex-direction: column; gap: 8px; margin-left: -8px; padding-left: 8px; }
 .notch-active-list > .notch-active { flex-shrink: 0; }
@@ -342,7 +341,7 @@ html:not(.notch-black) .is-notch-attached .notch-panel :is(.notch-week-dates .is
 .notch-recent .edge-dock-mark { opacity: .85; }
 .notch-recent-body { min-width: 0; }
 .notch-recent-title { display: block; font-size: 11.5px; line-height: 15px; white-space: nowrap; overflow: hidden; }
-.notch-recent-meta { display: block; margin-top: 5px; font-size: 9.5px; line-height: 12px; color: var(--notch-faint); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.notch-recent-meta { display: flex; align-items: center; gap: 6px; margin-top: 5px; font-size: 9.5px; line-height: 12px; color: var(--notch-faint); white-space: nowrap; overflow: hidden; }
 .notch-recent-value { display: flex; flex-direction: column; align-items: flex-end; gap: 5px; }
 .notch-recent-tokens { font-size: 11.5px; line-height: 15px; }
 .notch-session-tokens { font-family: var(--notch-ui); font-variant-numeric: normal; }

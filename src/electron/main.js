@@ -55,6 +55,7 @@ const { isLimitWindowHidden: historyWindowHidden } = require('../shared/limits/u
 const { maskEmailAddress: historyMaskEmail } = require('./renderer/accountIdentity');
 const { vendorColors: historyVendorColors } = require('../shared/vendorPresentation');
 const {
+  createDesktopHubFetch,
   createSessionProxyApplier,
   createProxyReadyFetch,
   networkProxySource,
@@ -114,6 +115,7 @@ const sessionProxy = createSessionProxyApplier({
   getConfig: () => sessionProxyConfig(settings || {}),
   log: (message) => console.log(message)
 });
+const fetchFromHub = createDesktopHubFetch(electronLimitsFetch());
 
 // Lazy because `session.defaultSession` only exists once the app is ready, and
 // process-wide because the transport caches one proxy agent per proxy URL.
@@ -178,6 +180,9 @@ const {
   projectModelAliasHistory
 } = require('./modelAliasPresentation');
 const { createHub } = require('../hub/server');
+const { fetchFixedRange, fixedRangeUploadPages } = require('../shared/fixedRangeClient');
+const { SYNC_WEEK_STARTS_ON } = require('../shared/fixedRangeSync');
+const { createFixedRangeReadCache, resolveSyncedFixedPeriod, resolveSyncedSessionPeriod, historyFallbackForDevices } = require('./syncedFixedPeriod');
 const { probeHubBuild } = require('./hubBuildStatus');
 const { normalizeLimitsRefreshMode, normalizeLimitsRefreshMs, parseBoolean, parseLimitProviders } = require('../shared/limits/collector');
 const { createCursorUsageEventIndex } = require('../shared/providers/cursor/usageEvents');
@@ -302,7 +307,7 @@ const { MIMO_PLATFORM_CONSOLE_URL } = require('../shared/providers/mimo/limits')
 const { deviceHistoryRevision, historyPreview, historyRevision } = require('../shared/history');
 const { completeHistorySource, resolveCompleteHistory, resolveCompleteHistoryWithDevices } = require('./historySource');
 const { fixedPeriodHistoryMeta } = require('./fixedPeriodHistory');
-const { readSessionDetailForPlatform } = require('../shared/sessionDetailResolver');
+const { readSessionDetailForPlatform, runSessionDetailWorker } = require('../shared/sessionDetailResolver');
 const { startDiscordRpc, stopDiscordRpc, updateDiscordRpc } = require('./discordRpc');
 const {
   commitMacWidgetSnapshot,
@@ -356,6 +361,7 @@ const { createCodexResetForecastClient } = require('./providers/codex/resetForec
 const { createUpdateInstallQuitGuard, observeUpdateInstallHandoff } = require('./updateInstallQuit');
 const { classifyStreamFailure } = require('./syncConnection');
 const {
+  attachLocalNativeRanges,
   attachLocalNativeViews,
   attachLocalPresentationNativeViews,
   completeLocalSyncStats,
@@ -405,6 +411,7 @@ const {
 const {
   describeWindowBehavior,
   floatingAlwaysOnTopLevel,
+  normalizeWindowBehavior,
   normalizeWindowBehaviorSettings,
   windowBehaviorSelection
 } = require('./windowBehavior');
@@ -483,7 +490,7 @@ const {
   normalizeWindowsBackdropMode,
   normalizeWindowsDockBackdropMode
 } = require('./windowsBackdropMode');
-const { refreshWindowsBackdrop, syncWindowsBackdrop, windowsBackdropFallback } = require('./windowsBackdrop');
+const { refreshWindowsBackdrop, syncWindowsBackdrop, windowsAccentActive, windowsBackdropFallback } = require('./windowsBackdrop');
 const {
   isLiquidGlassBackdrop,
   liquidGlassStyle,
@@ -524,6 +531,8 @@ function appWindowIcon() {
 
 const DEFAULT_WINDOW = { width: 340, height: 650 };
 const WINDOW_LIMITS = { minWidth: 240, minHeight: 140, maxWidth: 1200, maxHeight: 1400 };
+const DEFAULT_DASHBOARD_WINDOW = { width: 1180, height: 760 };
+const DASHBOARD_WINDOW_LIMITS = { minWidth: 720, minHeight: 520 };
 const ZOOM_LIMITS = { min: 0.7, max: 1.6, step: 0.1 };
 const TRAY_CONTENT_VALUES = new Set(['tokens', 'cost', 'both', 'tokensMonth', 'costMonth', 'bothMonth', 'tokensAll', 'costAll', 'bothAll', 'limitsAllSessions', 'liveTokenRate', 'bars', 'barsSession', 'barsWeekly', 'barsAllSessions', 'icon', 'custom']);
 const HUB_MODE_VALUES = new Set(['local', 'client', 'host', 'icloud']);
@@ -546,6 +555,7 @@ const TRAY_OPEN_VIEW_IDS = new Set(['home', 'project', 'session', 'limits', 'tre
 let mainWindow = null;
 let dashboardWindow = null;
 let dashboardWindowReady = false;
+let pendingDashboardWindowBounds = null;
 let settingsPath = null;
 let settings = null;
 let initialLimitProvidersPending = false;
@@ -583,7 +593,7 @@ if (!gotLock) app.exit(0);
 
 const HOME_LIMIT_ACCOUNT_COUNT_DEFAULT = 3;
 const HOME_LIMIT_ACCOUNT_COUNT_MAX = 12;
-const PERIOD_MONTH_MODES = new Set(['month', 'week', 'last7', 'last30']);
+const PERIOD_MONTH_MODES = new Set(['month', 'yesterday', 'week', 'last7', 'last30']);
 
 function normalizePeriodMonthMode(value) {
   return PERIOD_MONTH_MODES.has(value) ? value : 'month';
@@ -635,11 +645,24 @@ function defaultSettings() {
     titleIconOnly: true,
     settingsInTitlebar: false,
     showCompactTotalTokens: false,
+    detailTokensUseCompactUnits: false,
     showLiveTokenRate: false,
     liveTokenRateScope: 'all',
     compactTokenUnits: 'western',
     tokenRateMode: 'speed',
     heatmapMetric: 'cost',
+    dashboardHeatmapMetric: null,
+    dashboardStageView: 'flow',
+    dashboardBackdrop: 'inherit',
+    dashboardWindowBehavior: 'normal',
+    dashboardWindowBounds: null,
+    dashboardFlowMode: 'sync',
+    dashboardFollowPeriodTabs: false,
+    dashboardVisiblePeriods: [],
+    dashboardShowVelocity: true,
+    dashboardShowQuotas: true,
+    dashboardHighlightLowLimits: true,
+    dashboardQuotaProviderOrder: '',
     modelRankingMetric: 'tokens',
     homeActiveDaysWindow: 'all',
     showExactHomeTrendTokens: false,
@@ -650,6 +673,7 @@ function defaultSettings() {
     sessionContextMetric: 'used',
     sessionTitlesEnabled: true,
     periodMonthMode: 'month',
+    periodTabOrder: [],
     themeColors: {},
     macGlassFollowSystem: true,
     macGlassLightColors: {},
@@ -822,6 +846,20 @@ function defaultSettings() {
   };
 }
 
+function normalizeDashboardStageView(value) {
+  return value === '2d' || value === '3d' ? value : 'flow';
+}
+
+function normalizeDashboardFlowMode(value) {
+  return value === 'stagger' ? 'stagger' : 'sync';
+}
+
+function normalizeDashboardPeriods(value) {
+  return Array.isArray(value)
+    ? fixedPeriodRangesApi.PERIOD_TAB_OPTIONS.filter(period => value.includes(period))
+    : [];
+}
+
 function resettableSettingsDefaults() {
   const defaults = defaultSettings();
   const keys = [
@@ -839,7 +877,7 @@ function resettableSettingsDefaults() {
     'notchStyle', 'notchProgressiveBlur', 'notchSummaryEnabled', 'notchSummaryMode',
     'notchHideSummaryInFullScreen', 'notchRunningIndicatorEnabled', 'notchWarnColors', 'notchHaptic', 'notchSwipeGestures',
     'systemGlass', 'windowsBackdrop', 'macBackdrop', 'textSize', 'reduceMotion', 'tokenNumberAnimation',
-    'showCompactTotalTokens', 'compactTokenUnits', 'showLiveTokenRate', 'liveTokenRateScope',
+    'showCompactTotalTokens', 'detailTokensUseCompactUnits', 'compactTokenUnits', 'showLiveTokenRate', 'liveTokenRateScope',
     'settingsInTitlebar', 'showLiveDot', 'showToolIcons', 'titleIconOnly',
     'collectionMode', 'exportIntervalMs',
     'showLimitSource', 'showLimitUsed', 'workbuddyQuotaTotalEnabled', 'syncUploadIntervalMs'
@@ -921,29 +959,39 @@ function syncUploadIntervalMs() {
   return normalizeSyncUploadIntervalMs(settings?.syncUploadIntervalMs);
 }
 
-function electronUsageConfig(errorPrefix) {
+// The collector composes the native Week range for this calendar week. The
+// renderer resolves the same locale and checks the range it receives.
+function collectorCalendarLocale() {
+  const preferred = typeof app.getPreferredSystemLanguages === 'function' ? app.getPreferredSystemLanguages() : [app.getLocale()];
+  return resolveRegionalLocale([...preferred, settings?.locale]);
+}
+
+function collectorWeekStartsOn() {
+  return fixedPeriodRangesApi.weekStartsOn(collectorCalendarLocale());
+}
+
+function electronUsageConfig(errorPrefix, { synced = false } = {}) {
   return usageConfigFromSettings(settings, {
+    nativeRangesEnabled: true,
+    dailySessionSyncEnabled: synced && settings?.hubMode !== 'icloud',
     agentVersion: appVersion(),
     agentRuntime: 'electron-widget',
     commandTimeoutMs: 120 * 1000,
     defaultDeviceId: defaultDeviceId(),
     intervalMs: collectorIntervalMs(),
     historyIntervalMs: normalizeHistoryIntervalMs(settings.historyIntervalMs),
-    reasonixNativeSessionsEnabled: true,
     watchEnabled: collectorWatchEnabled(),
     // No watchUsePolling on purpose. The widget states no preference so the
     // shared default in resolveWatchUsePolling() governs and the widget cannot
     // drift from the headless agent, which has never passed one. That default
-    // is native events on every platform: chokidar 4 dropped the bundled
-    // fsevents backend, so every platform now watches through the same
-    // per-directory fs.watch path, and the earlier attempt that observed missed
-    // events ran on the chokidar 3 backend that no longer exists. Where the
-    // kernel cannot supply watch descriptors the collector degrades to polling
-    // by itself; TOKEN_MONITOR_WATCH_POLLING overrides in both directions.
+    // is native events on every platform. Where the kernel cannot supply watch
+    // descriptors the collector degrades to polling by itself;
+    // TOKEN_MONITOR_WATCH_POLLING overrides in both directions.
     watchTriggersCollection: collectorWatchTriggersCollection(),
     intervalRequiresActivity: collectorIntervalRequiresActivity(),
     watchDebounceMs: 1500,
     dailyHistoryArchiveWriteEnabled: () => !isExternalAgentActive(),
+    weekStartsOn: synced ? SYNC_WEEK_STARTS_ON : collectorWeekStartsOn(),
     onError: (error, reason) => console.log(`[${errorPrefix}] ${reason}: ${error.message}`),
     logger: (message) => console.log(`[${errorPrefix}] ${message}`)
   });
@@ -1503,11 +1551,10 @@ function isBoundsOnScreen(bounds) {
   } catch (_) { return false; }
 }
 
-function restoredBounds() {
-  const saved = settings?.windowBounds;
-  if (!saved || typeof saved.width !== 'number' || typeof saved.height !== 'number') return null;
-  const width = Math.min(WINDOW_LIMITS.maxWidth, Math.max(WINDOW_LIMITS.minWidth, saved.width));
-  const height = Math.min(WINDOW_LIMITS.maxHeight, Math.max(WINDOW_LIMITS.minHeight, saved.height));
+function restoredBounds(saved, { minWidth, minHeight, maxWidth = Infinity, maxHeight = Infinity } = WINDOW_LIMITS) {
+  if (!Number.isFinite(saved?.width) || !Number.isFinite(saved?.height)) return null;
+  const width = Math.min(maxWidth, Math.max(minWidth, saved.width));
+  const height = Math.min(maxHeight, Math.max(minHeight, saved.height));
   if (!isBoundsOnScreen({ ...saved, width, height })) return { width, height };
   return { x: saved.x, y: saved.y, width, height };
 }
@@ -1785,10 +1832,10 @@ function collapsedMargin() {
   return floatingBubbleCollapsedMargin(process.platform);
 }
 
-function persistWindowBounds(next) {
-  const prev = settings.windowBounds || {};
+function persistWindowBounds(next, key = 'windowBounds') {
+  const prev = settings[key] || {};
   if (prev.x === next.x && prev.y === next.y && prev.width === next.width && prev.height === next.height) return false;
-  settings.windowBounds = next;
+  settings[key] = next;
   saveSettings();
   return true;
 }
@@ -1803,7 +1850,7 @@ function collapseFloatingBubble(plan) {
   floatingBubbleState.collapsedBounds = collapsedBounds;
   floatingBubbleState.expandedBounds = expandedBounds;
   settings.floatingBubbleBounds = collapsedBounds;
-  applyNativeMaterial();
+  if (applyNativeMaterial()) pushSettingsToRenderer();
   if (process.platform === 'win32') {
     persistWindowBounds(expandedBounds);
     replaceMainWindow(collapsedBounds, {
@@ -1853,7 +1900,7 @@ function expandFloatingBubble(options = {}) {
   floatingBubbleState.side = null;
   floatingBubbleState.collapsedBounds = current;
   floatingBubbleState.expandedBounds = target;
-  applyNativeMaterial();
+  if (applyNativeMaterial()) pushSettingsToRenderer();
   if (target) {
     floatingBubbleState.suppressNextCollapse = true;
     if (process.platform === 'win32' && mainWindowChrome.collapsedFloatingBubble) {
@@ -2168,6 +2215,7 @@ function readSettings() {
     merged.limitProviderHiddenItems = normalizeLimitProviderHiddenItems(merged.limitProviderHiddenItems);
     merged.homeLimitAccountCount = normalizeHomeLimitAccountCount(merged.homeLimitAccountCount);
     merged.periodMonthMode = normalizePeriodMonthMode(merged.periodMonthMode);
+    merged.periodTabOrder = fixedPeriodRangesApi.normalizePeriodTabOrder(merged.periodTabOrder);
     if (saved.historyEnabled !== undefined) {
       merged.historyEnabled = parseBoolean(saved.historyEnabled, false);
     }
@@ -2187,6 +2235,19 @@ function readSettings() {
     merged.collectionIntervalMs = normalizeCollectionIntervalMs(merged.collectionIntervalMs);
     merged.syncUploadIntervalMs = normalizeSyncUploadIntervalMs(merged.syncUploadIntervalMs);
     merged.heatmapMetric = normalizeHeatmapMetric(merged.heatmapMetric);
+    merged.dashboardHeatmapMetric = merged.dashboardHeatmapMetric == null ? null : normalizeHeatmapMetric(merged.dashboardHeatmapMetric);
+    merged.dashboardStageView = normalizeDashboardStageView(merged.dashboardStageView);
+    merged.dashboardBackdrop = normalizeDashboardBackdrop(saved.dashboardBackdrop ?? (saved.dashboardFlat === true ? 'solid' : 'inherit'));
+    merged.dashboardWindowBehavior = normalizeWindowBehavior(merged.dashboardWindowBehavior, 'normal');
+    merged.dashboardFlowMode = normalizeDashboardFlowMode(merged.dashboardFlowMode);
+    merged.dashboardVisiblePeriods = normalizeDashboardPeriods(merged.dashboardVisiblePeriods);
+    merged.dashboardFollowPeriodTabs = parseBoolean(merged.dashboardFollowPeriodTabs, false);
+    merged.dashboardShowVelocity = parseBoolean(merged.dashboardShowVelocity, true);
+    merged.dashboardShowQuotas = parseBoolean(merged.dashboardShowQuotas, true);
+    merged.dashboardHighlightLowLimits = parseBoolean(merged.dashboardHighlightLowLimits, true);
+    merged.dashboardQuotaProviderOrder = require('./plugins/limits').desktopProviderPreference(
+      merged.dashboardQuotaProviderOrder ?? '', parseLimitProviders
+    );
     merged.modelRankingMetric = normalizeRankingMetric(merged.modelRankingMetric);
     merged.homeActiveDaysWindow = normalizeHomeActiveDaysWindow(merged.homeActiveDaysWindow);
     merged.showExactHomeTrendTokens = parseBoolean(merged.showExactHomeTrendTokens, false);
@@ -2202,6 +2263,7 @@ function readSettings() {
     merged.tokenNumberAnimation = tokenNumberAnimationApi.normalize(merged.tokenNumberAnimation);
     merged.showLiveTokenRate = parseBoolean(merged.showLiveTokenRate, false);
     merged.liveTokenRateScope = normalizeLiveTokenRateScope(merged.liveTokenRateScope);
+    merged.detailTokensUseCompactUnits = parseBoolean(merged.detailTokensUseCompactUnits, false);
     merged.compactTokenUnits = normalizeCompactTokenUnits(merged.compactTokenUnits);
     merged.modelAliases = normalizeModelAliases(merged.modelAliases);
     merged.syncContentState = normalizeSyncContentState(merged.syncContentState);
@@ -2603,13 +2665,44 @@ function nativeBlurEnabled(source = settings) {
   return floatingBubbleNativeGlassEnabled(source);
 }
 
+function normalizeDashboardBackdrop(value, platform = process.platform) {
+  if (value === 'solid') return value;
+  if (platform === 'darwin' && (value === 'vibrancy' || isLiquidGlassBackdrop(value))) return value;
+  if (platform === 'win32' && ['acrylic', 'mica', 'mica-alt', 'accent'].includes(value)) return value;
+  return 'inherit';
+}
+
+function dashboardMaterialSettings(source) {
+  const mode = normalizeDashboardBackdrop(source.dashboardBackdrop);
+  if (mode === 'inherit') return source;
+  if (mode === 'solid') return { ...source, systemGlass: false };
+  return process.platform === 'darwin'
+    ? { ...source, systemGlass: true, macBackdrop: mode }
+    : { ...source, systemGlass: true, windowsBackdrop: mode };
+}
+
+function applyDashboardWindowBehavior(win, source = settings) {
+  if (!win || win.isDestroyed()) return;
+  const mode = normalizeWindowBehavior(source.dashboardWindowBehavior, 'normal');
+  const behavior = describeWindowBehavior({ windowBehavior: mode });
+  win.setAlwaysOnTop(behavior.alwaysOnTop, floatingAlwaysOnTopLevel());
+  win.setMovable(behavior.draggable);
+  win.setResizable(behavior.resizable);
+}
+
+function syncDashboardWindowsBackdrop(win, source = settings) {
+  const effective = dashboardMaterialSettings(source);
+  syncWindowsBackdrop(win, { enabled: nativeBlurEnabled(effective), mode: effective.windowsBackdrop });
+}
+
 function nativeMaterialOptions(source = settings, dashboard = false) {
+  if (dashboard) source = dashboardMaterialSettings(source);
   return {
     enabled: nativeBlurEnabled(source),
     liquidGlass: isLiquidGlassBackdrop(source.macBackdrop),
     style: liquidGlassStyle(source.macBackdrop),
     tintOpacity: liquidGlassTint(source),
-    opaque: dashboard && source.dashboardFlat === true,
+    opaque: dashboard && source.dashboardBackdrop === 'solid',
     reducedTransparency: nativeTheme.prefersReducedTransparency === true,
     highContrast: nativeTheme.shouldUseHighContrastColors === true,
     dark: source.macGlassFollowSystem === false ? !isLightHex(source.themeColors?.bg) : nativeTheme.shouldUseDarkColors,
@@ -2621,9 +2714,11 @@ function applyNativeMaterial(source = settings) {
   syncNativeMaterialVisibility(mainWindow, nativeMaterialOptions(source));
   syncNativeMaterialVisibility(dashboardWindow, nativeMaterialOptions(source, true));
   const windowsMaterial = { enabled: nativeBlurEnabled(source), mode: source.windowsBackdrop };
+  const hadAccent = windowsAccentActive(mainWindow);
   syncWindowsBackdrop(mainWindow, windowsMaterial);
-  syncWindowsBackdrop(dashboardWindow, windowsMaterial);
+  syncDashboardWindowsBackdrop(dashboardWindow, source);
   limitsHistoryController?.syncMaterial();
+  return hadAccent !== windowsAccentActive(mainWindow);
 }
 
 function withHistoryPreview(stats, devices) {
@@ -2797,6 +2892,7 @@ function electronPresentationStats(stats) {
 }
 
 const allTimeSessionsCache = createStatsPresentationCache();
+const fixedRangeReads = createFixedRangeReadCache();
 const rendererSnapshots = createRendererSnapshots({ source: () => hubModeGeneration });
 // The local record each Hub snapshot was shown with, captured where the
 // snapshot was built. The collector replaces the live one between publishes.
@@ -2821,8 +2917,29 @@ function rendererAllTimeSessions(stats) {
     const devices = hubSnapshot?.localDevice
       ? [...(complete.devices || []).filter(device => device.deviceId !== hubSnapshot.localDevice.deviceId), hubSnapshot.localDevice]
       : complete.devices;
-    const sourced = projectSessionDeviceSessions(sessions, devices, ['month', 'allTime']);
-    return projectModelAliasSessions(stats, settings?.sessionTitlesEnabled === false ? withoutSessionTitles(sourced) : sourced, aliases, { grouping });
+    const unstamped = Object.fromEntries(Object.entries(sessions).map(([id, { sourceDevice: _owner, ...session }]) => [id, session]));
+    const sourced = projectSessionDeviceSessions(unstamped, devices, ['month', 'allTime']);
+    const inline = projectModelAliasSessions(stats, settings?.sessionTitlesEnabled === false ? withoutSessionTitles(sourced) : sourced, aliases, { grouping });
+    if (!stats.sessionDetailsOmitted?.month) return inline;
+
+    const withoutConfirmedOwners = rows => Object.fromEntries(Object.entries(rows).map(([id, session]) => [
+      id, { ...session, sourceDevice: { ambiguous: true } }
+    ]));
+    if (!Object.keys(stats.fixedRangeRevisions || {}).length) return withoutConfirmedOwners(inline);
+    return resolveSyncedPeriodForStats(stats, hubModeGeneration, 'month').then(paged => {
+      const pagedSessions = paged?.period?.sessions || {};
+      const local = hubSnapshot?.localDevice?.allTime?.sessions || {};
+      const merged = { ...inline };
+      for (const [id, session] of Object.entries(pagedSessions)) {
+        if (!Object.hasOwn(local, id)) {
+          merged[id] = session;
+        } else if (!merged[id]?.sourceDevice || session.sourceDevice?.ambiguous
+          || session.sourceDevice?.deviceId !== hubSnapshot.localDevice.deviceId) {
+          merged[id] = { ...merged[id], sourceDevice: { ambiguous: true } };
+        }
+      }
+      return paged?.detailsAvailable === true ? merged : withoutConfirmedOwners(merged);
+    });
   });
 }
 
@@ -3123,7 +3240,7 @@ function getHubInfo() {
 async function getHubBuildStatus() {
   if (settings?.hubMode !== 'client') return { status: 'notConfigured', runtime: '', hubUrl: '' };
   const hubUrl = String(settings.hubUrl || '').trim();
-  return probeHubBuild(hubUrl);
+  return probeHubBuild(hubUrl, { fetchImpl: fetchFromHub });
 }
 
 async function startEmbeddedHub() {
@@ -3191,7 +3308,7 @@ async function deleteDeviceFromHub(deviceId) {
   const { url: hubUrl, secret } = effectiveHubConfig();
   if (!hubUrl) return;
   const base = hubUrl.replace(/\/$/, '');
-  const response = await fetch(`${base}/api/devices/${encodeURIComponent(deviceId)}`, {
+  const response = await fetchFromHub(`${base}/api/devices/${encodeURIComponent(deviceId)}`, {
     method: 'DELETE',
     headers: secret ? { authorization: `Bearer ${secret}` } : {}
   });
@@ -3257,7 +3374,7 @@ async function postToHub(summary) {
     || syncOptions.identity !== getSyncContentRuntime().status().identity
     || !sameDestination(uploadContext, syncContentContext())
     || summary.deviceId !== syncContentContext().deviceId) throw new Error('hub_changed');
-  const fetchForUpload = (target, options) => fetch(target, { ...options, redirect: 'error',
+  const fetchForUpload = (target, options) => fetchFromHub(target, { ...options, redirect: 'error',
     signal: AbortSignal.any([syncOptions.signal, AbortSignal.timeout(15_000)]) });
   const { response } = await postSyncPayload(fetchForUpload, url, {
     syncSessionTitles: syncOptions.syncSessionTitles,
@@ -3310,7 +3427,7 @@ async function requestSyncContent(context, pathname, method, body) {
         body: error.current || null };
     }
   }
-  const response = await fetch(`${context.url.replace(/\/$/, '')}${pathname}`, {
+  const response = await fetchFromHub(`${context.url.replace(/\/$/, '')}${pathname}`, {
     method, redirect: 'error',
     headers: { 'content-type': 'application/json', ...(context.secret ? { authorization: `Bearer ${context.secret}` } : {}) },
     ...(body !== undefined ? { body: JSON.stringify(body) } : {}),
@@ -3565,7 +3682,7 @@ async function fetchSharedSubscriptions() {
   // lane open for the rest of the session, and every later read and save for that
   // hub behind it. fetch() has no deadline of its own, so it gets the same 15s
   // the other hub requests use.
-  const response = await fetch(endpoint.url, { headers: endpoint.headers, signal: AbortSignal.timeout(15_000) });
+  const response = await fetchFromHub(endpoint.url, { headers: endpoint.headers, signal: AbortSignal.timeout(15_000) });
   if (!response.ok) throw new Error(`Hub ${response.status}: ${(await response.text()).slice(0, 200)}`);
   return response.json();
 }
@@ -3620,7 +3737,7 @@ async function writeSharedSubscriptionsNow(list, hub, baseUpdatedAt) {
   }
   const endpoint = subscriptionsEndpoint();
   if (!endpoint) throw new Error('hub not configured');
-  const response = await fetch(endpoint.url, {
+  const response = await fetchFromHub(endpoint.url, {
     method: 'PUT',
     headers: { 'content-type': 'application/json', ...endpoint.headers },
     body: JSON.stringify({ subscriptions: list, baseUpdatedAt }),
@@ -4178,7 +4295,7 @@ async function startIcloudCollector() {
       flush: () => runtime.flush(),
       stop: () => runtime.stop()
     };
-    const usageOptions = electronUsageConfig('icloud-collector');
+    const usageOptions = electronUsageConfig('icloud-collector', { synced: true });
     createdDeviceRuntime = createDeviceRuntime({
       envelope: electronDeviceEnvelope(),
       initialLimits: lastCollectedDevice?.limits,
@@ -4260,7 +4377,7 @@ function startSyncCollector() {
     flush: () => syncUploadScheduler.flush(),
     stop: () => syncUploadScheduler.stop()
   };
-  const usageOptions = electronUsageConfig('sync-collector');
+  const usageOptions = electronUsageConfig('sync-collector', { synced: true });
   deviceRuntimeHandle = createDeviceRuntime({
     envelope: electronDeviceEnvelope(),
     initialLimits: lastCollectedDevice?.limits,
@@ -4308,7 +4425,32 @@ function startHostCollector() {
         if (payload.allTimeProjectsOmitted === true) {
           console.log('[host-ingest] all-time project breakdown omitted to reduce the sync snapshot size');
         }
-        embeddedHub.hub.ingest(payload);
+        const accepted = embeddedHub.hub.ingest(payload);
+        const fixedRangeAt = JSON.stringify([visibleSummary.updatedAt, options.sessionTitleSyncGeneration, visibleSummary.projectsEnabled !== false, visibleSummary.nativeRangeWindows, Boolean(visibleSummary.dailySessionPeriods)]);
+        if (visibleSummary.nativeRanges && handle.fixedRangeAt !== fixedRangeAt) {
+          try {
+            const publish = record => {
+              try {
+                for (const page of fixedRangeUploadPages(record, options)) {
+                  const accepted = handle.hub.acceptFixedRange(record.deviceId, page);
+                  if (accepted.status !== 200) return false;
+                  if (accepted.complete) return true;
+                }
+              } catch (error) {
+                if (!record.dailySessionPeriods || !(error instanceof RangeError)) throw error;
+              }
+              return false;
+            };
+            if (publish(visibleSummary)) handle.fixedRangeAt = fixedRangeAt;
+            else if (visibleSummary.dailySessionPeriods) publish({ ...visibleSummary, dailySessionPeriods: undefined });
+          } catch (error) {
+            console.log(`[host-ingest] fixed range upload deferred: ${error.message}`);
+          }
+        }
+        if (visibleSummary.dailySessionPeriods && handle.fixedRangeAt === fixedRangeAt
+          && payload.history?.dailyTotalsOmitted > 0 && accepted.history?.summary?.activeDaysComplete !== true) {
+          embeddedHub.hub.restoreHistory(syncPayload(visibleSummary, { ...options, pagedSessions: true }));
+        }
         if (settings.lastPostedDeviceId !== visibleSummary.deviceId) {
           settings.lastPostedDeviceId = visibleSummary.deviceId;
           saveSettings();
@@ -4318,7 +4460,7 @@ function startHostCollector() {
       });
     }
   };
-  const usageOptions = electronUsageConfig('host-collector');
+  const usageOptions = electronUsageConfig('host-collector', { synced: true });
   deviceRuntimeHandle = createDeviceRuntime({
     envelope: electronDeviceEnvelope(),
     initialLimits: lastCollectedDevice?.limits,
@@ -4393,7 +4535,15 @@ function injectLocalDeviceStatus(stats) {
   for (const device of stats.devices) if (device.limits) device.limits = { ...device.limits, providers: device.limits.providers.map(row => ({
     ...row, stale: isProviderStale(row, device.limits, device, stats.staleAfterMs, now)
   })) };
-  if (mode !== 'local') snapshotLocalDevices.set(stats, { localDevice: lastCollectedDevice });
+  if (mode !== 'local') {
+    snapshotLocalDevices.set(stats, { localDevice: lastCollectedDevice });
+    delete stats.localFixedRangeRevision;
+    if (settings?.hubMode === 'client' && ownsUsageRuntime() && lastCollectedDevice?.nativeRanges
+      && stats.devices.some(device => device.deviceId === lastCollectedDevice.deviceId
+        && device.updatedAt === lastCollectedDevice.updatedAt)) {
+      stats.localFixedRangeRevision = JSON.stringify([lastCollectedDevice.deviceId, lastCollectedDevice.updatedAt]);
+    }
+  }
   return stats;
 }
 
@@ -4448,6 +4598,7 @@ function historyResolverOptions() {
   return {
     aggregateHistory,
     embeddedHub,
+    fetchImpl: fetchFromHub,
     historyEnabled: settings?.historyEnabled !== false,
     hubMode: settings?.hubMode,
     hubUrl,
@@ -4625,7 +4776,7 @@ function publishLocalSessionActivity(patch) {
   const previousDevice = lastCollectedDevice;
   lastCollectedDevice = projectLocalActivity(lastCollectedDevice, patch);
   if (localDevice) localDevice = localDevice === previousDevice ? lastCollectedDevice : applyActivityPatch(localDevice, patch);
-  if (!latestStats) return;
+  if (!latestStatsMatchCurrentSource()) return;
   const previous = latestStats;
   latestStats = projectLocalActivity(previous, patch);
   const localSnapshot = snapshotLocalDevices.get(previous);
@@ -4647,6 +4798,11 @@ function publishLocalSessionActivity(patch) {
   pluginRuntime?.publishStats(activityStats, latestStats);
   updateEdgeDockCells(activityStats);
   sendPush({ event: 'session-activity', data: { patch: visiblePatch, snapshot } });
+}
+
+function latestStatsMatchCurrentSource() {
+  return latestStats && latestStatsSource?.generation === hubModeGeneration
+    && latestStatsSource.identity === currentHubStatsIdentity();
 }
 
 // Two options, both for the cold-start seed and neither for live stats.
@@ -4674,7 +4830,9 @@ function mainWindowStatsPushWanted() {
 function sendPush(payload, options = {}) {
   const previousHistoryRevision = statsHistoryRevision(latestStats);
   const wantsRenderer = options.deferToRenderer === true || mainWindowStatsPushWanted();
+  const wantsDashboard = dashboardStatsPushWanted();
   let rendererPayload = payload;
+  let dashboardPayload = payload;
   let rendererFingerprint = null;
   if (payload?.data?.stats) {
     payload.data.stats = injectLocalDeviceStatus(payload.data.stats);
@@ -4693,21 +4851,27 @@ function sendPush(payload, options = {}) {
     getLimitsHistoryStore().record(currentHubStatsIdentity(), visibleStats.limits);
     limitsHistoryController?.refresh();
     migrateCodexAdditionalLimits(visibleStats);
-    if (wantsRenderer) {
+    if (wantsRenderer || wantsDashboard) {
       const copy = rendererSnapshots.stamp(latestStats, rendererStats(visibleStats), visibleStats);
-      const allowDelta = options.deferToRenderer !== true
-        && payload.data.reason !== 'read'
-        && payload.data.reason !== 'presentation';
-      const built = allowDelta
-        ? buildStatsDelta(lastRendererStatsFingerprint, copy)
-        : { delta: null, fingerprint: fingerprintStats(copy) };
-      rendererFingerprint = built.fingerprint;
-      if (built.delta) {
-        const data = { ...payload.data };
-        delete data.stats;
-        rendererPayload = { ...payload, data: { ...data, statsDelta: built.delta } };
-      } else {
-        rendererPayload = { ...payload, data: { ...payload.data, stats: copy } };
+      if (wantsDashboard) {
+        const dashboardStats = { ...rendererStats(visibleStats, { dashboard: true }), snapshot: copy.snapshot };
+        dashboardPayload = { ...payload, data: { ...payload.data, stats: dashboardStats } };
+      }
+      if (wantsRenderer) {
+        const allowDelta = options.deferToRenderer !== true
+          && payload.data.reason !== 'read'
+          && payload.data.reason !== 'presentation';
+        const built = allowDelta
+          ? buildStatsDelta(lastRendererStatsFingerprint, copy)
+          : { delta: null, fingerprint: fingerprintStats(copy) };
+        rendererFingerprint = built.fingerprint;
+        if (built.delta) {
+          const data = { ...payload.data };
+          delete data.stats;
+          rendererPayload = { ...payload, data: { ...data, statsDelta: built.delta } };
+        } else {
+          rendererPayload = { ...payload, data: { ...payload.data, stats: copy } };
+        }
       }
     }
     scheduleMacWidgetSnapshot(visibleStats, options.widgetProducerOwner);
@@ -4740,6 +4904,9 @@ function sendPush(payload, options = {}) {
       }
     }
   }
+  if (wantsDashboard && !options.deferToRenderer && dashboardWindow && !dashboardWindow.isDestroyed()) {
+    try { dashboardWindow.webContents.send('stats:push', dashboardPayload); } catch (_) {}
+  }
   if (payload?.data?.stats) {
     const nextHistoryRevision = statsHistoryRevision(payload.data.stats);
     if (nextHistoryRevision !== previousHistoryRevision && dashboardWindow && !dashboardWindow.isDestroyed()) {
@@ -4747,6 +4914,14 @@ function sendPush(payload, options = {}) {
     }
     maybeAdoptSharedSubscriptionRevision(payload.data.stats);
   }
+}
+
+function dashboardStatsPushWanted() {
+  return Boolean(dashboardWindow
+    && dashboardWindowReady
+    && !dashboardWindow.isDestroyed()
+    && dashboardWindow.isVisible()
+    && !dashboardWindow.isMinimized());
 }
 
 function statsHistoryRevision(stats) {
@@ -4950,6 +5125,9 @@ function primeLocalStatsFromAnchor(usageOptions, widgetProducerOwner) {
       projectsEnabled: usageOptions.projectsEnabled,
       customScanPaths: usageOptions.customScanPaths,
       wslScanEnabled: usageOptions.wslScanEnabled,
+      nativeRangesEnabled: usageOptions.nativeRangesEnabled,
+      weekStartsOn: usageOptions.weekStartsOn,
+      codexDotsVisible: usageOptions.codexDotsVisible,
       wslSupported: process.platform === 'win32',
       historyEnabled: usageOptions.historyEnabled,
       dailyHistoryArchiveEnabled: usageOptions.dailyHistoryArchiveEnabled,
@@ -4976,7 +5154,7 @@ function primeLocalStatsFromAnchor(usageOptions, widgetProducerOwner) {
   }
   anchorSeedDevice = visible;
   localDevice = visible;
-  localStats = withHistoryPreview(aggregateDevices([visible], 0), [visible]);
+  localStats = coldLocalStats(visible);
   // Through the normal publisher, not straight to the renderer: the tray reads
   // what sendPush sets, and in tray mode the window is hidden, so a seed that
   // only reached the renderer would leave the one visible surface on zero.
@@ -4990,6 +5168,12 @@ function primeLocalStatsFromAnchor(usageOptions, widgetProducerOwner) {
   }, { skipExport: true, deferToRenderer: true, widgetProducerOwner });
 }
 
+function coldLocalStats(device) {
+  const stats = withHistoryPreview(aggregateDevices([device], 0), [device]);
+  stats.nativeRangesPending = true;
+  return attachLocalNativeRanges(stats, device);
+}
+
 // The first scan holds its record back until all-time is in, which on a long
 // history is minutes after Today was ready. Show each window as it lands, over
 // the seed's last known values when there is one. Display only: nothing here is
@@ -4998,7 +5182,7 @@ function publishColdPreview(preview, reason, widgetProducerOwner) {
   if (lastCollectedDevice) return;
   const device = seedWithColdPreview(anchorSeedDevice || preview, preview);
   localDevice = device;
-  localStats = withHistoryPreview(aggregateDevices([device], 0), [device]);
+  localStats = coldLocalStats(device);
   sendPush({
     event: 'stats',
     data: { type: 'stats', reason, stats: localStats, at: new Date().toISOString() }
@@ -5033,6 +5217,7 @@ function startLocalCollector() {
       localStats = composeLocalOnlySummary(localDevice, (stats) => {
         withHistoryPreview(stats, [localDevice]);
         attachLocalNativeViews(stats, localDevice);
+        attachLocalNativeRanges(stats, localDevice);
         return stats;
       });
       updateDiscordRpcDisplay(localStats);
@@ -5093,7 +5278,7 @@ async function startStatsStream(options = {}) {
   controller.signal.addEventListener('abort', () => clearTimeout(activityTimer), { once: true });
   try {
     armActivityTimeout(15_000);
-    const response = await fetch(url, {
+    const response = await fetchFromHub(url, {
       headers: {
         accept: 'text/event-stream',
         [HUB_STREAM_HEADER]: HUB_STREAM_VERSION,
@@ -5292,9 +5477,12 @@ function settingsForRenderer() {
   const locale = trayMenuLocale();
   return {
     ...rendererSettings,
+    windowsAccentActive: windowsAccentActive(mainWindow),
     windowsBackdropFallback: windowsBackdropFallback(mainWindow),
     syncContentStatus: getSyncContentRuntime().status(),
     locale,
+    calendarLocale: collectorCalendarLocale(),
+    syncWeekStartsOn: SYNC_WEEK_STARTS_ON,
     fontContext: windowsFontContext(locale),
     deviceIconScope: currentHubIdentity() || 'local',
     ...redactedCredentials,
@@ -5575,7 +5763,10 @@ function syncNotch(rendererSettings) {
 // allowlisted appearance projection instead of the full renderer settings.
 function edgeDockAppearance(rendererSettings = settingsForRenderer()) {
   const source = rendererSettings || {};
+  const deviceIconScope = source.deviceIconScope || 'local';
   return {
+    deviceIconScope,
+    deviceIconOverrides: { [deviceIconScope]: source.deviceIconOverrides?.[deviceIconScope] },
     language: source.language,
     currency: source.currency,
     currencyRatesEffective: source.currencyRatesEffective,
@@ -6027,22 +6218,35 @@ function syncDockSurfaces(rendererSettings) {
 }
 
 function sendStatsPresentationToRenderer(options = {}) {
-  if (!latestStats || !mainWindow || mainWindow.isDestroyed()) return false;
-  if (options.force !== true && !mainWindowStatsPushWanted()) return false;
+  if (!latestStatsMatchCurrentSource()) return false;
+  const wantsMain = Boolean(mainWindow && !mainWindow.isDestroyed() && (options.force === true || mainWindowStatsPushWanted()));
+  const wantsDashboard = dashboardStatsPushWanted();
+  if (!wantsMain && !wantsDashboard) return false;
   const visibleStats = electronPresentationStats(latestStats);
   const copy = rendererSnapshots.stamp(latestStats, rendererStats(visibleStats), visibleStats);
-  try {
-    mainWindow.webContents.send('stats:push', {
-      event: 'stats',
-      data: { type: 'stats', reason: 'presentation', mode, stats: copy }
-    });
-    const fingerprint = fingerprintStats(copy);
-    if (fingerprint) lastRendererStatsFingerprint = fingerprint;
-    return true;
-  } catch (_) {
-    lastRendererStatsFingerprint = null;
-    return false;
+  const message = {
+    event: 'stats',
+    data: { type: 'stats', reason: 'presentation', mode, stats: copy }
+  };
+  let delivered = false;
+  if (wantsMain) {
+    try {
+      mainWindow.webContents.send('stats:push', message);
+      const fingerprint = fingerprintStats(copy);
+      if (fingerprint) lastRendererStatsFingerprint = fingerprint;
+      delivered = true;
+    } catch (_) {
+      lastRendererStatsFingerprint = null;
+    }
   }
+  if (wantsDashboard) {
+    try {
+      const dashboardStats = { ...rendererStats(visibleStats, { dashboard: true }), snapshot: copy.snapshot };
+      dashboardWindow.webContents.send('stats:push', { ...message, data: { ...message.data, stats: dashboardStats } });
+      delivered = true;
+    } catch (_) {}
+  }
+  return delivered;
 }
 
 function refreshLimitStatsPresentation() {
@@ -6423,7 +6627,7 @@ function exitTrayMode() {
     if (typeof mainWindow.setSkipTaskbar === 'function') mainWindow.setSkipTaskbar(skipTaskbarForSettings(settings));
     setWindowMaximizable(mainWindow, true);
     applyMacSpaceBehavior(false);
-    const restore = restoredBounds() || DEFAULT_WINDOW;
+    const restore = restoredBounds(settings?.windowBounds) || DEFAULT_WINDOW;
     mainWindow.setBounds({
       width: restore.width,
       height: restore.height,
@@ -6446,6 +6650,7 @@ function startMode() {
   hubModeGeneration += 1;
   advanceMacWidgetProducerAndSourceEpoch();
   clearLatestHubStatsCache();
+  fixedRangeReads.clear();
   edgeDockManualStats = null;
   const icloudStop = stopIcloudRuntime();
   // Tear down collectors synchronously so they can't double-run while the
@@ -6556,7 +6761,7 @@ function usageCollectorNameForMode() {
 }
 
 function usageConfigForMode() {
-  return electronUsageConfig(usageCollectorNameForMode());
+  return electronUsageConfig(usageCollectorNameForMode(), { synced: mode !== 'local' });
 }
 
 function applyUsageRuntimeForMode() {
@@ -6584,6 +6789,7 @@ function stopAll() {
   disposePluginRuntime();
   cancelMainWindowHibernate();
   stopPersistBoundsTimer();
+  persistDashboardWindowBounds(dashboardWindow);
   stopLocalCollector({ skipCloseWatchers: true });
   stopStatsStream();
   stopHostStats();
@@ -6805,7 +7011,10 @@ async function fetchStats(options = {}) {
     }
   }
   const url = `${hubUrl.replace(/\/$/, '')}/api/stats`;
-  const response = await fetch(url, { headers: secret ? { authorization: `Bearer ${secret}` } : {} });
+  const response = await fetchFromHub(url, {
+    headers: secret ? { authorization: `Bearer ${secret}` } : {},
+    signal: AbortSignal.timeout(15_000)
+  });
   if (!response.ok) throw new Error(`Hub ${response.status}: ${(await response.text()).slice(0, 200)}`);
   const stats = await response.json();
   if (!hubModeRequestIsCurrent(requestGeneration, 'client', requestHubIdentity)) {
@@ -7369,7 +7578,7 @@ function createWindow(boundsOverride, options = {}) {
   cancelMainWindowHibernate();
   ensureSettingsLoaded();
   const collapsedFloatingBubble = options.collapsedFloatingBubble === true;
-  const bounds = boundsOverride || restoredBounds() || DEFAULT_WINDOW;
+  const bounds = boundsOverride || restoredBounds(settings?.windowBounds) || DEFAULT_WINDOW;
   const collapsedSizeLimits = {
     minWidth: bounds.width,
     minHeight: bounds.height,
@@ -7595,7 +7804,8 @@ function replaceMainWindow(bounds, options = {}) {
     });
     const next = mainWindow;
     if (process.platform === 'win32') {
-      if (windowsBackdropFallback(old) !== windowsBackdropFallback(next)) pushSettingsToRenderer();
+      if (windowsBackdropFallback(old) !== windowsBackdropFallback(next)
+        || windowsAccentActive(old) !== windowsAccentActive(next)) pushSettingsToRenderer();
       sendFloatingBubbleState();
       if (old?.isMinimized()) next.minimize();
       else if (old?.isVisible()) {
@@ -7624,10 +7834,58 @@ function discardFailedDashboardWindow(win, reason) {
   win.destroy();
 }
 
-function showDashboardWindow(win) {
+function showDashboardWindow(win, bounds) {
   if (win.isMinimized()) win.restore();
+  if (bounds) {
+    const { x, y, width, height } = win.getBounds();
+    if (width !== bounds.width || height !== bounds.height) {
+      win.setMinimumSize(
+        Math.min(bounds.width, DASHBOARD_WINDOW_LIMITS.minWidth),
+        Math.min(bounds.height, DASHBOARD_WINDOW_LIMITS.minHeight)
+      );
+    }
+    if (width !== bounds.width || height !== bounds.height
+      || (bounds.x !== undefined && (x !== bounds.x || y !== bounds.y))) {
+      win.setBounds(bounds);
+    }
+  }
   win.show();
   win.focus();
+  // macOS can reposition the window as it orders it front for the first time.
+  if (process.platform === 'darwin' && typeof bounds?.x === 'number') {
+    const [x, y] = win.getPosition();
+    if (x !== bounds.x || y !== bounds.y) win.setPosition(bounds.x, bounds.y);
+  }
+}
+
+function persistDashboardWindowBounds(win) {
+  if (!dashboardWindowReady || win !== dashboardWindow) return;
+  const bounds = normalWindowBounds(win) || pendingDashboardWindowBounds;
+  if (!bounds) return;
+  pendingDashboardWindowBounds = null;
+  if (!canPositionWindow()) {
+    bounds.x = settings.dashboardWindowBounds?.x;
+    bounds.y = settings.dashboardWindowBounds?.y;
+  }
+  persistWindowBounds(bounds, 'dashboardWindowBounds');
+}
+
+function restoredDashboardBounds() {
+  const saved = restoredBounds(settings?.dashboardWindowBounds, DASHBOARD_WINDOW_LIMITS);
+  const bounds = saved || DEFAULT_DASHBOARD_WINDOW;
+  const canPosition = canPositionWindow();
+  const { workArea } = (canPosition && displayForBounds(saved)) || screen.getPrimaryDisplay();
+  const width = Math.min(bounds.width, workArea.width);
+  const height = Math.min(bounds.height, workArea.height);
+  if (!saved || !canPosition) return { width, height };
+  const x = saved.x ?? workArea.x + Math.floor((workArea.width - width) / 2);
+  const y = saved.y ?? workArea.y + Math.floor((workArea.height - height) / 2);
+  return {
+    x: Math.max(workArea.x, Math.min(x, workArea.x + workArea.width - width)),
+    y: Math.max(workArea.y, Math.min(y, workArea.y + workArea.height - height)),
+    width,
+    height
+  };
 }
 
 function createDashboardWindow() {
@@ -7637,11 +7895,11 @@ function createDashboardWindow() {
     if (dashboardWindowReady) showDashboardWindow(dashboardWindow);
     return dashboardWindow;
   }
+  const bounds = restoredDashboardBounds();
   const windowOptions = {
-    width: 920,
-    height: 620,
-    minWidth: 560,
-    minHeight: 420,
+    ...bounds,
+    minWidth: Math.min(bounds.width, DASHBOARD_WINDOW_LIMITS.minWidth),
+    minHeight: Math.min(bounds.height, DASHBOARD_WINDOW_LIMITS.minHeight),
     frame: false,
     transparent: true,
     show: false,
@@ -7660,7 +7918,8 @@ function createDashboardWindow() {
   dashboardWindowReady = false;
   applyWindowsChrome(win, { round: true });
   suppressLinuxSystemContextMenu(win);
-  syncWindowsBackdrop(win, { enabled: nativeBlurEnabled(), mode: settings.windowsBackdrop });
+  applyDashboardWindowBehavior(win);
+  syncDashboardWindowsBackdrop(win);
   attachNativeMaterialVisibility(win, () => nativeMaterialOptions(settings, true));
   syncNativeMaterialVisibility(win, nativeMaterialOptions(settings, true));
   win.webContents.setWindowOpenHandler(({ url }) => {
@@ -7682,15 +7941,85 @@ function createDashboardWindow() {
   win.on('unresponsive', () => {
     if (!win.isVisible()) discardFailedDashboardWindow(win, 'renderer became unresponsive while opening');
   });
+  let boundsTimer;
+  const scheduleBoundsSave = () => {
+    if (!dashboardWindowReady || win !== dashboardWindow) return;
+    const bounds = normalWindowBounds(win);
+    if (!bounds) return;
+    pendingDashboardWindowBounds = bounds;
+    clearTimeout(boundsTimer);
+    boundsTimer = setTimeout(() => persistDashboardWindowBounds(win), 400);
+  };
+  for (const event of ['resize', 'resized', 'move', 'moved']) win.on(event, scheduleBoundsSave);
+  win.on('close', () => persistDashboardWindowBounds(win));
   win.on('closed', () => {
+    clearTimeout(boundsTimer);
     if (dashboardWindow === win) {
       dashboardWindow = null;
       dashboardWindowReady = false;
+      pendingDashboardWindowBounds = null;
     }
   });
-  win.loadFile(path.join(__dirname, 'renderer', 'dashboard.html'))
+  win.loadFile(path.join(__dirname, 'renderer', 'dashboard', 'dashboard.html'))
     .catch((error) => discardFailedDashboardWindow(win, `load failed: ${error.message}`));
   return win;
+}
+
+async function getSyncedFixedPeriod(snapshotId, source, selection) {
+  return resolveSyncedPeriodForStats(rendererSnapshots.get(snapshotId, source), source, selection);
+}
+
+async function resolveSyncedPeriodForStats(stats, source, selection) {
+  const revisions = stats?.fixedRangeRevisions || {};
+  const legacyPeriod = selection === 'today' || selection === 'month';
+  if (mode !== 'sync' || source !== hubModeGeneration || (!legacyPeriod && !fixedPeriodRangesApi.isDerived(selection))
+    || (!stats?.localFixedRangeRevision && !Object.keys(revisions).length)) return null;
+  const config = historyResolverOptions();
+  const localDevice = stats.localFixedRangeRevision ? snapshotLocalDevices.get(stats)?.localDevice : null;
+  const options = { weekStartsOn: SYNC_WEEK_STARTS_ON, now: Date.now() };
+  const { sessionTitlesEnabled, modelAliases, modelAliasGrouping } = settings || {};
+  const headers = config.secret ? { authorization: `Bearer ${config.secret}` } : {};
+  const read = (deviceId, name, window, revision) => {
+    if (config.hubMode === 'icloud') return config.icloudSync?.readFixedRange(deviceId, name, window, revision);
+    if (config.hubMode === 'host') return config.embeddedHub?.hub.readFixedRange(deviceId, name, window, revision);
+    if (!config.hubUrl) return null;
+    const key = JSON.stringify([source, currentHubStatsIdentity(config.hubMode), deviceId, name, window.start, window.end, revision]);
+    return fixedRangeReads.read(key, async (abort) => {
+      const signal = AbortSignal.any([abort, AbortSignal.timeout(15_000)]);
+      return fetchFixedRange(
+        (url, init) => fetchFromHub(url, { ...init, signal, redirect: 'error' }),
+        config.hubUrl, deviceId, name, window, headers, revision
+      );
+    });
+  };
+  const history = async (devices) => {
+    if (!config.historyEnabled) return null;
+    try {
+      const resolved = await resolveCompleteHistoryWithDevices(config);
+      return historyFallbackForDevices(selection, devices, resolved.deviceHistories, options);
+    } catch (_) { return null; }
+  };
+  const fixed = legacyPeriod
+    ? await resolveSyncedSessionPeriod(selection, stats.devices || [], revisions, { ...options, read })
+    : await resolveSyncedFixedPeriod(selection, stats.devices || [], revisions, { ...options, localDevice, read, history });
+  if (!fixed || source !== hubModeGeneration) return null;
+  const current = config.hubMode === 'icloud'
+    ? config.icloudSync?.getStats() : currentHubStatsCache();
+  if (current && Object.entries(revisions).some(([id, revision]) => (
+    id !== localDevice?.deviceId && current.fixedRangeRevisions?.[id] !== revision
+  ))) return null;
+  const input = {
+    periods: { [selection]: fixed.period },
+    devices: fixed.devices.map(({ period, ...device }) => ({ ...device, periods: { [selection]: period } }))
+  };
+  const visible = sessionTitlesEnabled === false || settings?.sessionTitlesEnabled === false
+    ? withoutSessionTitleStats(input) : input;
+  const projected = projectModelAliasStats(visible, modelAliases, { grouping: modelAliasGrouping });
+  return {
+    ...fixed,
+    period: projected.periods[selection],
+    devices: projected.devices.map(({ periods, ...device }) => ({ ...device, period: periods[selection] }))
+  };
 }
 
 async function getDashboardHistory(options = {}) {
@@ -7767,7 +8096,7 @@ app.whenReady().then(() => {
   // icon we have already handed to the shell, so the renderer has to recompose
   // it — nothing else in the app would notice the change.
   nativeTheme.on('updated', () => {
-    applyNativeMaterial();
+    if (applyNativeMaterial()) pushSettingsToRenderer();
     // Rebuilds the dock only when Reduce Transparency moved its material.
     if (edgeDockController?.isRunning()) edgeDockController.sync();
     if (notchController?.isRunning()) notchController.sync();
@@ -8152,6 +8481,24 @@ app.whenReady().then(() => {
     if (patch.collectionIntervalMs !== undefined) normalizedPatch.collectionIntervalMs = normalizeCollectionIntervalMs(patch.collectionIntervalMs, settings.collectionIntervalMs);
     if (patch.syncUploadIntervalMs !== undefined) normalizedPatch.syncUploadIntervalMs = normalizeSyncUploadIntervalMs(patch.syncUploadIntervalMs, settings.syncUploadIntervalMs);
     if (patch.heatmapMetric !== undefined) normalizedPatch.heatmapMetric = normalizeHeatmapMetric(patch.heatmapMetric, settings.heatmapMetric);
+    if (patch.dashboardHeatmapMetric !== undefined) {
+      normalizedPatch.dashboardHeatmapMetric = patch.dashboardHeatmapMetric === null ? null : normalizeHeatmapMetric(patch.dashboardHeatmapMetric);
+    }
+    if (patch.dashboardWindowBehavior !== undefined) {
+      normalizedPatch.dashboardWindowBehavior = normalizeWindowBehavior(patch.dashboardWindowBehavior, 'normal');
+    }
+    if (patch.dashboardBackdrop !== undefined) normalizedPatch.dashboardBackdrop = normalizeDashboardBackdrop(patch.dashboardBackdrop);
+    if (patch.dashboardStageView !== undefined) normalizedPatch.dashboardStageView = normalizeDashboardStageView(patch.dashboardStageView);
+    if (patch.dashboardFlowMode !== undefined) normalizedPatch.dashboardFlowMode = normalizeDashboardFlowMode(patch.dashboardFlowMode);
+    if (patch.dashboardQuotaProviderOrder !== undefined) {
+      normalizedPatch.dashboardQuotaProviderOrder = require('./plugins/limits').desktopProviderPreference(
+        patch.dashboardQuotaProviderOrder ?? '', parseLimitProviders
+      );
+    }
+    if (patch.dashboardVisiblePeriods !== undefined) normalizedPatch.dashboardVisiblePeriods = normalizeDashboardPeriods(patch.dashboardVisiblePeriods);
+    for (const key of ['dashboardFollowPeriodTabs', 'dashboardShowVelocity', 'dashboardShowQuotas', 'dashboardHighlightLowLimits']) {
+      if (patch[key] !== undefined) normalizedPatch[key] = parseBoolean(patch[key], settings[key]);
+    }
     if (patch.homeActiveDaysWindow !== undefined) normalizedPatch.homeActiveDaysWindow = normalizeHomeActiveDaysWindow(patch.homeActiveDaysWindow, settings.homeActiveDaysWindow);
     if (patch.sessionContextMetric !== undefined) normalizedPatch.sessionContextMetric = normalizeSessionContextMetric(patch.sessionContextMetric, settings.sessionContextMetric);
     settings = normalizeWindowBehaviorSettings({
@@ -8184,6 +8531,7 @@ app.whenReady().then(() => {
       showToolIcons: patch.showToolIcons ?? settings.showToolIcons ?? true,
       titleIconOnly: parseBoolean(patch.titleIconOnly ?? settings.titleIconOnly, false),
       showCompactTotalTokens: parseBoolean(patch.showCompactTotalTokens ?? settings.showCompactTotalTokens, false),
+      detailTokensUseCompactUnits: parseBoolean(patch.detailTokensUseCompactUnits ?? settings.detailTokensUseCompactUnits, false),
       showLiveTokenRate: parseBoolean(patch.showLiveTokenRate ?? settings.showLiveTokenRate, false),
       liveTokenRateScope: normalizeLiveTokenRateScope(patch.liveTokenRateScope ?? settings.liveTokenRateScope),
       compactTokenUnits: normalizeCompactTokenUnits(patch.compactTokenUnits ?? settings.compactTokenUnits),
@@ -8287,6 +8635,8 @@ app.whenReady().then(() => {
       limitProviderHiddenItems: normalizeLimitProviderHiddenItems(patch.limitProviderHiddenItems ?? settings.limitProviderHiddenItems),
       homeLimitAccountCount: normalizeHomeLimitAccountCount(patch.homeLimitAccountCount ?? settings.homeLimitAccountCount),
       periodMonthMode: normalizePeriodMonthMode(patch.periodMonthMode ?? settings.periodMonthMode),
+      periodTabOrder: patch.periodTabOrder === undefined ? settings.periodTabOrder
+        : fixedPeriodRangesApi.normalizePeriodTabOrder(patch.periodTabOrder),
       modelRankingMetric: normalizeRankingMetric(patch.modelRankingMetric ?? settings.modelRankingMetric),
       sessionTitlesEnabled: parseBoolean(patch.sessionTitlesEnabled ?? settings.sessionTitlesEnabled, true),
       sessionContextMetric: normalizeSessionContextMetric(patch.sessionContextMetric ?? settings.sessionContextMetric),
@@ -8404,6 +8754,9 @@ app.whenReady().then(() => {
       || settings.language !== previousLanguage
     ) && latestStats) updateDiscordRpcDisplay(latestStats);
     applyWindowSettings();
+    if (settings.dashboardWindowBehavior !== previousSettingsState.dashboardWindowBehavior) {
+      applyDashboardWindowBehavior(dashboardWindow);
+    }
     syncFloatingBubbleAvailability();
     syncDockSurfaces();
     applyNativeMaterial();
@@ -8447,6 +8800,9 @@ app.whenReady().then(() => {
           console.log(`[limits-runtime] settings refresh failed: ${error.message}`);
         });
       }
+    }
+    if (proxySettingChanged && !runtimeChange.modeStructural && settings.hubMode === 'client') {
+      void startStatsStream();
     }
     if (settings.showTrayIcon !== previousShowTrayIcon) {
       if (settings.showTrayIcon) ensureTray();
@@ -8493,6 +8849,9 @@ app.whenReady().then(() => {
         try { dashboardWindow.webContents.send('dashboard:historyChanged'); } catch (_) {}
       }
     }
+    if (settings.sessionTitlesEnabled !== previousSettingsState.sessionTitlesEnabled
+      || settings.hubSyncSessionTitles !== previousSettingsState.hubSyncSessionTitles
+      || settings.projectsEnabled !== previousSettingsState.projectsEnabled) fixedRangeReads.clear();
     pushSettingsToRenderer();
     if (settings.sessionTitlesEnabled !== previousSettingsState.sessionTitlesEnabled) {
       refreshLimitStatsPresentation();
@@ -8630,8 +8989,6 @@ app.whenReady().then(() => {
   ipcMain.handle('stats:get', async (event, options) => {
     if (options?.deltaResync === true) {
       if (!mainWindow || mainWindow.isDestroyed() || event.sender !== mainWindow.webContents) return null;
-      if (latestStatsSource?.generation !== hubModeGeneration
-        || latestStatsSource.identity !== currentHubStatsIdentity()) return null;
       // Send the full snapshot on the same channel as subsequent deltas.
       // An invoke reply can arrive after a newer push and roll the view back.
       sendStatsPresentationToRenderer({ force: true });
@@ -8658,6 +9015,9 @@ app.whenReady().then(() => {
       const fingerprint = fingerprintStats(copy);
       if (fingerprint) lastRendererStatsFingerprint = fingerprint;
     }
+    if (dashboardWindow && !dashboardWindow.isDestroyed() && event?.sender === dashboardWindow.webContents) {
+      return { ...rendererStats(visibleStats, { dashboard: true }), snapshot: copy.snapshot };
+    }
     return copy;
   });
   ipcMain.handle('devices:delete', async (_event, deviceId) => {
@@ -8668,7 +9028,11 @@ app.whenReady().then(() => {
       throw new Error(error.code || error.message, { cause: error });
     }
   });
-  ipcMain.handle('stats:allTimeSessions', (_event, snapshotId) => rendererAllTimeSessions(rendererSnapshots.get(snapshotId)));
+  ipcMain.handle('stats:allTimeSessions', async (_event, snapshotId) => {
+    const source = hubModeGeneration;
+    const sessions = await rendererAllTimeSessions(rendererSnapshots.get(snapshotId, source));
+    return source === hubModeGeneration ? sessions : null;
+  });
   // While a headless agent owns host or sync collection, this app's record stops
   // updating and the agent applies its own archive, so there is no count to show.
   ipcMain.handle('stats:archivedSessionCount', () => (
@@ -8695,9 +9059,30 @@ app.whenReady().then(() => {
     if (result.canceled || !result.filePaths[0]) return { ok: false, canceled: true };
     return { ok: true, dir: result.filePaths[0] };
   });
+  let reasonixSessionRead;
+  ipcMain.handle('session:listReasonix', async (event) => {
+    if (event.sender !== mainWindow?.webContents || !trackedClientSet(clientsCsvForSetting(settings?.clients)).has('reasonix')) return {};
+    const allTimeSince = settings.allTimeSince;
+    const todayKey = fixedPeriodRangesApi.localDayKey();
+    if (!reasonixSessionRead || reasonixSessionRead.allTimeSince !== allTimeSince || reasonixSessionRead.todayKey !== todayKey) {
+      const request = { allTimeSince, todayKey, promise: null };
+      request.promise = runSessionDetailWorker({ action: 'listReasonixSessions', allTimeSince }).finally(() => {
+        if (reasonixSessionRead === request) reasonixSessionRead = null;
+      });
+      reasonixSessionRead = request;
+    }
+    const sessions = await reasonixSessionRead.promise;
+    const { modelAliases, modelAliasGrouping, sessionTitlesEnabled } = settings;
+    return Object.fromEntries(Object.entries(sessions).map(([period, rows]) => [
+      period,
+      projectModelAliasSessions(latestStats || {}, sessionTitlesEnabled === false ? withoutSessionTitles(rows) : rows,
+        modelAliases, { grouping: modelAliasGrouping })
+    ]));
+  });
   ipcMain.handle('session:getDetail', (_event, args) => {
-    const { client, sessionId, period, sessionCost } = args || {};
-    return readSessionDetailForPlatform({ client, sessionId, period, sessionCost }, {
+    const { client, sessionId, period, sessionCost, reasonixSessionRef, snapshotSource } = args || {};
+    if (snapshotSource != null && snapshotSource !== hubModeGeneration) return null;
+    return readSessionDetailForPlatform({ client, sessionId, period, sessionCost, reasonixSessionRef }, {
       lookupModelPricing, getPricingRevision: () => pricingFingerprint({ pricingPath: customPricingPath() })
     });
   });
@@ -9011,14 +9396,19 @@ app.whenReady().then(() => {
     return true;
   });
   ipcMain.handle('dashboard:getHistory', (_event, options) => getDashboardHistory(options));
+  ipcMain.handle('stats:fixedPeriod', (_event, ...args) => getSyncedFixedPeriod(...args));
   ipcMain.on('dashboard:ready', (event) => {
     const win = BrowserWindow.fromWebContents(event.sender);
     if (!win || win !== dashboardWindow || win.isDestroyed()) return;
     // A shared renderer can retain an opaque canvas over the native material.
     // Restore transparency after load, before revealing the prepared Dashboard.
     if (process.platform === 'darwin') win.setBackgroundColor('#00000000');
+    const bounds = dashboardWindowReady ? null : restoredDashboardBounds();
     dashboardWindowReady = true;
-    showDashboardWindow(win);
+    showDashboardWindow(win, bounds);
+  });
+  ipcMain.on('dashboard:openAppSettings', (event) => {
+    if (event.sender === dashboardWindow?.webContents && event.senderFrame === event.sender.mainFrame) openSettingsFromTray();
   });
   ipcMain.on('dashboard:minimize', (event) => { BrowserWindow.fromWebContents(event.sender)?.minimize(); });
   ipcMain.on('dashboard:close', (event) => { BrowserWindow.fromWebContents(event.sender)?.close(); });
@@ -9131,7 +9521,11 @@ app.whenReady().then(() => {
   startAppUpdateBackgroundChecks();
 });
 
-app.on('second-instance', focusExistingWindow);
+app.on('second-instance', () => {
+  // Windows can dispatch this inside the native window constructor, before
+  // createWindow assigns mainWindow. Wait for that construction to return.
+  setImmediate(focusExistingWindow);
+});
 app.on('window-all-closed', () => {
   if (process.platform !== 'darwin' && !mainWindowHibernated) app.quit();
 });

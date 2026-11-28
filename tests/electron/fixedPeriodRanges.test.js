@@ -7,6 +7,24 @@ const ranges = require('../../src/electron/renderer/fixedPeriodRanges');
 const { resolveRegionalLocale } = require('../../src/electron/renderer/i18n');
 const { aggregateHistory, extractUsageFromTokscale, normalizePeriod } = require('../../src/shared/usage');
 
+test('offline device day boundaries follow its own zone through DST', () => {
+  const source = { periodWindows: { timeZone: 'America/New_York', today: { endsAt: '2026-03-07T05:00:00Z' } } };
+  assert.equal(ranges.nextDeviceDayBoundary(source, Date.parse('2026-03-07T04:59:59Z')), Date.parse('2026-03-07T05:00:00Z'));
+  assert.equal(ranges.nextDeviceDayBoundary(source, Date.parse('2026-03-07T05:00:00Z')), Date.parse('2026-03-08T05:00:00Z'));
+  assert.equal(ranges.nextDeviceDayBoundary(source, Date.parse('2026-03-08T05:00:00Z')), Date.parse('2026-03-09T04:00:00Z'));
+  assert.equal(ranges.nextDeviceDayBoundary(source, Date.parse('2026-11-01T04:00:00Z')), Date.parse('2026-11-02T05:00:00Z'));
+});
+
+test('custom period tabs keep a unique supported order or fall back to the legacy layout', () => {
+  assert.deepEqual(ranges.normalizePeriodTabOrder(undefined), []);
+  assert.deepEqual(ranges.normalizePeriodTabOrder(['today', 'today', 'month', 'invalid']), []);
+  assert.deepEqual(ranges.normalizePeriodTabOrder(['week', 'week', 'invalid', 'last7', 'yesterday']),
+    ['week', 'last7', 'yesterday']);
+  assert.deepEqual(ranges.normalizePeriodTabOrder(['allTime', 'month', 'week', 'today', 'last30', 'last7', 'yesterday']),
+    ['allTime', 'month', 'week', 'today', 'last30', 'last7']);
+  assert.deepEqual(ranges.PERIOD_TAB_OPTIONS.map(ranges.displayLabel), ['DAY', 'YDAY', 'WEEK', '7D', 'MONTH', '30D', 'TOTAL']);
+});
+
 function day(date, tokens, client = 'claude', model = 'opus') {
   return {
     date,
@@ -679,8 +697,8 @@ test('fixed periods fail closed without History and for unsupported detail views
   }).reason, 'historyDisabled');
   assert.equal(ranges.supportsBreakdown('last7', 'session'), false);
   assert.equal(ranges.supportsBreakdown('last7', 'project'), false);
-  assert.equal(ranges.supportsBreakdown('last7', 'device', { deviceHistoriesAvailable: true }), true);
-  assert.equal(ranges.supportsBreakdown('last7', 'device', { deviceHistoriesAvailable: false }), false);
+  assert.equal(ranges.supportsBreakdown('last7', 'device', { deviceRowsAvailable: true }), true);
+  assert.equal(ranges.supportsBreakdown('last7', 'device', { deviceRowsAvailable: false }), false);
   assert.equal(ranges.supportsBreakdown('last7', 'model'), true);
 });
 
@@ -743,4 +761,19 @@ test('latest request coordinator catches up revisions and upgrades a background 
   await Promise.resolve();
   assert.deepEqual(settled, [{ render: true }]);
   assert.equal(coordinator.active(), false);
+});
+
+test('a ready native range gives its local device the headline period before History loads', () => {
+  const period = { totalTokens: 70, clients: { claude: 70 } };
+  const localDevice = { deviceId: 'mac', hostname: 'Mac', periods: { today: { totalTokens: 10 } } };
+  for (const selection of ['yesterday', 'week', 'last7', 'last30']) {
+    const snapshot = { status: 'ready', selection, native: true, period };
+    const [device] = ranges.devicesForReadySnapshot(snapshot, selection, localDevice);
+    assert.equal(device.deviceId, 'mac');
+    assert.equal(device.hostname, 'Mac');
+    assert.equal(device.periods[selection], period);
+    assert.deepEqual(localDevice.periods, { today: { totalTokens: 10 } });
+    assert.deepEqual(ranges.devicesForReadySnapshot(snapshot, selection), []);
+    assert.deepEqual(ranges.devicesForReadySnapshot({ ...snapshot, native: false }, selection, localDevice), []);
+  }
 });

@@ -18,7 +18,7 @@
         </div>
         <div class="title-controls">
           <div id="pluginPageActions" class="plugin-page-actions hidden"></div>
-          <nav class="tabs" aria-label="Period tabs">
+          <nav id="periodTabs" class="tabs" aria-label="Period tabs" data-i18n-aria-label="periodRange.tabsTitle">
             <span class="tab-indicator" aria-hidden="true"></span>
             <button class="tab active" data-period="today" data-period-slot="today">DAY</button>
             <button id="monthPeriodTab" class="tab" data-period="month" data-period-slot="month" aria-haspopup="menu" aria-expanded="false">MONTH</button>
@@ -26,6 +26,7 @@
           </nav>
           <div id="monthPeriodMenu" class="view-switcher-menu period-menu hidden" popover="manual" role="menu" aria-labelledby="monthPeriodTab">
             <button class="view-switcher-menu-item" type="button" role="menuitemradio" data-fixed-period="month"><span class="view-switcher-menu-label" data-i18n="periodRange.month">This month</span></button>
+            <button class="view-switcher-menu-item" type="button" role="menuitemradio" data-fixed-period="yesterday"><span class="view-switcher-menu-label" data-i18n="periodRange.yesterday">Yesterday</span></button>
             <button class="view-switcher-menu-item" type="button" role="menuitemradio" data-fixed-period="week"><span class="view-switcher-menu-label" data-i18n="periodRange.week">This week</span></button>
             <button class="view-switcher-menu-item" type="button" role="menuitemradio" data-fixed-period="last7"><span class="view-switcher-menu-label" data-i18n="periodRange.last7">Last 7 days</span></button>
             <button class="view-switcher-menu-item" type="button" role="menuitemradio" data-fixed-period="last30"><span class="view-switcher-menu-label" data-i18n="periodRange.last30">Last 30 days</span></button>
@@ -127,7 +128,7 @@
                     <div class="settings-group-header maintenance-header"><span data-i18n="settings.proxy.title">Network proxy</span><span id="networkProxySource"></span></div>
                     <label><span data-i18n="settings.proxy.url">Proxy URL</span><input id="proxyUrlInput" type="text" spellcheck="false" autocomplete="off" placeholder="http://127.0.0.1:7890" aria-describedby="networkProxyNote" /></label>
                     <label><span data-i18n="settings.proxy.noProxy">Bypass proxy for</span><input id="noProxyInput" type="text" spellcheck="false" autocomplete="off" placeholder="example.com, .internal.net, 10.0.0.1:8080" data-i18n-placeholder="settings.proxy.noProxyPlaceholder" /></label>
-                    <p id="networkProxyNote" class="settings-note" data-i18n="settings.proxy.note">Used only for Token Monitor's own limit and account requests; sign-ins in your browser or a CLI are not affected. While set, it replaces HTTP(S)_PROXY and NO_PROXY for these requests, so list any hosts to bypass here; local addresses always stay direct. Leave empty to use the environment or system proxy.</p>
+                    <p id="networkProxyNote" class="settings-note" data-i18n="settings.proxy.note">Used for Token Monitor's own limit and account requests and desktop Hub sync; sign-ins in your browser or a CLI are not affected. While set, it replaces HTTP(S)_PROXY and NO_PROXY for these requests, so list any hosts to bypass here; local addresses always stay direct. Leave empty to use the environment or system proxy.</p>
                     <div id="proxyUrlError" class="hub-status error" role="alert" hidden></div>
                   </div>
                   <div id="tokscaleGroup" class="settings-group advanced-settings-block maintenance-panel">
@@ -216,12 +217,23 @@
             </div>
             <div class="settings-subgroup main-numbers-group">
               <div class="main-numbers-title" data-i18n="settings.main.statsCurrency">Stats &amp; currency</div>
+              <div id="periodTabSettings" class="period-tab-settings">
+                <div class="edge-dock-composer-heading">
+                  <span id="periodTabsLabel" data-i18n="periodRange.tabsTitle">Usage range buttons</span>
+                  <button id="resetPeriodTabs" class="edge-dock-composer-reset" type="button" data-i18n="settings.edgeDock.reset" hidden>Reset</button>
+                </div>
+                <div id="shownPeriodTabs" class="period-tab-list period-tab-list-shown" role="group" aria-labelledby="periodTabsLabel" aria-describedby="periodTabsHint"></div>
+                <div id="availablePeriodTabs" class="period-tab-list" role="group" aria-label="Not shown" data-i18n-aria-label="settings.views.hiddenGroup" aria-describedby="periodTabsHint"></div>
+                <p id="periodTabsHint" class="settings-note" data-i18n="periodRange.tabsHint">Choose 3–6 ranges. Drag between rows to show or hide, and within the top row to reorder. You can also click to show or hide.</p>
+                <p id="periodTabsError" class="settings-note hidden" role="alert"></p>
+              </div>
               <div class="settings-item period-default-setting">
                 <span class="settings-item-text" data-reset-setting="periodMonthMode">
                   <label for="periodMonthModeInput" class="settings-item-title" data-i18n="periodRange.settingsTitle">Default usage range</label>
                 </span>
                 <select id="periodMonthModeInput" aria-describedby="periodMonthModeNote">
                   <option value="month" data-i18n="periodRange.month">This month</option>
+                  <option value="yesterday" data-i18n="periodRange.yesterday">Yesterday</option>
                   <option value="week" data-i18n="periodRange.week">This week</option>
                   <option value="last7" data-i18n="periodRange.last7">Last 7 days</option>
                   <option value="last30" data-i18n="periodRange.last30">Last 30 days</option>
@@ -606,6 +618,7 @@
             <div class="settings-subgroup settings-appearance-usage">
               <div class="settings-group-header"><span data-i18n="settings.appearance.group.usage">Usage display</span></div>
               <div class="checkbox-label settings-item"><span class="settings-item-text" data-reset-setting="showCompactTotalTokens"><label for="showCompactTotalTokensInput" class="settings-item-title" data-i18n="settings.appearance.compactTotalTokens">Show compact token total</label></span><input id="showCompactTotalTokensInput" type="checkbox" /></div>
+              <div class="checkbox-label settings-item"><span class="settings-item-text" data-reset-setting="detailTokensUseCompactUnits"><label for="detailTokensUseCompactUnitsInput" class="settings-item-title" data-i18n="settings.appearance.detailCompactTokens">Compact detail tokens</label></span><input id="detailTokensUseCompactUnitsInput" type="checkbox" aria-describedby="detailTokensUseCompactUnitsNote" /><span id="detailTokensUseCompactUnitsNote" class="settings-note settings-item-desc" data-i18n="settings.appearance.detailCompactTokensNote">Use compact units in breakdown views and session details. Click any number to temporarily view the exact count.</span></div>
               <div id="compactTokenUnitsRow" class="settings-item hidden"><span class="settings-item-text" data-reset-setting="compactTokenUnits"><label for="compactTokenUnitsInput" class="settings-item-title" data-i18n="settings.appearance.compactTokenUnits">Compact token units</label></span><select id="compactTokenUnitsInput"><option value="western" data-i18n="settings.appearance.compactTokenUnitsWestern">International (K/M/B)</option><option value="localized" data-i18n="settings.appearance.compactTokenUnitsLocalized">East Asian (萬/億)</option></select></div>
               <div class="checkbox-label settings-item"><span class="settings-item-text" data-reset-setting="showLiveTokenRate"><label for="showLiveTokenRateInput" class="settings-item-title" data-i18n="settings.appearance.liveTokenRate">Show live token rate</label></span><input id="showLiveTokenRateInput" type="checkbox" aria-describedby="showLiveTokenRateNote" /><span id="showLiveTokenRateNote" class="settings-note settings-item-desc" data-i18n="settings.appearance.liveTokenRateNote">Show the latest generation speed in the footer. Click it to switch between tok/s and TPM.</span></div>
               <div id="liveTokenRateScopeRow" class="settings-item hidden"><span class="settings-item-text" data-reset-setting="liveTokenRateScope"><label for="liveTokenRateScopeInput" class="settings-item-title" data-i18n="settings.appearance.liveTokenRateScope">Live rate scope</label></span><select id="liveTokenRateScopeInput"><option value="all" data-i18n="settings.appearance.liveTokenRateScopeAll">All devices</option><option value="device" data-i18n="settings.appearance.liveTokenRateScopeDevice">This device</option></select></div>
@@ -1848,6 +1861,7 @@
     <script src="../../shared/sessionLive.js"></script>
     <script src="../../shared/sessionActivityProjection.js"></script>
     <script src="../sessionTitleDisplay.js"></script>
+    <script src="detailTokenDisplay.js"></script>
     <script src="sessionRows.js"></script>
     <script src="overflowText.js"></script>
     <script src="breakdownRenderPolicy.js"></script>

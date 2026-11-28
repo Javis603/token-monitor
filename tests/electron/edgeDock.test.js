@@ -628,8 +628,10 @@ test('a startedAt-only session keeps its display age without becoming running', 
   }
   assert.equal(edgeDockPresentation.runningSessionSummary([home]).count, 0);
   assert.equal(edgeDockPresentation.nextRunningExpiryAt([home]), 0);
-  assert.match(readRendererFile('app.js'), /homeSessionAgo\(Date\.parse\(row\.lastUsedAt \|\| row\.startedAt \|\| ''\)\)/);
-  assert.match(readRendererFile(path.join('edgeDock', 'dock.js')), /relativeAgo\(session\.lastUsedAt \|\| session\.startedAt\)/);
+  assert.match(readRendererFile('app.js'), /const ageAt = Date\.parse\(row\.lastUsedAt \|\| row\.startedAt \|\| ''\);/);
+  assert.match(readRendererFile('app.js'), /sessionAgeShort\(ageAt, now\)/);
+  assert.match(readRendererFile(path.join('edgeDock', 'dock.js')), /relativeAgo\(ageSource, now\)/);
+  assert.match(readRendererFile(path.join('edgeDock', 'dock.js')), /sessionRowsApi\.sessionAgeShort\(ageSource, now\)/);
 });
 
 test('running sessions are never truncated by the recent cap, and the count matches the rows', () => {
@@ -2012,6 +2014,47 @@ test('a pinned rail window ignores automatic exhaustion and keeps its identity a
   assert.equal(build([scoped, weekly, { ...session, remainingPercent: 72 }]).remainingPercent, 72);
   assert.equal(build([scoped, weekly]).remainingPercent, null);
   assert.equal(build([scoped, weekly]).status, 'error');
+});
+
+test('an Antigravity group pin uses only that group across visible accounts', () => {
+  const geminiSession = { kind: 'session', label: 'Gemini 5-hour', remainingPercent: 85 };
+  const geminiWeekly = { kind: 'weekly', label: 'Gemini weekly', remainingPercent: 55 };
+  const claudeSession = { kind: 'session', label: 'Claude/GPT 5-hour', remainingPercent: 0 };
+  const main = provider('antigravity', { accountKey: 'main', windows: [geminiSession, geminiWeekly, claudeSession] });
+  const other = provider('antigravity', { accountKey: 'other', windows: [
+    { ...geminiSession, remainingPercent: 70 },
+    { ...geminiWeekly, remainingPercent: 60 }
+  ] });
+  const unrelated = provider('antigravity', { accountKey: 'unrelated', windows: [claudeSession] });
+  const stats = { limits: { providers: [main, other, unrelated] } };
+  const build = (options) => buildEdgeDockCells(stats, { items: normalizeEdgeDockItems([
+    { type: 'limit', provider: 'antigravity', ...options }
+  ]) })[0];
+  const windowKey = JSON.stringify(['group', 'Gemini']);
+
+  assert.equal(build({}).remainingPercent, 0);
+  assert.equal(build({ windowKey }).remainingPercent, 70);
+  const pinned = build({ windowKey, hiddenAccounts: ['other'] });
+  assert.equal(pinned.remainingPercent, 85);
+  assert.equal(pinned.severityPercent, 55);
+  assert.equal(pinned.windowKind, 'session');
+  assert.deepEqual(pinned.accounts[0].record, main);
+  assert.equal(build({ windowKey: limitWindowKey(geminiWeekly) }).remainingPercent, 55);
+
+  main.windows = [geminiSession, { ...geminiWeekly, remainingPercent: 5 }, claudeSession];
+  const lowWeekly = build({ windowKey });
+  assert.equal(lowWeekly.remainingPercent, 70);
+  assert.equal(lowWeekly.severityPercent, 5);
+
+  main.windows = [geminiSession, { ...geminiWeekly, remainingPercent: 0 }, claudeSession];
+  const exhausted = build({ windowKey });
+  assert.equal(exhausted.remainingPercent, 0);
+  assert.equal(exhausted.windowKind, 'weekly');
+
+  main.windows = [claudeSession];
+  other.stale = true;
+  assert.equal(build({ windowKey }).remainingPercent, null);
+  assert.equal(normalizeEdgeDockItems([{ type: 'limit', provider: 'claude', windowKey }])[0].windowKey, '');
 });
 
 test('backend identity separates same-label windows and survives label changes', () => {

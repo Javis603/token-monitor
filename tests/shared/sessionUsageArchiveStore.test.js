@@ -812,7 +812,9 @@ test('incremental replay treats fully pruned session rows as tombstones', (t) =>
   const refreshed = createSessionUsageArchiveStore(options);
   const rebased = createSessionUsageArchiveStore(options);
   const oldDate = new Date(2026, 8, 15, 8, 0);
-  const newDate = new Date(2026, 8, 16, 8, 0);
+  // Past the native ranges' 30 retained days, so the ended Today is not kept
+  // as a day and the row is pruned completely.
+  const newDate = new Date(2026, 9, 20, 8, 0);
 
   current.capture(summary(100, 'one', ['today']), oldDate);
   refreshed.read(new Date(2026, 8, 15, 8, 1));
@@ -823,7 +825,7 @@ test('incremental replay treats fully pruned session rows as tombstones', (t) =>
 
   assert.equal(rebased.capture(
     summary(125, 'one', ['allTime']),
-    new Date(2026, 8, 16, 8, 1)
+    new Date(2026, 9, 20, 8, 1)
   ).error, null);
   const retained = current.refresh().sessions['codex:one'].periods;
   assert.equal(retained.today, undefined);

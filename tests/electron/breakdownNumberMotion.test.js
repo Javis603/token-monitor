@@ -52,6 +52,7 @@ function harness(count = 100) {
     },
     cancelRowNumberAnimation(el) { motions.delete(el); delete el.dataset.motionTarget; },
     formatNumber: value => String(value),
+    formatDetailTokens: value => String(value),
     animateBarBetween(fill, from, to) {
       if (rows.length > 40) assert.fail('large lists must not animate bars');
       bars.push({ fill, from, to });

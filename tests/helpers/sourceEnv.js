@@ -17,6 +17,11 @@ const SOURCE_ENV_KEYS = Object.freeze([
   // be cleared like the rest of this list.
   'HOME',
   'USERPROFILE',
+  // Windows sources under %APPDATA% and %LOCALAPPDATA% resolve through these
+  // before the stubbed home, so a developer's real VS Code, Zed or Kiro data
+  // would answer for the fixture.
+  'APPDATA',
+  'LOCALAPPDATA',
   'XDG_DATA_HOME',
   'COPILOT_OTEL_FILE_EXPORTER_PATH',
   'CODEX_HOME',

@@ -58,11 +58,11 @@ test('system reduced motion receives the same catch-all CSS as explicit On', () 
 
 test('main window and dashboard load the shared preference before their renderer', () => {
   const index = read('index.html');
-  const dashboard = read('dashboard.html');
+  const dashboard = read('dashboard/dashboard.html');
 
   const indexMotion = index.indexOf('../motionPreference.js');
   const indexApp = index.indexOf('app.js');
-  const dashboardMotion = dashboard.indexOf('../motionPreference.js');
+  const dashboardMotion = dashboard.indexOf('../../motionPreference.js');
   const dashboardApp = dashboard.indexOf('dashboard.js');
   assert.notEqual(indexMotion, -1, 'main window should load the shared motion preference');
   assert.notEqual(indexApp, -1, 'main window should load app.js');

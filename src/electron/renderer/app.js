@@ -188,6 +188,7 @@ const subscriptionApi = window.TokenMonitorSubscriptionDisplay;
 // cannot describe one record two ways.
 const subscriptionText = window.TokenMonitorSubscriptionText;
 const compactTokenApi = window.TokenMonitorCompactTokens;
+const detailTokenDisplayApi = window.TokenMonitorDetailTokenDisplay;
 const trayLayoutApi = window.TokenMonitorTrayLayout;
 const sessionRowsApi = window.TokenMonitorSessionRows;
 const breakdownRenderPolicyApi = window.TokenMonitorBreakdownRenderPolicy;
@@ -275,7 +276,7 @@ const VIEW_DISPLAY_OPTIONS = [
   { id: 'trends', labelKey: 'views.trends' },
   { id: 'status', labelKey: 'views.status' }
 ];
-const viewPeriodValues = new Set(['today', 'month', 'week', 'last7', 'last30', 'allTime']);
+const viewPeriodValues = new Set(fixedPeriodRangesApi.PERIOD_TAB_OPTIONS);
 const viewBreakdownValues = new Set(['home', ...baseBreakdownOrder, 'status', 'limits', 'trends']);
 const HOME_MODULE_OPTIONS = [
   { id: 'limits', labelKey: 'home.limits', viewId: 'limits' },
@@ -393,6 +394,9 @@ state.fixedPeriodHistoryRetryTimer = null;
 state.fixedPeriodHistoryPromise = null;
 state.fixedPeriodHistoryCoordinator = null;
 state.fixedPeriodSnapshot = null;
+state.syncedFixedPeriod = null;
+state.syncedFixedPeriodCache = new Map();
+state.syncedFixedPeriodWarmup = null;
 state.periodMenuOpen = false;
 state.sessionToolFilter = '';
 state.sessionPage = 0;
@@ -404,7 +408,7 @@ state.sessionRowsCache = null;
 let directBreakdownOverride = null;
 state.homeActivitySettingsExpanded = false;
 state.settingsSections = Object.fromEntries(SETTINGS_SECTION_IDS.map((id) => [id, false]));
-const defaultAppearance = { glassOpacity: 68, glassBlur: 32, backgroundImageOpacity: 28, zoomFactor: 1, systemGlass: true, windowsBackdrop: 'acrylic', macBackdrop: 'vibrancy', reduceMotion: 'system', tokenNumberAnimation: 'roll', showLiveDot: true, showToolIcons: true, titleIconOnly: true, showCompactTotalTokens: false, showLiveTokenRate: false, liveTokenRateScope: 'all', compactTokenUnits: 'western', settingsInTitlebar: false };
+const defaultAppearance = { glassOpacity: 68, glassBlur: 32, backgroundImageOpacity: 28, zoomFactor: 1, systemGlass: true, windowsBackdrop: 'acrylic', macBackdrop: 'vibrancy', reduceMotion: 'system', tokenNumberAnimation: 'roll', showLiveDot: true, showToolIcons: true, titleIconOnly: true, showCompactTotalTokens: false, detailTokensUseCompactUnits: false, showLiveTokenRate: false, liveTokenRateScope: 'all', compactTokenUnits: 'western', settingsInTitlebar: false };
 const nativeGlassTintSettings = [['macGlassTint', 'liquid-glass'], ['macClearGlassTint', 'liquid-glass-clear']];
 let nativeMaterialState = glassRenderingApi.normalizeNativeMaterialState();
 let nativeMaterialRevision = 0;
@@ -609,6 +613,7 @@ Object.assign(els, {
   titleIconInput: document.getElementById('titleIconInput'),
   tokenNumberAnimationInput: document.getElementById('tokenNumberAnimationInput'),
   showCompactTotalTokensInput: document.getElementById('showCompactTotalTokensInput'),
+  detailTokensUseCompactUnitsInput: document.getElementById('detailTokensUseCompactUnitsInput'),
   showLiveTokenRateInput: document.getElementById('showLiveTokenRateInput'),
   liveTokenRateScopeRow: document.getElementById('liveTokenRateScopeRow'),
   liveTokenRateScopeInput: document.getElementById('liveTokenRateScopeInput'),
@@ -708,9 +713,11 @@ function toggleAccordionRow(row) {
   const isExpanded = row.classList.contains('expanded');
   document.querySelectorAll('.row.expanded').forEach((other) => {
     other.classList.remove('expanded');
+    other.querySelector('.row-accordion-inner').inert = true;
     other.querySelector('.row-head')?.setAttribute('aria-expanded', 'false');
   });
   if (!isExpanded) {
+    row.querySelector('.row-accordion-inner').inert = false;
     row.classList.add('expanded');
     row.querySelector('.row-head')?.setAttribute('aria-expanded', 'true');
     renderActiveToolDetail();
@@ -720,12 +727,13 @@ function toggleAccordionRow(row) {
 }
 
 document.addEventListener('click', (event) => {
-  if (event.target.closest('button, a, input, select, textarea')) return;
+  if (event.target.closest('button, a, input, select, textarea, [data-detail-token-toggle="true"]')) return;
   const row = event.target.closest('.row.has-accordion');
   if (row) toggleAccordionRow(row);
 });
 
 document.addEventListener('keydown', (event) => {
+  if (event.target.closest('[data-detail-token-toggle="true"]')) return;
   const row = event.target.closest('.row-head')?.closest('.row.has-accordion');
   if (!row || (event.key !== 'Enter' && event.key !== ' ')) return;
   event.preventDefault();
@@ -770,7 +778,7 @@ function currentLocale() {
 }
 
 function currentCalendarLocale() {
-  return i18n.resolveRegionalLocale([...preferredLanguages(), state.settings?.locale]);
+  return state.settings?.calendarLocale || i18n.resolveRegionalLocale([...preferredLanguages(), state.settings?.locale]);
 }
 
 function supportsLocalizedCompactTokenUnits(locale) {
@@ -1077,6 +1085,74 @@ function hideTotalCompact() {
   els.totalTokensCompact.textContent = '';
   els.totalTokensCompact.classList.add('hidden');
 }
+function isDetailCompactEnabled() {
+  return state.settings?.detailTokensUseCompactUnits === true;
+}
+function formatDetailTokens(value) {
+  return detailTokenDisplayApi.formatDetailTokens(value);
+}
+function detailTokenDisplaySignature() {
+  return detailTokenDisplayApi.stateSignature();
+}
+function captureDetailTokenFocus() {
+  const active = document.activeElement;
+  if (!active || active.dataset?.detailTokenToggle !== 'true') return null;
+  const host = state.openSession ? els.sessionDetail : els.breakdown;
+  if (!host || !host.contains?.(active)) return null;
+  const row = active.closest?.('.row[data-key]');
+  if (row) {
+    const tokens = Array.from(row.querySelectorAll('[data-detail-token-toggle="true"]'));
+    const index = tokens.indexOf(active);
+    if (index >= 0) return { host, rowKey: row.dataset.key, index };
+  }
+  const tokens = Array.from(host.querySelectorAll('[data-detail-token-toggle="true"]'));
+  const index = tokens.indexOf(active);
+  return index >= 0 ? { host, rowKey: '', index } : null;
+}
+function restoreDetailTokenFocus(anchor) {
+  if (!anchor) return;
+  const scope = anchor.rowKey
+    ? Array.from(anchor.host.querySelectorAll('.row[data-key]')).find((row) => row.dataset.key === anchor.rowKey)
+    : anchor.host;
+  const target = scope?.querySelectorAll('[data-detail-token-toggle="true"]')?.[anchor.index];
+  if (target && document.activeElement !== target) {
+    target.focus?.({ preventScroll: true });
+  }
+}
+function refreshDetailTokenViews() {
+  const focusAnchor = captureDetailTokenFocus();
+  settleRowNumberAnimations();
+  if (state.openSession?.kind === 'session-group') {
+    renderSessionGroupDetail(state.openSession);
+    restoreDetailTokenFocus(focusAnchor);
+    return;
+  }
+  if (state.openSession?.detail) {
+    renderSessionDetail({ detail: state.openSession.detail, preserveScroll: true });
+    restoreDetailTokenFocus(focusAnchor);
+    return;
+  }
+  if (state.stats && ['tool', 'model', 'project', 'device', 'session'].includes(state.breakdown)) {
+    render();
+    restoreDetailTokenFocus(focusAnchor);
+  }
+}
+function decorateDetailTokenElement(el, value, options = {}) {
+  const exactText = options.exactText !== undefined ? String(options.exactText) : formatNumber(value);
+  detailTokenDisplayApi.decorateTokenElement(el, exactText, {
+    ...(options.enabled !== undefined ? { enabled: options.enabled } : {}),
+    exactHint: t('detail.tokens.clickForExact'),
+    compactHint: t('detail.tokens.clickForCompact')
+  });
+}
+detailTokenDisplayApi.configure({
+  isEnabled: isDetailCompactEnabled,
+  getUnitSystem: effectiveCompactTokenUnits,
+  getLocale: currentLocale,
+  formatExact: formatNumber,
+  formatCompact: (value, unitSystem, locale) => formatCompact(value, unitSystem, locale),
+  onToggle: refreshDetailTokenViews
+});
 function currentTokenRateValue() {
   const period = state.stats?.periods?.[state.period];
   const burn = state.settings?.tokenRateMode === 'burn';
@@ -2236,7 +2312,7 @@ function settleRowNumberAnimations() {
     cancelAnimationFrame(motion.handle);
     motion.settleRoll?.();
     const target = Number(motion.target ?? el.dataset.motionTarget ?? el.dataset.motionValue ?? 0);
-    el.textContent = formatNumber(target);
+    el.textContent = formatDetailTokens(target);
     el.dataset.motionValue = String(target);
     delete el.dataset.motionTarget;
   }
@@ -2290,7 +2366,7 @@ function animateRowNumber(el, from, to, duration = 420, capturedRoll = null, { s
   }
   const startValue = Number.isFinite(previous?.value) ? previous.value : from;
   if (!Number.isFinite(startValue) || !Number.isFinite(to) || startValue === to || prefersReducedMotion()) {
-    el.textContent = formatNumber(to);
+    el.textContent = formatDetailTokens(to);
     el.dataset.motionValue = String(Number(to) || 0);
     delete el.dataset.motionTarget;
     rowNumberAnimations.delete(el);
@@ -2302,17 +2378,17 @@ function animateRowNumber(el, from, to, duration = 420, capturedRoll = null, { s
   if (rolling) {
     duration = tokenNumberAnimationApi.duration;
     motion.value = to;
-    motion.settleRoll = tokenNumberAnimationApi.beginRoll(el, formatNumber(startValue), formatNumber(to), to > startValue, null, rollSnapshot,
+    motion.settleRoll = tokenNumberAnimationApi.beginRoll(el, formatDetailTokens(startValue), formatDetailTokens(to), to > startValue, null, rollSnapshot,
       { period: synchronized, whole: synchronized });
   } else {
-    el.textContent = formatNumber(startValue);
+    el.textContent = formatDetailTokens(startValue);
   }
   el.dataset.motionValue = String(motion.value);
   el.dataset.motionTarget = String(to);
   function frame(now) {
     if (prefersReducedMotion()) {
       motion.settleRoll?.();
-      el.textContent = formatNumber(to);
+      el.textContent = formatDetailTokens(to);
       el.dataset.motionValue = String(Number(to) || 0);
       delete el.dataset.motionTarget;
       if (rowNumberAnimations.get(el) === motion) rowNumberAnimations.delete(el);
@@ -2321,7 +2397,7 @@ function animateRowNumber(el, from, to, duration = 420, capturedRoll = null, { s
     const progress = Math.min(1, (now - startedAt) / duration);
     if (!rolling) {
       motion.value = startValue + delta * easeOutQuart(progress);
-      el.textContent = formatNumber(motion.value);
+      el.textContent = formatDetailTokens(motion.value);
       el.dataset.motionValue = String(motion.value);
     }
     if (progress < 1) {
@@ -2352,7 +2428,7 @@ function settleOffscreenBreakdownNumbers() {
   for (const [el, motion] of rowNumberAnimations) {
     if (visible.has(el)) continue;
     cancelRowNumberAnimation(el);
-    el.textContent = formatNumber(motion.target);
+    el.textContent = formatDetailTokens(motion.target);
     el.dataset.motionValue = String(motion.target);
   }
 }
@@ -2372,7 +2448,7 @@ function animateBreakdownFrom(snapshot, { duration = 420, synchronized = false }
   for (const [el, motion] of rowNumberAnimations) {
     if (animatedValues.has(el)) continue;
     cancelRowNumberAnimation(el);
-    el.textContent = formatNumber(motion.target);
+    el.textContent = formatDetailTokens(motion.target);
     el.dataset.motionValue = String(motion.target);
   }
   let enteringIndex = 0;
@@ -2670,6 +2746,7 @@ function createDeviceRemoveButton(deviceId, deleteText, deleteConfirmText) {
 function renderDeviceAccordion(accordionInner, deviceDetail) {
   const signature = JSON.stringify([
     toolIconsEnabled(state.settings?.showToolIcons),
+    detailTokenDisplaySignature(),
     deviceDetail.emptyText,
     deviceDetail.metaParts,
     deviceDetail.tools.map((tool) => [
@@ -2713,7 +2790,8 @@ function renderDeviceAccordion(accordionInner, deviceDetail) {
       label.append(mark, name, percent);
       const metrics = document.createElement('span');
       metrics.className = 'device-tool-metrics';
-      metrics.textContent = formatNumber(tool.value);
+      metrics.textContent = formatDetailTokens(tool.value);
+      decorateDetailTokenElement(metrics, tool.value);
       head.append(label, metrics);
       toolGroup.append(head);
 
@@ -2728,7 +2806,8 @@ function renderDeviceAccordion(accordionInner, deviceDetail) {
           modelName.textContent = model.name;
           const modelValue = document.createElement('span');
           modelValue.className = 'device-model-value';
-          modelValue.textContent = formatCompact(model.value);
+          modelValue.textContent = isDetailCompactEnabled() ? formatDetailTokens(model.value) : formatCompact(model.value);
+          decorateDetailTokenElement(modelValue, model.value);
           modelRow.append(modelName, modelValue);
           modelList.append(modelRow);
         }
@@ -2747,7 +2826,7 @@ function renderDeviceAccordion(accordionInner, deviceDetail) {
   accordionInner.dataset.signature = signature;
 }
 
-function appendAccordionMetricRow(content, labelText, valueText, percent = null, className = '') {
+function appendAccordionMetricRow(content, labelText, valueText, percent = null, className = '', tokenValue = null) {
   const item = document.createElement('div');
   item.className = `accordion-row${className ? ` ${className}` : ''}`;
   const label = document.createElement('div');
@@ -2765,6 +2844,7 @@ function appendAccordionMetricRow(content, labelText, valueText, percent = null,
   const metric = document.createElement('div');
   metric.className = 'accordion-value';
   metric.textContent = valueText;
+  if (tokenValue !== null) decorateDetailTokenElement(metric, tokenValue);
   item.append(label, metric);
   content.append(item);
 }
@@ -2795,6 +2875,7 @@ function renderToolDetailAccordion(accordionInner, detail) {
     detail.name,
     detail.value,
     mode,
+    detailTokenDisplaySignature(),
     labels,
     tokenParts,
     modelRows.map((model) => [model.key, model.value, model.cost, Math.round(model.percent)])
@@ -2806,19 +2887,19 @@ function renderToolDetailAccordion(accordionInner, detail) {
 
   if (mode === 'tokens' && hasTokenDetails) {
     const inputPercentages = toolDetailsApi.tokenInputPercentages(tokenParts);
-    appendAccordionMetricRow(content, labels.cacheHit, formatNumber(tokenParts.cacheRead), inputPercentages.hit);
-    appendAccordionMetricRow(content, labels.cacheMiss, formatNumber(tokenParts.cacheMiss), inputPercentages.miss);
-    appendAccordionMetricRow(content, labels.output, formatNumber(tokenParts.output));
+    appendAccordionMetricRow(content, labels.cacheHit, formatDetailTokens(tokenParts.cacheRead), inputPercentages.hit, '', tokenParts.cacheRead);
+    appendAccordionMetricRow(content, labels.cacheMiss, formatDetailTokens(tokenParts.cacheMiss), inputPercentages.miss, '', tokenParts.cacheMiss);
+    appendAccordionMetricRow(content, labels.output, formatDetailTokens(tokenParts.output), null, '', tokenParts.output);
     if (tokenParts.unclassified > 0) {
-      appendAccordionMetricRow(content, labels.unclassified, formatNumber(tokenParts.unclassified));
+      appendAccordionMetricRow(content, labels.unclassified, formatDetailTokens(tokenParts.unclassified), null, '', tokenParts.unclassified);
     }
   }
 
   if (mode === 'models' && hasModels) {
     for (const model of modelRows) {
-      const metric = model.value > 0 ? formatNumber(model.value) : formatCost(model.cost);
+      const metric = model.value > 0 ? formatDetailTokens(model.value) : formatCost(model.cost);
       const label = model.unattributed === true ? labels.unclassified : model.name;
-      appendAccordionMetricRow(content, label, metric, model.value > 0 ? model.percent : null, 'tool-model-row');
+      appendAccordionMetricRow(content, label, metric, model.value > 0 ? model.percent : null, 'tool-model-row', model.value > 0 ? model.value : null);
     }
   }
 
@@ -2950,7 +3031,7 @@ function updateRowLive(row, activityState, activityAt) {
   dot.classList.add('pulse');
 }
 
-function updateRow(row, { name, subtitle, subtitleIdentity, subagentCountLabel, activity, detail, value, cost, unpricedTokens, barValue, max, color, barBackground, accordionRows, deviceDetail, stale, platform, local, client, clientLabel, sourceDevice, kind, modelSource, cacheReadTokens, outputTokens, unclassifiedTokens, modelRows, modelLabel, modelTooltipEntries, titleModelLabel, reasoningEffort, tokenDataUnavailable, sessionDetailAvailable, sessionGroup, running, activityState, context, promptCache, contextSnapshot, sortTime }) {
+function updateRow(row, { name, subtitle, subtitleIdentity, subagentCountLabel, activity, detail, sessionDetailHeading, value, cost, unpricedTokens, barValue, max, color, barBackground, accordionRows, deviceDetail, stale, platform, local, client, clientLabel, sourceDevice, kind, modelSource, cacheReadTokens, outputTokens, unclassifiedTokens, modelRows, modelLabel, modelTooltipEntries, titleModelLabel, reasoningEffort, tokenDataUnavailable, sessionDetailAvailable, sessionGroup, running, activityState, context, promptCache, contextSnapshot, sortTime }) {
   const width = rowWidth(barValue, max);
   const isExpanded = row.classList.contains('expanded');
   // `running` still drives the row class for layout, but the mark's own state
@@ -2971,11 +3052,8 @@ function updateRow(row, { name, subtitle, subtitleIdentity, subagentCountLabel, 
   if (kind !== undefined) row.dataset.kind = kind || '';
   if (sessionGroup) row.dataset.sessionGroup = sessionGroup;
   else delete row.dataset.sessionGroup;
-  if (kind === 'session' && client === 'reasonix') {
-    row.dataset.detailUnavailable = sessionDetailAvailable === true ? 'false' : 'true';
-  } else if (row.hasAttribute('data-detail-unavailable')) {
-    row.removeAttribute('data-detail-unavailable');
-  }
+  if (client === 'reasonix' && kind === 'session') row.dataset.reasonixDetail = String(sessionDetailAvailable === true);
+  else delete row.dataset.reasonixDetail;
   const interactive = Boolean(sessionGroup) || (kind === 'session'
     && sessionRowsApi.sessionRowDetailAvailable({ client, sessionDetailAvailable }));
   const mark = row.querySelector('.row-mark');
@@ -3057,8 +3135,8 @@ function updateRow(row, { name, subtitle, subtitleIdentity, subagentCountLabel, 
   // Local sessions keep their usual density; only a confirmed remote source
   // adds a separate line below the session's activity.
   const deviceEl = row.querySelector('.row-device');
-  const remoteDevice = state.settings?.deviceId && sourceDevice?.deviceId
-    && sourceDevice.deviceId !== state.settings.deviceId && sourceDevice.name ? sourceDevice : null;
+  if (kind === 'session') window.TokenMonitorDomReconcile.data(row, { sourceDevice, sessionDetailHeading });
+  const remoteDevice = sessionRowsApi.remoteSessionDevice(sourceDevice, state.settings?.deviceId);
   setHoverMarqueeText(deviceEl, remoteDevice?.name || '');
   deviceEl.classList.toggle('hidden', !remoteDevice);
   if (remoteDevice) {
@@ -3071,19 +3149,20 @@ function updateRow(row, { name, subtitle, subtitleIdentity, subagentCountLabel, 
     if (!existingIcon) content.prepend(icon);
     overflowText.update(deviceEl);
   }
-  // A titled session already has name, client/model and activity lines. Move
-  // its ID into Details, but keep the ID when only two lines remain so untitled
-  // sessions can still be distinguished (including when titles are disabled).
-  const shownDetail = kind === 'session' && interactive && activity ? '' : detail;
+  // Move the ID into Details for named sessions. A project can label several
+  // untitled sessions, so keep their IDs visible to distinguish them.
+  const shownDetail = kind === 'session' && interactive && activity && !sessionDetailHeading ? '' : detail;
   const detailEl = row.querySelector('.row-detail');
   setHoverMarqueeText(detailEl, shownDetail);
   detailEl.classList.toggle('hidden', !shownDetail);
   const valueEl = row.querySelector('.row-value');
-  const tokenLabel = formatNumber(value);
+  const exactTokenLabel = formatNumber(value);
+  const tokenLabel = formatDetailTokens(value);
   if (tokenDataUnavailable === true) {
     row.dataset.tokenDataUnavailable = 'true';
     cancelRowNumberAnimation(valueEl);
     valueEl.textContent = tokenLabel;
+    decorateDetailTokenElement(valueEl, value, { enabled: false });
   } else {
     delete row.dataset.tokenDataUnavailable;
     // Metadata-only updates must not replace the glyphs of a matching roll.
@@ -3092,6 +3171,7 @@ function updateRow(row, { name, subtitle, subtitleIdentity, subagentCountLabel, 
       cancelRowNumberAnimation(valueEl);
       valueEl.textContent = tokenLabel;
     }
+    decorateDetailTokenElement(valueEl, value);
   }
   valueEl.dataset.motionValue = String(Number(value) || 0);
   row.dataset.motionValue = String(Number(value) || 0);
@@ -3115,7 +3195,10 @@ function updateRow(row, { name, subtitle, subtitleIdentity, subagentCountLabel, 
     row.classList.add('has-accordion');
     if (isExpanded) row.classList.add('expanded');
   } else if (Array.isArray(accordionRows) && accordionRows.length > 0) {
-    const accordionSignature = JSON.stringify(accordionRows.map((tool) => [tool.name, tool.value, Math.round(tool.percent), tool.color]));
+    const accordionSignature = JSON.stringify([
+      detailTokenDisplaySignature(),
+      accordionRows.map((tool) => [tool.name, tool.value, Math.round(tool.percent), tool.color])
+    ]);
     if (accordionInner.dataset.signature !== accordionSignature) {
       const content = document.createElement('div');
       content.className = 'accordion-content project-tool-breakdown';
@@ -3135,7 +3218,8 @@ function updateRow(row, { name, subtitle, subtitleIdentity, subagentCountLabel, 
         label.append(mark, text, percent);
         const tokens = document.createElement('span');
         tokens.className = 'accordion-value';
-        tokens.textContent = formatNumber(tool.value);
+        tokens.textContent = formatDetailTokens(tool.value);
+        decorateDetailTokenElement(tokens, tool.value);
         item.append(label, tokens);
         content.append(item);
       }
@@ -3170,13 +3254,14 @@ function updateRow(row, { name, subtitle, subtitleIdentity, subagentCountLabel, 
   }
   const rowHead = row.querySelector('.row-head');
   const hasAccordion = row.classList.contains('has-accordion');
+  accordionInner.inert = !row.classList.contains('expanded');
   const costLabel = `, ${t('dashboard.stat.totalCost')}: ${costLabelText}`;
   sessionRowsApi.applyBreakdownRowSemantics(row, rowHead, {
     interactive,
     hasAccordion,
     expanded: row.classList.contains('expanded'),
     ariaLabel: hasAccordion
-      ? `${name}, ${t('dashboard.stat.totalTokens')}: ${tokenLabel}${costLabel}`
+      ? `${name}, ${t('dashboard.stat.totalTokens')}: ${exactTokenLabel}${costLabel}`
       : name
   });
 }
@@ -3328,7 +3413,7 @@ function updateSessionSearchQuery(value) {
   const cache = state.sessionRowsCache;
   if (state.breakdown === 'session' && cache?.stats === state.stats && cache?.period === state.period) {
     syncSessionSearchChrome();
-    const incompleteHint = sessionRowsApi.sessionBreakdownIncomplete(state.stats, state.period)
+    const incompleteHint = sessionBreakdownIncomplete()
       ? 'sessions.incomplete' : '';
     overflowText.batch(() => renderRows(cache.rows, { incompleteHint, fromSearch: true, reuseToolFilter: true }));
     return;
@@ -3413,13 +3498,19 @@ function renderRows(rows, { incompleteHint = '', fromSearch = false, reuseToolFi
     rows = sessionRowsApi.filterSessionRows(rows, searchQuery);
   }
   const searchEmpty = Boolean(searchQuery && rows.length === 0);
-  if (rows.length === 0 && (!incompleteHint || searchEmpty)) {
+  const reasonixReadFailed = state.breakdown === 'session' && reasonixSessionList?.failed
+    && !fixedPeriodRangesApi.isDerived(state.period);
+  const hintText = [
+    incompleteHint ? t(incompleteHint) : '',
+    reasonixReadFailed ? t('sessions.reasonixReadFailed') : ''
+  ].filter(Boolean).join(' ');
+  if (rows.length === 0 && (!hintText || searchEmpty)) {
     els.breakdown.replaceChildren();
-    if (incompleteHint) {
+    if (hintText) {
       const hint = document.createElement('p');
       hint.className = 'breakdown-incomplete-hint';
       hint.setAttribute('role', 'status');
-      hint.textContent = t(incompleteHint);
+      hint.textContent = hintText;
       els.breakdown.append(hint);
     }
     if (searchEmpty) els.breakdown.append(sessionSearchEmptyNode(searchQuery));
@@ -3435,7 +3526,6 @@ function renderRows(rows, { incompleteHint = '', fromSearch = false, reuseToolFi
   setSessionSearchStatus(searchQuery, page.total);
   const visibleRows = page.rows;
   const max = barScaleMax(rows);
-  const hintText = incompleteHint ? t(incompleteHint) : '';
   const signature = JSON.stringify([
     state.breakdown,
     hintText,
@@ -3454,6 +3544,7 @@ function renderRows(rows, { incompleteHint = '', fromSearch = false, reuseToolFi
     currency: currentCurrency(),
     currencyRatesEffective: state.settings?.currencyRatesEffective || null,
     locale: currentLocale(),
+    detailTokenDisplay: detailTokenDisplaySignature(),
     showToolIcons: toolIconsEnabled(state.settings?.showToolIcons),
     deviceIconOverrides: state.settings?.deviceIconOverrides,
     deviceIconScope: state.settings?.deviceIconScope,
@@ -3478,7 +3569,7 @@ function renderRows(rows, { incompleteHint = '', fromSearch = false, reuseToolFi
       if (!retainedKeys.has(key)) cancelRowNumberAnimation(row.querySelector('.row-value'));
     }
     const nodes = visibleRows.map((row) => existing.get(row.key) || rowTemplate(row));
-    if (incompleteHint) {
+    if (hintText) {
       const hint = existingHint || document.createElement('p');
       hint.className = 'breakdown-incomplete-hint';
       hint.setAttribute('role', 'status');
@@ -3541,8 +3632,12 @@ function stableColor(value, colors) {
 }
 
 function fixedPeriodDevices() {
-  if (!fixedPeriodRangesApi.isDerived(state.period)) return state.stats?.devices || [];
-  return fixedPeriodRangesApi.devicesForReadySnapshot(state.fixedPeriodSnapshot, state.period);
+  const devices = state.stats?.devices || [];
+  if (!fixedPeriodRangesApi.isDerived(state.period)) return devices;
+  const localDevice = state.fixedPeriodSnapshot?.native
+    ? devices.find(device => device.deviceId === state.settings?.deviceId)
+    : undefined;
+  return fixedPeriodRangesApi.devicesForReadySnapshot(state.fixedPeriodSnapshot, state.period, localDevice);
 }
 
 function fixedPeriodSources() {
@@ -3558,7 +3653,8 @@ function buildFixedPeriodSourcesSnapshot() {
     historyEnabled: state.settings?.historyEnabled !== false,
     historyAvailable: meta.historyTransportAvailable === true,
     todayKey: fixedPeriodTodayKey(),
-    locale: currentCalendarLocale()
+    locale: currentCalendarLocale(),
+    weekStartsOn: state.mode === 'sync' ? state.settings?.syncWeekStartsOn : undefined
   });
 }
 
@@ -3662,8 +3758,10 @@ function modelRowsForPeriod(period, rankingMetric = state.settings?.modelRanking
 }
 
 function sessionPresentationOptions() {
+  const formatReviewTokens = state.settings?.detailTokensUseCompactUnits === true ? formatDetailTokens : formatCompact;
   const localDevice = state.stats?.devices?.find(device => device.deviceId === state.settings?.deviceId);
   return {
+    localDeviceId: state.settings?.deviceId,
     clientLabels,
     clientColors,
     modelColor,
@@ -3673,6 +3771,8 @@ function sessionPresentationOptions() {
     subagentLabel: t('sessions.subagent'),
     latestModelLabel: t('session.latestModel'),
     unattributedLabel: t('dashboard.tooltip.unclassified'),
+    formatTokens: formatDetailTokens,
+    formatTokensKey: detailTokenDisplaySignature(),
     sourcePeriods: state.stats?.periods,
     grokBotSessionIds: state.stats?.grokBotSessionIds,
     nativeSessions: state.stats?.nativeSessions?.[state.period] || {},
@@ -3681,14 +3781,15 @@ function sessionPresentationOptions() {
     subagents: {
       countLabel: (count) => t('sessions.subagentCount', { count }),
       latestModelLabel: t('session.latestModel'),
-      unattributedLabel: t('dashboard.tooltip.unclassified')
+      unattributedLabel: t('dashboard.tooltip.unclassified'),
+      formatTokens: formatDetailTokens
     },
     backgroundReviews: {
       label: t('sessions.backgroundReviews'),
       countLabel: (count) => t('sessions.backgroundReviewCount', { count }),
       summaryLabel: ({ latestTime, latestValue }) => [
         latestTime ? t('sessions.backgroundReviewLatest', { time: latestTime }) : '',
-        latestValue > 0 ? formatCompact(latestValue, effectiveCompactTokenUnits(), currentLocale()) : ''
+        latestValue > 0 ? formatReviewTokens(latestValue) : ''
       ].filter(Boolean).join(' · ')
     },
     grokBot: {
@@ -3700,17 +3801,60 @@ function sessionPresentationOptions() {
   };
 }
 
+function displayedSessions(periodKey, period = state.stats?.periods?.[periodKey]) {
+  const paged = periodKey === state.period ? syncedSessionPeriod() : null;
+  return paged?.period.sessions ?? period?.sessions;
+}
+
 function rawSessionRowsForPeriod(period, options = sessionPresentationOptions()) {
-  return sessionRowsApi.sessionRowsForPeriod(period, options);
+  return sessionRowsApi.sessionRowsForPeriod({ ...period, sessions: displayedSessions(state.period, period) }, options);
 }
 
 const sessionRowLabelCache = {};
 
+let reasonixSessionList = null;
+
+function loadReasonixSessionList() {
+  if (state.breakdown !== 'session' || !clientRowTracked('reasonix')) {
+    reasonixSessionList = null;
+    return;
+  }
+  // Reuse the list for this visit and local day across ordinary stats repaints.
+  if (state.period && fixedPeriodRangesApi.isDerived(state.period)) return;
+  const key = JSON.stringify([
+    state.settings?.sessionTitlesEnabled !== false,
+    state.settings?.modelAliases,
+    state.settings?.modelAliasGrouping,
+    state.settings?.allTimeSince,
+    fixedPeriodTodayKey()
+  ]);
+  if (state.openSession || reasonixSessionList?.key === key
+    || !window.tokenMonitor.listReasonixSessions) return;
+  const request = { key, titlesEnabled: state.settings?.sessionTitlesEnabled !== false, periods: {}, failed: false };
+  reasonixSessionList = request;
+  window.tokenMonitor.listReasonixSessions().then((periods) => {
+    if (reasonixSessionList !== request) return;
+    request.periods = periods;
+    statsRenderScheduler.request();
+  }, (error) => {
+    if (reasonixSessionList !== request) return;
+    console.log(`[reasonix-sessions] ${error?.message || error}`);
+    request.failed = true;
+    statsRenderScheduler.request();
+  });
+}
+
 function sessionRowsForPeriod(period) {
   const options = sessionPresentationOptions();
-  if (state.breakdown === 'session') options.rowLabelCache = sessionRowLabelCache;
+  if (state.breakdown === 'session') {
+    options.rowLabelCache = sessionRowLabelCache;
+    if (reasonixSessionList?.titlesEnabled === (state.settings?.sessionTitlesEnabled !== false)
+      && clientRowTracked('reasonix')) options.reasonixSessions = reasonixSessionList.periods[state.period];
+  }
   const rows = rawSessionRowsForPeriod(period, options);
-  if (rows.length > 0) return sessionRowsApi.groupSessionRows(rows, { ...options, sortBy: state.sessionSort });
+  if (rows.length > 0) return sessionRowsApi.sessionListRows(rows, {
+    ...options, sortBy: state.sessionSort, sessionTitlesEnabled: state.settings?.sessionTitlesEnabled
+  });
   if (Number(period?.totalTokens || 0) === 0) return [];
   return modelRowsForPeriod(period);
 }
@@ -3726,8 +3870,7 @@ function projectRowsForPeriod(period) {
     unknownClientLabel: t('projects.unknownTool'),
     unknownModelLabel: t('projects.unknownModel'),
     allowSessionModelAttribution: !projectRowsApi.projectBreakdownIncomplete(state.stats, state.period),
-    nativeProjects: state.stats?.nativeProjects?.[state.period] || {},
-    nativeSessions: state.stats?.nativeSessions?.[state.period] || {}
+    nativeProjects: state.stats?.nativeProjects?.[state.period] || {}
   });
 }
 
@@ -5687,24 +5830,45 @@ function applySessionDetailResult(request, options) {
     return;
   }
   request.renderOptions = null;
+  request.pendingDisplayRefresh = false;
   renderSessionDetail(options);
 }
 
-async function openSessionDetail({ client, sessionId, sessionCost, title, returnTo = null, titleFollowsSession = false }) {
+// A native range's turns are its days; other periods keep their names.
+function sessionDetailPeriod() {
+  const range = currentNativeRangeSnapshot()?.range
+    || (state.fixedPeriodSnapshot?.selection === state.period && state.fixedPeriodSnapshot.detailsAvailable && state.fixedPeriodSnapshot.devices
+      .find(device => device.deviceId === state.settings?.deviceId)?.range);
+  return range ? `range:${range.start}:${range.end}` : state.period;
+}
+
+async function openSessionDetail({ client, sessionId, sessionCost, title, sourceDevice, reasonixSessionRef, returnTo = null, titleFollowsSession = false }) {
   // A review run is headed by model and time; a named group run (a subagent, a
   // Grok Bot record) is headed by its session title and follows title display.
   const fixedGroupHeading = returnTo?.kind === 'session-group' && titleFollowsSession !== true;
-  const request = { kind: 'session', client, sessionId, sessionCost,
+  const request = { kind: 'session', client, sessionId, sessionCost, reasonixSessionRef,
     title: state.settings?.sessionTitlesEnabled === false && !fixedGroupHeading ? '' : title,
-    period: state.period, detail: null, returnTo, titleFollowsSession: titleFollowsSession === true };
+    sourceDevice,
+    remote: sourceDevice?.ambiguous === true || Boolean(sourceDevice?.deviceId && sourceDevice.deviceId !== state.settings?.deviceId),
+    period: state.period, detailPeriod: sessionDetailPeriod(), detail: null, returnTo, titleFollowsSession: titleFollowsSession === true };
   state.openSession = request;
+  if (request.remote) {
+    // Transcript readers look at this machine. A matching local ID cannot
+    // establish the contents of a session attributed to another device.
+    request.detail = { found: false };
+    renderSessionDetail({ detail: request.detail });
+    return;
+  }
   renderSessionDetail({ loading: true });
   // Read before the request, not after: a stats push that lands while it is in
   // flight has to stay unseen so catch-up re-reads, instead of being written
   // off against a response that predates it.
   const liveSignature = sessionDetailLiveSignature();
   try {
-    const detail = await window.tokenMonitor.getSessionDetail({ client, sessionId, period: request.period, sessionCost });
+    const detail = await window.tokenMonitor.getSessionDetail({
+      client, sessionId, period: request.detailPeriod || request.period, sessionCost,
+      ...(reasonixSessionRef ? { reasonixSessionRef } : {})
+    });
     if (state.openSession === request) {
       request.detail = detail;
       request.liveSignature = liveSignature;
@@ -5720,23 +5884,29 @@ async function openSessionDetail({ client, sessionId, sessionCost, title, return
 
 function sessionLiveStatsEntry(request) {
   if (!request) return null;
+  if (request.client === 'reasonix') return null;
   const periodKey = request.period || state.period;
-  return request.client === 'reasonix'
-    ? state.stats?.nativeSessions?.[periodKey]?.[request.sessionId] || null
-    : state.stats?.periods?.[periodKey]?.sessions?.[`${request.client}:${request.sessionId}`] || null;
+  return displayedSessions(periodKey)?.[`${request.client}:${request.sessionId}`] || null;
 }
 
-function sessionLiveCost(entry, client) {
-  return client === 'reasonix' ? Number(entry?.reportedCostUsd || 0) : Number(entry?.costUsd || 0);
+function sessionLiveCost(entry) {
+  return Number(entry?.costUsd || 0);
+}
+
+// The dates a native-range detail reads move with the range (a new day), even
+// when the session's totals do not.
+function openSessionDetailPeriod(request) {
+  return request?.detailPeriod && request.period === state.period ? sessionDetailPeriod() : request?.detailPeriod;
 }
 
 function sessionDetailLiveSignature() {
   const entry = sessionLiveStatsEntry(state.openSession);
   if (!entry) return '';
+  const detailPeriod = openSessionDetailPeriod(state.openSession);
   return JSON.stringify([
     Number(entry.totalTokens) || 0,
     Number(entry.costUsd) || 0,
-    Number(entry.reportedCostUsd) || 0
+    ...(String(detailPeriod || '').startsWith('range:') ? [detailPeriod] : [])
   ]);
 }
 
@@ -5748,22 +5918,24 @@ function sessionDetailLiveSignature() {
 // the controls being read while the new transcript snapshot is applied.
 async function refreshOpenSessionDetail() {
   const request = state.openSession;
-  if (request?.kind !== 'session' || !request.detail || request.detailLiveBusy) return;
+  if (request?.kind !== 'session' || request.remote || !request.detail || request.detailLiveBusy) return;
   if (visibleStatsSurface() !== 'main') return;
   const signature = sessionDetailLiveSignature();
   if (!signature || signature === request.liveSignature) return;
   const sessionCost = sessionLiveCost(sessionLiveStatsEntry(request), request.client);
+  const detailPeriod = openSessionDetailPeriod(request);
   request.detailLiveBusy = true;
   let readSucceeded = false;
   try {
     const detail = await window.tokenMonitor.getSessionDetail({
-      client: request.client, sessionId: request.sessionId, period: request.period, sessionCost
+      client: request.client, sessionId: request.sessionId, period: detailPeriod || request.period, sessionCost
     });
     if (state.openSession !== request) return;
     // Readers resolve filesystem failures as payloads rather than rejecting.
     // Keep the last good snapshot and signature so the next tick can retry.
     if (!detail || detail.found !== true || detail.error) return;
     request.sessionCost = sessionCost;
+    request.detailPeriod = detailPeriod;
     request.detail = detail;
     request.liveSignature = signature;
     readSucceeded = true;
@@ -5837,6 +6009,19 @@ function renderSessionDetail({ detail, loading, error, preserveScroll = false } 
 
   const idLabel = sessionRowsApi.sessionDetailIdLabel(state.openSession?.client, state.openSession?.sessionId, detail);
   if (idLabel) container.append(sessionIdLine(idLabel));
+  const localDeviceId = state.settings?.deviceId;
+  if (state.openSession && localDeviceId) {
+    const source = state.openSession.sourceDevice;
+    const provenance = document.createElement('div');
+    provenance.className = 'detail-session-source';
+    const remote = sessionRowsApi.remoteSessionDevice(source, localDeviceId);
+    if (remote) provenance.append(deviceIconsApi.sessionDeviceNode(document, remote, {
+      settings: state.settings, bindOverflow: bindHoverMarquee
+    }));
+    else provenance.textContent = source?.deviceId === localDeviceId
+      ? t('settings.sync.panel.thisDevice') : t('session.sourceUnknown');
+    container.append(provenance);
+  }
 
   if (loading) { container.append(detailNote(t('detailLoading') || 'Loading…')); return; }
   if (error || detail?.error) {
@@ -5847,9 +6032,8 @@ function renderSessionDetail({ detail, loading, error, preserveScroll = false } 
 
   const rows = sessionDetailApi.exchangeRows(detail, { now: new Date(), sortBy: state.detailSort });
   if (rows.length === 0) { container.append(detailNote(t('detailEmpty') || 'No activity in this period.')); return; }
-  if (detail?.tokenDataUnavailable === true) {
-    container.append(detailNote(t('detailTokenDataUnavailable') || 'Token data is unavailable for this session.'));
-  }
+
+  if (detail?.tokenDataUnavailable === true) container.append(detailNote(t('detailTokenDataUnavailable')));
 
   const sort = document.createElement('button');
   sort.className = 'detail-sort';
@@ -5903,11 +6087,10 @@ function sessionDetailTitle() {
   if (request?.returnTo?.kind === 'session-group' && request.titleFollowsSession !== true) return request.title;
   if (state.settings?.sessionTitlesEnabled === false) return '';
   const period = request?.period || state.period;
-  const session = request?.client === 'reasonix'
-    ? state.stats?.nativeSessions?.[period]?.[request.sessionId]
-    : state.stats?.periods?.[period]?.sessions?.[`${request?.client}:${request?.sessionId}`];
+  const session = displayedSessions(period)?.[`${request?.client}:${request?.sessionId}`];
+  const syncedRange = state.mode === 'sync' && fixedPeriodRangesApi.isDerived(period);
   return sessionRowsApi.sessionTitleForDisplay({
-    client: request?.client, title: session?.title || request?.title
+    client: request?.client, title: session?.title || (syncedRange ? '' : request?.title)
   });
 }
 
@@ -5935,7 +6118,11 @@ function refreshSessionDetailHeading() {
       // would keep quoting titles the current stats no longer carry, so return
       // to whichever group holds this session now, or to Sessions when none does.
       const holder = rows.find(holds);
-      state.openSession.returnTo = holder ? { kind: 'session-group', period: group.period, summary: holder } : null;
+      if (holder) {
+        state.openSession.returnTo = { kind: 'session-group', period: group.period, summary: holder };
+      } else if (state.settings?.sessionTitlesEnabled === false || !pagedSessionsPending()) {
+        state.openSession.returnTo = null;
+      }
     }
   }
   const head = els.sessionDetailHead;
@@ -6014,6 +6201,16 @@ function sessionGroupRunNode(row, max, parent) {
   // Group members are still session rows. Share the template, metrics, tooltip
   // and activity rendering; exchange rows belong only to the actual transcript.
   const member = { ...row, name: title, titleModelLabel: namedGroup ? undefined : row.modelLabel };
+  if (row.modelTokens) {
+    member.modelTooltipEntries = sessionRowsApi.sessionModelTooltipEntries(
+      { models: row.modelTokens, totalTokens: row.value, latestModel: row.latestModel },
+      {
+        latestModelLabel: t('session.latestModel'),
+        unattributedLabel: t('dashboard.tooltip.unclassified'),
+        formatTokens: formatDetailTokens
+      }
+    );
+  }
   if (subagentGroup) {
     member.subtitle = [row.clientLabel, sessionRowsApi.sessionModelMetadataLabel(row)].filter(Boolean).join(' · ');
     member.activity = row.activitySummary;
@@ -6029,9 +6226,10 @@ function sessionGroupRunNode(row, max, parent) {
       const sessionId = String(row.key || '').replace(/^session:[^:]+:/, '');
       openSessionDetail({
         client: row.client,
-        sessionId: row.client === 'reasonix' ? `reasonix:${sessionId}` : sessionId,
+        sessionId,
         sessionCost: Number(row.cost || 0),
         title,
+        sourceDevice: row.sourceDevice,
         returnTo: parent,
         titleFollowsSession: namedGroup
       });
@@ -6081,7 +6279,15 @@ function renderSessionGroupDetail(request) {
   overview.innerHTML = '<span class="session-group-count"></span><span class="session-group-totals"></span>';
   overview.querySelector('.session-group-count').textContent = request.summary.subagentGroup
     ? t('dashboard.stat.totalTokens') : request.summary.groupDetail || request.summary.detail;
-  overview.querySelector('.session-group-totals').textContent = `${formatNumber(request.summary.value)} · ${formatCost(request.summary.cost || 0, request.summary.unpricedTokens)}`;
+  const groupTotals = overview.querySelector('.session-group-totals');
+  const groupTokens = document.createElement('span');
+  groupTokens.className = 'session-group-tokens';
+  groupTokens.textContent = formatDetailTokens(request.summary.value);
+  decorateDetailTokenElement(groupTokens, request.summary.value);
+  const groupCost = document.createElement('span');
+  groupCost.className = 'session-group-cost';
+  groupCost.textContent = ` · ${formatCost(request.summary.cost || 0, request.summary.unpricedTokens)}`;
+  groupTotals.replaceChildren(groupTokens, groupCost);
   container.append(overview);
 
   const max = Math.max(1, ...rows.map((row) => Number(row.value) || 0));
@@ -6141,9 +6347,11 @@ function exchangeNode(row, max, expanded = false) {
   bindHoverMarquee(exTitle);
   wrap.querySelector('.detail-ex-sub').textContent = row.subtitle;
   const tokensAvailable = row.tokensAvailable !== false;
-  wrap.querySelector('.detail-ex-value').textContent = tokensAvailable
-    ? formatNumber(row.value)
+  const exValueEl = wrap.querySelector('.detail-ex-value');
+  exValueEl.textContent = tokensAvailable
+    ? formatDetailTokens(row.value)
     : (t('detailTokenUnavailable') || 'Unavailable');
+  decorateDetailTokenElement(exValueEl, row.value, { enabled: tokensAvailable && isDetailCompactEnabled() });
   wrap.querySelector('.detail-ex-cost').textContent = tokensAvailable ? formatCost(row.cost, row.unpricedTokens) : '';
   applyBarScale(wrap.querySelector('.bar-fill'), rowWidth(row.value, max) / 100);
 
@@ -6172,19 +6380,26 @@ function turnNode(turn) {
   // "cache" folds cache reads + cache writes (Claude's cache_creation) into one bucket so the
   // in/out/cache breakdown sums to the turn total; reason is an informational subset of out.
   const cache = (tk.cacheRead || 0) + (tk.cacheWrite || 0);
-  const split = `in ${formatNumber(tk.input || 0)} · out ${formatNumber(tk.output || 0)} · cache ${formatNumber(cache)}`
+  const split = `in ${formatDetailTokens(tk.input || 0)} · out ${formatDetailTokens(tk.output || 0)} · cache ${formatDetailTokens(cache)}`
+    + (tk.reasoning ? ` · reason ${formatDetailTokens(tk.reasoning)}` : '');
+  const exactSplit = `in ${formatNumber(tk.input || 0)} · out ${formatNumber(tk.output || 0)} · cache ${formatNumber(cache)}`
     + (tk.reasoning ? ` · reason ${formatNumber(tk.reasoning)}` : '');
   el.innerHTML = '<div class="detail-turn-label"><span class="detail-turn-title"></span><span class="detail-turn-split"></span><span class="detail-turn-tools"></span></div>'
     + '<div class="detail-turn-metrics"><span class="detail-turn-value"></span><span class="detail-turn-cost"></span></div>';
   el.querySelector('.detail-turn-title').textContent = `AI ${turn.label}`;
   const tokensAvailable = turn.tokensAvailable !== false;
-  el.querySelector('.detail-turn-split').textContent = tokensAvailable
+  const splitEl = el.querySelector('.detail-turn-split');
+  splitEl.textContent = tokensAvailable
     ? split
     : (t('detailTokenUnavailable') || 'Unavailable');
+  const toggleEnabled = tokensAvailable && isDetailCompactEnabled();
+  decorateDetailTokenElement(splitEl, 0, { exactText: exactSplit, enabled: toggleEnabled });
   el.querySelector('.detail-turn-tools').textContent = turn.tools ? `⊢ ${turn.tools}` : '';
-  el.querySelector('.detail-turn-value').textContent = tokensAvailable
-    ? formatNumber(turn.value)
+  const turnValueEl = el.querySelector('.detail-turn-value');
+  turnValueEl.textContent = tokensAvailable
+    ? formatDetailTokens(turn.value)
     : (t('detailTokenUnavailable') || 'Unavailable');
+  decorateDetailTokenElement(turnValueEl, turn.value, { enabled: toggleEnabled });
   el.querySelector('.detail-turn-cost').textContent = tokensAvailable ? formatCost(turn.cost, turn.unpricedTokens) : '';
   return el;
 }
@@ -6599,8 +6814,239 @@ function fixedPeriodHistoryInventoriesMatch(history) {
     === fixedPeriodRangesApi.deviceInventorySignature(state.stats?.devices || []);
 }
 
+function showFixedPeriod(snapshot) {
+  if (snapshot?.status !== 'ready' || !state.stats?.periods) return;
+  const current = state.stats.periods[state.period];
+  if (current !== snapshot.period && state.stats.nativeRangeWindows?.[state.period]) {
+    const replaced = replacedNativeRangePeriods.get(state.stats) || {};
+    if (!replaced[state.period]) replacedNativeRangePeriods.set(state.stats, { ...replaced, [state.period]: current });
+  }
+  state.stats.periods[state.period] = snapshot.period;
+}
+
+function currentNativeRangeSnapshot(period = state.period) {
+  return fixedPeriodRangesApi.nativeRangeSnapshot(period, statsWithNativeRangePeriods(state.stats), {
+    todayKey: fixedPeriodTodayKey(),
+    locale: currentCalendarLocale()
+  });
+}
+
+function canRenderNativeDevices() {
+  return state.breakdown === 'device' && Boolean(currentNativeRangeSnapshot());
+}
+
+function syncedFixedPeriodKey(period = state.period) {
+  const stats = state.stats;
+  const revisionMap = stats?.fixedRangeRevisions || {};
+  const revisions = Object.entries(revisionMap).sort();
+  if (state.settings?.hubMode === 'local' || (!revisions.length && !stats?.localFixedRangeRevision) || !stats?.snapshot) return '';
+  if (!fixedPeriodRangesApi.isDerived(period)) {
+    if (!needsPagedSessions()) return '';
+    const canReadPages = stats.devices?.some(device => device.sessionDetailsOmitted?.[state.period] > 0
+      && device.periodWindows?.today?.key && Object.hasOwn(revisionMap, device.deviceId) && revisionMap[device.deviceId]);
+    if (!canReadPages) return '';
+  }
+  // A fallback device can update live Today without a range or History revision.
+  const deviceObservations = (stats.devices || []).map(device => [
+    device.deviceId, device.updatedAt, fixedPeriodRangesApi.deviceDayState(device)?.currentKey || ''
+  ]);
+  return JSON.stringify([
+    syncedFixedPeriodScope(), period, deviceObservations, revisions, stats.localFixedRangeRevision, stats.deviceHistoryRevision
+  ]);
+}
+
+function syncedFixedPeriodScope() {
+  const settings = state.settings;
+  return JSON.stringify([
+    state.stats?.snapshot?.source, settings?.hubMode, settings?.deviceId, currentCalendarLocale(), fixedPeriodTodayKey(),
+    settings?.syncWeekStartsOn, settings?.historyEnabled, settings?.projectsEnabled, settings?.sessionTitlesEnabled,
+    settings?.modelAliases, settings?.modelAliasGrouping,
+    (state.stats?.devices || []).map(device => [device.deviceId, device.projectsEnabled, device.trackedClients,
+      device.periodWindows?.timeZone, fixedPeriodRangesApi.deviceDayState(device)?.currentKey])
+  ]);
+}
+
+function readSyncedFixedPeriod(period, key) {
+  const { id, source } = state.stats.snapshot;
+  if (!fixedPeriodRangesApi.isDerived(period)) return window.tokenMonitor.getSyncedFixedPeriod(id, source, period);
+  const scope = syncedFixedPeriodScope();
+  const cache = state.syncedFixedPeriodCache;
+  const previous = cache.get(period);
+  if (previous?.scope === scope && previous.key === key && previous.promise) return previous.promise;
+  if (previous?.scope === scope && previous.snapshotKey === key) return Promise.resolve(previous.snapshot);
+  const revisions = state.stats.fixedRangeRevisions || {};
+  let snapshot = previous?.scope === scope ? previous.snapshot : null;
+  if (snapshot && (Object.keys(previous.revisions).length !== Object.keys(revisions).length
+    || Object.entries(previous.revisions).some(([id, revision]) => revisions[id] !== revision))) {
+    snapshot = retainVerifiedFixedRangeTitles(snapshot, previous.revisions, revisions);
+  }
+  const entry = { scope, key, revisions, snapshot, promise: null };
+  cache.set(period, entry);
+  entry.promise = window.tokenMonitor.getSyncedFixedPeriod(id, source, period).then(result => {
+    if (cache.get(period) !== entry || syncedFixedPeriodKey(period) !== key) return null;
+    if (result?.detailsAvailable) {
+      entry.snapshot = result;
+      entry.snapshotKey = key;
+    } else if (result?.status === 'ready') {
+      entry.snapshot = null;
+    }
+    return result;
+  }).finally(() => { entry.promise = null; });
+  return entry.promise;
+}
+
+function retainVerifiedFixedRangeTitles(snapshot, previous, current) {
+  const stats = state.stats;
+  const localId = state.settings?.deviceId;
+  const sessions = snapshot.period.sessions;
+  const uncertain = Object.fromEntries(Object.entries(sessions || {}).filter(([key, row]) => {
+    const id = row.sourceDevice?.deviceId;
+    // A local scan owns its own titles. Remote titles are confirmed by the
+    // same accepted range revision or by an inline row from the same device.
+    if (id && id === localId && stats.localFixedRangeRevision) return false;
+    if (id && Object.hasOwn(previous, id) && previous[id] === current[id]) return false;
+    return !id || !['today', 'month'].some(name => {
+      const inline = stats.periods?.[name]?.sessions?.[key];
+      return inline?.sourceDevice?.deviceId === id && inline.title && inline.title === row.title;
+    });
+  }));
+  const redacted = window.TokenMonitorSessionTitleDisplay.withoutSessionTitles(uncertain);
+  if (redacted === uncertain) return snapshot;
+  return { ...snapshot, period: { ...snapshot.period, sessions: { ...sessions, ...redacted } } };
+}
+
+function warmSyncedFixedPeriod() {
+  if (!['session', 'project'].includes(state.breakdown) || !window.tokenMonitor.getSyncedFixedPeriod
+    || state.settings?.hubMode === 'local' || !state.stats?.snapshot || isRendererWindowHidden()
+    || visibleStatsSurface() !== 'main' || state.syncedFixedPeriodWarmup || state.syncedFixedPeriod?.pending) return;
+  const scope = syncedFixedPeriodScope();
+  const period = shownPeriodOrder().find(candidate => {
+    if (candidate === state.period || !fixedPeriodRangesApi.isDerived(candidate)) return false;
+    const cached = state.syncedFixedPeriodCache.get(candidate);
+    return cached?.scope !== scope || (!cached.snapshot && cached.key !== syncedFixedPeriodKey(candidate));
+  });
+  const key = period && syncedFixedPeriodKey(period);
+  if (!key) return;
+  const request = readSyncedFixedPeriod(period, key);
+  state.syncedFixedPeriodWarmup = request;
+  const finish = () => {
+    state.syncedFixedPeriodWarmup = null;
+    warmSyncedFixedPeriod();
+  };
+  void request.then(finish, finish);
+}
+
+function needsPagedSessions() {
+  return state.breakdown === 'session' && (state.period === 'today' || state.period === 'month')
+    && state.stats?.sessionDetailsOmitted?.[state.period] > 0;
+}
+
+function syncedSessionPeriod() {
+  if (!needsPagedSessions()) return null;
+  const request = state.syncedFixedPeriod;
+  return request?.key === syncedFixedPeriodKey() ? request.snapshot : null;
+}
+
+function sessionBreakdownIncomplete() {
+  return sessionRowsApi.sessionBreakdownIncomplete(state.stats, state.period) && !syncedSessionPeriod()?.detailsAvailable;
+}
+
+function pagedSessionsPending() {
+  const key = needsPagedSessions() && syncedFixedPeriodKey();
+  if (!key || !window.tokenMonitor.getSyncedFixedPeriod) return false;
+  const request = state.syncedFixedPeriod;
+  return request?.key !== key || request.pending || Number.isFinite(request.retryAt);
+}
+
+function requestSyncedFixedPeriod() {
+  const key = syncedFixedPeriodKey();
+  if (!key || !window.tokenMonitor.getSyncedFixedPeriod) return;
+  const previous = state.syncedFixedPeriod;
+  if (previous?.key === key && (previous.pending || Date.now() < previous.retryAt)) return;
+  clearTimeout(previous?.retryTimer);
+  const sameKey = previous?.key === key;
+  const request = {
+    key, pending: true, snapshot: sameKey ? previous.snapshot : null,
+    retries: sameKey ? previous.retries : 0
+  };
+  state.syncedFixedPeriod = request;
+  const finish = (snapshot) => {
+    if (state.syncedFixedPeriod !== request) return;
+    if (key !== syncedFixedPeriodKey()) {
+      state.syncedFixedPeriod = null;
+      return;
+    }
+    request.snapshot = snapshot;
+    request.pending = false;
+    // Pages can arrive late, and a transient transport failure can also leave
+    // the selected revision without details until the next read.
+    const canRetry = !snapshot?.detailsAvailable && request.retries < FIXED_PERIOD_HISTORY_MAX_RETRIES;
+    request.retryAt = canRetry ? Date.now() + FIXED_PERIOD_HISTORY_RETRY_MS : Infinity;
+    if (canRetry) {
+      request.retryTimer = setTimeout(() => {
+        if (state.syncedFixedPeriod !== request || key !== syncedFixedPeriodKey()) return;
+        request.retries += 1;
+        request.retryAt = 0;
+        requestSyncedFixedPeriod();
+      }, FIXED_PERIOD_HISTORY_RETRY_MS);
+    }
+    state.sessionRowsCache = null;
+    statsRenderScheduler.request();
+  };
+  void readSyncedFixedPeriod(state.period, key)
+    .then(finish, () => finish(null));
+}
+
 function buildFixedPeriodSnapshot() {
   if (!fixedPeriodRangesApi.isDerived(state.period)) return { status: 'native', period: null };
+  const key = syncedFixedPeriodKey();
+  const request = state.syncedFixedPeriod?.key === key ? state.syncedFixedPeriod : null;
+  const cached = state.syncedFixedPeriodCache?.get(state.period);
+  if (key && cached?.publicationTimer != null) {
+    clearTimeout(cached.publicationTimer);
+    cached.publicationTimer = null;
+  }
+  const usableCache = cached?.snapshot && cached.scope === syncedFixedPeriodScope();
+  let synced = request?.snapshot;
+  if (!synced && usableCache) {
+    if (!key) {
+      // Usage can arrive before its detail pages. Give publication one retry
+      // interval while retaining the same range and checking title consent.
+      const period = state.period;
+      cached.publicationTimer ??= setTimeout(() => {
+        if (state.syncedFixedPeriodCache.get(period) !== cached) return;
+        cached.publicationTimer = null;
+        if (syncedFixedPeriodKey(period)) return;
+        const active = state.syncedFixedPeriod;
+        if (active && (active.key === cached.key || active.key === cached.snapshotKey)) {
+          clearTimeout(active.retryTimer);
+          state.syncedFixedPeriod = null;
+        }
+        cached.snapshot = null;
+        cached.snapshotKey = null;
+        if (state.period === period) statsRenderScheduler.request();
+      }, FIXED_PERIOD_HISTORY_RETRY_MS);
+      synced = retainVerifiedFixedRangeTitles(cached.snapshot, cached.revisions, {});
+    } else if (cached.snapshotKey === key || request?.pending || Number.isFinite(request?.retryAt)) {
+      synced = cached.snapshot;
+    }
+  }
+  if (synced) {
+    const history = state.settings?.historyEnabled !== false && !state.fixedPeriodHistoryFailed
+      ? buildFixedPeriodSourcesSnapshot() : null;
+    return { ...synced, synchronized: true, daily: history?.daily, summary: history?.summary };
+  }
+  const native = currentNativeRangeSnapshot();
+  if (native) {
+    // While History refreshes, the last snapshot for this range still holds
+    // its Trends summary and device rows.
+    const history = state.settings?.historyEnabled === false || !state.fixedPeriodHistoryRequested || state.fixedPeriodHistoryFailed
+      ? null
+      : state.fixedPeriodHistoryBusy
+        ? fixedPeriodRangesApi.readySnapshotForSelection(state.fixedPeriodSnapshot, state.period)
+        : buildFixedPeriodSourcesSnapshot();
+    return fixedPeriodRangesApi.nativeRangeWithHistory(native, history, state.settings?.deviceId);
+  }
   if (state.settings?.historyEnabled === false) {
     return { status: 'unavailable', reason: 'historyDisabled', period: null };
   }
@@ -6612,7 +7058,7 @@ function buildFixedPeriodSnapshot() {
       state.fixedPeriodSnapshot,
       state.period
     );
-    return ready
+    return ready && !ready.synchronized
       ? ready
       : { status: 'loading', reason: 'loading', period: null };
   }
@@ -6676,9 +7122,7 @@ async function performFixedPeriodHistoryLoad({ force = false, signature = fixedP
         }, FIXED_PERIOD_HISTORY_RETRY_MS);
       }
       state.fixedPeriodSnapshot = buildFixedPeriodSnapshot();
-      if (state.fixedPeriodSnapshot.status === 'ready' && state.stats?.periods) {
-        state.stats.periods[state.period] = state.fixedPeriodSnapshot.period;
-      }
+      showFixedPeriod(state.fixedPeriodSnapshot);
     }
   }
   return true;
@@ -6744,6 +7188,14 @@ async function warmFixedPeriodHistory(options = {}) {
 }
 
 function fixedPeriodMessage(snapshot, breakdown = '') {
+  if (state.syncedFixedPeriod?.pending && state.syncedFixedPeriod.key === syncedFixedPeriodKey()
+    && (snapshot?.status !== 'ready' || breakdown === 'session' || breakdown === 'project')) {
+    return t(breakdown === 'session' ? 'periodRange.sessionLoading'
+      : breakdown === 'project' ? 'periodRange.projectLoading' : 'periodRange.loading');
+  }
+  if (state.stats?.nativeRangesPending && (breakdown === 'session' || breakdown === 'project')) {
+    return t(breakdown === 'session' ? 'periodRange.sessionLoading' : 'periodRange.projectLoading');
+  }
   if (snapshot?.status === 'loading') return t('periodRange.loading');
   if (breakdown === 'session') return t('periodRange.sessionUnavailable');
   if (breakdown === 'project') return t('periodRange.projectUnavailable');
@@ -6797,10 +7249,14 @@ function setPeriodMenuOpen(open, { restoreFocus = false, focus = '' } = {}) {
   if (!state.periodMenuOpen && restoreFocus) els.monthPeriodTab?.focus();
 }
 
-function syncPeriodMenu() {
-  const mode = fixedPeriodRangesApi.slotForSelection(state.period) === 'month'
+function legacyMiddlePeriod() {
+  return fixedPeriodRangesApi.slotForSelection(state.period) === 'month'
     ? fixedPeriodRangesApi.normalizeMonthMode(state.period)
     : fixedPeriodRangesApi.normalizeMonthMode(state.settings?.periodMonthMode);
+}
+
+function syncPeriodMenu() {
+  const mode = legacyMiddlePeriod();
   for (const button of periodMenuButtons()) {
     const active = button.dataset.fixedPeriod === mode;
     button.classList.toggle('is-current', active);
@@ -6914,9 +7370,11 @@ function renderViewSwitcher({ focusMenu = false, focusDisclosure = false } = {})
   const currentLabel = viewLabelById(currentId);
   const nextId = nextBreakdown(currentId);
   const nextLabel = viewLabelById(nextId);
+  const hasDashboardLauncher = typeof window !== 'undefined' && typeof window.tokenMonitor?.openDashboard === 'function';
   const renderKey = JSON.stringify([currentId, order.map(id => [id, viewLabelById(id)]),
     pluginPageOptions().map(page => [page.id, page.icon, page.identityIcon]),
-    t('views.switcher.choose'), t('views.switcher.next', { view: nextLabel })]);
+    t('views.switcher.choose'), t('views.switcher.next', { view: nextLabel }),
+    hasDashboardLauncher ? t('dashboard.menuLabel') : '']);
   // Usage pushes repaint the page without changing navigation. Keep the same
   // popover/rows so hover, focus, scroll and its entry animation survive them.
   if (renderKey === viewSwitcherRenderKey && updateViewSwitcherOpenState({ focusMenu, focusDisclosure })) return;
@@ -7003,6 +7461,32 @@ function renderViewSwitcher({ focusMenu = false, focusDisclosure = false } = {})
       else renderBreakdownChange(id);
     });
     menu.append(item);
+  }
+  if (hasDashboardLauncher) {
+    const separator = document.createElement('div');
+    separator.className = 'view-switcher-menu-separator';
+    separator.setAttribute('role', 'separator');
+    menu.append(separator);
+
+    const dashItem = document.createElement('button');
+    dashItem.type = 'button';
+    dashItem.className = 'view-switcher-menu-item view-switcher-menu-action';
+    dashItem.dataset.action = 'open-dashboard';
+    dashItem.setAttribute('role', 'menuitem');
+    dashItem.tabIndex = -1;
+    const dashExt = document.createElement('span');
+    dashExt.className = 'view-switcher-icon view-switcher-menu-ext';
+    dashExt.setAttribute('aria-hidden', 'true');
+    const dashLabel = document.createElement('span');
+    dashLabel.className = 'view-switcher-menu-label';
+    dashLabel.textContent = t('dashboard.menuLabel');
+    dashItem.append(dashExt, dashLabel);
+    dashItem.addEventListener('click', () => {
+      state.viewSwitcherOpen = false;
+      updateViewSwitcherOpenState();
+      window.tokenMonitor.openDashboard();
+    });
+    menu.append(dashItem);
   }
   menu.addEventListener('keydown', (event) => {
     const items = Array.from(menu.querySelectorAll('.view-switcher-menu-item'));
@@ -7227,12 +7711,23 @@ function renderHomeLimitModule() {
     body.append(empty);
     return module;
   }
-  const displayMode = homeModulePreferencesApi.resolveHomeLimitDisplayMode(state.settings?.homeLimitDisplayMode);
-  if (displayMode !== 'rows') return renderClassicHomeLimits(module, body, rows, displayMode === 'bars');
-  const vendorColors = homeVendorColorsEnabled();
   // Low-limit colour is opt-in in every layout; the reading and meter length
   // already show how much is left.
   const highlightLow = state.settings?.showHomeLimitBars === true;
+  function applyWarning(metric, value, remainingPercent) {
+    if (!highlightLow) return;
+    const warning = homeOverviewApi.limitWarning(remainingPercent);
+    if (warning === 'exhausted') {
+      value.classList.add('home-limit-value-critical');
+      metric.classList.add('is-exhausted');
+    } else if (warning === 'low') {
+      value.classList.add('home-limit-value-low');
+      metric.classList.add('is-low');
+    }
+  }
+  const displayMode = homeModulePreferencesApi.resolveHomeLimitDisplayMode(state.settings?.homeLimitDisplayMode);
+  if (displayMode !== 'rows') return renderClassicHomeLimits(module, body, rows, displayMode === 'bars', applyWarning);
+  const vendorColors = homeVendorColorsEnabled();
   const nowMs = Date.now();
   for (const row of rows) {
     const item = document.createElement('div');
@@ -7245,7 +7740,7 @@ function renderHomeLimitModule() {
     const mark = document.createElement('span');
     const pluginModule = state.pluginCatalog?.limits?.modules?.find(module => module.id === row.providerId);
     if (pluginModule) mark.append(window.TokenMonitorPluginViews.navigationIcon(document, pluginModule, 14));
-    else applyHomeListMark(mark, iconKindFor({ key: row.iconId || row.providerId || row.key }, 'limits'), row.color);
+    else applyHomeListMark(mark, iconKindFor({ key: row.iconId || row.providerId || row.key }, 'limits'), 'rgba(var(--overlay-rgb), 0.5)');
     const name = document.createElement('span');
     name.className = 'home-list-name';
     name.textContent = row.name;
@@ -7319,26 +7814,7 @@ function renderHomeLimitModule() {
         value.setAttribute('data-limit-motion-value', String(readingPercent));
         value.setAttribute('data-limit-motion-text', value.textContent);
       }
-      if (highlightLow && remainingPercent != null) {
-        const clamped = Math.max(0, Math.min(100, remainingPercent));
-        if (!vendorColors) {
-          // Red only when exhausted, amber when nearly out.
-          if (clamped === 0) {
-            value.classList.add('home-limit-value-critical');
-            metric.classList.add('is-exhausted');
-          } else if (clamped < 20) {
-            value.classList.add('home-limit-value-low');
-            metric.classList.add('is-low');
-          }
-        } else if (clamped < 20) {
-          value.classList.add('home-limit-value-critical');
-          metric.classList.add('is-critical');
-          if (clamped === 0) metric.classList.add('is-exhausted');
-        } else if (clamped < 50) {
-          value.classList.add('home-limit-value-low');
-          value.style.setProperty('--home-limit-accent', row.color);
-        }
-      }
+      applyWarning(metric, value, remainingPercent);
       // An untouched window needs no attention, so it steps back.
       if (remainingPercent === 100 && !fixedValue) metric.classList.add('is-untouched');
       let reading = value;
@@ -7426,10 +7902,9 @@ function classicHomeLimitWindowLabel(window, providerId = '', visibleWindows = [
 // The earlier Home layouts, kept as choices: each account's compact pick of
 // windows sits two to a row, a reading beside its name and the reset
 // underneath, with or without a meter.
-function renderClassicHomeLimits(module, body, rows, showBars) {
+function renderClassicHomeLimits(module, body, rows, showBars, applyWarning) {
   module.classList.add('home-module-limits-classic');
   const showUsed = Boolean(state.settings?.showLimitUsed);
-  const highlightLow = state.settings?.showHomeLimitBars === true;
   for (const row of rows) {
     const item = document.createElement('div');
     item.className = 'home-limit-account';
@@ -7439,7 +7914,7 @@ function renderClassicHomeLimits(module, body, rows, showBars) {
     const mark = document.createElement('span');
     const pluginModule = state.pluginCatalog?.limits?.modules?.find(module => module.id === row.providerId);
     if (pluginModule) mark.append(window.TokenMonitorPluginViews.navigationIcon(document, pluginModule, 14));
-    else applyHomeListMark(mark, iconKindFor({ key: row.iconId || row.providerId || row.key }, 'limits'), row.color);
+    else applyHomeListMark(mark, iconKindFor({ key: row.iconId || row.providerId || row.key }, 'limits'), 'rgba(var(--overlay-rgb), 0.5)');
     const name = document.createElement('span');
     name.className = 'home-list-name';
     name.textContent = row.name;
@@ -7467,20 +7942,7 @@ function renderClassicHomeLimits(module, body, rows, showBars) {
       value.className = 'home-list-value';
       value.textContent = window.value || formatHomeLimitWindowValue(window, showUsed);
       const remainingPercent = optionalFiniteNumber(window.remainingPercent);
-      if (highlightLow && remainingPercent != null) {
-        const clamped = Math.max(0, Math.min(100, remainingPercent));
-        if (!homeVendorColorsEnabled()) {
-          // Same monochrome thresholds as the default rows: red only when
-          // exhausted, amber when nearly out.
-          if (clamped === 0) value.classList.add('home-limit-value-critical');
-          else if (clamped < 20) value.classList.add('home-limit-value-low');
-        } else if (clamped < 20) {
-          value.classList.add('home-limit-value-critical');
-        } else if (clamped < 50) {
-          value.classList.add('home-limit-value-low');
-          value.style.setProperty('--home-limit-accent', row.color);
-        }
-      }
+      applyWarning(metric, value, remainingPercent);
       const info = limitWindowsView.limitDetailInfoNode(window.detailEntries);
       if (info) {
         const right = document.createElement('span');
@@ -7608,26 +8070,14 @@ function renderHomeToolModule(period) {
   return module;
 }
 
-function homeSessionAgo(value) {
+function homeSessionAgo(value, now = Date.now()) {
   if (!Number.isFinite(value) || value <= 0) return '';
-  const minutes = Math.round(Math.max(0, Date.now() - value) / 60000);
+  const minutes = Math.round(Math.max(0, now - value) / 60000);
   if (minutes < 1) return t('edgeDock.agoNow');
   if (minutes < 60) return t('edgeDock.agoMinutes', { count: minutes });
   const hours = Math.round(minutes / 60);
   if (hours < 24) return t('edgeDock.agoHours', { count: hours });
   return t('edgeDock.agoDays', { count: Math.round(hours / 24) });
-}
-
-// The one-line form of a session's age ("28m", "3h", "2d"), in the same units
-// as the limit countdowns; the full phrase stays its accessible name.
-function homeSessionAgoShort(value) {
-  if (!Number.isFinite(value) || value <= 0) return '';
-  const minutes = Math.round(Math.max(0, Date.now() - value) / 60000);
-  if (minutes < 1) return t('edgeDock.agoNow');
-  if (minutes < 60) return `${minutes}m`;
-  const hours = Math.round(minutes / 60);
-  if (hours < 24) return `${hours}h`;
-  return `${Math.round(hours / 24)}d`;
 }
 
 function stopHomeSessionRepaint() {
@@ -7666,7 +8116,7 @@ function scheduleSessionStatusRepaint(period, incompleteHint = '') {
   stopSessionStatusRepaint();
   const now = Date.now();
   const sessions = [
-    ...Object.entries(period?.sessions || {}).map(([key, session]) => window.TokenMonitorSessionLive.sessionWithActivity(period, key, session)),
+    ...Object.entries(displayedSessions(state.period, period) || {}).map(([key, session]) => window.TokenMonitorSessionLive.sessionWithActivity(period, key, session)),
     ...Object.values(state.stats?.nativeSessions?.[state.period] || {})
   ];
   const next = window.TokenMonitorSessionLive.nextSessionStatusChangeAt(sessions, now);
@@ -7705,7 +8155,8 @@ function renderHomeSessionModule(rows) {
   const ordered = detailed ? entries
     : [...entries.filter((entry) => isLive(entry.activityState)), ...entries.filter((entry) => !isLive(entry.activityState))];
   ordered.forEach(({ row, activityState }, index) => {
-    const full = detailed || isLive(activityState);
+    const live = isLive(activityState);
+    const full = detailed || live;
     const item = document.createElement('div');
     item.className = full ? 'home-list-row home-session-row' : 'home-list-row home-session-row is-compact';
     item.dataset.key = row.key;
@@ -7737,45 +8188,71 @@ function renderHomeSessionModule(rows) {
     const value = document.createElement('span');
     value.className = 'home-list-value';
     value.textContent = formatCompact(row.totalTokens);
-    const age = homeSessionAgo(Date.parse(row.lastUsedAt || row.startedAt || ''));
+    const device = row.remoteDevice && deviceIconsApi.sessionDeviceNode(document, row.remoteDevice, {
+      settings: state.settings, bindOverflow: bindHoverMarquee
+    });
+    // One age reading serves both layouts: the short form is what a row shows,
+    // the full phrase is what assistive technology hears.
+    const ageAt = Date.parse(row.lastUsedAt || row.startedAt || '');
+    // One clock reading, so the short form and the phrase it announces cannot
+    // disagree across a minute boundary.
+    const now = Date.now();
+    const age = homeSessionAgo(ageAt, now);
+    const shortAge = sessionRowsApi.sessionAgeShort(ageAt, now);
     if (!full) {
       const ago = document.createElement('span');
       ago.className = 'home-list-aux home-session-ago';
-      ago.textContent = homeSessionAgoShort(Date.parse(row.lastUsedAt || row.startedAt || ''));
+      ago.textContent = shortAge;
       if (age) {
         ago.setAttribute('role', 'img');
         ago.setAttribute('aria-label', age);
       }
-      item.append(mark, stateMark, name, ago, value);
+      item.append(mark, stateMark, name);
+      if (device) {
+        item.classList.add('has-source-device');
+        item.append(device);
+      }
+      item.append(ago, value);
       body.append(item);
       return;
     }
     const meta = document.createElement('div');
     meta.className = 'home-session-meta';
     const description = document.createElement('span');
-    description.className = 'home-list-sub';
-    const memberLabel = row.sessionGroup && (!row.subagentGroup || row.subagentCount > 0)
-      ? (row.subagentGroup ? t('sessions.subagentCount', { count: row.subagentCount })
-        : t('sessions.grokBotCount', { count: row.groupRows.length })) : '';
+    description.className = 'home-list-sub session-compact-description';
     // The same "N models" hover the Sessions list draws: the label stays the
     // row's own text, and the tooltip lists the models behind the count.
     const modelLabel = sessionRowsApi.sessionModelLabel(row);
-    const metadataLabel = sessionRowsApi.sessionModelMetadataLabel(row);
-    description.append(sessionRowsApi.sessionModelMetadataNode(document, { ...row, modelLabel }, {
+    const metadata = sessionRowsApi.sessionModelMetadataNode(document, { ...row, modelLabel }, {
       translate: t, view: limitWindowsView,
       latestModelLabel: t('session.latestModel'),
       unattributedLabel: t('dashboard.tooltip.unclassified'),
       formatTokens: formatCompact
-    }));
-    if (memberLabel) {
-      if (metadataLabel) description.append(document.createTextNode(' · '));
+    });
+    if (device) meta.append(device);
+    if (metadata.childElementCount) description.append(metadata);
+    if (row.sessionGroup === 'cursor-grok-bot') {
+      if (description.childElementCount) description.append(document.createTextNode(' · '));
       const count = document.createElement('span');
-      count.className = 'home-session-member-count';
-      count.textContent = memberLabel;
+      count.textContent = t('sessions.grokBotCount', { count: row.groupRows.length });
       description.append(count);
     }
-    if (age) description.append(document.createTextNode(`${memberLabel || metadataLabel ? ' · ' : ''}${age}`));
-    meta.append(description);
+    // A live row keeps its age once it is a minute old: running covers up to ten
+    // minutes of quiet, so "8m" separates an active session from a stalled one
+    // where "<1m" would only repeat the state mark. Detailed rows show it always.
+    if (age && shortAge && (detailed || shortAge !== '<1m')) {
+      const ago = document.createElement('span');
+      ago.className = 'home-session-ago-inline';
+      ago.textContent = shortAge;
+      ago.setAttribute('role', 'img');
+      ago.setAttribute('aria-label', age);
+      if (description.childElementCount) description.append(document.createTextNode(' · '));
+      description.append(ago);
+    }
+    if (description.childElementCount) {
+      bindHoverMarquee(description);
+      meta.append(description);
+    }
     const status = sessionRowsApi.sessionStatusNode(document, row, { prefix: 'home-session', translate: t,
       view: limitWindowsView, showUsed: state.settings?.sessionContextMetric !== 'remaining' });
     if (status) meta.append(status);
@@ -8469,6 +8946,29 @@ function renderHome() {
 }
 
 let localSessionActivity = null;
+// Native range periods are part of the stats the next delta applies to. A
+// History fallback shown in their place keeps the native period here, so the
+// delta base and a later native snapshot still see every session row.
+const replacedNativeRangePeriods = new WeakMap();
+
+function statsWithNativeRangePeriods(stats) {
+  const replaced = stats ? replacedNativeRangePeriods.get(stats) : null;
+  return replaced ? { ...stats, periods: { ...stats.periods, ...replaced } } : stats;
+}
+
+// Stats derived from the current ones (an activity patch, hidden titles)
+// carry the native periods a History fallback replaced.
+function replaceDerivedStats(next) {
+  const replaced = state.stats ? replacedNativeRangePeriods.get(state.stats) : null;
+  if (replaced && next && next !== state.stats) {
+    // Saved periods follow the same title policy as the stats they belong to.
+    replacedNativeRangePeriods.set(next, state.settings?.sessionTitlesEnabled === false
+      ? window.TokenMonitorSessionTitleDisplay.withoutSessionTitleStats({ periods: replaced }).periods
+      : replaced);
+  }
+  state.stats = next;
+}
+
 function applyLocalSessionActivity(stats) {
   const incoming = localSessionActivity;
   if (!stats || !incoming || incoming.snapshot?.id !== stats.snapshot?.id
@@ -8486,7 +8986,24 @@ function setRendererSettings(next) {
   const titlesChanged = (state.settings?.sessionTitlesEnabled !== false) !== (next.sessionTitlesEnabled !== false);
   const animationChanged = tokenNumberAnimationApi.normalize(state.settings?.tokenNumberAnimation)
     !== tokenNumberAnimationApi.normalize(next.tokenNumberAnimation);
+  const restoringPeriodTabs = state.settings?.periodTabOrder?.length && !next.periodTabOrder?.length;
+  const previousLocale = currentLocale();
+  const detailCompactChanged = (state.settings?.detailTokensUseCompactUnits === true) !== (next.detailTokensUseCompactUnits === true);
+  const detailUnitsChanged = (state.settings?.compactTokenUnits === 'localized') !== (next.compactTokenUnits === 'localized');
   state.settings = next;
+  const localeChanged = previousLocale !== currentLocale();
+  if (next.periodTabOrder?.length) ensureVisiblePeriod(next.periodTabOrder);
+  else if (restoringPeriodTabs && fixedPeriodRangesApi.slotForSelection(state.period) === 'month') {
+    const defaultPeriod = fixedPeriodRangesApi.normalizeMonthMode(next.periodMonthMode);
+    if (state.period !== defaultPeriod && setPeriod(defaultPeriod)) followOpenSessionToPeriod();
+  }
+  if (next.detailTokensUseCompactUnits !== true) detailTokenDisplayApi.reset();
+  if (detailCompactChanged || detailUnitsChanged || localeChanged) {
+    settleRowNumberAnimations();
+    if (state.openSession?.kind === 'session' && state.openSession.detail) {
+      state.openSession.pendingDisplayRefresh = true;
+    }
+  }
   if (animationChanged) {
     pluginViewHost?.refreshMotion();
     cancelNumberAnimation();
@@ -8496,7 +9013,7 @@ function setRendererSettings(next) {
     updateTotalCompact(state.currentTotal);
   }
   if (titlesChanged) {
-    if (next.sessionTitlesEnabled === false) state.stats = sessionStatsForDisplay(state.stats);
+    if (next.sessionTitlesEnabled === false) replaceDerivedStats(sessionStatsForDisplay(state.stats));
     // Main may have returned a titleless map while disabled. Pull it again
     // when re-enabled, even if no new usage snapshot has arrived.
     allTimeSessions.invalidate();
@@ -8510,7 +9027,9 @@ function periodContentAvailability() {
   return {
     fixedUnavailable: derived && state.fixedPeriodSnapshot?.status !== 'ready',
     detailUnavailable: derived && !fixedPeriodRangesApi.supportsBreakdown(state.period, state.breakdown, {
-      deviceHistoriesAvailable: Array.isArray(state.fixedPeriodHistory?.deviceHistories)
+      deviceRowsAvailable: Array.isArray(state.fixedPeriodHistory?.deviceHistories)
+        || (state.breakdown === 'device' && fixedPeriodDevices().length > 0),
+      native: state.fixedPeriodSnapshot?.native === true || state.fixedPeriodSnapshot?.detailsAvailable === true
     })
   };
 }
@@ -8540,6 +9059,7 @@ function renderAppContent({ fromSearch = false } = {}) {
     return;
   }
   ensureBreakdownVisible();
+  loadReasonixSessionList();
   syncSessionSearchChrome();
   if (state.breakdown !== 'session' || state.openSession) els.sessionToolFilter.classList.add('hidden');
   const pluginPage = pluginMainPages?.render(pluginPageOptions(), state.breakdown) || false;
@@ -8574,13 +9094,14 @@ function renderAppContent({ fromSearch = false } = {}) {
       // visible repaint, so switching to a fixed range cannot remain on loading.
       void loadFixedPeriodHistory();
     }
+    requestSyncedFixedPeriod();
     state.fixedPeriodSnapshot = buildFixedPeriodSnapshot();
-    if (state.fixedPeriodSnapshot.status === 'ready') {
-      state.stats.periods[state.period] = state.fixedPeriodSnapshot.period;
-    }
+    showFixedPeriod(state.fixedPeriodSnapshot);
   } else {
     state.fixedPeriodSnapshot = null;
+    if (needsPagedSessions()) requestSyncedFixedPeriod();
   }
+  warmSyncedFixedPeriod();
   if (state.openSession && state.breakdown !== 'session') { state.openSession = null; els.sessionDetail.classList.add('hidden'); rendererDom.clear(els.sessionDetail); els.sessionDetailHead.classList.add('hidden'); rendererDom.clear(els.sessionDetailHead); }
   if (state.openSession) { els.sessionDetail.classList.remove('hidden'); els.sessionDetailHead.classList.remove('hidden'); } else { els.sessionDetail.classList.add('hidden'); els.sessionDetailHead.classList.add('hidden'); }
   const period = state.stats.periods?.[state.period] || { totalTokens: 0, costUsd: 0, clients: {} };
@@ -8680,8 +9201,11 @@ function renderAppContent({ fromSearch = false } = {}) {
     els.breakdown.classList.add('hidden');
     if (state.openSession.kind === 'session-group') {
       const latest = sessionRowsForPeriod(period).find((row) => row.key === state.openSession.summary.key);
-      if (!latest) { closeSessionDetail(); return; }
-      state.openSession.summary = latest;
+      if (!latest && (state.settings?.sessionTitlesEnabled === false || !pagedSessionsPending())) {
+        closeSessionDetail();
+        return;
+      }
+      if (latest) state.openSession.summary = latest;
       // Update group readings while retaining the controls being read.
       renderSessionGroupDetail(state.openSession);
     }
@@ -8689,7 +9213,11 @@ function renderAppContent({ fromSearch = false } = {}) {
     if (state.openSession.renderOptions) {
       const options = state.openSession.renderOptions;
       state.openSession.renderOptions = null;
+      state.openSession.pendingDisplayRefresh = false;
       renderSessionDetail(options);
+    } else if (state.openSession.pendingDisplayRefresh && state.openSession.detail) {
+      state.openSession.pendingDisplayRefresh = false;
+      renderSessionDetail({ detail: state.openSession.detail, preserveScroll: true });
     }
     void refreshOpenSessionDetail();
   } else {
@@ -8705,7 +9233,7 @@ function renderAppContent({ fromSearch = false } = {}) {
     let incompleteHint = '';
     if (state.breakdown === 'project' && projectRowsApi.projectBreakdownIncomplete(state.stats, state.period)) {
       incompleteHint = 'projects.incomplete';
-    } else if (state.breakdown === 'session' && sessionRowsApi.sessionBreakdownIncomplete(state.stats, state.period)) {
+    } else if (state.breakdown === 'session' && sessionBreakdownIncomplete()) {
       incompleteHint = 'sessions.incomplete';
     }
     renderRows(rows, { incompleteHint, fromSearch });
@@ -8858,10 +9386,14 @@ async function refreshStats(options = {}) {
       state.homeHistoryRetrySignature = '';
       state.homeHistoryRetries = 0;
       state.homeHistorySignature = '';
+      clearTimeout(state.syncedFixedPeriod?.retryTimer);
+      state.syncedFixedPeriod = null;
+      state.syncedFixedPeriodCache.clear();
     }
     applyCodexActiveAccountFromStats();
     const forceFixedPeriodHistory = options.forceHistory === true;
     if (fixedPeriodRangesApi.isDerived(state.period)) {
+      if (syncedFixedPeriodKey() || canRenderNativeDevices()) statsRenderScheduler.request();
       await warmFixedPeriodHistory({
         force: forceFixedPeriodHistory,
         retryFailed: forceFixedPeriodHistory,
@@ -9046,7 +9578,11 @@ function applyAppearanceSettings(settings) {
   const systemGlassDisabled = settings?.systemGlass === false;
   const isWindows = navigator.userAgent.toLowerCase().includes('windows');
   const isMac = navigator.userAgent.includes('Macintosh');
-  const windowsGlass = windowsGlassApi.appearanceState(settings, { isWindows });
+  const windowsGlass = windowsGlassApi.appearanceState(settings, {
+    isWindows,
+    osRelease: state.appInfo?.osRelease,
+    accentActive: (settings?.windowsAccentActive ?? state.settings?.windowsAccentActive) === true
+  });
   const macGlass = macBackdropApi.appearanceState(settings, {
     liquidGlassSupported: nativeMaterialState.liquidGlassSupported
   });
@@ -9135,6 +9671,7 @@ function applyAppearanceSettings(settings) {
   document.body.classList.remove('is-windows-glass');
   
   document.documentElement.classList.toggle('is-windows', isWindows);
+  document.documentElement.classList.toggle('windows-accent-square', windowsGlass.squareCorners);
   document.body.classList.toggle('is-windows', isWindows);
   
   document.documentElement.classList.toggle('is-mac-legacy', isMacLegacyRadius);
@@ -9919,6 +10456,7 @@ function appearancePatchFromControls() {
     showToolIcons: Boolean(els.toolIconsInput.checked),
     titleIconOnly: Boolean(els.titleIconInput.checked),
     showCompactTotalTokens: Boolean(els.showCompactTotalTokensInput.checked),
+    detailTokensUseCompactUnits: Boolean(els.detailTokensUseCompactUnitsInput?.checked),
     showLiveTokenRate: Boolean(els.showLiveTokenRateInput.checked),
     liveTokenRateScope: els.liveTokenRateScopeInput?.value === 'device' ? 'device' : 'all',
     compactTokenUnits: els.compactTokenUnitsInput?.value === 'localized' ? 'localized' : 'western',
@@ -10570,24 +11108,242 @@ async function refreshHubBuildStatus() {
   renderHubBuildStatus();
 }
 
-function syncPeriodTabs() {
-  const tabs = Array.from(document.querySelectorAll('.tab'));
-  const activeSlot = fixedPeriodRangesApi.slotForSelection(state.period);
-  const activeIndex = Math.max(0, tabs.findIndex((tab) => tab.dataset.periodSlot === activeSlot));
-  document.querySelector('.tabs')?.style.setProperty('--period-index', String(activeIndex));
-  for (const tab of tabs) {
-    const active = tab.dataset.periodSlot === activeSlot;
-    tab.classList.toggle('active', active);
-    tab.setAttribute('aria-pressed', String(active));
+const periodTabs = document.getElementById('periodTabs');
+const legacyPeriodTabs = Array.from(periodTabs.querySelectorAll('.tab'));
+let periodTabSignature = '';
+const shownPeriodTabs = document.getElementById('shownPeriodTabs');
+const availablePeriodTabs = document.getElementById('availablePeriodTabs');
+const resetPeriodTabs = document.getElementById('resetPeriodTabs');
+const periodTabsError = document.getElementById('periodTabsError');
+let periodOrderSaving = false;
+
+let draggedPeriod = '';
+let periodDropMarker = null;
+
+function clearPeriodDropMarker() {
+  periodDropMarker?.removeAttribute('data-period-drop');
+  periodDropMarker = null;
+}
+
+const periodTabDrag = rowDragControllerApi.createRowDragController({
+  axis: 'grid',
+  dragSort: verticalDragSortApi,
+  getList: () => shownPeriodTabs,
+  getScrollPanel: () => els.settingsPanel,
+  rowSelector: '.period-tab-chip',
+  idKey: 'period',
+  preserveScroll: preserveSettingsPanelScroll,
+  applyOrder: order => placePeriodChips(shownPeriodTabs, order),
+  previewOrderAt(x, y) {
+    const target = x === undefined ? null : document.elementFromPoint(x, y);
+    const canRemove = availablePeriodTabs.contains(target)
+      && shownPeriodOrder().length > fixedPeriodRangesApi.MIN_PERIOD_TABS;
+    if (canRemove) availablePeriodTabs.dataset.periodDrop = 'list';
+    else availablePeriodTabs.removeAttribute('data-period-drop');
+    return shownPeriodTabs.contains(target);
+  },
+  onDropOutside(event, period) {
+    const target = document.elementFromPoint(event.clientX, event.clientY);
+    if (shownPeriodTabs.contains(target)) return false;
+    const order = shownPeriodOrder();
+    if (availablePeriodTabs.contains(target) && order.length > fixedPeriodRangesApi.MIN_PERIOD_TABS) {
+      void savePeriodTabOrder(order.filter(id => id !== period), period);
+    }
+    return true;
+  },
+  mirrorOrder: () => { periodOrderSaving = true; },
+  persistOrder: (order, period) => void savePeriodTabOrder(order, period),
+  requestRender: syncPeriodTabSettings
+});
+
+function periodInsertionTarget(event) {
+  const chip = event.target.closest('.period-tab-chip');
+  if (!chip) return { chip: shownPeriodTabs, edge: 'list' };
+  const rect = chip.getBoundingClientRect();
+  return { chip, edge: event.clientX < rect.left + rect.width / 2 ? 'before' : 'after' };
+}
+
+shownPeriodTabs.addEventListener('dragover', event => {
+  clearPeriodDropMarker();
+  if (!draggedPeriod || periodOrderSaving || shownPeriodOrder().length >= fixedPeriodRangesApi.MAX_PERIOD_TABS) return;
+  event.preventDefault();
+  event.dataTransfer.dropEffect = 'move';
+  const { chip, edge } = periodInsertionTarget(event);
+  periodDropMarker = chip;
+  chip.dataset.periodDrop = edge;
+});
+shownPeriodTabs.addEventListener('dragleave', event => {
+  if (!shownPeriodTabs.contains(event.relatedTarget)) clearPeriodDropMarker();
+});
+shownPeriodTabs.addEventListener('drop', event => {
+  clearPeriodDropMarker();
+  const order = [...shownPeriodOrder()];
+  if (!draggedPeriod || periodOrderSaving || order.length >= fixedPeriodRangesApi.MAX_PERIOD_TABS) return;
+  event.preventDefault();
+  const { chip, edge } = periodInsertionTarget(event);
+  const index = edge === 'list' ? order.length : order.indexOf(chip.dataset.period) + Number(edge === 'after');
+  order.splice(index, 0, draggedPeriod);
+  void savePeriodTabOrder(order, draggedPeriod);
+});
+
+function shownPeriodOrder() {
+  const custom = state.settings?.periodTabOrder;
+  if (custom?.length) return custom;
+  return ['today', legacyMiddlePeriod(), 'allTime'];
+}
+
+function periodLabelKey(period) {
+  return period === 'today' || period === 'allTime' ? `trayComposer.period.${period}` : `periodRange.${period}`;
+}
+
+function syncPeriodButtonName(button, period, { tooltip = false } = {}) {
+  const name = t(periodLabelKey(period));
+  if (button.getAttribute('aria-label') === name) return;
+  if (tooltip) limitWindowsView.setDetailTooltip(button, [{ full: name }], { centered: true });
+  else button.setAttribute('aria-label', name);
+}
+
+function placePeriodChips(list, order) {
+  if (Array.from(list.children).every((chip, index) => chip.dataset.period === order[index])
+    && list.children.length === order.length) return;
+  const focused = document.activeElement;
+  list.append(...order.map(period => periodChips.get(period)));
+  if (list.contains(focused) && document.activeElement !== focused) focused.focus({ preventScroll: true });
+}
+
+async function savePeriodTabOrder(order, focusPeriod) {
+  periodOrderSaving = true;
+  shownPeriodTabs.setAttribute('aria-busy', 'true');
+  periodTabsError.classList.add('hidden');
+  try {
+    await saveSettings({ periodTabOrder: order });
+  } catch (_) {
+    periodTabsError.textContent = t('periodRange.tabsSaveFailed');
+    periodTabsError.classList.remove('hidden');
+  } finally {
+    periodOrderSaving = false;
+    shownPeriodTabs.removeAttribute('aria-busy');
+    const restoreFocus = document.activeElement === resetPeriodTabs;
+    preserveSettingsPanelScroll(syncPeriodTabSettings);
+    if (restoreFocus && resetPeriodTabs.hidden) periodChips.get(focusPeriod)?.focus({ preventScroll: true });
   }
-  if (els.monthPeriodTab) {
-    const mode = activeSlot === 'month'
-      ? fixedPeriodRangesApi.normalizeMonthMode(state.period)
-      : fixedPeriodRangesApi.normalizeMonthMode(state.settings?.periodMonthMode);
+}
+
+const periodChips = new Map(fixedPeriodRangesApi.PERIOD_TAB_OPTIONS.map(period => {
+  const chip = document.createElement('button');
+  chip.type = 'button';
+  chip.className = 'tab period-tab-chip';
+  chip.dataset.period = period;
+  chip.append(document.createElement('span'));
+  chip.addEventListener('pointerdown', event => {
+    if (!periodOrderSaving && chip.parentElement === shownPeriodTabs) {
+      chip.querySelector('.limit-detail-tooltip:popover-open')?.hidePopover();
+      periodTabDrag.startRowDrag(event, period);
+    }
+  });
+  chip.addEventListener('dragstart', event => {
+    if (periodOrderSaving || chip.parentElement !== availablePeriodTabs || chip.getAttribute('aria-disabled') === 'true') {
+      event.preventDefault();
+      return;
+    }
+    draggedPeriod = period;
+    event.dataTransfer.effectAllowed = 'move';
+    event.dataTransfer.setData('text/plain', period);
+    chip.querySelector('.limit-detail-tooltip:popover-open')?.hidePopover();
+    chip.classList.add('dragging');
+  });
+  chip.addEventListener('dragend', () => {
+    chip.classList.remove('dragging');
+    draggedPeriod = '';
+    clearPeriodDropMarker();
+    syncPeriodTabSettings();
+  });
+  chip.addEventListener('click', () => {
+    if (periodOrderSaving || draggedPeriod || periodTabDrag.isDragging() || chip.getAttribute('aria-disabled') === 'true') return;
+    const order = shownPeriodOrder();
+    const next = order.includes(period) ? order.filter(id => id !== period) : [...order, period];
+    void savePeriodTabOrder(next, period);
+  });
+  chip.addEventListener('keydown', event => {
+    if (!event.altKey || periodOrderSaving || draggedPeriod || periodTabDrag.isDragging() || chip.parentElement !== shownPeriodTabs) return;
+    const offset = event.key === 'ArrowLeft' ? -1 : event.key === 'ArrowRight' ? 1 : 0;
+    if (!offset) return;
+    event.preventDefault();
+    const order = [...shownPeriodOrder()];
+    const index = order.indexOf(period);
+    const target = index + offset;
+    if (target < 0 || target >= order.length) return;
+    order.splice(target, 0, ...order.splice(index, 1));
+    void savePeriodTabOrder(order, period);
+  });
+  return [period, chip];
+}));
+
+function syncPeriodTabSettings() {
+  if (periodOrderSaving || draggedPeriod || periodTabDrag.deferRender()) return;
+  const order = shownPeriodOrder();
+  const available = fixedPeriodRangesApi.PERIOD_TAB_OPTIONS.filter(period => !order.includes(period));
+  placePeriodChips(shownPeriodTabs, order);
+  placePeriodChips(availablePeriodTabs, available);
+  resetPeriodTabs.hidden = !state.settings.periodTabOrder?.length;
+  for (const [period, chip] of periodChips) {
+    const shown = order.includes(period);
+    const countLimit = shown ? fixedPeriodRangesApi.MIN_PERIOD_TABS : fixedPeriodRangesApi.MAX_PERIOD_TABS;
+    chip.firstElementChild.textContent = fixedPeriodRangesApi.displayLabel(period);
+    syncPeriodButtonName(chip, period, { tooltip: true });
+    chip.draggable = !shown;
+    chip.setAttribute('aria-pressed', String(shown));
+    chip.setAttribute('aria-disabled', String(order.length === countLimit));
+    if (shown) chip.setAttribute('aria-keyshortcuts', 'Alt+ArrowLeft Alt+ArrowRight');
+    else chip.removeAttribute('aria-keyshortcuts');
+  }
+}
+
+resetPeriodTabs.addEventListener('click', () => {
+  if (!periodOrderSaving && !draggedPeriod && !periodTabDrag.isDragging()) void savePeriodTabOrder([], 'today');
+});
+
+function ensureVisiblePeriod(order) {
+  if (!order.includes(state.period) && setPeriod(order[0])) followOpenSessionToPeriod();
+}
+
+function syncPeriodTabs() {
+  const order = state.settings?.periodTabOrder || [];
+  const custom = order.length > 0;
+  const signature = order.join(',');
+  if (signature !== periodTabSignature) {
+    if (state.periodMenuOpen) setPeriodMenuOpen(false);
+    periodTabSignature = signature;
+    const buttons = custom ? order.map(period => {
+      const button = document.createElement('button');
+      button.type = 'button';
+      button.className = 'tab';
+      button.dataset.period = period;
+      button.textContent = fixedPeriodRangesApi.displayLabel(period);
+      return button;
+    }) : legacyPeriodTabs;
+    for (const tab of periodTabs.querySelectorAll('.tab')) tab.remove();
+    periodTabs.append(...buttons);
+    periodTabs.style.setProperty('--period-count', String(buttons.length));
+    periodTabs.parentElement.style.setProperty('--period-width', `${Math.max(148, buttons.length * 44)}px`);
+    periodTabs.classList.toggle('custom-period-tabs', custom);
+  }
+  const tabs = Array.from(periodTabs.querySelectorAll('.tab'));
+  const activeSlot = custom ? state.period : fixedPeriodRangesApi.slotForSelection(state.period);
+  const activeIndex = Math.max(0, tabs.findIndex(tab => (tab.dataset.periodSlot || tab.dataset.period) === activeSlot));
+  periodTabs.style.setProperty('--period-index', String(activeIndex));
+  if (!custom) {
+    const mode = legacyMiddlePeriod();
     els.monthPeriodTab.textContent = fixedPeriodRangesApi.displayLabel(mode);
     els.monthPeriodTab.dataset.period = mode;
+    syncPeriodMenu();
   }
-  syncPeriodMenu();
+  for (const tab of tabs) {
+    const active = (tab.dataset.periodSlot || tab.dataset.period) === activeSlot;
+    tab.classList.toggle('active', active);
+    tab.setAttribute('aria-pressed', String(active));
+    syncPeriodButtonName(tab, tab.dataset.period);
+  }
 }
 
 function applyInitialBreakdownPreference() {
@@ -11039,7 +11795,9 @@ function syncSettingsForm() {
   if (els.languageInput) els.languageInput.value = currentLanguage();
   if (els.periodMonthModeInput) {
     els.periodMonthModeInput.value = fixedPeriodRangesApi.normalizeMonthMode(state.settings?.periodMonthMode);
+    els.periodMonthModeInput.closest('.period-default-setting').classList.toggle('hidden', Boolean(state.settings.periodTabOrder?.length));
   }
+  syncPeriodTabSettings();
   if (els.currencyInput) els.currencyInput.value = currentCurrency();
   syncCurrencyRateControls();
   syncNetworkProxyControls();
@@ -11098,6 +11856,9 @@ function syncSettingsForm() {
     els.tokenNumberAnimationInput.value = tokenNumberAnimationApi.normalize(state.settings.tokenNumberAnimation);
   }
   els.showCompactTotalTokensInput.checked = state.settings.showCompactTotalTokens === true;
+  if (els.detailTokensUseCompactUnitsInput) {
+    els.detailTokensUseCompactUnitsInput.checked = state.settings.detailTokensUseCompactUnits === true;
+  }
   els.showLiveTokenRateInput.checked = state.settings.showLiveTokenRate === true;
   if (els.liveTokenRateScopeInput) {
     els.liveTokenRateScopeInput.value = state.settings.liveTokenRateScope === 'device' ? 'device' : 'all';
@@ -12367,7 +13128,8 @@ function setClientHealthExpanded(clientId, options = {}) {
     // left alone so a collapse still has something to animate.
     if (open) {
       const force = options.refreshPlaceholder === true
-        && !clientHealthPresentationApi.hasClientHealth(localClientHealth(), row.dataset.client);
+        && (row.dataset.client === 'antigravity'
+          || !clientHealthPresentationApi.hasClientHealth(localClientHealth(), row.dataset.client));
       loadClientSources(row.dataset.client, { force });
       if (container.childElementCount === 0) {
         fillClientHealthPanel(container, row.dataset.client);
@@ -12519,7 +13281,7 @@ function clientHealthDetailFor(clientId) {
 function clientEditionHealthDetail(clientId) {
   const options = {
     usage: clientPeriodUsage(clientId),
-    sources: localClientSources(clientId),
+    sources: localClientSources(clientId)?.filter(source => source.id !== 't3-antigravity-acp'),
     collectionState: enabledClientSet().has(clientId) ? 'waiting' : 'notTracked'
   };
   const detail = clientHealthPresentationApi.clientHealthDetail(localClientHealth(), clientId, options);
@@ -13013,6 +13775,41 @@ function clientHealthActions(clientId, detail) {
   return actions;
 }
 
+let antigravityAcpDisclosureOpen = false;
+
+function antigravityAcpSourceGroup(sources) {
+  const section = document.createElement('section');
+  section.className = 'tool-health-group';
+  const heading = document.createElement('h4');
+  heading.className = 'tool-health-group-title';
+  heading.textContent = t('settings.tools.health.autoDiscovery');
+  const disclosure = document.createElement('details');
+  disclosure.className = 'tool-health-auto-source';
+  disclosure.open = antigravityAcpDisclosureOpen;
+  const summary = document.createElement('summary');
+  summary.textContent = 'T3 Code ACP';
+  summary.addEventListener('click', (event) => {
+    event.preventDefault();
+    antigravityAcpDisclosureOpen = !disclosure.open;
+    disclosure.open = antigravityAcpDisclosureOpen;
+  });
+  const paths = document.createElement('div');
+  paths.className = 'tool-health-checks';
+  for (const { dir, exists, pending } of sources) {
+    const row = document.createElement('div');
+    row.className = 'tool-health-check-row';
+    const chip = document.createElement('code');
+    chip.className = `tool-health-check${exists ? ' found' : pending ? ' pending' : ''}`;
+    chip.textContent = friendlyPath(dir);
+    chip.setAttribute('aria-label', dir);
+    row.append(chip);
+    paths.append(row);
+  }
+  disclosure.append(summary, paths);
+  section.append(heading, disclosure);
+  return section;
+}
+
 function clientHealthPanel(detail, clientId) {
   const inner = document.createElement('div');
   inner.className = 'accordion-animation-inner';
@@ -13031,6 +13828,11 @@ function clientHealthPanel(detail, clientId) {
       detail.notes.filter((note) => note.group === group.id),
       clientId
     ));
+    if (group.id === 'source' && clientId === 'antigravity') {
+      const sources = (localClientSources(clientId) || [])
+        .filter(source => source.id === 't3-antigravity-acp' && source.dir);
+      if (sources.length > 0) groups.append(antigravityAcpSourceGroup(sources));
+    }
   }
   box.append(groups);
   for (const id of clientSourcesPanelIds(clientId)) {
@@ -15259,6 +16061,7 @@ async function init() {
   if (!systemUiThemeSeeded) state.systemDarkUi = state.appInfo?.systemDarkUi === true;
   if (els.aboutVersion) els.aboutVersion.textContent = state.appInfo?.version ? `v${state.appInfo.version}` : '—';
   state.settings = await window.tokenMonitor.getSettings();
+  if (state.settings.periodTabOrder?.length) ensureVisiblePeriod(state.settings.periodTabOrder);
   await refreshAccountSlotPanels();
   // Local appearance is sufficient for first reveal. Plugin discovery, sync,
   // updater and stats queries below must not hold the window off screen.
@@ -15328,44 +16131,54 @@ async function init() {
   updateTitleFit();
 }
 
-for (const tab of document.querySelectorAll('.tab')) {
-  tab.addEventListener('click', (event) => {
-    const slot = tab.dataset.periodSlot || tab.dataset.period;
-    const activeSlot = fixedPeriodRangesApi.slotForSelection(state.period);
-    if (slot === 'month' && activeSlot === 'month') {
-      event.stopPropagation();
-      setPeriodMenuOpen(!state.periodMenuOpen, { focus: state.periodMenuOpen ? '' : 'current' });
-      return;
-    }
-    setPeriodMenuOpen(false);
-    const targetPeriod = slot === 'month'
-      ? fixedPeriodRangesApi.normalizeMonthMode(state.settings?.periodMonthMode)
-      : tab.dataset.period;
-    const snapshot = captureBreakdownMotion();
-    if (!setPeriod(targetPeriod)) return;
-    syncPeriodTabs();
-    if (state.openSession && fixedPeriodRangesApi.supportsBreakdown(state.period, 'session')) {
-      if (state.openSession.kind === 'session-group') {
-        const period = state.stats?.periods?.[state.period];
-        const summary = sessionRowsForPeriod(period).find((row) => row.key === state.openSession.summary.key);
-        if (summary) {
-          state.openSession = { kind: 'session-group', period: state.period, summary };
-        } else {
-          state.openSession = null;
-        }
+// An open session follows a period change when the new period lists sessions,
+// re-reading its detail for the new period (and range); otherwise it closes.
+function followOpenSessionToPeriod() {
+  if (state.openSession && fixedPeriodRangesApi.supportsBreakdown(state.period, 'session', {
+    native: Boolean(currentNativeRangeSnapshot())
+  })) {
+    if (state.openSession.kind === 'session-group') {
+      const period = state.stats?.periods?.[state.period];
+      const summary = sessionRowsForPeriod(period).find((row) => row.key === state.openSession.summary.key);
+      if (summary || pagedSessionsPending()) {
+        state.openSession = { kind: 'session-group', period: state.period, summary: summary || state.openSession.summary };
       } else {
-        openSessionDetail({ ...state.openSession, returnTo: null });
+        state.openSession = null;
       }
-    } else if (state.openSession) {
-      state.openSession = null;
+    } else {
+      // The detail's cost is the destination period's row, like its turns;
+      // no row there means no cost to spread over its turns.
+      const entry = sessionLiveStatsEntry({ ...state.openSession, period: state.period });
+      openSessionDetail({
+        ...state.openSession,
+        sessionCost: sessionLiveCost(entry, state.openSession.client),
+        returnTo: null
+      });
     }
-    state.rowSignature = '';
-    state.periodMotionActive = true;
-    render();
-    state.periodMotionActive = false;
-    animateBreakdownFrom(snapshot, { duration: periodBreakdownMotionDuration(), synchronized: true });
-  });
+  } else if (state.openSession) {
+    state.openSession = null;
+  }
 }
+
+periodTabs.addEventListener('click', (event) => {
+  const tab = event.target.closest('.tab');
+  if (!tab) return;
+  if (tab === els.monthPeriodTab && fixedPeriodRangesApi.slotForSelection(state.period) === 'month') {
+    event.stopPropagation();
+    setPeriodMenuOpen(!state.periodMenuOpen, { focus: state.periodMenuOpen ? '' : 'current' });
+    return;
+  }
+  setPeriodMenuOpen(false);
+  const snapshot = captureBreakdownMotion();
+  if (!setPeriod(tab.dataset.period)) return;
+  syncPeriodTabs();
+  followOpenSessionToPeriod();
+  state.rowSignature = '';
+  state.periodMotionActive = true;
+  render();
+  state.periodMotionActive = false;
+  animateBreakdownFrom(snapshot, { duration: periodBreakdownMotionDuration(), synchronized: true });
+});
 
 for (const button of els.monthPeriodMenu?.querySelectorAll('[data-fixed-period]') || []) {
   button.addEventListener('click', async (event) => {
@@ -15376,8 +16189,8 @@ for (const button of els.monthPeriodMenu?.querySelectorAll('[data-fixed-period]'
     const changed = setPeriod(selection);
     state.settings.periodMonthMode = selection;
     syncPeriodTabs();
-    syncPeriodMenu();
     if (changed) {
+      followOpenSessionToPeriod();
       state.rowSignature = '';
       state.periodMotionActive = true;
       render();
@@ -15411,7 +16224,7 @@ els.monthPeriodMenu?.addEventListener('keydown', (event) => {
 async function saveDefaultUsageRange(value) {
   const selection = fixedPeriodRangesApi.normalizeMonthMode(value);
   state.settings.periodMonthMode = selection;
-  if (fixedPeriodRangesApi.slotForSelection(state.period) === 'month') setPeriod(selection);
+  if (fixedPeriodRangesApi.slotForSelection(state.period) === 'month' && setPeriod(selection)) followOpenSessionToPeriod();
   syncPeriodTabs();
   render();
   await saveSettings({ periodMonthMode: selection });
@@ -15436,6 +16249,7 @@ document.addEventListener('keydown', (event) => {
 
 els.breakdown.addEventListener('scroll', settleOffscreenBreakdownNumbers, { passive: true });
 els.breakdown.addEventListener('click', (event) => {
+  if (event.target?.dataset?.detailTokenToggle === 'true') return;
   if (state.breakdown !== 'session') return;
   const rowEl = event.target.closest('.row');
   if (!rowEl) return;
@@ -15451,20 +16265,22 @@ els.breakdown.addEventListener('click', (event) => {
   }
   const key = rowEl.dataset.key || '';            // "session:<client>:<sessionId>"
   const client = rowEl.dataset.client || '';
-  if (client !== 'claude' && client !== 'codex' && client !== 'opencode' && client !== 'reasonix' && client !== 'dsh' && client !== 'codebuddy' && client !== 'workbuddy' && client !== 'pi' && client !== 'omp' && client !== 'senpi') return;
-  if (client === 'reasonix' && rowEl.dataset.detailUnavailable === 'true') return;
+  if (!sessionRowsApi.sessionRowDetailAvailable({ client, sessionDetailAvailable: rowEl.dataset.reasonixDetail === 'true' })) return;
   const match = key.match(/^session:([^:]+):(.+)$/);
   if (!match) return;
   const sessionId = client === 'reasonix' ? `reasonix:${match[2]}` : match[2];
-  const period = state.stats?.periods?.[state.period];
   const session = client === 'reasonix'
-    ? state.stats?.nativeSessions?.[state.period]?.[sessionId]
-    : period?.sessions?.[`${client}:${sessionId}`];
+    ? reasonixSessionList?.periods[state.period]?.[sessionId]
+    : displayedSessions(state.period)?.[`${client}:${sessionId}`];
+  if (client === 'reasonix' && !session?.reasonixSessionRef) return;
+  const { sourceDevice, sessionDetailHeading } = window.TokenMonitorDomReconcile.data(rowEl) || {};
   openSessionDetail({
     client,
     sessionId,
-    sessionCost: client === 'reasonix' ? Number(session?.reportedCostUsd || 0) : Number(session?.costUsd || 0),
-    title: rowEl.querySelector('.row-title')?.textContent || ''
+    reasonixSessionRef: session?.reasonixSessionRef,
+    sessionCost: Number(session?.costUsd || 0),
+    sourceDevice,
+    title: sessionDetailHeading || rowEl.querySelector('.row-title')?.textContent || ''
   });
 });
 
@@ -16052,6 +16868,9 @@ els.tokenNumberAnimationInput?.addEventListener('change', saveAppearanceFromCont
 els.showCompactTotalTokensInput.addEventListener('change', async () => {
   await saveAppearanceFromControls();
 });
+els.detailTokensUseCompactUnitsInput?.addEventListener('change', async () => {
+  await saveAppearanceFromControls();
+});
 els.showLiveTokenRateInput.addEventListener('change', async () => {
   state.settings.showLiveTokenRate = els.showLiveTokenRateInput.checked;
   const liveRateHasScope = state.settings.showLiveTokenRate
@@ -16470,7 +17289,13 @@ els.refreshButton.addEventListener('click', () => {
   // used all over the settings/account flows, and folding those into it would re-run
   // the expensive `tokscale graph`, plus the Cursor and Antigravity sync subprocesses,
   // on every one of them.
-  else refreshStats({ force: true, forceHistory: true, forceSelfSync: true, feedback: true });
+  else {
+    if (state.breakdown === 'session' && !state.openSession) {
+      reasonixSessionList = null;
+      loadReasonixSessionList();
+    }
+    refreshStats({ force: true, forceHistory: true, forceSelfSync: true, feedback: true });
+  }
 });
 els.minButton.addEventListener('click', (event) => {
   if (event.detail > 0) els.minButton.blur();
@@ -16766,7 +17591,7 @@ const allTimeSessions = allTimeSessionsApi.createAllTimeSessionsLoader({
     ? window.TokenMonitorSessionTitleDisplay.withoutSessionTitles(sessions) : sessions,
   projectionKey: () => state.settings?.sessionTitlesEnabled !== false,
   onLoaded: () => {
-    if (state.stats) state.stats = sessionStatsForDisplay(allTimeSessions.attach(state.stats));
+    if (state.stats) replaceDerivedStats(sessionStatsForDisplay(allTimeSessions.attach(state.stats)));
     statsRenderScheduler.request();
   },
   onError: (error) => console.log(`[stats] all-time sessions failed: ${error?.message || error}`)
@@ -16809,7 +17634,7 @@ window.tokenMonitor.onStatsPush?.((payload) => {
   if (!payload) return;
   if (payload.event === 'session-activity') {
     localSessionActivity = payload.data;
-    state.stats = applyLocalSessionActivity(state.stats);
+    replaceDerivedStats(applyLocalSessionActivity(state.stats));
     statsRenderScheduler.request();
     return;
   }
@@ -16825,7 +17650,7 @@ window.tokenMonitor.onStatsPush?.((payload) => {
       incomingStats = payload.data.stats;
       state.statsDeltaResyncPending = null;
     } else if (payload.data?.statsDelta) {
-      incomingStats = window.TokenMonitorStatsDelta?.applyStatsDelta(state.stats, payload.data.statsDelta) || null;
+      incomingStats = window.TokenMonitorStatsDelta?.applyStatsDelta(statsWithNativeRangePeriods(state.stats), payload.data.statsDelta) || null;
       if (!incomingStats) {
         // Recover on the stats push channel, where a full snapshot arrives
         // before any delta based on it. The invoke reply carries no stats.
@@ -16875,6 +17700,7 @@ window.tokenMonitor.onStatsPush?.((payload) => {
       // fetched; repaint once with the coherent snapshot instead of flashing an
       // intermediate loading layout.
       if (fixedPeriodHistoryNeedsWarmup()) {
+        if (syncedFixedPeriodKey() || canRenderNativeDevices()) statsRenderScheduler.request();
         void warmFixedPeriodHistory({ renderOnComplete: true });
       } else {
         statsRenderScheduler.request();
@@ -16914,6 +17740,8 @@ function roundedRectPath(ctx, x, y, w, h, r) {
 const trayProviderImages = {};
 const trayProviderImageIds = new WeakMap();
 const trayProviderImageOpticalSamples = new WeakMap();
+const trayProviderIconsRequested = new Set();
+let trayProviderIconsLoading = new Set();
 const trayProviderIconDeliveryGuard = window.TokenMonitorTrayProviderIcons.createTrayProviderIconDeliveryGuard();
 const trayComposers = {};
 let customTrayClockTimer = null;
@@ -17666,10 +18494,11 @@ function trayDataUrlForMode(mode, size = 44, colors, options = {}) {
 
 async function maybeUpdateBarsIcon(options = {}) {
   if (options.refreshComposers !== false && isSettingsSurfaceVisible()) {
-    refreshTrayComposers();
+    refreshTrayComposers(options);
     if (edgeDockAvailable() && state.settings?.edgeDockEnabled === true) edgeDockComposer?.render();
     if (state.appInfo?.platform === 'darwin' && state.settings?.notchEnabled === true) notchItemsComposer?.render();
   } else {
+    syncTrayProviderIconDemand();
     syncCustomTrayClockTimer();
   }
   const mode = state.settings?.trayContent;
@@ -17994,7 +18823,8 @@ function syncCustomTrayClockTimer() {
   }
 }
 
-function refreshTrayComposers() {
+function refreshTrayComposers(options) {
+  if (isSettingsSurfaceVisible()) syncTrayProviderIconDemand();
   const surfaces = [
     { id: 'tray', root: els.trayComposer, visible: true },
     { id: 'floatingBubble', root: els.floatingBubbleComposer, visible: true },
@@ -18005,7 +18835,7 @@ function refreshTrayComposers() {
     trayComposers,
     createTrayComposer
   );
-  Object.values(trayComposers).forEach((composer) => composer?.refresh());
+  Object.values(trayComposers).forEach((composer) => composer?.refresh(options));
   syncCustomTrayClockTimer();
 }
 
@@ -18079,10 +18909,45 @@ function providerImageToPngDataUrl(img, size, showBadge = false, options = {}) {
   return canvas.toDataURL('image/png');
 }
 
+function trayProviderIconDemand() {
+  const demand = window.TokenMonitorTrayProviderIcons.trayProviderIconDemand({
+    stats: state.stats,
+    layouts: ['trayCustomLayout', 'floatingBubbleCustomLayout', 'notchCustomLayout']
+      .map((key) => state.settings?.[key])
+  });
+  if (isSettingsSurfaceVisible()) {
+    for (const { provider } of statsForTrayComposer().limits.providers) demand.add(provider);
+  }
+  return [...demand].filter((id) => trayIconProviderIds.has(id));
+}
+
+// A provider that starts reporting usage after startup needs its mark delivered
+// before the tray can pick it. An id counts as requested while the latest
+// finished delivery sent its mark to main or failed to load it, so a failed
+// mark cannot turn every stats push into another delivery, while one dropped
+// by a superseded delivery, or left out of a later one, is asked for again.
+// Ids the current delivery is still loading are left to it.
+function syncTrayProviderIconDemand() {
+  if (!state.settings || !window.tokenMonitor.setTrayIcons) return;
+  if (trayProviderIconDemand().some((id) => !trayProviderIconsRequested.has(id) && !trayProviderIconsLoading.has(id))) {
+    void deliverTrayProviderIcons();
+  }
+}
+
+// Draws only ever read the 128 px optical sample, so keep that canvas as the
+// provider's image and let the decoded SVG go.
+async function loadTrayProviderMark(path) {
+  const sample = providerImageOpticalSample(await loadImage(path));
+  trayProviderImageOpticalSamples.set(sample.canvas, sample);
+  return sample.canvas;
+}
+
 async function deliverTrayProviderIcons(showBadge = state.settings?.showTrayProviderBadge === true) {
   if (!window.tokenMonitor.setTrayIcons) return;
   const deliveryId = trayProviderIconDeliveryGuard.begin();
-  const sources = window.TokenMonitorTrayProviderIcons.trayProviderIconSources(trayIconProviderIds);
+  const demand = trayProviderIconDemand();
+  trayProviderIconsLoading = new Set(demand);
+  const sources = window.TokenMonitorTrayProviderIcons.trayProviderIconSources(demand);
   sources.app = '../../../assets/icons/tray-token-monitor.png';
   const modules = state.pluginCatalog?.limits?.modules || [];
   for (const module of modules) {
@@ -18092,23 +18957,35 @@ async function deliverTrayProviderIcons(showBadge = state.settings?.showTrayProv
   }
   for (const id of Object.keys(trayProviderImages)) if (id.startsWith('plugin:') && !sources[id]) delete trayProviderImages[id];
   const icons = {};
+  const failed = [];
   for (const [id, path] of Object.entries(sources)) {
     try {
-      const img = await loadImage(path);
+      // Built-in marks never change, so a redelivery for the badge or the system
+      // theme repaints from the kept sample. Plugin icons can, so reload those.
+      const img = id.startsWith('plugin:')
+        ? await loadImage(path)
+        : trayProviderImages[id] || await loadTrayProviderMark(path);
       if (!trayProviderIconDeliveryGuard.isCurrent(deliveryId)) return;
       trayProviderImages[id] = img;
       trayProviderImageIds.set(img, id);
       if (!id.startsWith('plugin:')) icons[id] = providerImageToPngDataUrl(img, 44, showBadge, { trayInk: true, standalone: true });
     } catch (_) {
       if (!trayProviderIconDeliveryGuard.isCurrent(deliveryId)) return;
+      failed.push(id);
       if (id.startsWith('plugin:')) delete trayProviderImages[id];
     }
   }
   if (!trayProviderIconDeliveryGuard.isCurrent(deliveryId)) return;
-  if (Object.keys(icons).length) await window.tokenMonitor.setTrayIcons(icons);
+  // Drop absent built-in bitmaps so main can use its fallback until a fresh
+  // mark arrives, even if it changes providers while the renderer is hidden.
+  const cleared = Object.fromEntries([...trayIconProviderIds].map((id) => [id, null]));
+  await window.tokenMonitor.setTrayIcons({ ...cleared, ...icons });
   if (!trayProviderIconDeliveryGuard.isCurrent(deliveryId)) return;
+  trayProviderIconsRequested.clear();
+  for (const id of [...Object.keys(icons), ...failed]) trayProviderIconsRequested.add(id);
+  trayProviderIconsLoading = new Set();
   // Provider images may unlock a richer bars icon now that they're cached.
-  maybeUpdateBarsIcon();
+  maybeUpdateBarsIcon({ refreshOpenPreview: true });
   renderFloatingBubbleContent();
 }
 

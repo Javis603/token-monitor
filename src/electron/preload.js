@@ -41,12 +41,14 @@ contextBridge.exposeInMainWorld('tokenMonitor', {
   deleteDevice: (deviceId) => ipcRenderer.invoke('devices:delete', deviceId),
   getAllTimeSessions: (snapshotId) => ipcRenderer.invoke('stats:allTimeSessions', snapshotId),
   getArchivedSessionCount: () => ipcRenderer.invoke('stats:archivedSessionCount'),
+  listReasonixSessions: () => ipcRenderer.invoke('session:listReasonix'),
   getSessionDetail: (args) => ipcRenderer.invoke('session:getDetail', args),
   getStreamStatus: () => ipcRenderer.invoke('stream:status'),
   getServiceStatus: (options) => ipcRenderer.invoke('serviceStatus:get', options),
   getCodexResetForecast: (options) => ipcRenderer.invoke('codexResetForecast:get', options),
   openDashboard: () => ipcRenderer.invoke('dashboard:open'),
   getDashboardHistory: (options) => ipcRenderer.invoke('dashboard:getHistory', options),
+  getSyncedFixedPeriod: (...args) => ipcRenderer.invoke('stats:fixedPeriod', ...args),
   onDashboardHistoryChanged: (callback) => {
     const listener = () => { try { callback(); } catch (_) {} };
     ipcRenderer.on('dashboard:historyChanged', listener);
@@ -54,6 +56,7 @@ contextBridge.exposeInMainWorld('tokenMonitor', {
   },
   dashboard: {
     ready: () => ipcRenderer.send('dashboard:ready'),
+    openAppSettings: () => ipcRenderer.send('dashboard:openAppSettings'),
     minimize: () => ipcRenderer.send('dashboard:minimize'),
     close: () => ipcRenderer.send('dashboard:close')
   },

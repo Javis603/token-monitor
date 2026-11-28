@@ -146,8 +146,13 @@
     return { render, hasTarget,
       hasAnchor(native) { return [...outlets.values()].some(record => record.native === native && record.nodes.size > 0); },
       nodesFor(native) {
-        if (!native.parentNode) return [];
-        const owned = new Set([...outlets.values()].filter(record => record.native === native).flatMap(record => [...record.nodes.values()]));
+        if (!outlets.size || !native.parentNode) return [];
+        const owned = new Set();
+        for (const record of outlets.values()) {
+          if (record.native !== native) continue;
+          for (const node of record.nodes.values()) owned.add(node);
+        }
+        if (!owned.size) return [];
         return [...native.parentNode.children].filter(node => owned.has(node));
       },
       retain(targets) {

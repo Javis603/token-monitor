@@ -358,7 +358,9 @@ class FakeSocket extends EventTarget {
     this.sent.push(message);
     if (message.id == null) return;
     if (this.heldMethods.has(message.method)) return;
-    const result = message.method === 'thread/list' ? { data: this.threads, nextCursor: null } : {};
+    const result = message.method === 'thread/list'
+      ? { data: this.threads.filter((thread) => message.params.originators.includes(thread.originator)), nextCursor: null }
+      : {};
     queueMicrotask(() => {
       if (this.readyState !== 1) return;
       const event = new Event('message');
@@ -392,6 +394,27 @@ function subscriptionFixture(t, listedThreads) {
     calls(method) { return sockets.flatMap((socket) => socket.sent.filter((item) => item.method === method)); }
   };
 }
+
+test('discovers Web Work tasks on the local executor alongside legacy Dots tasks', async (t) => {
+  const web = { ...LOCAL, id: 'local-web-task', originator: 'codex_work_web', threadSource: 'user' };
+  const f = subscriptionFixture(t, [
+    LOCAL,
+    web,
+    { ...web, id: 'wrong-source', threadSource: 'aeon_child' },
+    { ...web, id: 'native', path: '/rollout.jsonl' },
+    { ...web, id: 'other-device', environments: [{ environmentId: 'executor-other', cwd: '/work/project' }] }
+  ]);
+  f.source.start();
+  await f.settle();
+  assert.deepEqual(
+    f.calls('thread/resume').map((item) => item.params.threadId).sort(),
+    [LOCAL.id, web.id].sort()
+  );
+  const socket = f.sockets[0];
+  socket.notify('thread/tokenUsage/updated', { threadId: web.id, turnId: 'baseline', tokenUsage: { last: LAST, total: TOTAL } });
+  socket.notify('thread/tokenUsage/updated', { threadId: web.id, turnId: 'work', tokenUsage: { last: LAST, total: addCounters(TOTAL, LAST) } });
+  assert.deepEqual(f.store.rows().map((row) => [row.threadId, row.usage.total]), [[web.id, LAST.totalTokens]]);
+});
 
 test('historical idle threads never resume, including after reconnect; newly active work still records usage', async (t) => {
   const listed = Array.from({ length: 90 }, (_, i) => ({ ...LOCAL, id: `${ID}-${i}`, status: { type: 'idle' } }));
@@ -1146,7 +1169,7 @@ test('separate processes serialize duplicate ledger updates and transfer ownersh
   assert.equal(await rpc(children[1], { method: 'observe', event: event() }), false);
 });
 
-test('live model attribution requires a turn-linked event rather than the thread current model', async (t) => {
+test('live model attribution prefers a turn-linked reroute and otherwise uses the thread model', async (t) => {
   const { store } = fixture(t);
   const socket = new FakeSocket();
   const source = createLocalUsageSource({ store }, {
@@ -1173,7 +1196,23 @@ test('live model attribution requires a turn-linked event rather than the thread
     threadId: ID, turn: { id: 'turn-nested' },
     tokenUsage: { last: LAST, total: addCounters(addCounters(next, LAST), LAST) }
   });
-  assert.deepEqual(store.rows().map((row) => row.model), ['unknown', 'confirmed-model', 'nested-model']);
+  assert.deepEqual(store.rows().map((row) => row.model), [LOCAL.model, 'confirmed-model', 'nested-model']);
+});
+
+test('Work usage follows the thread model refreshed by discovery between turns', async (t) => {
+  const web = { ...LOCAL, id: 'local-web-task', name: null, originator: 'codex_work_web', threadSource: 'user' };
+  const f = subscriptionFixture(t, [web]);
+  f.source.start();
+  await f.settle();
+  const socket = f.sockets[0];
+  const notify = (turnId, total) => socket.notify('thread/tokenUsage/updated', { threadId: web.id, turnId, tokenUsage: { last: LAST, total } });
+  notify('baseline', TOTAL);
+  const next = addCounters(TOTAL, LAST);
+  notify('turn-configured', next);
+  socket.threads = [{ ...web, model: 'gpt-switched' }];
+  await f.tick();
+  notify('turn-switched', addCounters(next, LAST));
+  assert.deepEqual(f.store.rows().map((row) => [row.turnId, row.model]), [['turn-configured', LOCAL.model], ['turn-switched', 'gpt-switched']]);
 });
 
 test('native replacement removes previously observed Dots usage from retained daily history', async (t) => {

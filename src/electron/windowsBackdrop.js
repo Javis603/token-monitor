@@ -6,7 +6,7 @@
 // SetWindowCompositionAttribute(WCA_ACCENT_POLICY) API. Keep every call lazy
 // and best-effort so an unsupported Windows build can fall back to Acrylic.
 
-const { normalizeWindowsBackdropMode } = require('./windowsBackdropMode');
+const { normalizeWindowsBackdropMode, supportsWindowsMica } = require('./windowsBackdropMode');
 const os = require('node:os');
 
 const DEFAULT_ACCENT_ARGB = 0x3a232323;
@@ -147,7 +147,7 @@ function syncWindowsBackdrop(win, { enabled = true, mode = 'acrylic' } = {}, opt
   // Preserve the saved preference, but use the existing Acrylic path on builds
   // where Electron cannot apply Mica (Windows 11 22H2 starts at build 22621).
   if ((wanted === 'mica' || wanted === 'mica-alt')
-      && !(Number((options.release || os.release()).split('.')[2]) >= 22621)) wanted = 'acrylic';
+      && !supportsWindowsMica(options.release || os.release())) wanted = 'acrylic';
   const previous = windowStates.get(win);
   if (previous?.mode === wanted && !previous.accentCleanupPending) return previous;
   const api = options.api || (wanted === 'accent' || previous?.mode === 'accent' || previous?.accentCleanupPending ? loadAccentApi() : null);
@@ -201,6 +201,11 @@ function refreshWindowsBackdrop(win, options = {}) {
   return true;
 }
 
+function windowsAccentActive(win) {
+  const state = windowStates.get(win);
+  return state?.mode === 'accent' && !state.fallback;
+}
+
 function windowsBackdropFallback(win) {
   return windowStates.get(win)?.fallback === true;
 }
@@ -211,5 +216,6 @@ module.exports = {
   createAccentApi,
   refreshWindowsBackdrop,
   syncWindowsBackdrop,
+  windowsAccentActive,
   windowsBackdropFallback
 };

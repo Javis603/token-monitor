@@ -44,8 +44,7 @@
   // unknown to upstream tokscale: the collector requests it with --client like
   // any other id, but it is absent from tokscale's --help client list and does
   // not honour TOKSCALE_EXTRA_DIRS. This is an axis of its own, not a
-  // collection "mode": self-synced clients (cursor, antigravity) are tracked
-  // separately in collector.js.
+  // collection "mode": self-synced clients are tracked in selfSyncThrottle.js.
   const CLIENT_CATALOG = Object.freeze([
     { id: 'claude', label: 'Claude Code' },
     { id: 'codex', label: 'Codex' },

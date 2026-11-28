@@ -234,11 +234,17 @@ html.native-high-contrast {
   --line-strong-alpha: 0.48 !important;
 }
 html.native-high-contrast .shell { border: 1px solid var(--line-strong); }
+html.is-windows {
+  --windows-widget-radius: 8px;
+}
+html.is-windows.windows-accent-square {
+  --windows-widget-radius: 0px;
+}
 html.is-windows, html.is-windows body {
-  border-radius: 8px;
+  border-radius: var(--windows-widget-radius);
 }
 html.is-windows .shell {
-  border-radius: 8px;
+  border-radius: var(--windows-widget-radius);
   /* No clip-path on Windows: Chromium renders clip-path with a hard, non-AA
      edge on a transparent window, which made the bottom corners look truncated.
      border-radius + overflow:hidden round the corners (and clip the backdrop
@@ -337,7 +343,7 @@ html.is-windows.floating-bubble-collapsed-left body .floating-bubble-tab,
 html.is-windows.floating-bubble-collapsed-right body .floating-bubble-tab,
 body.is-windows.floating-bubble-collapsed-left .floating-bubble-tab,
 body.is-windows.floating-bubble-collapsed-right .floating-bubble-tab {
-  border-radius: 8px;
+  border-radius: var(--windows-widget-radius);
 }
 .floating-bubble-tab:hover {
   color: var(--text);
@@ -494,6 +500,10 @@ body.is-windows.floating-bubble-collapsed-right .floating-bubble-tab {
   min-width: 100px;
   width: 148px;
   height: 30px;
+}
+.title-controls:has(.custom-period-tabs) {
+  flex-basis: var(--period-width, 148px);
+  max-width: calc(100% - 44px);
 }
 /* Cover the whole top-right rounded corner without covering the period tabs:
    the top arm occupies the 12px shell padding and the right arm continues down
@@ -949,7 +959,10 @@ span.settings-note.settings-item-desc {
 }
 .settings-section-toggle {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(0, auto);
+  /* The title takes its full width first and the summary truncates in the
+     space left over. The 12px floor keeps the disclosure chevron visible when
+     the window is too narrow for the whole title. */
+  grid-template-columns: minmax(0, max-content) minmax(12px, 1fr);
   align-items: center;
   gap: 10px;
   width: 100%;
@@ -2909,6 +2922,35 @@ button.tool-preference-main:focus-visible {
   font: inherit;
   font-weight: 500;
 }
+.tool-health-auto-source {
+  min-width: 0;
+}
+.tool-health-auto-source > summary {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: fit-content;
+  list-style: none;
+  color: var(--fg);
+  cursor: pointer;
+}
+.tool-health-auto-source > summary::-webkit-details-marker {
+  display: none;
+}
+.tool-health-auto-source > summary::after {
+  content: '';
+  width: 4px;
+  height: 4px;
+  border: solid var(--muted);
+  border-width: 0 1px 1px 0;
+  transform: rotate(-45deg);
+}
+.tool-health-auto-source[open] > summary::after {
+  transform: translateY(-1px) rotate(45deg);
+}
+.tool-health-auto-source > .tool-health-checks {
+  margin-top: 4px;
+}
 .tool-health-source-summary-row {
   display: flex;
   align-items: center;
@@ -4216,10 +4258,11 @@ html.is-windows .settings-panel select option {
 }
 .tabs {
   --period-index: 0;
+  --period-count: 3;
   position: relative;
   z-index: 1;
   display: grid;
-  grid-template-columns: repeat(3, 1fr);
+  grid-template-columns: repeat(var(--period-count), minmax(0, 1fr));
   gap: 2px;
   padding: 3px;
   width: 100%;
@@ -4236,7 +4279,7 @@ html.is-windows .settings-panel select option {
   top: 3px;
   bottom: 3px;
   left: 3px;
-  width: calc((100% - 10px) / 3);
+  width: calc((100% - 6px - (var(--period-count) - 1) * 2px) / var(--period-count));
   border: 1px solid rgba(var(--line-rgb), 0.13);
   border-radius: 6px;
   background: rgba(var(--overlay-rgb), 0.06);
@@ -4262,6 +4305,53 @@ html.is-windows .settings-panel select option {
   color: var(--accent);
   background: transparent;
   box-shadow: none;
+}
+.custom-period-tabs { container-type: inline-size; }
+.custom-period-tabs > .tab {
+  min-width: 0;
+  padding-inline: 0;
+  white-space: nowrap;
+  /* Fit the five-character monospace labels in equal cells at any zoom. */
+  font-size: min(0.5625rem, calc((100cqw - (var(--period-count) - 1) * 2px) / var(--period-count) / 3.1));
+  border-inline-width: 0;
+}
+@media (max-width: 239px) and (height >= 134px) {
+  .shell:not(.settings-open, .plugin-page-mode) .titlebar:has(.custom-period-tabs) {
+    padding-bottom: 36px;
+  }
+  .shell:not(.settings-open, .plugin-page-mode) .titlebar:has(.custom-period-tabs > .tab:nth-of-type(4)) {
+    padding-bottom: 60px;
+  }
+  .shell:not(.settings-open, .plugin-page-mode) .title-controls:has(.custom-period-tabs) {
+    position: static;
+    flex-basis: 34px;
+    min-width: 34px;
+  }
+  .shell:not(.settings-open, .plugin-page-mode) .title-controls > .custom-period-tabs {
+    inset: auto 0 0;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+  .custom-period-tabs > .tab-indicator { display: none; }
+  .custom-period-tabs > .tab.active {
+    border: 1px solid rgba(var(--line-rgb), 0.13);
+    background: rgba(var(--overlay-rgb), 0.06);
+  }
+  .custom-period-tabs > .tab { font-size: 0.5625rem; }
+}
+@media (max-width: 239px) and (height < 134px) {
+  .shell:not(.settings-open, .plugin-page-mode):has(.custom-period-tabs) {
+    gap: 3px;
+    padding-block: 4px;
+  }
+  .shell:not(.settings-open, .plugin-page-mode) .titlebar:has(.custom-period-tabs) > div:first-child {
+    display: none;
+  }
+  .shell:not(.settings-open, .plugin-page-mode) .title-controls:has(.custom-period-tabs) {
+    /* Leave the leading edge of the frameless titlebar available for window dragging. */
+    flex-basis: calc(100% - 12px);
+    max-width: calc(100% - 12px);
+    margin-inline-start: auto;
+  }
 }
 .fixed-period-message {
   position: relative;
@@ -4684,6 +4774,7 @@ html.is-windows .settings-panel select option {
   background: var(--blue);
   box-shadow: 0 0 0 2px rgba(var(--overlay-rgb), 0.03);
 }
+.home-list-mark.dash-quota-mark { background: rgba(var(--overlay-rgb), 0.5); }
 .home-list-mark.row-icon {
   width: 10px;
   height: 10px;
@@ -4812,6 +4903,13 @@ html.is-windows .settings-panel select option {
   grid-template-columns: 10px 10px minmax(0, 1fr) auto minmax(42px, auto);
   align-items: center;
 }
+.home-session-row.is-compact.has-source-device {
+  grid-template-columns: 10px 10px minmax(0, 1fr) fit-content(26%) auto minmax(42px, auto);
+}
+.home-session-row.is-compact .session-source-device {
+  max-width: 100%;
+  font-size: 0.625rem;
+}
 .home-session-row.is-compact .home-list-mark { margin-top: 0; }
 .home-session-row.is-compact .home-list-name { color: var(--readable-muted); }
 .home-session-row.is-compact .home-list-value { color: var(--readable-muted); }
@@ -4856,8 +4954,9 @@ html.is-windows .settings-panel select option {
   min-width: 0;
   align-items: center;
   gap: 6px;
+  color: var(--readable-muted);
+  font-size: 0.625rem;
 }
-.home-session-meta .home-list-sub { min-width: 0; }
 .home-session-cache { margin-left: auto; flex: 0 0 auto; color: var(--muted); font-size: 0.625rem; white-space: nowrap; }
 .home-session-context { display: inline-flex; flex: 0 0 auto; align-items: center; gap: 4px; margin-left: auto; color: var(--muted); font-size: 0.625rem; }
 .home-session-context-meter { flex: 0 0 16px; width: 16px; height: 3px; overflow: hidden; border-radius: 2px; background: rgba(var(--overlay-rgb), 0.18); }
@@ -5103,12 +5202,7 @@ html.is-windows .settings-panel select option {
   opacity: 0;
 }
 /* A window close to running out keeps its tail lit; nothing else glows. */
-.home-limit-window:is(.is-low, .is-critical) .home-limit-tip::after { opacity: 1; }
-/* Mixed toward the text colour so amber reads on light panels as well as dark. */
-.home-limit-window.is-low > .home-list-value,
-.home-limit-window.is-low .home-limit-window-value .home-list-value {
-  color: color-mix(in srgb, var(--yellow) 62%, var(--text));
-}
+.home-limit-window.is-low .home-limit-tip::after { opacity: 1; }
 /* The notch's tick, above the groove; shown with the notch while the account is hovered, like its vendor colour. */
 .home-limit-pace {
   position: absolute;
@@ -5145,8 +5239,9 @@ html.is-windows .settings-panel select option {
 .home-limit-window.is-untouched > .home-list-value {
   color: var(--readable-muted);
 }
+/* Mix toward the text colour for contrast on light and dark panels. */
 .home-limit-value-low {
-  color: var(--home-limit-accent, var(--yellow));
+  color: color-mix(in srgb, var(--yellow) 62%, var(--text));
 }
 .home-limit-value-critical {
   color: var(--red);
@@ -5165,7 +5260,7 @@ html.is-windows .settings-panel select option {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.home-limit-window.is-exhausted .home-limit-reset {
+.home-limit-window.is-exhausted:not(.home-module-limits-classic *) .home-limit-reset {
   color: var(--red);
 }
 /* Classic Text / Progress bars layouts: two windows per row, the reading
@@ -5868,6 +5963,23 @@ html.is-windows .settings-panel select option {
   mask: var(--device-kind-mask) center / contain no-repeat;
 }
 .row-device .device-kind-icon { margin-right: 4px; }
+.session-source-device {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+  max-width: 42%;
+  color: var(--readable-muted);
+}
+.session-source-device .device-kind-icon { width: 1em; height: 1em; }
+.session-source-device-name, .session-compact-description {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.session-source-device + .session-compact-description > .overflow-text-content::before { content: '· '; }
 .device-kind-computer, .device-kind-desktop { --device-kind-mask: url("icons/views/device.svg"); }
 .device-kind-laptop { --device-kind-mask: url("icons/devices/laptop.svg"); }
 .device-kind-mini { --device-kind-mask: url("icons/devices/mini.svg"); }
@@ -6912,6 +7024,9 @@ html.is-windows .limit-live-badge {
   height: auto;
   flex: 0 0 auto;
 }
+/* Compact rows truncate model text character by character, including when
+   the label also opens the model breakdown popover. */
+.session-compact-description .session-models.limit-detail-tooltip-wrap { display: inline; }
 .limit-detail-tooltip-trigger {
   display: inline-grid;
   width: 10px;
@@ -7015,7 +7130,7 @@ html.is-windows .limit-live-badge {
   right: auto;
   left: calc(anchor(left) - 1px);
 }
-.plugin-quota-info .limit-detail-tooltip {
+:is(.plugin-quota-info, .period-tab-chip) .limit-detail-tooltip {
   right: auto;
   left: anchor(center);
   translate: calc(-50% + var(--tooltip-shift, 0px)) 0;
@@ -7027,7 +7142,7 @@ html.is-windows .limit-live-badge {
   white-space: normal;
   overflow-wrap: anywhere;
 }
-.plugin-quota-info .limit-detail-tooltip::after {
+:is(.plugin-quota-info, .period-tab-chip) .limit-detail-tooltip::after {
   right: auto;
   left: calc(50% - 4px - var(--tooltip-shift, 0px));
 }
@@ -7785,7 +7900,9 @@ html.native-material-opaque .content-blur-surface { --popup-surface-alpha: 1; }
   inset: auto;
   left: anchor(left);
   bottom: calc(anchor(top) + 6px);
-  width: anchor-size(width);
+  min-width: anchor-size(width);
+  width: max-content;
+  max-width: calc(100vw - 24px);
   margin: 0;
   color: var(--text);
   /* Keep content filtering out of the backdrop surface. The menu fades and
@@ -7848,6 +7965,28 @@ html.native-material-opaque .content-blur-surface { --popup-surface-alpha: 1; }
   line-height: 14px;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+.view-switcher-menu-separator {
+  height: 1px;
+  margin: 4px 6px;
+  background: linear-gradient(
+    to right,
+    rgba(var(--line-rgb), 0) 0,
+    rgba(var(--line-rgb), 0.12) 20%,
+    rgba(var(--line-rgb), 0.12) 80%,
+    rgba(var(--line-rgb), 0) 100%
+  );
+}
+.view-switcher-menu-action {
+  color: var(--muted);
+}
+.view-switcher-menu-ext {
+  width: 13px;
+  height: 13px;
+  justify-self: center;
+  opacity: 0.78;
+  -webkit-mask-image: url("icons/actions/external-link.svg");
+  mask-image: url("icons/actions/external-link.svg");
 }
 /* On Liquid Glass the controls sit straight on the AppKit surface, so they read
    as lensed edges of that one sheet rather than slabs stacked on it: capsule
@@ -8481,7 +8620,12 @@ html.native-liquid-glass .view-switcher-menu-item { border-radius: 9px; }
 .session-group-totals { white-space: nowrap; color: var(--text); }
 .row[role="button"]:focus-visible { outline: 2px solid rgba(var(--accent-rgb), 0.35); outline-offset: 2px; }
 .row[role="button"] { cursor: pointer; }
+.detail-token-toggle { cursor: pointer; }
+.detail-token-toggle:hover { text-decoration: underline dotted rgba(var(--overlay-rgb), 0.35); text-underline-offset: 2px; }
+.detail-token-toggle:focus-visible { outline: 2px solid rgba(var(--accent-rgb), 0.35); outline-offset: 2px; border-radius: 3px; }
 .detail-session-id { display: flex; align-items: center; gap: 6px; min-width: 0; color: var(--muted, #8a8a90); font-size: 0.625rem; }
+.detail-session-source { color: var(--readable-muted); font-size: 0.625rem; }
+.detail-session-source .session-source-device { max-width: 100%; }
 .detail-session-id-text { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; user-select: text; }
 .detail-session-id-copy { flex-shrink: 0; padding: 0 2px; border: 0; background: transparent; color: inherit; font: inherit; cursor: pointer; opacity: 0.72; }
 .detail-session-id-copy:hover, .detail-session-id-copy:focus-visible { color: var(--text); opacity: 1; }
@@ -8855,6 +8999,55 @@ html.native-liquid-glass .view-switcher-menu-item { border-radius: 9px; }
 }
 .settings-section-details-inner > .main-numbers-group:last-child { padding-bottom: 8px; }
 .main-numbers-title + .settings-item { margin-top: 4px; }
+.period-tab-settings { display: grid; gap: 6px; margin-top: 8px; padding-bottom: 8px; }
+.period-tab-settings > .settings-note { margin: 0; }
+.period-tab-list { display: flex; flex-wrap: wrap; gap: 3px; }
+.period-tab-list-shown {
+  width: fit-content;
+  max-width: 100%;
+  padding: 3px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: rgba(var(--overlay-rgb), 0.026);
+}
+.tab.period-tab-chip {
+  min-width: 30px;
+  width: auto;
+  height: 24px;
+  flex: 0 0 auto;
+  padding-inline: 5px;
+  border-color: var(--line);
+  border-radius: 999px;
+  white-space: nowrap;
+}
+.period-tab-list-shown > .period-tab-chip {
+  cursor: grab;
+  touch-action: none;
+  color: var(--text);
+  background: rgba(var(--overlay-rgb), 0.08);
+}
+.period-tab-chip:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+.period-tab-list:not(.period-tab-list-shown) > .period-tab-chip[aria-disabled="true"] { cursor: default; }
+.period-tab-chip[draggable="true"]:not([aria-disabled="true"]) { cursor: grab; }
+.period-tab-list-shown.is-reordering { overflow-anchor: none; }
+.period-tab-list-shown.drag-active > .period-tab-chip {
+  transform: translate(var(--drag-shift-x, 0px), var(--drag-shift-y, 0px));
+  transition: transform 160ms var(--ease-out, ease);
+}
+.period-tab-list-shown.drag-active > .period-tab-chip.dragging {
+  z-index: 2;
+  pointer-events: none;
+  transform: translate(var(--drag-x, 0px), var(--drag-y, 0px));
+  transition: none;
+}
+@media (prefers-reduced-motion: reduce) {
+  :root:not([data-reduce-motion="off"]) .period-tab-list-shown.drag-active > .period-tab-chip { transition: none; }
+}
+:root[data-reduce-motion="on"] .period-tab-list-shown.drag-active > .period-tab-chip { transition: none; }
+.period-tab-list:not(.period-tab-list-shown) > .period-tab-chip.dragging { opacity: .5; }
+.period-tab-chip[data-period-drop="before"] { box-shadow: -2px 0 var(--accent); }
+.period-tab-chip[data-period-drop="after"] { box-shadow: 2px 0 var(--accent); }
+.period-tab-list[data-period-drop="list"] { outline: 1px solid var(--accent); outline-offset: 1px; }
 
 /* Main Screen starts pointer reordering from the six-dot handles, while the
    rows use the same transform choreography as Collection and AI Tool Limits. */

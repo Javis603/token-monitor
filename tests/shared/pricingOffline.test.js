@@ -3,11 +3,12 @@
 const assert = require('node:assert/strict');
 const { EventEmitter } = require('node:events');
 const test = require('node:test');
+const { withoutWindowedScan } = require('../helpers/tokscaleWithoutWindows');
 
 test('resident period/history scans and model lookups explicitly prohibit pricing network requests', async t => {
   const childProcess = require('node:child_process');
   const calls = [];
-  t.mock.method(childProcess, 'spawn', (_bin, args) => {
+  t.mock.method(childProcess, 'spawn', withoutWindowedScan((_bin, args) => {
     calls.push(args);
     const child = new EventEmitter();
     child.stdout = new EventEmitter();
@@ -18,7 +19,7 @@ test('resident period/history scans and model lookups explicitly prohibit pricin
       child.emit('close', 0);
     });
     return child;
-  });
+  }));
   const collectorPath = require.resolve('../../src/shared/collector');
   delete require.cache[collectorPath];
   const { startCollector, lookupModelPricing } = require(collectorPath);

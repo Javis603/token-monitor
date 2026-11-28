@@ -10,7 +10,7 @@ const { resolveProxyConfig } = require('../../outboundFetch');
 const { appVersion } = require('../../appVersion');
 const { codexOAuthRequestContext, hashAccountKey } = require('./auth');
 const { codexHomeDir } = require('./sessionMetadata');
-const { localExecutorIds, localThreadEnvironment } = require('./localExecutor');
+const { DOTS_ORIGINATORS, localExecutorIds, localThreadEnvironment } = require('./localExecutor');
 const { createLocalUsageStore, usageCounters } = require('./localUsageStore');
 
 const APP_SERVER_URL = 'wss://codex-cloud-backend.chatgpt.com/';
@@ -194,7 +194,7 @@ function createLocalUsageSource(options = {}, deps = {}) {
     do {
       const page = await request('thread/list', {
         archived: false, limit: 100, sortKey: 'updated_at', sortDirection: 'desc',
-        originators: ['codex_work_cca'], ...(cursor ? { cursor } : {})
+        originators: DOTS_ORIGINATORS, ...(cursor ? { cursor } : {})
       });
       if (stopped || connection !== current) return;
       const candidates = Array.isArray(page.data) ? page.data : [];
@@ -234,9 +234,9 @@ function createLocalUsageSource(options = {}, deps = {}) {
     if (!entry || entry.retiring || entry.disconnected || !localThreadEnvironment(entry.thread, executorIds)) return;
     const accountKey = hashAccountKey(context.accountId);
     const turnId = params.turnId || params.turn?.id;
-    // The desktop schema's Turn has no model. Thread.model and resume.model
-    // are current configuration, not per-turn execution telemetry. Only an
-    // explicit turn-linked reroute identifies the execution model here.
+    // The desktop schema's Turn has no model. A turn-linked reroute names the
+    // execution model; otherwise the request uses Thread.model, the thread's
+    // configured model, which discovery refreshes while the subscription lives.
     const reportedModel = message.method === 'model/rerouted' ? params.toModel : null;
     if (turnId && typeof reportedModel === 'string' && reportedModel.trim()) {
       entry.turnModels.set(turnId, reportedModel.trim());
@@ -250,7 +250,7 @@ function createLocalUsageSource(options = {}, deps = {}) {
       if (!turnId || !total || !last || Object.keys(last).some((key) => last[key] > total[key])) return;
       if (shouldYield() || !store.claimObserver(owner)) { disconnect(); store.releaseObserver(owner); return; }
       if (store.observe({
-        accountKey, thread: { ...entry.thread, model: entry.turnModels.get(turnId) || 'unknown' }, ...entry.local, turnId,
+        accountKey, thread: { ...entry.thread, model: entry.turnModels.get(turnId) || entry.thread.model }, ...entry.local, turnId,
         tokenUsage: params.tokenUsage, baselineOnly: entry.baselinePending, now: now()
       })) {
         resumeRetries.delete(params.threadId);

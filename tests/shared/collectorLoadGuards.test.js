@@ -19,6 +19,7 @@ const {
 
 const { installSourceEnvGuard } = require('../helpers/sourceEnv');
 const { installInProcessWatchHost } = require('../helpers/watchHost');
+const { withoutWindowedScan } = require('../helpers/tokscaleWithoutWindows');
 
 const collectorPath = require.resolve('../../src/shared/collector');
 
@@ -49,7 +50,7 @@ function withTmpHome(prepare) {
 }
 
 function recordingSpawn(calls) {
-  return (_bin, args) => {
+  return withoutWindowedScan((_bin, args) => {
     calls.push(args);
     const child = new EventEmitter();
     child.stdout = new EventEmitter();
@@ -61,7 +62,7 @@ function recordingSpawn(calls) {
       child.emit('close', 0);
     });
     return child;
-  };
+  });
 }
 
 function wslBundleWith(client, tokens) {
@@ -516,7 +517,7 @@ for (const source of ['native', 'override', 'configured-home', 'injected-env', '
     const sourceRoot = path.join('.gemini', 'antigravity');
     const tmp = withTmpHome([sourceRoot, 'catalog', path.join('.config', 'tokscale', 'antigravity-cache')]);
     const originalHome = os.homedir;
-    const chokidar = require('chokidar');
+    const chokidar = require('../../src/shared/fileWatcher');
     const originalWatch = chokidar.watch;
     let handle;
     let db;
@@ -651,7 +652,7 @@ test('Antigravity source events target its umbrella client without watching sync
   os.homedir = () => tmp;
   process.env.TOKEN_MONITOR_SHARED_DIR = tmp;
 
-  const chokidar = require('chokidar');
+  const chokidar = require('../../src/shared/fileWatcher');
   const originalWatch = chokidar.watch;
   let watchHandler = null;
   let watchedDirs = null;
@@ -672,7 +673,7 @@ test('Antigravity source events target its umbrella client without watching sync
   const childProcess = require('node:child_process');
   const originalSpawn = childProcess.spawn;
   const calls = [];
-  childProcess.spawn = (_bin, args) => {
+  childProcess.spawn = withoutWindowedScan((_bin, args) => {
     calls.push(args);
     const child = new EventEmitter();
     child.stdout = new EventEmitter();
@@ -684,7 +685,7 @@ test('Antigravity source events target its umbrella client without watching sync
       child.emit('close', 0);
     });
     return child;
-  };
+  });
 
   // Pinned to a captured instant, not `originalNow() + offset`: the floor is
   // measured from the startup sync, so letting real time leak into the elapsed
@@ -778,7 +779,7 @@ test('a catch-up that comes due mid-tick keeps its targeted scan scope', async (
   os.homedir = () => tmp;
   process.env.TOKEN_MONITOR_SHARED_DIR = tmp;
 
-  const chokidar = require('chokidar');
+  const chokidar = require('../../src/shared/fileWatcher');
   const originalWatch = chokidar.watch;
   let watchHandler = null;
   chokidar.watch = () => {
@@ -797,7 +798,7 @@ test('a catch-up that comes due mid-tick keeps its targeted scan scope', async (
   const calls = [];
   let holdNextSpawn = null;
   let heldSpawns = 0;
-  childProcess.spawn = (_bin, args) => {
+  childProcess.spawn = withoutWindowedScan((_bin, args) => {
     calls.push(args);
     const child = new EventEmitter();
     child.stdout = new EventEmitter();
@@ -812,7 +813,7 @@ test('a catch-up that comes due mid-tick keeps its targeted scan scope', async (
       child.emit('close', 0);
     });
     return child;
-  };
+  });
 
   const originalNow = Date.now;
   const baseNow = originalNow();
@@ -901,7 +902,7 @@ test('a manual refresh satisfies a deferred source sync instead of adding one', 
   os.homedir = () => tmp;
   process.env.TOKEN_MONITOR_SHARED_DIR = tmp;
 
-  const chokidar = require('chokidar');
+  const chokidar = require('../../src/shared/fileWatcher');
   const originalWatch = chokidar.watch;
   let watchHandler = null;
   chokidar.watch = () => {
@@ -989,7 +990,7 @@ test('a failed forced sync hands the source event back instead of eating it', as
   os.homedir = () => tmp;
   process.env.TOKEN_MONITOR_SHARED_DIR = tmp;
 
-  const chokidar = require('chokidar');
+  const chokidar = require('../../src/shared/fileWatcher');
   const originalWatch = chokidar.watch;
   let watchHandler = null;
   chokidar.watch = () => {
@@ -1094,7 +1095,7 @@ test('a source event that keeps failing backs off to the idle cadence', async (t
   os.homedir = () => tmp;
   process.env.TOKEN_MONITOR_SHARED_DIR = tmp;
 
-  const chokidar = require('chokidar');
+  const chokidar = require('../../src/shared/fileWatcher');
   const originalWatch = chokidar.watch;
   let watchHandler = null;
   chokidar.watch = () => {
@@ -1193,7 +1194,7 @@ test('an unrelated client event does not bypass a source-sync backoff', async ()
   os.homedir = () => tmp;
   process.env.TOKEN_MONITOR_SHARED_DIR = tmp;
 
-  const chokidar = require('chokidar');
+  const chokidar = require('../../src/shared/fileWatcher');
   const originalWatch = chokidar.watch;
   let watchHandler = null;
   chokidar.watch = () => {
@@ -1412,7 +1413,7 @@ test('a misbehaving sync child reports failure exactly once', async () => {
   const childProcess = require('node:child_process');
   const originalSpawn = childProcess.spawn;
   let emitAfterError = false;
-  childProcess.spawn = (_bin, args) => {
+  childProcess.spawn = withoutWindowedScan((_bin, args) => {
     const child = new EventEmitter();
     child.stdout = new EventEmitter();
     child.stderr = new EventEmitter();
@@ -1429,7 +1430,7 @@ test('a misbehaving sync child reports failure exactly once', async () => {
       child.emit('close', 1);
     });
     return child;
-  };
+  });
 
   try {
     const { collectUsageOnce } = freshCollector();
@@ -1487,7 +1488,7 @@ test('an Antigravity CLI event rescans without paying for an IDE sync', async ()
   process.env.TOKEN_MONITOR_SHARED_DIR = tmp;
   delete process.env.GEMINI_CLI_HOME;
 
-  const chokidar = require('chokidar');
+  const chokidar = require('../../src/shared/fileWatcher');
   const originalWatch = chokidar.watch;
   let watchHandler = null;
   chokidar.watch = () => {
@@ -2884,7 +2885,7 @@ test('a Cursor report with implicit sync blocks logout until the report closes',
   let reportCalls = 0;
   let logoutStarted = false;
 
-  childProcess.spawn = () => {
+  childProcess.spawn = withoutWindowedScan(() => {
     const child = new EventEmitter();
     child.stdout = new EventEmitter();
     child.stderr = new EventEmitter();
@@ -2901,7 +2902,7 @@ test('a Cursor report with implicit sync blocks logout until the report closes',
       });
     }
     return child;
-  };
+  });
   cursorAuth.readActiveAccount = () => ({ accessToken: 'token' });
   cursorAuth.runCursorSync = async () => { throw new Error('explicit sync failed'); };
 
@@ -2983,7 +2984,7 @@ test('collectUsageOnce runs the three tokscale scans serially, not concurrently'
   const originalSpawn = childProcess.spawn;
   let active = 0;
   let maxActive = 0;
-  childProcess.spawn = () => {
+  childProcess.spawn = withoutWindowedScan(() => {
     active += 1;
     maxActive = Math.max(maxActive, active);
     const child = new EventEmitter();
@@ -2997,7 +2998,7 @@ test('collectUsageOnce runs the three tokscale scans serially, not concurrently'
       child.emit('close', 0);
     });
     return child;
-  };
+  });
   try {
     const { collectUsageOnce } = freshCollector();
     await collectUsageOnce({
@@ -3045,7 +3046,7 @@ test('a watch event during an in-flight tick re-arms the debounce instead of coa
   const originalSharedDir = process.env.TOKEN_MONITOR_SHARED_DIR;
   process.env.TOKEN_MONITOR_SHARED_DIR = tmp;
 
-  const chokidar = require('chokidar');
+  const chokidar = require('../../src/shared/fileWatcher');
   const originalWatch = chokidar.watch;
   let watchHandler = null;
   chokidar.watch = () => ({
@@ -3057,7 +3058,7 @@ test('a watch event during an in-flight tick re-arms the debounce instead of coa
   const originalSpawn = childProcess.spawn;
   const calls = [];
   let spawnDelayMs = 5;
-  childProcess.spawn = (_bin, args) => {
+  childProcess.spawn = withoutWindowedScan((_bin, args) => {
     calls.push(args);
     const child = new EventEmitter();
     child.stdout = new EventEmitter();
@@ -3069,7 +3070,7 @@ test('a watch event during an in-flight tick re-arms the debounce instead of coa
       child.emit('close', 0);
     }, spawnDelayMs);
     return child;
-  };
+  });
 
   let handle = null;
   try {
@@ -3127,7 +3128,7 @@ test('live watch events scan only changed clients and preserve the other client 
   os.homedir = () => tmp;
   process.env.TOKEN_MONITOR_SHARED_DIR = tmp;
 
-  const chokidar = require('chokidar');
+  const chokidar = require('../../src/shared/fileWatcher');
   const originalWatch = chokidar.watch;
   let watchHandler = null;
   chokidar.watch = () => {
@@ -3147,7 +3148,7 @@ test('live watch events scan only changed clients and preserve the other client 
   let codexDeleted = false;
   let codexUnattributed = false;
   let codexUnexpectedClient = false;
-  childProcess.spawn = (_bin, args) => {
+  childProcess.spawn = withoutWindowedScan((_bin, args) => {
     calls.push(args);
     const selected = String(args[args.indexOf('--client') + 1] || '').split(',').filter(Boolean);
     const child = new EventEmitter();
@@ -3179,7 +3180,7 @@ test('live watch events scan only changed clients and preserve the other client 
       child.emit('close', 0);
     });
     return child;
-  };
+  });
 
   let handle = null;
   try {
@@ -3286,7 +3287,7 @@ test('smart collection uses native watching and skips idle intervals after start
   os.homedir = () => tmp;
   process.env.TOKEN_MONITOR_SHARED_DIR = tmp;
 
-  const chokidar = require('chokidar');
+  const chokidar = require('../../src/shared/fileWatcher');
   const originalWatch = chokidar.watch;
   let watchOptions = null;
   chokidar.watch = (_dirs, options) => {
@@ -3390,13 +3391,16 @@ for (const client of ['zcode', 'cherrystudio', 'goose']) {
     const originalSharedDir = process.env.TOKEN_MONITOR_SHARED_DIR;
     os.homedir = () => tmp;
     process.env.TOKEN_MONITOR_SHARED_DIR = tmp;
+    // Without APPDATA, Windows Goose roots fall back to the native Roaming
+    // folder, which would put this fixture in the developer's real profile.
+    process.env.APPDATA = path.join(tmp, 'AppData', 'Roaming');
     const { clientSourceRoots } = freshCollector();
     const dbDir = clientSourceRoots(client)[client].find((root) => root.id === `${client}-db`)?.dir
       || path.join(tmp, '.zcode', 'cli', 'db');
     fs.mkdirSync(dbDir, { recursive: true });
     const dbName = { zcode: 'db.sqlite', cherrystudio: 'cherrystudio.sqlite', goose: 'sessions.db' }[client];
 
-    const chokidar = require('chokidar');
+    const chokidar = require('../../src/shared/fileWatcher');
     const originalWatch = chokidar.watch;
     let watchHandler = null;
     chokidar.watch = () => {
@@ -3482,7 +3486,7 @@ test('collector does not reuse a persisted anchor with a retired Qoder CN databa
   fs.writeFileSync(path.join(tmp, 'collector-anchor.json'), JSON.stringify({
     dateKey: initialCollector.localTodayKey(),
     calendarKey: initialCollector.collectionCalendarKey(),
-    sessionIdentityVersion: 2,
+    sessionIdentityVersion: 3,
     today: emptyPeriod(),
     month: oldQoderCnPeriod,
     allTime: oldQoderCnPeriod,
@@ -3533,7 +3537,7 @@ test('smart collection coalesces watch events into one targeted interval tick', 
   os.homedir = () => tmp;
   process.env.TOKEN_MONITOR_SHARED_DIR = tmp;
 
-  const chokidar = require('chokidar');
+  const chokidar = require('../../src/shared/fileWatcher');
   const originalWatch = chokidar.watch;
   let watchHandler = null;
   chokidar.watch = () => ({
@@ -3610,7 +3614,7 @@ test('smart collection keeps events received during a scan pending', async () =>
   os.homedir = () => tmp;
   process.env.TOKEN_MONITOR_SHARED_DIR = tmp;
 
-  const chokidar = require('chokidar');
+  const chokidar = require('../../src/shared/fileWatcher');
   const originalWatch = chokidar.watch;
   let watchHandler = null;
   chokidar.watch = () => ({
@@ -3622,7 +3626,7 @@ test('smart collection keeps events received during a scan pending', async () =>
   const originalSpawn = childProcess.spawn;
   const calls = [];
   let spawnDelayMs = 0;
-  childProcess.spawn = (_bin, args) => {
+  childProcess.spawn = withoutWindowedScan((_bin, args) => {
     calls.push(args);
     const child = new EventEmitter();
     child.stdout = new EventEmitter();
@@ -3634,7 +3638,7 @@ test('smart collection keeps events received during a scan pending', async () =>
       child.emit('close', 0);
     }, spawnDelayMs);
     return child;
-  };
+  });
 
   let handle = null;
   try {
@@ -3686,7 +3690,7 @@ test('smart collection retries a failed activity scan on the next interval', asy
   os.homedir = () => tmp;
   process.env.TOKEN_MONITOR_SHARED_DIR = tmp;
 
-  const chokidar = require('chokidar');
+  const chokidar = require('../../src/shared/fileWatcher');
   const originalWatch = chokidar.watch;
   let watchHandler = null;
   chokidar.watch = () => ({
@@ -3698,7 +3702,7 @@ test('smart collection retries a failed activity scan on the next interval', asy
   const originalSpawn = childProcess.spawn;
   const calls = [];
   let failNext = false;
-  childProcess.spawn = (_bin, args) => {
+  childProcess.spawn = withoutWindowedScan((_bin, args) => {
     calls.push(args);
     const child = new EventEmitter();
     child.stdout = new EventEmitter();
@@ -3711,7 +3715,7 @@ test('smart collection retries a failed activity scan on the next interval', asy
       failNext = false;
     });
     return child;
-  };
+  });
   const cursorAuth = require('../../src/shared/providers/cursor/auth');
   const originalRunCursorSync = cursorAuth.runCursorSync;
   cursorAuth.runCursorSync = async () => {};
@@ -3792,7 +3796,7 @@ test('watch-descriptor exhaustion degrades to polling and stays there', async ()
   os.homedir = () => tmp;
   process.env.TOKEN_MONITOR_SHARED_DIR = tmp;
 
-  const chokidar = require('chokidar');
+  const chokidar = require('../../src/shared/fileWatcher');
   const originalWatch = chokidar.watch;
   const watchOptions = [];
   const errorHandlers = [];
@@ -3871,7 +3875,7 @@ test('descriptor exhaustion over a tree too large to poll degrades to interval c
   os.homedir = () => tmp;
   process.env.TOKEN_MONITOR_SHARED_DIR = tmp;
 
-  const chokidar = require('chokidar');
+  const chokidar = require('../../src/shared/fileWatcher');
   const originalWatch = chokidar.watch;
   const watchOptions = [];
   const errorHandlers = [];
@@ -3958,7 +3962,7 @@ test('a successful watcher rebuild clears the current watcher failure', async ()
   os.homedir = () => tmp;
   process.env.TOKEN_MONITOR_SHARED_DIR = tmp;
 
-  const chokidar = require('chokidar');
+  const chokidar = require('../../src/shared/fileWatcher');
   const originalWatch = chokidar.watch;
   let watchCalls = 0;
   chokidar.watch = () => {
@@ -4038,7 +4042,7 @@ test('watch roots reach chokidar canonicalised on Windows and untouched elsewher
   os.homedir = () => alias;
   process.env.TOKEN_MONITOR_SHARED_DIR = alias;
 
-  const chokidar = require('chokidar');
+  const chokidar = require('../../src/shared/fileWatcher');
   const originalWatch = chokidar.watch;
   let watchedDirs = null;
   let watchOptions = null;
@@ -4114,7 +4118,7 @@ test('the ignore matcher agrees with the roots chokidar was actually handed', as
   fs.mkdirSync(hermesHome, { recursive: true });
   process.env.HERMES_HOME = hermesHome;
 
-  const chokidar = require('chokidar');
+  const chokidar = require('../../src/shared/fileWatcher');
   const originalWatch = chokidar.watch;
   let watchedDirs = null;
   let ignored = null;
@@ -4181,7 +4185,7 @@ for (const pollingEnv of ['TOKEN_MONITOR_WATCH_POLLING', 'CHOKIDAR_USEPOLLING'])
   process.env.TOKEN_MONITOR_SHARED_DIR = tmp;
   process.env[pollingEnv] = '0';
 
-  const chokidar = require('chokidar');
+  const chokidar = require('../../src/shared/fileWatcher');
   const originalWatch = chokidar.watch;
   const watchOptions = [];
   const errorHandlers = [];
@@ -4243,7 +4247,7 @@ test('a non-descriptor watch error is logged without degrading to polling', asyn
   os.homedir = () => tmp;
   process.env.TOKEN_MONITOR_SHARED_DIR = tmp;
 
-  const chokidar = require('chokidar');
+  const chokidar = require('../../src/shared/fileWatcher');
   const originalWatch = chokidar.watch;
   const watchOptions = [];
   const errorHandlers = [];
@@ -4308,7 +4312,7 @@ test('live collection retries all clients after a failed targeted watch scan', a
   os.homedir = () => tmp;
   process.env.TOKEN_MONITOR_SHARED_DIR = tmp;
 
-  const chokidar = require('chokidar');
+  const chokidar = require('../../src/shared/fileWatcher');
   const originalWatch = chokidar.watch;
   let watchHandler = null;
   chokidar.watch = () => ({
@@ -4320,7 +4324,7 @@ test('live collection retries all clients after a failed targeted watch scan', a
   const originalSpawn = childProcess.spawn;
   const calls = [];
   let failNext = false;
-  childProcess.spawn = (_bin, args) => {
+  childProcess.spawn = withoutWindowedScan((_bin, args) => {
     calls.push(args);
     const child = new EventEmitter();
     child.stdout = new EventEmitter();
@@ -4333,7 +4337,7 @@ test('live collection retries all clients after a failed targeted watch scan', a
       failNext = false;
     });
     return child;
-  };
+  });
 
   let handle = null;
   try {
@@ -4403,7 +4407,7 @@ test('idle smart collection still performs the hourly full reconciliation', asyn
   Date.now = () => nowMs;
   process.env.TOKEN_MONITOR_SHARED_DIR = tmp;
 
-  const chokidar = require('chokidar');
+  const chokidar = require('../../src/shared/fileWatcher');
   const originalWatch = chokidar.watch;
   chokidar.watch = () => ({ on: () => {}, close: () => {} });
 
@@ -4461,7 +4465,7 @@ test('hourly smart reconciliation refreshes WSL-only usage without a host event'
   Date.now = () => nowMs;
   process.env.TOKEN_MONITOR_SHARED_DIR = tmp;
 
-  const chokidar = require('chokidar');
+  const chokidar = require('../../src/shared/fileWatcher');
   const originalWatch = chokidar.watch;
   chokidar.watch = () => ({ on: () => {}, close: () => {} });
 
@@ -4527,7 +4531,7 @@ test('hourly smart reconciliation starts watching a client directory created aft
   Date.now = () => nowMs;
   process.env.TOKEN_MONITOR_SHARED_DIR = tmp;
 
-  const chokidar = require('chokidar');
+  const chokidar = require('../../src/shared/fileWatcher');
   const originalWatch = chokidar.watch;
   let watchCalls = 0;
   let watchHandler = null;
@@ -4601,7 +4605,7 @@ test('a custom Codex root that becomes a Codex home rebuilds the watcher on a To
   fs.mkdirSync(customHome, { recursive: true });
   const originalHomedir = os.homedir;
   const originalCodexHome = process.env.CODEX_HOME;
-  const chokidar = require('chokidar');
+  const chokidar = require('../../src/shared/fileWatcher');
   const originalWatch = chokidar.watch;
   let handle;
   t.after(() => {
@@ -4657,7 +4661,7 @@ test('smart collection lets a successful manual refresh acknowledge existing act
   os.homedir = () => tmp;
   process.env.TOKEN_MONITOR_SHARED_DIR = tmp;
 
-  const chokidar = require('chokidar');
+  const chokidar = require('../../src/shared/fileWatcher');
   const originalWatch = chokidar.watch;
   let watchHandler = null;
   chokidar.watch = () => ({
@@ -4718,7 +4722,7 @@ test('smart collection acknowledges the latest activity revision after tick coal
   os.homedir = () => tmp;
   process.env.TOKEN_MONITOR_SHARED_DIR = tmp;
 
-  const chokidar = require('chokidar');
+  const chokidar = require('../../src/shared/fileWatcher');
   const originalWatch = chokidar.watch;
   let watchHandler = null;
   chokidar.watch = () => ({
@@ -4730,7 +4734,7 @@ test('smart collection acknowledges the latest activity revision after tick coal
   const originalSpawn = childProcess.spawn;
   const calls = [];
   let spawnDelayMs = 0;
-  childProcess.spawn = (_bin, args) => {
+  childProcess.spawn = withoutWindowedScan((_bin, args) => {
     calls.push(args);
     const child = new EventEmitter();
     child.stdout = new EventEmitter();
@@ -4742,7 +4746,7 @@ test('smart collection acknowledges the latest activity revision after tick coal
       child.emit('close', 0);
     }, spawnDelayMs);
     return child;
-  };
+  });
 
   let handle = null;
   try {
@@ -5332,7 +5336,7 @@ test('the quit variant of stop() skips the watcher walk and leans on `stopped`',
   os.homedir = () => tmp;
   process.env.TOKEN_MONITOR_SHARED_DIR = tmp;
 
-  const chokidar = require('chokidar');
+  const chokidar = require('../../src/shared/fileWatcher');
   const originalWatch = chokidar.watch;
   let watchHandler = null;
   let closeCalls = 0;
@@ -5422,7 +5426,7 @@ test('a watch-event storm faster than the debounce still ticks within the max-wa
   const originalSharedDir = process.env.TOKEN_MONITOR_SHARED_DIR;
   process.env.TOKEN_MONITOR_SHARED_DIR = tmp;
 
-  const chokidar = require('chokidar');
+  const chokidar = require('../../src/shared/fileWatcher');
   const originalWatch = chokidar.watch;
   let watchHandler = null;
   chokidar.watch = () => ({
@@ -5433,7 +5437,7 @@ test('a watch-event storm faster than the debounce still ticks within the max-wa
   const childProcess = require('node:child_process');
   const originalSpawn = childProcess.spawn;
   const calls = [];
-  childProcess.spawn = (_bin, args) => {
+  childProcess.spawn = withoutWindowedScan((_bin, args) => {
     calls.push(args);
     const child = new EventEmitter();
     child.stdout = new EventEmitter();
@@ -5445,7 +5449,7 @@ test('a watch-event storm faster than the debounce still ticks within the max-wa
       child.emit('close', 0);
     }, 5);
     return child;
-  };
+  });
 
   let handle = null;
   let storm = null;
@@ -5518,7 +5522,7 @@ test('a single watch event still waits out the debounce and does not fire early'
   const originalSharedDir = process.env.TOKEN_MONITOR_SHARED_DIR;
   process.env.TOKEN_MONITOR_SHARED_DIR = tmp;
 
-  const chokidar = require('chokidar');
+  const chokidar = require('../../src/shared/fileWatcher');
   const originalWatch = chokidar.watch;
   let watchHandler = null;
   chokidar.watch = () => ({
@@ -5529,7 +5533,7 @@ test('a single watch event still waits out the debounce and does not fire early'
   const childProcess = require('node:child_process');
   const originalSpawn = childProcess.spawn;
   const calls = [];
-  childProcess.spawn = (_bin, args) => {
+  childProcess.spawn = withoutWindowedScan((_bin, args) => {
     calls.push(args);
     const child = new EventEmitter();
     child.stdout = new EventEmitter();
@@ -5541,7 +5545,7 @@ test('a single watch event still waits out the debounce and does not fire early'
       child.emit('close', 0);
     }, 5);
     return child;
-  };
+  });
 
   let handle = null;
   try {

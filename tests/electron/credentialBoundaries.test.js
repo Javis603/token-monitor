@@ -59,12 +59,12 @@ test('the main settings IPC projection hides provider secrets while retaining co
   // are fixtures; this is not an Electron runtime test. The extracted source has
   // no source map and deliberately receives no credit against main.js coverage.
   const project = vm.runInNewContext(`${main.slice(start, end)}; settingsForRenderer`, {
-    settings, mainWindow: null, windowsBackdropFallback: () => false,
+    settings, mainWindow: null, windowsAccentActive: () => false, windowsBackdropFallback: () => false,
     networkProxySource, normalizePluginAuthorSkin, credentialSettingsForRenderer, hubProfilesForRenderer, accountFieldProjection, accountStatusProjection,
     limitAccountFormsForRenderer,
   limitConnectionSourcesForRenderer, rendererOmittedAccountKeys, process: { env: {} },
     getSyncContentRuntime: () => ({ status: () => ({ enabled: {} }) }),
-    trayMenuLocale: () => 'en', windowsFontContext: () => undefined,
+    trayMenuLocale: () => 'en', collectorCalendarLocale: () => 'en-GB', SYNC_WEEK_STARTS_ON: 1, windowsFontContext: () => undefined,
     effectiveSubscriptions: () => [], subscriptionsAreShared: () => false,
     currentHubIdentity: () => 'local', subscriptionDocumentVersion: () => 0,
     subscriptionsDocumentFor: () => null, pendingOrphanedSubscriptions: () => [],

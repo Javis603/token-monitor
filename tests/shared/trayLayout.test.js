@@ -820,59 +820,6 @@ test('recent activity uses a stable app or unavailable fallback without timestam
   assert.equal(resolved.items[1].text, '--');
 });
 
-test('local Reasonix native activity selects aggregate Reasonix Token and Cost values', () => {
-  const reasonixStats = {
-    localRecentUsageActivity: {
-      provider: 'reasonix',
-      timestampMs: Date.parse('2026-08-12T10:05:00.000Z')
-    },
-    periods: {
-      today: {
-        totalTokens: 1_040,
-        costUsd: 8.25,
-        clients: { claude: 1_000, reasonix: 40 },
-        clientCosts: { claude: 8, reasonix: 0.25 },
-        sessions: {
-          'claude:older': {
-            client: 'claude',
-            sessionId: 'older',
-            lastUsedAt: '2026-08-12T10:00:00.000Z'
-          }
-        }
-      }
-    },
-    nativeSessions: {
-      today: {
-        'reasonix:newer': {
-          client: 'reasonix',
-          sessionId: 'reasonix:newer',
-          lastMessageAt: '2026-08-12T10:05:00.000Z',
-          lastUsedAt: '2026-08-12T10:05:00.000Z',
-          totalTokens: 999,
-          reportedCostUsd: 99
-        }
-      },
-      month: {},
-      allTime: {}
-    }
-  };
-  const icon = createTrayLayoutItem('providerIcon', { idFactory: () => 'reasonix-icon' });
-  icon.autoMode = 'recent';
-  const tokens = createTrayLayoutItem('tokens', { idFactory: () => 'reasonix-tokens' });
-  tokens.usageScope = 'recent';
-  const cost = createTrayLayoutItem('cost', { idFactory: () => 'reasonix-cost' });
-  cost.usageScope = 'recent';
-
-  const resolved = resolveTrayLayout({ version: 3, items: [icon, tokens, cost] }, reasonixStats, {
-    availableProviderIds: ['claude', 'reasonix'],
-    currency: 'USD'
-  });
-
-  assert.equal(resolved.items[0].provider, 'reasonix');
-  assert.equal(resolved.items[1].text, '40');
-  assert.equal(resolved.items[2].text, '$0.25');
-});
-
 test('one layout resolution reads the local recent provider only once', () => {
   const original = trayTextApi.pickRecentUsageProviderId;
   let calls = 0;

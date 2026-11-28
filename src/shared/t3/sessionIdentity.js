@@ -7,7 +7,7 @@ const path = require('node:path');
 // a strong native reference must still match an existing session exactly.
 const DRIVER_CLIENTS = Object.freeze({
   codex: 'codex', claudeAgent: 'claude', cursor: 'cursor',
-  opencode: 'opencode', grok: 'grok', muse: 'muse'
+  opencode: 'opencode', grok: 'grok', muse: 'muse', antigravity: 'antigravity', kiro: 'kiro'
 });
 const REGISTRY_CLIENTS = Object.freeze({
   'codex-acp': 'codex', 'claude-acp': 'claude', cursor: 'cursor',
@@ -30,13 +30,19 @@ function nativeAccountingId(client, value, historical = false) {
   return ['codex', 'claude'].includes(client) && UUID.test(id) ? id.toLowerCase() : id;
 }
 
-function readT3IdentityBindings(dbPath) {
+function readT3IdentityBindings(dbPath, onUnavailable) {
   const bindings = new Map();
   // ServerConfig derives settings.json beside statev2.sqlite. Never use a
   // different environment's catalog, nor infer an agent from an instance name.
   try {
     const settings = JSON.parse(fs.readFileSync(path.join(path.dirname(dbPath), 'settings.json'), 'utf8'));
-    for (const [id, instance] of Object.entries(settings.providerInstances || {})) {
+    const instances = settings?.providerInstances;
+    if (!settings || typeof settings !== 'object' || Array.isArray(settings)
+      || (instances !== undefined && (!instances || typeof instances !== 'object' || Array.isArray(instances)))) {
+      onUnavailable?.();
+      return bindings;
+    }
+    for (const [id, instance] of Object.entries(instances || {})) {
       const config = instance?.config;
       if (instance?.driver !== 'acpRegistry' || !config || Array.isArray(config)
         || (config.source !== undefined && config.source !== 'registry')
@@ -44,7 +50,7 @@ function readT3IdentityBindings(dbPath) {
       const client = Object.hasOwn(REGISTRY_CLIENTS, config.agentId) ? REGISTRY_CLIENTS[config.agentId] : null;
       if (client) bindings.set(id, client);
     }
-  } catch (_) { /* absent/unreadable configuration cannot identify an ACP agent */ }
+  } catch (_) { onUnavailable?.(); }
   return bindings;
 }
 
@@ -53,4 +59,12 @@ function t3AccountingClient(driver, instanceId, bindings) {
     : (Object.hasOwn(DRIVER_CLIENTS, driver) ? DRIVER_CLIENTS[driver] : null);
 }
 
-module.exports = { supportsT3SessionClient, nativeAccountingId, readT3IdentityBindings, t3AccountingClient };
+function revokeT3SessionLinks(session) {
+  delete session.t3ThreadId;
+  if (!session.t3ParentLink) return;
+  delete session.parentSessionId;
+  delete session.parentClient;
+  delete session.t3ParentLink;
+}
+
+module.exports = { revokeT3SessionLinks, supportsT3SessionClient, nativeAccountingId, readT3IdentityBindings, t3AccountingClient };

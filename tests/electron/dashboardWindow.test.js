@@ -12,7 +12,7 @@ const read = (...p) => fs.readFileSync(path.join(rootDir, ...p), 'utf8');
 const { usageConfigFromSettings } = require('../../src/electron/runtimeConfig');
 
 function dashboardFunction(name, endMarker, context) {
-  const source = read('src', 'electron', 'renderer', 'dashboard.js');
+  const source = read('src', 'electron', 'renderer', 'dashboard', 'dashboard.js');
   const asyncStart = source.indexOf(`async function ${name}(`);
   const start = asyncStart >= 0 ? asyncStart : source.indexOf(`function ${name}(`);
   const body = source.slice(start, source.indexOf(endMarker));
@@ -23,9 +23,12 @@ function dashboardWindowFixture(platform = 'win32', settings = {}) {
   const windows = [];
   const backdrops = new Map();
   const handlers = new Map();
+  const displays = [{ workArea: { x: 0, y: 0, width: 1920, height: 1080 } }];
+  const boundsTimers = new Map();
   class Window extends EventEmitter {
-    constructor() {
+    constructor({ x = 40, y = 50, width, height }) {
       super();
+      this.bounds = { x, y, width, height };
       this.calls = [];
       this.webContents = new EventEmitter();
       this.webContents.setWindowOpenHandler = () => {};
@@ -38,45 +41,84 @@ function dashboardWindowFixture(platform = 'win32', settings = {}) {
     isDestroyed() { return this.destroyed === true; }
     isVisible() { return this.visible === true; }
     isMinimized() { return this.minimized === true; }
+    getBounds() { return { ...this.bounds }; }
+    setBounds(bounds) { Object.assign(this.bounds, bounds); this.calls.push('bounds'); }
+    setMinimumSize() {}
+    getPosition() { return [this.bounds.x, this.bounds.y]; }
+    setPosition(x, y) { Object.assign(this.bounds, { x, y }); }
     hide() { this.visible = false; this.calls.push('hide'); }
-    show() { this.visible = true; this.calls.push('show'); }
+    show() {
+      this.visible = true;
+      if (this.shiftOnShow) this.bounds.x += 80;
+      this.calls.push('show');
+    }
     focus() { this.calls.push('focus'); }
     setBackgroundColor(color) { this.calls.push(['background', color]); }
     restore() { this.minimized = false; this.calls.push('restore'); }
-    loadFile() { this.calls.push('load'); return Promise.resolve(); }
+    setAlwaysOnTop(value) { this.alwaysOnTop = value; }
+    setMovable(value) { this.movable = value; }
+    setResizable(value) { this.resizable = value; }
+    loadFile(file) { this.loadedFile = file; this.calls.push('load'); return Promise.resolve(); }
+    close() { this.emit('close'); this.destroy(); }
     destroy() { this.destroyed = true; this.emit('closed'); }
     static fromWebContents(sender) { return windows.find(win => win.webContents === sender); }
   }
   const context = vm.createContext({
     dashboardWindow: null, dashboardWindowReady: false, mainWindow: null, lastRendererStatsFingerprint: null,
-    BrowserWindow: Window, process: { platform }, path, __dirname: rootDir,
+    pendingDashboardWindowBounds: null,
+    BrowserWindow: Window, process: { platform }, path, __dirname: path.join(rootDir, 'src', 'electron'),
+    screen: {
+      getDisplayMatching: ({ x }) => displays.findLast(({ workArea }) => x >= workArea.x) || displays[0],
+      getPrimaryDisplay: () => displays[0]
+    },
+    canPositionWindow: () => true,
+    normalWindowBounds: require('../../src/electron/windowState').normalWindowBounds,
+    saveSettings() {},
     appWindowIcon: () => ({}), applyWindowsChrome() {}, suppressLinuxSystemContextMenu() {},
     syncWindowsBackdrop(win, { enabled, mode = 'acrylic' }) {
       if (platform === 'win32' && win) backdrops.set(win, enabled ? mode : 'transparent');
     },
+    windowsAccentActive: win => backdrops.get(win) === 'accent',
     nativeBlurEnabled: (source = settings) => source.systemGlass !== false,
+    ...require('../../src/electron/windowBehavior'),
     attachNativeMaterialVisibility() {}, syncNativeMaterialVisibility() {},
-    nativeMaterialOptions: () => ({}), limitsHistoryController: null, settings,
+    isLiquidGlassBackdrop: require('../../src/electron/macBackdropMode').isLiquidGlassBackdrop,
+    liquidGlassStyle: require('../../src/electron/macBackdropMode').liquidGlassStyle,
+    liquidGlassTint: require('../../src/electron/macBackdropMode').liquidGlassTint,
+    nativeTheme: {}, floatingBubbleState: {}, isLightHex: () => false,
+    limitsHistoryController: null, settings,
     isAllowedExternalUrl: () => false, console: { log() {} },
     ipcMain: { on: (name, handler) => handlers.set(name, handler) }
   });
   const main = read('src', 'electron', 'main.js');
-  vm.runInContext(main.slice(main.indexOf('function applyNativeMaterial('), main.indexOf('function withHistoryPreview(')), context);
+  vm.runInContext(main.slice(main.indexOf('const DEFAULT_WINDOW ='), main.indexOf('const ZOOM_LIMITS ='))
+    + main.slice(main.indexOf('function isBoundsOnScreen('), main.indexOf('let persistBoundsTimer'))
+    + main.slice(main.indexOf('function displayForBounds('), main.indexOf('function displayForPoint('))
+    + main.slice(main.indexOf('function persistWindowBounds('), main.indexOf('function collapseFloatingBubble(')), context);
+  vm.runInContext(main.slice(main.indexOf('function normalizeDashboardBackdrop('), main.indexOf('function withHistoryPreview(')), context);
   vm.runInContext(main.slice(main.indexOf('function discardFailedDashboardWindow('), main.indexOf('async function getDashboardHistory(')), context);
   vm.runInContext(main.slice(main.indexOf("ipcMain.on('dashboard:ready'"), main.indexOf("ipcMain.on('dashboard:minimize'")), context);
   const app = new EventEmitter();
-  const timers = [];
-  Object.assign(context, { app, quitRequested: false, setTimeout: fn => timers.push(fn) });
+  Object.assign(context, {
+    app, quitRequested: false,
+    setTimeout(fn, delay) { const id = Symbol(); boundsTimers.set(id, { fn, delay }); return id; },
+    clearTimeout(id) { boundsTimers.delete(id); }
+  });
   vm.runInContext(main.slice(main.indexOf('const rendererCrashReloadAt ='), main.indexOf('// Every quit route')), context);
   return {
-    windows, backdrops, open: () => context.createDashboardWindow(),
+    windows, backdrops, displays, open: () => context.createDashboardWindow(),
     applyNativeMaterial: () => context.applyNativeMaterial(),
+    applyWindowBehavior: win => context.applyDashboardWindowBehavior(win),
+    materialOptions: () => context.nativeMaterialOptions(settings, true),
     ready: win => handlers.get('dashboard:ready')({ sender: win.webContents }),
     crash(win) {
       const details = { reason: 'crashed' };
       win.webContents.emit('render-process-gone', {}, details);
       app.emit('render-process-gone', {}, win.webContents, details);
-      for (const fn of timers.splice(0)) fn();
+      for (const [id, { fn }] of boundsTimers) {
+        boundsTimers.delete(id);
+        fn();
+      }
     }
   };
 }
@@ -95,12 +137,120 @@ test('Windows Dashboard uses the widget backdrop on open and when appearance cha
   settings.systemGlass = false;
   f.applyNativeMaterial();
   assert.equal(f.backdrops.get(win), 'transparent');
+  settings.dashboardBackdrop = 'mica';
+  f.applyNativeMaterial();
+  assert.equal(f.backdrops.get(win), 'mica');
+  assert.equal(settings.windowsBackdrop, 'accent');
+  settings.dashboardBackdrop = 'solid';
+  f.applyNativeMaterial();
+  assert.equal(f.backdrops.get(win), 'transparent');
   assert.equal(f.open(), win);
+});
+
+test('Dashboard display mode applies on open and changes without affecting the main window mode', () => {
+  const settings = { windowBehavior: 'floating' };
+  const f = dashboardWindowFixture('darwin', settings);
+  const win = f.open();
+  assert.deepEqual([win.alwaysOnTop, win.movable, win.resizable], [false, true, true]);
+
+  settings.dashboardWindowBehavior = 'floating';
+  f.applyWindowBehavior(win);
+  assert.deepEqual([win.alwaysOnTop, win.movable, win.resizable], [true, true, true]);
+
+  settings.dashboardWindowBehavior = 'desktop';
+  f.applyWindowBehavior(win);
+  assert.deepEqual([win.alwaysOnTop, win.movable, win.resizable], [false, false, false]);
+  assert.equal(settings.windowBehavior, 'floating');
+});
+
+test('Dashboard reopens pinned at its last bounds and falls back to an available display', () => {
+  const mainBounds = { x: 20, y: 30, width: 440, height: 640 };
+  const settings = { windowBounds: mainBounds, dashboardWindowBehavior: 'normal' };
+  const f = dashboardWindowFixture('darwin', settings);
+  f.displays.push({ workArea: { x: 1920, y: 0, width: 1920, height: 1080 } });
+  const win = f.open();
+  assert.deepEqual(win.getBounds(), { x: 40, y: 50, width: 1180, height: 760 });
+  f.ready(win);
+  const bounds = { x: 1990, y: 80, width: 1440, height: 840 };
+  Object.assign(win.bounds, bounds);
+  win.emit('move');
+  win.emit('resize');
+  settings.dashboardWindowBehavior = 'desktop';
+  f.applyWindowBehavior(win);
+  win.close();
+  assert.deepEqual(settings.dashboardWindowBounds, bounds);
+  assert.deepEqual(settings.windowBounds, mainBounds);
+
+  const reopened = f.open();
+  assert.deepEqual(reopened.getBounds(), bounds);
+  assert.equal(reopened.movable, false);
+  assert.equal(reopened.resizable, false);
+  reopened.shiftOnShow = true;
+  f.ready(reopened);
+  assert.deepEqual(reopened.getBounds(), bounds);
+  reopened.close();
+  f.displays.pop();
+  assert.deepEqual(f.open().getBounds(), { ...bounds, x: 240, y: 120 });
+});
+
+test('Dashboard keeps pinned controls on-screen after changes to the display layout', () => {
+  const scenarios = [
+    [{ x: 1700, y: 80, width: 1180, height: 760 }, { x: 740, y: 80, width: 1180, height: 760 }],
+    [{ x: 2100, y: 50, width: 3000, height: 1700 }, { x: 0, y: 0, width: 1920, height: 1080 }],
+    [{ x: 100, y: 90, width: 2400, height: 1400 }, { x: 0, y: 0, width: 1920, height: 1080 }]
+  ];
+  for (const [saved, expected] of scenarios) {
+    const f = dashboardWindowFixture('darwin', { dashboardWindowBounds: saved, dashboardWindowBehavior: 'desktop' });
+    const win = f.open();
+    win.shiftOnShow = true;
+    f.ready(win);
+    assert.deepEqual(win.getBounds(), expected);
+    assert.equal(win.movable, false);
+    assert.equal(win.resizable, false);
+  }
+});
+
+test('Dashboard applies the smaller work area before revealing a loading pinned window', () => {
+  const settings = { dashboardWindowBounds: { x: 100, y: 80, width: 1600, height: 900 }, dashboardWindowBehavior: 'desktop' };
+  const f = dashboardWindowFixture('darwin', settings);
+  const win = f.open();
+  f.displays[0].workArea = { x: 0, y: 30, width: 1024, height: 738 };
+  f.ready(win);
+  assert.deepEqual(win.getBounds(), { x: 0, y: 30, width: 1024, height: 738 });
+  assert.deepEqual(win.calls, ['load', ['background', '#00000000'], 'bounds', 'show', 'focus']);
+  assert.equal(win.resizable, false);
+});
+
+test('Dashboard saves a move immediately followed by minimizing and closing', () => {
+  const settings = { dashboardWindowBounds: { x: 100, y: 80, width: 920, height: 620 } };
+  const f = dashboardWindowFixture('darwin', settings);
+  const win = f.open();
+  f.ready(win);
+  win.setPosition(300, 120);
+  win.emit('move');
+  win.minimized = true;
+  win.close();
+  assert.deepEqual(f.open().getBounds(), { x: 300, y: 120, width: 920, height: 620 });
+});
+
+test('macOS Dashboard can override inherited glass or use a solid background', () => {
+  const settings = { systemGlass: true, macBackdrop: 'liquid-glass', macClearGlassTint: 20 };
+  const f = dashboardWindowFixture('darwin', settings);
+  assert.equal(f.materialOptions().style, 'regular');
+  settings.dashboardBackdrop = 'liquid-glass-clear';
+  assert.equal(f.materialOptions().style, 'clear');
+  assert.equal(f.materialOptions().tintOpacity, 0.2);
+  assert.equal(settings.macBackdrop, 'liquid-glass');
+  settings.dashboardBackdrop = 'solid';
+  assert.equal(f.materialOptions().opaque, true);
+  assert.equal(f.materialOptions().enabled, false);
 });
 
 test('macOS Dashboard restores its transparent canvas before reveal and after reload', () => {
   const f = dashboardWindowFixture('darwin');
   const win = f.open();
+  assert.equal(win.loadedFile, path.join(rootDir, 'src', 'electron', 'renderer', 'dashboard', 'dashboard.html'));
+  assert.ok(fs.existsSync(win.loadedFile));
   f.ready({ webContents: {} });
   assert.deepEqual(win.calls, ['load']);
   f.ready(win);
@@ -249,18 +399,18 @@ test('headless agent leaves Claude Web credentials to the widget transport', () 
 });
 
 test('dashboard.html wires the shared modules and the two panels', () => {
-  const html = read('src', 'electron', 'renderer', 'dashboard.html');
-  assert.match(html, /<link rel="stylesheet" href="styles\.css" \/>/);
+  const html = read('src', 'electron', 'renderer', 'dashboard', 'dashboard.html');
+  assert.match(html, /<link rel="stylesheet" href="\.\.\/styles\.css" \/>/);
   assert.match(html, /<link rel="stylesheet" href="dashboard\.css" \/>/);
-  assert.match(html, /<script src="usageCharts\.js"><\/script>/);
-  assert.match(html, /<script src="i18n\.js"><\/script>/);
-  assert.match(html, /<script src="\.\.\/\.\.\/shared\/currency\.js"><\/script>/);
-  assert.match(html, /<script src="\.\.\/\.\.\/shared\/compactMoney\.js"><\/script>/);
+  assert.match(html, /<script src="\.\.\/usageCharts\.js"><\/script>/);
+  assert.match(html, /<script src="\.\.\/i18n\.js"><\/script>/);
+  assert.match(html, /<script src="\.\.\/\.\.\/\.\.\/shared\/currency\.js"><\/script>/);
+  assert.match(html, /<script src="\.\.\/\.\.\/\.\.\/shared\/compactMoney\.js"><\/script>/);
   assert.match(html, /<script src="dashboard\.js"><\/script>/);
   const scriptOrder = [
-    '<script src="../../shared/compactTokens.js"></script>',
-    '<script src="../../shared/currency.js"></script>',
-    '<script src="../../shared/compactMoney.js"></script>',
+    '<script src="../../../shared/compactTokens.js"></script>',
+    '<script src="../../../shared/currency.js"></script>',
+    '<script src="../../../shared/compactMoney.js"></script>',
     '<script src="dashboard.js"></script>'
   ].map((script) => html.indexOf(script));
   assert.ok(scriptOrder.every((index) => index >= 0), 'dashboard should include every compact money dependency');
@@ -279,7 +429,7 @@ test('dashboard.html wires the shared modules and the two panels', () => {
 });
 
 test('dashboard.css declares chart classes and a flat theme override', () => {
-  const css = read('src', 'electron', 'renderer', 'dashboard.css');
+  const css = read('src', 'electron', 'renderer', 'dashboard', 'dashboard.css');
   assert.match(css, /\.candle-up/);
   assert.match(css, /\.candle-down/);
   assert.match(css, /\.heat\.lvl-4/);
@@ -290,15 +440,99 @@ test('dashboard.css declares chart classes and a flat theme override', () => {
 });
 
 test('dashboard.js fetches history over IPC and renders both tabs', () => {
-  const js = read('src', 'electron', 'renderer', 'dashboard.js');
-  assert.match(js, /window\.tokenMonitor\.getDashboardHistory\(\)/);
+  const html = read('src', 'electron', 'renderer', 'dashboard', 'dashboard.html');
+  const css = read('src', 'electron', 'renderer', 'dashboard', 'dashboard.css');
+  const js = read('src', 'electron', 'renderer', 'dashboard', 'dashboard.js');
+  const modelJs = read('src', 'electron', 'renderer', 'dashboard', 'dashboardModel.js');
+  const contentBlurJs = read('src', 'electron', 'renderer', 'contentBlur.js');
+  assert.match(js, /window\.tokenMonitor\.getDashboardHistory\(\{\s*includeDevices:\s*true\s*\}\)/);
   assert.match(js, /charts\.barsChartSvg/);
   assert.match(js, /charts\.candleChartSvg/);
   assert.match(js, /charts\.heatmapSvg/);
-  assert.match(js, /updateSettings\(\{ dashboardFlat: state\.flat \}\)/);
+  assert.match(js, /modelApi\.isometricHeatmapSvg/);
+  assert.doesNotMatch(html, /id="themeToggle"/);
+  assert.match(js, /saveDashboardSettings\(\{ dashboardBackdrop: input.value \}\)/);
   assert.match(js, /dashboard\.minimize\(\)/);
   assert.match(js, /dashboard\.ready\(\)/);
   assert.match(js, /onDashboardHistoryChanged\?\.\(handleDashboardHistoryChanged\)/);
+  assert.match(js, /onStatsPush\?\.\(/);
+  assert.match(html, /<script src="\.\.\/rowIconMasks\.js"><\/script>/);
+  assert.match(html, /<script src="\.\.\/limits\/homeMotion\.js"><\/script>/);
+  assert.match(html, /<script src="\.\.\/\.\.\/tokenNumberAnimation\.js"><\/script>/);
+  assert.match(html, /<script src="\.\.\/contentBlur\.js"><\/script>/);
+  assert.match(html, /<script src="\.\.\/accountIdentity\.js"><\/script>/);
+  assert.match(html, /<script src="dashboardModel\.js"><\/script>/);
+  assert.match(html, /<script src="activitySkyline3d\.js"><\/script>/);
+  assert.match(js, /TokenMonitorContentBlur/);
+  const skylineJs = read('src', 'electron', 'renderer', 'dashboard', 'activitySkyline3d.js');
+  assert.match(html, /id="dashDeviceMenu"[^>]*popover="manual"/);
+  assert.match(html, /id="dashDrawer"[^>]*popover="manual"/);
+  assert.match(html, /id="dashTooltip"[^>]*popover="manual"/);
+  assert.match(html, /id="dashTopology"/);
+  assert.match(html, /data-control="stageView"/);
+  assert.match(html, /dash-glass-card/);
+  assert.match(html, /id="dashQuotasCard"[^>]*home-module-limits/);
+  assert.match(html, /id="dashQuotas"[^>]*home-module-body/);
+  assert.doesNotMatch(html, /class="dash-title"/);
+  assert.match(html, /class="dash-quotas-viewport"/);
+  assert.match(html, /id="dashHeatLegend"/);
+  assert.match(css, /--dash-card-shadow:\s*none/);
+  assert.match(css, /\.dash-topo-wrap\s*\{[^}]*border:\s*none/);
+  assert.doesNotMatch(css, /\.topo-port\s*\{[^}]*background:\s*rgb\(var\(--glass-rgb\)\)/);
+  assert.match(css, /\.dash-quotas-viewport\s*\{/);
+  assert.doesNotMatch(css, /\.dash-quotas-col\s+\.home-limit-window/);
+  assert.match(css, /\.dash-heat-legend\s*\{/);
+  assert.doesNotMatch(css, /\.dash-activity-col\s*\{[^}]*justify-content:\s*space-between/);
+  assert.doesNotMatch(css, /\.dash-quotas-list\s*\{[^}]*max-height:\s*248px/);
+  assert.match(js, /home-limit-account-head/);
+  assert.match(js, /home-limit-windows/);
+  assert.match(js, /home-limit-resets/);
+  assert.match(js, /class="home-list-mark dash-quota-mark"/);
+  assert.match(js, /data-limit-color="\$\{accColor\}"/);
+  assert.match(js, /maskLimitAccountEmails/);
+  assert.match(js, /function animateMetricText/);
+  assert.match(js, /data-dom-island aria-hidden="true"/);
+  assert.match(js, /function syncTopologyScrollFades/);
+  assert.match(js, /dash-topo-col-scroll/);
+  assert.match(js, /--edge-vis/);
+  assert.match(js, /is-offscreen/);
+  assert.doesNotMatch(js, /topologyExpanded|topo-more-btn|topo-collapse-btn/);
+  assert.match(js, /topo-beam-tail/);
+  assert.match(js, /topo-beam-body/);
+  assert.match(js, /topo-beam-head/);
+  assert.match(js, /topo-edge--hop/);
+  assert.match(js, /topo-node--device/);
+  assert.match(js, /topo-node--hub/);
+  assert.match(js, /topo-node--endpoint/);
+  assert.match(js, /pathLength="100"/);
+  assert.doesNotMatch(js, /topo-packet-core/);
+  assert.doesNotMatch(js, /<animateMotion/);
+  assert.match(css, /\.dash-topo-col-scroll\b/);
+  assert.match(css, /\.has-bottom-fade/);
+  assert.match(css, /\.topo-edge\.is-offscreen/);
+  assert.match(css, /\.topo-beam-head/);
+  assert.match(css, /mask-composite:\s*exclude/);
+  assert.match(css, /topoBorderPass/);
+  assert.match(css, /topoSheenPass/);
+  assert.match(css, /topoPortEmit/);
+  assert.match(css, /topoPortHubIn/);
+  assert.match(css, /topoPortHubOut/);
+  assert.match(css, /topoPortArrive/);
+  assert.doesNotMatch(css, /topo-more-btn|topo-collapse-btn|dash-topo-wrap\.is-expanded/);
+  assert.doesNotMatch(js, /pendingVisualBandFromHeight|pendingRevealSelector/);
+  assert.match(js, /function activateSegButton/);
+  assert.match(js, /function renderHeatLegend/);
+  assert.match(js, /function updateHeroTokens[\s\S]*?!document\.hidden/);
+  assert.match(js, /function renderTopology/);
+  assert.match(js, /function layoutTopologyLinks/);
+  assert.match(js, /createLiveTokenRateGroupTracker\(\{\s*now:\s*Date\.now/);
+  assert.match(contentBlurJs, /\.dash-tooltip/);
+  assert.match(contentBlurJs, /\.dash-device-menu/);
+  assert.match(contentBlurJs, /\.dash-drawer/);
+  assert.doesNotMatch(html, /\sstyle\s*=/i, 'CSP forbids inline style attributes in dashboard.html');
+  assert.doesNotMatch(js, /<[a-z][^>]*\sstyle\s*=/i, 'CSP forbids inline style attributes in dashboard.js');
+  assert.doesNotMatch(modelJs, /<[a-z][^>]*\sstyle\s*=/i, 'CSP forbids inline style attributes in dashboardModel.js');
+  assert.doesNotMatch(skylineJs, /<[a-z][^>]*\sstyle\s*=/i, 'CSP forbids inline style attributes in activitySkyline3d.js');
 });
 
 test('Dashboard Trends renders the selected calendar range and labels unrecorded days', () => {
@@ -306,12 +540,64 @@ test('Dashboard Trends renders the selected calendar range and labels unrecorded
   // the range and removed those days from the chart. The Trends tab must build
   // the calendar window instead, keep the slots hoverable, and say "no record"
   // rather than claiming a measured zero.
-  const js = read('src', 'electron', 'renderer', 'dashboard.js');
+  const js = read('src', 'electron', 'renderer', 'dashboard', 'dashboard.js');
   const trends = /function renderTrends\(\) \{([\s\S]*?)\n\}\n\nfunction renderBreakdown/.exec(js);
   assert.ok(trends, 'renderTrends exists');
   assert.match(trends[1], /charts\.dailyWindow\(state\.history\?\.daily \|\| \[\],\s*\{\s*days: state\.range === 'all' \? 0 : Number\(state\.range\)\s*\}\)/);
   assert.doesNotMatch(js, /charts\.clampDaily/);
   assert.match(js, /t\('dashboard\.noRecord'\)/);
+});
+
+test('Hero labels partial coverage and distinguishes unavailable totals from zero', () => {
+  const classes = new Set();
+  const coverage = { textContent: '', classList: {
+    toggle(name, on) { if (on) classes.add(name); else classes.delete(name); }
+  } };
+  const cost = { textContent: '' };
+  let tokens;
+  const render = dashboardFunction('renderHero', '\nfunction renderVelocity', {
+    els: { heroCoverage: coverage, heroCost: cost },
+    state: { selectedDeviceId: 'all', periodKey: 'yesterday' },
+    lastHeroRender: {}, t: () => 'Partial totals', formatExactTokens: String,
+    updateHeroTokens(text) { tokens = text; },
+    formatCost: String,
+    animateMetricText(target, text) { target.textContent = text; }
+  });
+  render({ hero: { accountingStatus: 'partial', tokens: 310000, cost: 5 } });
+  assert.equal(tokens, '310000');
+  assert.equal(cost.textContent, '5');
+  assert.equal(coverage.textContent, 'Partial totals');
+  assert.equal(classes.has('hidden'), false);
+  render({ hero: { accountingStatus: 'unavailable', tokens: 0, cost: 0 } });
+  assert.equal(tokens, '—');
+  assert.equal(cost.textContent, '—');
+  assert.equal(classes.has('hidden'), true);
+  render({ hero: { accountingStatus: 'ready', tokens: 0, cost: 0 } });
+  assert.equal(tokens, '0');
+  assert.equal(cost.textContent, '0');
+});
+
+test('Dashboard hero shows token counts and displays the cache hit rate separately', () => {
+  let markup;
+  const heroCache = { textContent: '' };
+  const context = {
+    els: { heroAnatomy: {}, heroCache },
+    state: { selectedDeviceId: 'all', periodKey: 'today' },
+    lastHeroRender: {}, t: String, escapeHtml: String, formatExactTokens: String,
+    formatCompact: String, updateHeroTokens() {}, heroCacheMissDetails: () => [],
+    patchDashboardMarkup(_target, html) { markup = html; }
+  };
+  context.formatHeroPercent = dashboardFunction('formatHeroPercent', '\nfunction renderHero', context);
+  const render = dashboardFunction('renderHero', '\nfunction renderVelocity', context);
+  const segments = [
+    { key: 'cacheRead', labelKey: 'Cached input', tokens: 970, share: 0.97 },
+    { key: 'cacheMiss', labelKey: 'Uncached input', tokens: 29, share: 0.029 },
+    { key: 'output', labelKey: 'Output', tokens: 1, share: 0.001 }
+  ];
+  render({ hero: { tokens: 1000, cacheHitRate: 0.97, anatomy: { cacheWrite: 0, cacheMiss: 29, segments } } });
+  assert.deepEqual(Array.from(markup.matchAll(/<strong>(\d+)<\/strong>/g), match => match[1]), ['970', '29', '1']);
+  assert.doesNotMatch(markup, /%/);
+  assert.equal(heroCache.textContent, '97%');
 });
 
 test('Dashboard tooltips distinguish unrecorded days and buckets from recorded zeros', () => {
@@ -322,6 +608,7 @@ test('Dashboard tooltips distinguish unrecorded days and buckets from recorded z
     shortDate: () => '10/24',
     longDate: () => '10/24',
     formatCompact: (value) => String(value),
+    escapeHtml: String,
     colorFor: () => '#fff',
     applySwatchColors: () => {},
     positionTooltip: () => {}
@@ -349,17 +636,82 @@ test('Dashboard tooltips distinguish unrecorded days and buckets from recorded z
   assert.match(tooltip.innerHTML, />L<.*>0</);
 });
 
+test('Dashboard 3D heatmap passes only recorded days to the tooltip', () => {
+  let onHover;
+  const zeroDay = { tokens: 0 };
+  const calls = [];
+  const context = {
+    state: { stageView: '3d', tab: 'activity', dayMap: new Map([['2026-10-24', zeroDay]]) },
+    els: { skylineCanvasHost: {} },
+    skylineController: null,
+    skylineApi: { createSkylineController(_host, handlers) { onHover = handlers.onHover; return {}; } },
+    activeHover: null,
+    showHeatTooltip: (...args) => calls.push(args)
+  };
+  dashboardFunction('ensureSkylineController', '\nfunction renderSkylineToolLegend', context)();
+  const anchorRect = {};
+  for (const date of ['2026-10-23', '2026-10-24']) onHover({ cell: { date, tokens: 0 }, anchorRect });
+  assert.deepEqual(calls, [['2026-10-23', undefined, anchorRect], ['2026-10-24', zeroDay, anchorRect]]);
+});
+
 test('dashboard reuses the shared scheduler to defer hidden render work', () => {
-  const html = read('src', 'electron', 'renderer', 'dashboard.html');
-  const js = read('src', 'electron', 'renderer', 'dashboard.js');
-  const schedulerScript = html.indexOf('<script src="statsRenderScheduler.js"></script>');
+  const html = read('src', 'electron', 'renderer', 'dashboard', 'dashboard.html');
+  const js = read('src', 'electron', 'renderer', 'dashboard', 'dashboard.js');
+  const schedulerScript = html.indexOf('<script src="../statsRenderScheduler.js"></script>');
   const dashboardScript = html.indexOf('<script src="dashboard.js"></script>');
 
   assert.ok(schedulerScript >= 0 && schedulerScript < dashboardScript);
-  assert.match(js, /createStatsRenderScheduler\(\{[\s\S]*isHidden: \(\) => dashboardReady && document\.hidden,[\s\S]*render: renderNow/);
+  assert.match(js, /createStatsRenderScheduler\(\{\s*isHidden: \(\) => dashboardReady && document\.hidden,/);
   assert.match(js, /function render\(\) \{\s*dashboardRenderScheduler\.request\(\);\s*\}/);
   assert.match(js, /function handleDashboardVisibilityChange\(\)[\s\S]*visibilityChanged\(\)[\s\S]*scheduleDashboardRefresh\(\)/);
   assert.match(js, /document\.addEventListener\('visibilitychange', handleDashboardVisibilityChange\)/);
+});
+
+test('Dashboard refreshes the open quota order for late provider readings after a drag', () => {
+  const js = read('src', 'electron', 'renderer', 'dashboard', 'dashboard.js');
+  const provider = 'plugin:quota-test:provider';
+  let quotaOrderOpen = false;
+  let dragging = false;
+  let deferred = false;
+  const markup = [];
+  const context = vm.createContext({
+    statsRenderSchedulerApi: require('../../src/electron/renderer/statsRenderScheduler'),
+    modelApi: require('../../src/electron/renderer/dashboard/dashboardModel'),
+    document: { hidden: false },
+    dashboardReady: true,
+    state: { stats: {}, settings: { limitProviders: `codex,claude,${provider}` } },
+    dashboardSettings: {
+      quotaOrder: { classList: { contains: () => !quotaOrderOpen } },
+      quotaOrderList: {},
+      quotaOrderReset: {}
+    },
+    queuedDashboardQuotaOrder: null,
+    dashboardQuotaOrderDrag: { deferRender() { return (deferred = dragging); } },
+    renderNow() {},
+    dashboardQuotaOrderRows: () => [],
+    patchDashboardMarkup(_list, html) { markup.push(html); return true; },
+    escapeHtml: String,
+    t: String
+  });
+  vm.runInContext(js.slice(js.indexOf('const dashboardRenderScheduler'), js.indexOf('function scheduleDashboardRefresh('))
+    + js.slice(js.indexOf('function renderDashboardQuotaOrder('), js.indexOf('function renderDashboardBackdrop(')), context);
+  context.render();
+  assert.equal(markup.length, 0);
+  quotaOrderOpen = true;
+  context.renderDashboardQuotaOrder(context.state.settings);
+  assert.doesNotMatch(markup[0], /plugin:quota-test:provider/);
+
+  dragging = true;
+  context.state.stats = { limits: { providers: [{ provider }] } };
+  context.render();
+  assert.equal(deferred, true);
+  assert.equal(markup.length, 1);
+
+  dragging = false;
+  context.queuedDashboardQuotaOrder = { dashboardQuotaProviderOrder: 'codex,claude' };
+  context.renderDashboardQuotaOrder(context.state.settings);
+  const ids = Array.from(markup[1].matchAll(/data-quota-provider="([^"]+)"/g), ([, id]) => id);
+  assert.deepEqual(ids, ['codex', 'claude', provider]);
 });
 
 test('dashboard restore coalesces either native event order into one refresh', () => {
@@ -377,7 +729,8 @@ test('dashboard restore coalesces either native event order into one refresh', (
     requestAnimationFrame(callback) { frame = callback; return 1; },
     cancelAnimationFrame() { frame = null; },
     dashboardRenderScheduler: {
-      visibilityChanged: () => true
+      visibilityChanged: () => true,
+      flush() {}
     },
     refresh: () => { refreshes += 1; },
     get refreshRunning() { return refreshRunning; },
@@ -470,6 +823,8 @@ test('an in-flight Dashboard refresh preserves a hidden invalidation for restore
     get refreshQueued() { return refreshQueued; },
     set refreshQueued(value) { refreshQueued = value; }
   };
+  const js = read('src', 'electron', 'renderer', 'dashboard', 'dashboard.js');
+  vm.runInNewContext(js.slice(js.indexOf('let historyRequestSeq'), js.indexOf('async function manualRefresh(')), context);
   const refresh = dashboardFunction('refresh', '\nasync function boot(', context);
 
   await refresh();
@@ -481,8 +836,8 @@ test('an in-flight Dashboard refresh preserves a hidden invalidation for restore
 
 test('heatmap metric preserves the legacy cost default and normalizes settings', () => {
   const main = read('src', 'electron', 'main.js');
-  const js = read('src', 'electron', 'renderer', 'dashboard.js');
-  const html = read('src', 'electron', 'renderer', 'dashboard.html');
+  const js = read('src', 'electron', 'renderer', 'dashboard', 'dashboard.js');
+  const html = read('src', 'electron', 'renderer', 'dashboard', 'dashboard.html');
   assert.match(main, /heatmapMetric:\s*'cost'/);
   assert.match(main, /merged\.heatmapMetric = normalizeHeatmapMetric\(merged\.heatmapMetric\)/);
   assert.match(main, /normalizedPatch\.heatmapMetric = normalizeHeatmapMetric\(patch\.heatmapMetric, settings\.heatmapMetric\)/);
@@ -509,10 +864,10 @@ test('Home configures heatmap color in Settings while keeping token tooltips', (
 });
 
 test('dashboard motion is data-scoped and respects reduced-motion preferences', () => {
-  const js = read('src', 'electron', 'renderer', 'dashboard.js');
-  const css = read('src', 'electron', 'renderer', 'dashboard.css');
+  const js = read('src', 'electron', 'renderer', 'dashboard', 'dashboard.js');
+  const css = read('src', 'electron', 'renderer', 'dashboard', 'dashboard.css');
   assert.match(js, /prefers-reduced-motion: reduce/);
-  assert.match(js, /function animateChartGeometry/);
+  assert.match(js, /function animateBarGeometry/);
   assert.match(js, /function animateCandles/);
   assert.match(js, /function animateHeatmapEntry/);
   assert.match(js, /document\.hasFocus\(\)/);
@@ -538,7 +893,7 @@ test('dashboard repains on a rate-only settings push, not just a currency-code c
   // currency code identical, so the render() inside the code-change branch
   // never fires. configureRates mutates module state but the already-rendered
   // costs would stay stale unless render() also runs on the rate path.
-  const js = read('src', 'electron', 'renderer', 'dashboard.js');
+  const js = read('src', 'electron', 'renderer', 'dashboard', 'dashboard.js');
   const handler = /window\.tokenMonitor\.onSettingsPush\?\.\(\(next\)\s*=>\s*\{([\s\S]*?)\n\}\);/.exec(js);
   assert.ok(handler, 'dashboard should subscribe to onSettingsPush for rate updates');
   assert.match(handler[1], /configureRates\(next\.currencyRatesEffective\)/);
@@ -548,25 +903,25 @@ test('dashboard repains on a rate-only settings push, not just a currency-code c
 });
 
 test('dashboard shares localized token units and repaints when the setting or language changes', () => {
-  const js = read('src', 'electron', 'renderer', 'dashboard.js');
-  const html = read('src', 'electron', 'renderer', 'dashboard.html');
+  const js = read('src', 'electron', 'renderer', 'dashboard', 'dashboard.js');
+  const html = read('src', 'electron', 'renderer', 'dashboard', 'dashboard.html');
   const handler = /window\.tokenMonitor\.onSettingsPush\?\.\(\(next\)\s*=>\s*\{([\s\S]*?)\n\}\);/.exec(js);
   assert.ok(handler, 'dashboard should subscribe to settings pushes');
-  assert.match(html, /<script src="\.\.\/\.\.\/shared\/compactTokens\.js"><\/script>/);
+  assert.match(html, /<script src="\.\.\/\.\.\/\.\.\/shared\/compactTokens\.js"><\/script>/);
   assert.match(js, /const compactMoneyApi = window\.TokenMonitorCompactMoney/);
   assert.match(js, /const compactTokenApi = window\.TokenMonitorCompactTokens/);
   assert.match(js, /compactTokenApi\.formatCompactTokens\(value, effectiveCompactTokenUnits\(\), state\.locale\)/);
   assert.match(js, /compactMoneyApi\.formatCompactCurrencyFromUsd\(\s*usd,\s*state\.currency,\s*effectiveCompactTokenUnits\(\),\s*state\.locale/s);
   assert.match(js, /state\.locale = i18n\.resolveLocale\(settings\.locale \|\| settings\.language, navigator\.languages\)/);
-  assert.match(handler[1], /nextLocale = i18n\.resolveLocale\(next\.locale \|\| next\.language, navigator\.languages\)/);
-  assert.match(handler[1], /nextCompactTokenUnits = compactTokenApi\.normalizeCompactTokenUnits\(next\.compactTokenUnits\)/);
+  assert.match(handler[1], /nextLocale = i18n\.resolveLocale\(state\.settings\.locale \|\| state\.settings\.language, navigator\.languages\)/);
+  assert.match(handler[1], /nextCompactTokenUnits = compactTokenApi\.normalizeCompactTokenUnits\(state\.settings\.compactTokenUnits\)/);
   assert.match(handler[1], /needsRender = true/);
 });
 
 test('dashboard repaints when a settings push changes the motion preference', () => {
   // applyAppearance applies reduceMotion itself, so the change check must
   // compare against the value captured before it runs or it never fires.
-  const js = read('src', 'electron', 'renderer', 'dashboard.js');
+  const js = read('src', 'electron', 'renderer', 'dashboard', 'dashboard.js');
   const handler = /window\.tokenMonitor\.onSettingsPush\?\.\(\(next\)\s*=>\s*\{([\s\S]*?)\n\}\);/.exec(js);
   assert.ok(handler, 'dashboard should subscribe to settings pushes');
   assert.match(handler[1], /const previousReduceMotion = state\.reduceMotion;\s*(?:\/\/[^\n]*\n\s*)*applyAppearance\(state\.settings\)/);
@@ -583,4 +938,4040 @@ test('renderer removes Trends from available views when history is disabled', ()
   const app = read('src', 'electron', 'renderer', 'app.js');
   assert.match(app, /state\.settings\?\.historyEnabled === false/);
   assert.match(app, /order\.filter\(\(id\) => id !== 'trends'\)/);
+});
+
+test('main forwards live stats:push snapshots to a ready visible dashboard window', () => {
+  const main = read('src', 'electron', 'main.js');
+  const sentDashboard = [];
+  const sentMain = [];
+  const context = {
+    latestStats: null,
+    latestStatsSource: null,
+    hubModeGeneration: 1,
+    statsPushRevision: 0,
+    statsPushSource: null,
+    mode: 'local',
+    settings: {},
+    edgeDockManualStats: null,
+    lastRendererStatsFingerprint: null,
+    mainWindowStatsPushWanted: () => true,
+    mainWindow: {
+      isDestroyed: () => false,
+      webContents: { send: (ch, payload) => sentMain.push([ch, payload]) }
+    },
+    dashboardWindowReady: true,
+    dashboardWindow: {
+      isDestroyed: () => false,
+      isVisible: () => true,
+      isMinimized: () => false,
+      webContents: { send: (ch, payload) => sentDashboard.push([ch, payload]) }
+    },
+    statsHistoryRevision: () => 'rev-1',
+    injectLocalDeviceStatus: (s) => s,
+    currentHubStatsIdentity: () => 'local',
+    getSyncContentRuntime: () => ({ notifyStats() {} }),
+    getAccountPresentationSync: () => ({ notifyStats() {} }),
+    electronPresentationStats: (s) => s,
+    getLimitsHistoryStore: () => ({ record() {} }),
+    limitsHistoryController: null,
+    migrateCodexAdditionalLimits() {},
+    rendererSnapshots: { stamp: (_orig, copy) => ({ ...copy, snapshot: { id: 1, source: 1 } }) },
+    rendererStats: (s) => s,
+    buildStatsDelta: () => ({ delta: { patched: true }, fingerprint: 'fp-1' }),
+    fingerprintStats: () => 'fp-1',
+    scheduleMacWidgetSnapshot() {},
+    pluginRuntime: null,
+    updateEdgeDockCells() {},
+    syncCodexPresentationActiveAccount() {},
+    updateTrayDisplay() {},
+    maybeAdoptSharedSubscriptionRevision() {},
+    sendMainWindowEvent() {}
+  };
+  vm.runInNewContext(main.slice(main.indexOf('function sendPush('), main.indexOf('function statsHistoryRevision(')), context);
+  context.sendPush({ event: 'stats', data: { stats: { periods: { today: { totalTokens: 42 } }, historyRevision: 'rev-1' } } });
+
+  assert.equal(sentMain.length, 1);
+  assert.ok(sentMain[0][1].data.statsDelta, 'main window receives statsDelta');
+  assert.equal(sentDashboard.length, 1);
+  assert.equal(sentDashboard[0][0], 'stats:push');
+  assert.equal(sentDashboard[0][1].data.stats.periods.today.totalTokens, 42, 'dashboard receives full stats payload, never main-relative statsDelta');
+
+  context.dashboardWindow.isVisible = () => false;
+  context.sendPush({ event: 'stats', data: { stats: { periods: { today: { totalTokens: 99 } }, historyRevision: 'rev-1' } } });
+  assert.equal(sentDashboard.length, 1, 'hidden dashboard window does not receive stats pushes');
+  context.dashboardWindow.isVisible = () => true;
+  context.dashboardWindow.isMinimized = () => true;
+  context.sendPush({ event: 'stats', data: { stats: { historyRevision: 'rev-1' } } });
+  assert.equal(sentDashboard.length, 1, 'minimized dashboard window recovers on restore without background IPC');
+});
+
+test('dashboard tooltips stay anchored above pointer and survive live renderNow refreshes', () => {
+  const js = read('src', 'electron', 'renderer', 'dashboard', 'dashboard.js');
+  const css = read('src', 'electron', 'renderer', 'dashboard', 'dashboard.css');
+  const renderNowBody = /function renderNow\(\)\s*\{([\s\S]*?)\n\}\n\nconst dashboardRenderScheduler/.exec(js);
+  assert.ok(renderNowBody, 'renderNow exists');
+  assert.doesNotMatch(renderNowBody[1], /\bhideTooltip\(\)/, 'live refreshes must not unconditionally dismiss active hover tooltips');
+  assert.match(css, /\.dash-tooltip\s*\{[^}]*backdrop-filter:\s*blur\(28px\)/);
+  assert.match(css, /\.seg-indicator\s*\{/);
+  assert.match(js, /function syncSegIndicator/);
+
+  const style = { transform: '' };
+  const dataset = {};
+  const tooltip = {
+    style,
+    dataset,
+    classList: { remove() {}, add() {}, contains: () => false },
+    setAttribute() {},
+    getBoundingClientRect: () => ({ width: 120, height: 50 })
+  };
+  const context = {
+    els: { tooltip },
+    window: { innerWidth: 1000, innerHeight: 700 }
+  };
+  const positionTooltip = dashboardFunction('positionTooltip', '\nfunction showBarTooltip', context);
+  positionTooltip({ left: 300, top: 200, bottom: 212, width: 12, height: 12 });
+  // Above anchor: top (200) - gap (11) - tip height (50) = 139px; horizontal center: 306 - 60 = 246px.
+  assert.equal(style.transform, 'translate3d(246px, 139px, 0)');
+  assert.equal(dataset.visible, 'true');
+
+  const hit = {
+    getAttribute: () => '0',
+    getBoundingClientRect: () => ({ left: 300, top: 100, bottom: 500, width: 12 })
+  };
+  let move;
+  const chart = {
+    addEventListener(name, handler) { if (name === 'mousemove') move = handler; },
+    querySelector: () => hit
+  };
+  const bar = { label: '2026-11-15', total: 42 };
+  const candle = { key: bar.label, close: 42 };
+  const readings = [];
+  const show = (entry, anchor) => {
+    readings.push(entry.total ?? entry.close);
+    positionTooltip(anchor);
+  };
+  const hoverContext = {
+    ...context, els: { tooltip, chart }, activeHover: null,
+    state: { chartKind: 'bar', chartModel: { bars: [bar], candles: [candle] } },
+    showBarTooltip: show, showCandleTooltip: show, hideTooltip() {}
+  };
+  const chartListener = js.indexOf("els.chart.addEventListener('mousemove'");
+  vm.runInNewContext(js.slice(chartListener, js.indexOf('els.heatmap.addEventListener', chartListener)), hoverContext);
+  const refresh = dashboardFunction('refreshActiveHover', '\nlet localSessionActivity', hoverContext);
+  for (const [kind, entry, valueField] of [['bar', bar, 'total'], ['candle', candle, 'close']]) {
+    hoverContext.state.chartKind = kind;
+    move({ target: { closest: () => hit }, clientX: 306, clientY: 200 });
+    assert.equal(style.transform, 'translate3d(246px, 139px, 0)');
+    move({ target: { closest: () => hit }, clientX: 308, clientY: 350 });
+    assert.equal(style.transform, 'translate3d(248px, 289px, 0)');
+    entry[valueField]++;
+    refresh();
+    assert.equal(readings.at(-1), 43);
+    assert.equal(style.transform, 'translate3d(248px, 289px, 0)');
+  }
+});
+
+test('widget bottom-left viewSwitcherMenu offers Usage Dashboard launcher', () => {
+  const app = read('src', 'electron', 'renderer', 'app.js');
+  const css = read('src', 'electron', 'renderer', 'styles.css');
+  assert.match(app, /dataset\.action\s*=\s*'open-dashboard'/);
+  assert.match(app, /window\.tokenMonitor\.openDashboard\(\)/);
+  assert.match(css, /\.view-switcher-menu-separator/);
+  assert.match(css, /\.view-switcher-menu-action/);
+});
+
+test('dashboard refresh button reuses native stationary spinner markup and invokes full manual rescan', async () => {
+  const html = read('src', 'electron', 'renderer', 'dashboard', 'dashboard.html');
+  const css = read('src', 'electron', 'renderer', 'dashboard', 'dashboard.css');
+  const js = read('src', 'electron', 'renderer', 'dashboard', 'dashboard.js');
+
+  assert.match(html, /id="refreshBtn"[^>]*class="icon-button refresh-button"[^>]*><span class="refresh-button-icon"[^>]*><\/span><span class="refresh-button-spinner"/);
+  assert.doesNotMatch(css, /dashRefreshSpin|\.icon-button\.is-refreshing/);
+  assert.match(css, /\.icon-button\.refresh-button\s*\{/);
+
+  const silentRefreshBody = /async function refresh\(\)\s*\{([\s\S]*?)\n\}\n\nasync function boot/.exec(js);
+  assert.ok(silentRefreshBody, 'silent refresh function exists');
+  assert.doesNotMatch(silentRefreshBody[1], /is-refreshing/, 'silent background refreshes must not spin the manual refresh button');
+
+  const classes = new Set();
+  const attrs = new Map();
+  const refreshBtn = {
+    disabled: false,
+    classList: {
+      toggle(name, on) {
+        if (on) classes.add(name);
+        else classes.delete(name);
+      }
+    },
+    setAttribute(k, v) { attrs.set(k, v); },
+    removeAttribute(k) { attrs.delete(k); }
+  };
+  const calls = [];
+  let timerFn = null;
+  const context = {
+    els: { refreshBtn },
+    state: { history: null, stats: null, motion: 'none' },
+    t: (k) => k,
+    observeStatsRates: (s) => calls.push(['rates', s]),
+    render: () => calls.push(['render']),
+    console: { log() {} },
+    setTimeout: (fn) => { timerFn = fn; return 1; },
+    clearTimeout() {},
+    window: {
+      tokenMonitor: {
+        getStats: async (opts) => {
+          calls.push(['getStats', opts]);
+          return { periods: { today: { totalTokens: 12 } } };
+        },
+        getDashboardHistory: async (opts) => {
+          calls.push(['getDashboardHistory', opts]);
+          return { daily: [{ date: '2026-11-26', tokens: 12 }] };
+        }
+      }
+    }
+  };
+  vm.runInNewContext(
+    `${js.slice(js.indexOf('const REFRESH_BUTTON_FEEDBACK_MS'), js.indexOf('\nlet refreshRunning = false;'))}`,
+    context
+  );
+
+  await context.manualRefresh();
+  assert.deepEqual(JSON.parse(JSON.stringify(calls)), [
+    ['getStats', { force: true, forceHistory: true, forceSelfSync: true, feedback: true }],
+    ['rates', { periods: { today: { totalTokens: 12 } } }],
+    ['render'],
+    ['getDashboardHistory', { includeDevices: true }],
+    ['render']
+  ]);
+  assert.equal(refreshBtn.disabled, false);
+  assert.equal(classes.has('is-refreshed'), true);
+  assert.equal(classes.has('is-refreshing'), false);
+  assert.ok(typeof timerFn === 'function');
+  timerFn();
+  assert.equal(classes.has('is-refreshed'), false);
+  assert.equal(attrs.get('aria-label'), 'refreshButton.label');
+});
+
+test('dashboard hero removes redundant streak, aligns borderless active status, and stabilizes switching controls', () => {
+  const html = read('src', 'electron', 'renderer', 'dashboard', 'dashboard.html');
+  const css = read('src', 'electron', 'renderer', 'dashboard', 'dashboard.css');
+  const js = read('src', 'electron', 'renderer', 'dashboard', 'dashboard.js');
+
+  assert.doesNotMatch(html, /dashHeroStreak|dashboard\.hero\.streak/);
+  assert.doesNotMatch(js, /heroStreak|hero\.streak/);
+  assert.match(css, /\.dash-hero-eyebrow\s*\{[^}]*justify-content:\s*space-between/);
+  assert.doesNotMatch(css, /\.dash-hero-active\s*\{[^}]*border:\s*1px/);
+
+  // Non-shifting controls: secondary/conditionally hidden groups precede stable primary switches.
+  const activityCtrls = /class="dash-activity-controls">([\s\S]*?)<\/div>\s*<\/div>\s*<div id="dashTopology"/.exec(html);
+  assert.ok(activityCtrls);
+  assert.ok(
+    activityCtrls[1].indexOf('id="dashHeatmapMetricControl"') < activityCtrls[1].indexOf('data-control="stageView"'),
+    'Live Flow / 3D / 2D stays anchored on the right edge when Tokens / Cost toggles visibility'
+  );
+  const trendCtrls = /class="dash-control-row">([\s\S]*?)<div id="rangeSelect"/.exec(html);
+  assert.ok(trendCtrls);
+  assert.ok(
+    trendCtrls[1].indexOf('data-control="mode"') < trendCtrls[1].indexOf('data-control="stack"')
+    && trendCtrls[1].indexOf('data-control="trendMetric"') < trendCtrls[1].indexOf('data-control="stack"'),
+    'Bars / K-line and Tokens / Cost precede By tool / By model so toggling K-line never shifts them sideways'
+  );
+
+  // Switch transitions avoid vertical bounce offsets that cause panels to jump.
+  const revealBody = /function animateSectionReveal\([\s\S]*?\n\}/.exec(js);
+  assert.ok(revealBody);
+  assert.doesNotMatch(revealBody[0], /translateY/);
+  const listAnimBody = /function animateListSnapshot\([\s\S]*?\n\}\n\nlet statCardMeasureCanvas/.exec(js);
+  assert.ok(listAnimBody);
+  assert.doesNotMatch(listAnimBody[0], /translateY\(5px\)/);
+
+  // Provider icons stay monochrome while progress bars / limit meters keep brand colors.
+  assert.match(css, /\.dash-shell \.row-icon:not\(\.dash-brand-mark\)/);
+  assert.doesNotMatch(js, /class="[^"]*\brow-icon\b[^"]*"\s+data-c="/);
+  assert.doesNotMatch(js, /class="\$\{escapeHtml\(acc\.iconClass\)\}"\s+data-c="/);
+  assert.doesNotMatch(js, /els\.drawerIcon\.style\.color\s*=\s*displayColor/);
+
+  // Minimalist 2D compact heatmap + Orbital 3D skyline wiring stay intact with zero native tooltips.
+  assert.match(html, /id="dashHeatFooter"/);
+  assert.doesNotMatch(html, /id="dashHeat2dInsights"/);
+  assert.match(html, /id="dashSkylineStage"/);
+  assert.match(html, /data-control="skylineColor"/);
+  assert.match(html, /id="skylineReset"/);
+  assert.match(css, /\.dash-activity-col\[data-stage="2d"\]\s*\{[^}]*min-height:\s*0/);
+  assert.match(css, /\.dash-activity-col\[data-stage="2d"\] \.dash-heatmap-wrap/);
+  assert.doesNotMatch(css, /\.dash-heat2d-frame|\.dash-rhythm-track/);
+  assert.match(css, /\.dash-skyline-stage/);
+  assert.match(css, /\.dash-skyline-canvas-host\.is-panning/);
+  assert.doesNotMatch(html, /\stitle=/i);
+});
+
+test('dashboard quota motion keys contain no NUL bytes and stay stable across updates', () => {
+  const js = read('src', 'electron', 'renderer', 'dashboard', 'dashboard.js');
+  const context = {};
+  vm.runInNewContext(js.slice(js.indexOf('function quotaMotionKey'), js.indexOf('\nfunction renderQuotas')), context);
+  const key = context.quotaMotionKey({ key: 'codex:a', name: 'Personal' }, { label: 'Session', windowKey: 'primary' });
+  assert.equal(key.includes('\0'), false);
+  assert.equal(key.includes('\uFFFD'), false);
+  assert.equal(key, context.quotaMotionKey({ key: 'codex:a', name: 'Personal' }, { label: 'Session', windowKey: 'primary' }));
+  assert.notEqual(key, context.quotaMotionKey({ key: 'codex:a', name: 'Personal' }, { label: 'Session', windowKey: 'additional' }));
+});
+
+test('showHeatTooltip renders DOM-derived dates and labels as plain text', () => {
+  const makeNode = () => ({
+    textContent: '',
+    children: [],
+    style: {},
+    set innerHTML(_value) { assert.fail('tooltip must use text nodes'); },
+    replaceChildren(...nodes) { this.children = nodes; },
+    append(...nodes) { this.children.push(...nodes); }
+  });
+  const tooltip = makeNode();
+  const show = dashboardFunction('showHeatTooltip', '\nfunction showRibbonTooltip', {
+    els: { tooltip },
+    document: { createElement: makeNode },
+    longDate: value => value,
+    formatCompact: String,
+    formatCost: String,
+    displayColor: color => color,
+    t: key => key,
+    positionTooltip() {}
+  });
+
+  show('<img src=x>', { tokens: 10, cost: 1, topClient: { label: '<svg>', color: '#fff' } }, {});
+  assert.equal(tooltip.children[0].textContent, '<img src=x>');
+  assert.equal(tooltip.children.at(-1).children.at(-1).textContent, '<svg>');
+  show('2026-11-26', undefined, {});
+  assert.equal(tooltip.children.at(-1).textContent, 'dashboard.noRecord');
+  show('2026-11-26', { tokens: 0 }, {});
+  assert.equal(tooltip.children.at(-1).children.at(-1).textContent, '0');
+});
+
+test('an explicitly ambiguous Dashboard row cannot adopt local transcript ownership', () => {
+  const reconcile = dashboardFunction('reconcileSyncedSessionOwnership', '\nfunction loadSessionDrawerDetail(', {
+    state: { stats: { localDeviceId: 'local' } }
+  });
+  const page = { sourceDevice: { deviceId: 'local' } };
+  const ambiguous = reconcile({ sourceDevice: { ambiguous: true } }, page, { allowAdoptUnowned: true });
+  assert.equal(ambiguous.confirmedOwner, false);
+  assert.equal(ambiguous.session.sourceDevice.ambiguous, true);
+  assert.equal(reconcile({}, page, { allowAdoptUnowned: true }).confirmedOwner, true);
+});
+
+test('dashboard handles session-activity pushes, rejects stale snapshots, and includes required scripts and focus accessibility', async () => {
+  const html = read('src', 'electron', 'renderer', 'dashboard', 'dashboard.html');
+  const css = read('src', 'electron', 'renderer', 'dashboard', 'dashboard.css');
+  const js = read('src', 'electron', 'renderer', 'dashboard', 'dashboard.js');
+
+  for (const script of [
+    'limits/windowLabels.js',
+    'limits/usageItems.js',
+    'limits/providerOrder.js',
+    'sessionActivityProjection.js',
+    'sessionTitleDisplay.js',
+    'allTimeSessions.js',
+    'providers/reasonix/sessionGuard.js',
+    'sessionRows.js'
+  ]) {
+    assert.ok(html.includes(script), `dashboard.html must load ${script}`);
+  }
+
+  assert.match(css, /:focus-visible\s*\{/);
+  assert.match(js, /function handleKeyboardClick/);
+  assert.match(js, /class="dash-session-row[^"]*"[^>]*tabindex="0"\s+role="button"/);
+  assert.match(js, /class="dash-bd-row"[^>]*tabindex="0"\s+role="button"/);
+
+  const sessionActivityProjection = require('../../src/shared/sessionActivityProjection');
+  let renders = 0;
+  let rateCalls = 0;
+  let rateResets = 0;
+  let allTimeAttached = null;
+  let ensured = 0;
+  let invalidated = 0;
+  let syncedFetchArgs = [];
+  let pushHandler = null;
+
+  const baseStats = {
+    snapshot: { id: 10, source: 1 },
+    periods: {
+      today: {
+        totalTokens: 100,
+        sessions: {
+          'codex:s1': { client: 'codex', sessionId: 's1', totalTokens: 100, lastUsedAt: '2026-11-26T10:00:00.000Z' }
+        }
+      },
+      month: { totalTokens: 100, sessions: {} },
+      allTime: { totalTokens: 100 }
+    }
+  };
+  const newerPushStats = {
+    snapshot: { id: 12, source: 1 },
+    periods: baseStats.periods
+  };
+  const stalePullStats = {
+    snapshot: { id: 11, source: 1 },
+    periods: { today: { totalTokens: 50, sessions: {} } }
+  };
+
+  const context = {
+    state: { periodKey: 'allTime', streamConnected: false, motion: 'none', stats: null, settings: {} },
+    sessionActivityProjectionApi: sessionActivityProjection,
+    sessionTitleDisplayApi: null,
+    allTimeSessionsApi: {
+      createAllTimeSessionsLoader: () => ({
+        invalidate() { invalidated += 1; },
+        attach(s) { allTimeAttached = s; return s; },
+        ensure() { ensured += 1; }
+      })
+    },
+    deviceRateTracker: { reset() { rateResets += 1; } },
+    rateHistory: { reset() { rateResets += 1; } },
+    deviceRateTrackers: new Map(),
+    rateExpiryTimer: null,
+    document: { hidden: false },
+    refreshQueued: false,
+    dashboardReady: false,
+    scheduleDashboardRefresh() {},
+    observeStatsRates() { rateCalls += 1; },
+    render() { renders += 1; },
+    reducedMotionMedia: null,
+    window: {
+      tokenMonitor: {
+        getSyncedFixedPeriod(id, source, period) {
+          syncedFetchArgs.push([id, source, period]);
+          return Promise.resolve({
+            detailsAvailable: true,
+            period: {
+              sessions: {
+                'codex:omitted': { client: 'codex', sessionId: 'omitted', title: 'Paged Session', totalTokens: 200 }
+              }
+            }
+          });
+        },
+        onStatsPush(fn) { pushHandler = fn; }
+      }
+    }
+  };
+  const slice = js.slice(js.indexOf('let localSessionActivity = null;'), js.indexOf('\nfunction renderNow('))
+    + '\n'
+    + js.slice(js.indexOf('window.tokenMonitor.onStatsPush?.'), js.indexOf('\nreducedMotionMedia?.addEventListener'));
+  vm.runInNewContext(slice, context);
+
+  // Initial stamped push is accepted
+  pushHandler({ event: 'stats', data: { stats: baseStats, reason: 'local' } });
+  assert.equal(context.state.stats.snapshot.id, 10);
+  assert.equal(invalidated, 1);
+  assert.equal(ensured, 1);
+  assert.equal(rateCalls, 1);
+  assert.equal(allTimeAttached?.snapshot?.id, 10);
+
+  // session-activity patch updates stats without re-running observeStatsRates
+  const ratesBeforePatch = rateCalls;
+  const rendersBeforePatch = renders;
+  pushHandler({
+    event: 'session-activity',
+    data: {
+      snapshot: { id: 10, source: 1 },
+      patch: {
+        observations: [{
+          client: 'codex',
+          sessionId: 's1',
+          liveActivity: { state: 'running', observedAt: '2026-11-26T10:00:05.000Z' }
+        }],
+        nativeSessions: {}
+      }
+    }
+  });
+  assert.equal(rateCalls, ratesBeforePatch);
+  assert.equal(renders, rendersBeforePatch + 1);
+  assert.equal(context.state.stats.periods.today.sessionActivity['codex:s1']?.state, 'running');
+
+  // Newer push advances accepted snapshot id to 12; a stale pull (id 11) must be rejected
+  pushHandler({ event: 'stats', data: { stats: newerPushStats, reason: 'hub' } });
+  assert.equal(context.applyIncomingStats(stalePullStats, { expectedPushSeq: 1 }), false);
+  assert.equal(context.state.stats.snapshot.id, 12);
+  assert.equal(context.state.streamConnected, true);
+
+  // Omitted Hub sessions trigger snapshot-bound getSyncedFixedPeriod read and merge into period sessions
+  context.state.periodKey = 'today';
+  context.applyIncomingStats({
+    snapshot: { id: 13, source: 1 },
+    sessionDetailsOmitted: { today: 3 },
+    fixedRangeRevisions: { 'dev-1': 'rev-1' },
+    periods: { today: { totalTokens: 500, sessions: {} } }
+  });
+  await new Promise((r) => setTimeout(r, 0));
+  assert.deepEqual(syncedFetchArgs, [[13, 1, 'today']]);
+  assert.ok(context.state.stats.periods.today.sessions['codex:omitted']);
+
+  // Switching to a newer hub source resets rate trackers and clears stale Hub pages
+  assert.equal(context.applyIncomingStats({ snapshot: { id: 1, source: 2 }, periods: baseStats.periods }), true);
+  assert.equal(context.state.stats.snapshot.source, 2);
+  assert.ok(rateResets >= 2);
+});
+
+test('remote sessions never read local transcripts, delayed Hub A history is fenced, and open drawer title redacts immediately', async () => {
+  const js = read('src', 'electron', 'renderer', 'dashboard', 'dashboard.js');
+  const sessionTitleDisplay = require('../../src/electron/sessionTitleDisplay');
+
+  // 1. Remote session guard + openDrawer + title redaction on settings push + Hub A/B history race
+  const detailCalls = [];
+  const drawerBody = { innerHTML: '' };
+  const drawerTitle = { textContent: '' };
+  const drawerSubtitle = { textContent: '' };
+  let settingsHandler = null;
+
+  const context = {
+    state: {
+      periodKey: 'today',
+      selectedDeviceId: 'all',
+      history: { daily: [{ date: '2026-11-26', tokens: 10 }] },
+      stats: { localDeviceId: 'mac-local', snapshot: { id: 1, source: 1 }, periods: { today: { totalTokens: 10, sessions: { 'codex:s1': { client: 'codex', sessionId: 's1', title: 'Secret Title', totalTokens: 10 } } } } },
+      settings: { deviceId: 'mac-local', sessionTitlesEnabled: true, hubMode: 'client', hubUrl: 'https://hub-a' },
+      motion: 'none',
+      drawer: null,
+      locale: 'en'
+    },
+    els: {
+      drawer: { showPopover() {}, matches() { return false; } },
+      drawerScrim: { classList: { remove() {}, add() {} } },
+      drawerIcon: { className: '', style: {} },
+      drawerTitle,
+      drawerSubtitle,
+      drawerBody,
+      tooltip: { classList: { contains() { return true; } } },
+      refreshBtn: { classList: { toggle() {} }, setAttribute() {}, removeAttribute() {}, disabled: false },
+      body: { classList: { toggle() {} } }
+    },
+    fixedPeriodRangesApi: require('../../src/electron/renderer/fixedPeriodRanges'),
+    modelApi: { computeSessionDetailAnatomy: () => ({ segments: [] }) },
+    sessionTitleDisplayApi: sessionTitleDisplay,
+    sessionActivityProjectionApi: null,
+    allTimeSessionsApi: null,
+    tokenRateApi: null,
+    charts: { clientColors: {} },
+    deviceRateTracker: { getSample() { return null; }, reset() {}, observe() {} },
+    rateHistory: { getSamples() { return []; }, reset() {}, observe() {} },
+    deviceRateTrackers: new Map(),
+    rateExpiryTimer: null,
+    dashboardReady: true,
+    document: { hidden: false },
+    escapeHtml: (s) => String(s ?? ''),
+    formatCompact: String,
+    formatCost: String,
+    applySwatchColors() {},
+    applyAppearance() {},
+    handleKeyboardClick() {},
+    drawerStatGrid: () => '<div></div>',
+    drawerRequestToken: 0,
+    applyReduceMotionPreference() {},
+    render() {},
+    scheduleDashboardRefresh() {},
+    i18n: { resolveLocale: () => 'en' },
+    compactTokenApi: { normalizeCompactTokenUnits: (v) => v },
+    navigator: { languages: ['en'] },
+    reducedMotionMedia: null,
+    console: { log() {} },
+    setTimeout,
+    clearTimeout,
+    t: (k) => k,
+    window: {
+      tokenMonitor: {
+        getSessionDetail(args) {
+          detailCalls.push(args);
+          return Promise.resolve({ found: false });
+        },
+        onSettingsPush(fn) { settingsHandler = fn; },
+        getDashboardHistory: async () => ({ daily: [{ date: '2026-11-26', tokens: 999 }] }),
+        getStats: async () => ({ snapshot: { id: 1, source: 1 }, periods: {} })
+      }
+    }
+  };
+  const openDrawerSlice = js.slice(js.indexOf('function closeDrawer('), js.indexOf('\nfunction renderNow('))
+    + '\n'
+    + js.slice(js.indexOf('function observeStatsRates('), js.indexOf('\nasync function boot('))
+    + '\n'
+    + js.slice(js.indexOf('window.tokenMonitor.onSettingsPush?.'), js.indexOf('\nwindow.tokenMonitor.onStatsPush?.'));
+  vm.runInNewContext(openDrawerSlice, context);
+
+  // Remote session (matching local ID s1!) must NOT invoke getSessionDetail
+  context.openDrawer({
+    kind: 'session',
+    session: { client: 'codex', sessionId: 's1', title: 'Remote Title', projectLabel: 'Repo', clientLabel: 'Codex', sourceDevice: { deviceId: 'linux-remote', name: 'Linux' } }
+  });
+  assert.equal(detailCalls.length, 0);
+
+  // Local session invokes getSessionDetail and holds a Secret Title
+  context.openDrawer({
+    kind: 'session',
+    session: { client: 'codex', sessionId: 's1', title: 'Secret Title', projectLabel: 'Repo', clientLabel: 'Codex', sourceDevice: { deviceId: 'mac-local', name: 'Mac' } }
+  });
+  assert.equal(detailCalls.length, 1);
+  assert.equal(drawerTitle.textContent, 'Secret Title');
+
+  // Disabling session titles via settings push immediately redacts open drawer title & stats
+  settingsHandler({ sessionTitlesEnabled: false });
+  assert.equal(drawerTitle.textContent, 'Repo');
+  assert.equal(context.state.stats.periods.today.sessions['codex:s1'].title, undefined);
+
+  // Delayed Hub A history + stats response is rejected after Hub B stats push lands mid-flight
+  let resolveHubAHistory;
+  context.window.tokenMonitor.getDashboardHistory = () => new Promise((r) => { resolveHubAHistory = r; });
+  context.window.tokenMonitor.getStats = async () => ({ snapshot: { id: 2, source: 1 }, periods: { today: { totalTokens: 11 } } });
+  const pendingRefresh = context.refresh();
+  await new Promise((r) => setTimeout(r, 0));
+  // Hub B (source: 2) arrives while Hub A's history promise is still pending
+  assert.equal(context.applyIncomingStats({ snapshot: { id: 1, source: 2 }, periods: { today: { totalTokens: 222 } } }), true);
+  context.state.history = { daily: [{ date: '2026-11-26', tokens: 222 }] };
+  resolveHubAHistory({ daily: [{ date: '2026-11-25', tokens: 11 }] });
+  await pendingRefresh;
+  assert.equal(context.state.drawer, null, 'source change dismisses the previous session drawer');
+  assert.equal(context.state.history.daily[0].tokens, 222, 'Hub A delayed history must not overwrite Hub B history');
+  assert.equal(context.state.stats.snapshot.source, 2);
+});
+
+test('renderQuotas renders expired plan status without meter, hover refresh handles quotes, rate expiry clears idle topology rates, and ledger matches chart range and focus', async () => {
+  const js = read('src', 'electron', 'renderer', 'dashboard', 'dashboard.js');
+  const charts = require('../../src/electron/renderer/usageCharts');
+  const tokenRate = require('../../src/electron/renderer/tokenRatePresentation');
+
+  // 1. Expired MiMo plan renders localized Expired text with no meter track
+  const quotasEl = { innerHTML: '', scrollTop: 0, querySelectorAll: () => [] };
+  const qCountEl = { textContent: '' };
+  const quotaContext = {
+    els: { quotas: quotasEl, quotasCount: qCountEl },
+    state: { settings: {}, locale: 'en', motion: 'none' },
+    charts,
+    homeLimitMotion: null,
+    lastQuotasStructureSig: '',
+    escapeHtml: (s) => String(s ?? ''),
+    applySwatchColors() {},
+    displayColor: (c) => c,
+    formatResetShort: () => '',
+    window: { TokenMonitorHomeOverview: require('../../src/electron/renderer/homeOverview') },
+    formatQuotaWindowLabel: (w) => w.label || w.kind,
+    t: (k) => (k === 'limits.mimo.planExpired' ? 'Expired' : k)
+  };
+  vm.runInNewContext(js.slice(js.indexOf('function quotaWindowFlags'), js.indexOf('\nfunction sessionStateIconHtml')), quotaContext);
+  quotaContext.renderQuotas({
+    quotas: [{
+      key: 'mimo:1',
+      providerId: 'mimo',
+      name: 'MiMo',
+      windows: [{ kind: 'billing', label: 'Token Plan', planStatus: 'expired', showMeter: false, remainingPercent: null, fillPercent: 0 }]
+    }]
+  });
+  assert.match(quotasEl.innerHTML, />Expired</);
+  assert.doesNotMatch(quotasEl.innerHTML, /home-limit-track/);
+  assert.doesNotMatch(quotasEl.innerHTML, /0%/);
+
+  // A quota can cross warning thresholds without rebuilding its row.
+  const win = { windowKey: 'weekly', kind: 'weekly', remainingPercent: 28, fillPercent: 28 };
+  const account = { key: 'codex:1', providerId: 'codex', name: 'Codex', color: '#52a4aa', windows: [win] };
+  const overview = { quotas: [account] };
+  quotaContext.renderQuotas(overview);
+  assert.match(quotasEl.innerHTML, /data-limit-color="#52a4aa"/);
+  assert.match(quotasEl.innerHTML, /class="home-list-value"[^>]*>28%</);
+  assert.doesNotMatch(quotasEl.innerHTML, /data-limit-accent/);
+
+  const createClasses = () => {
+    const classes = new Set();
+    return {
+      contains: (name) => classes.has(name),
+      toggle: (name, enabled) => enabled ? classes.add(name) : classes.delete(name)
+    };
+  };
+  const value = { classList: createClasses(), setAttribute() {} };
+  const row = {
+    dataset: { limitMotionKey: quotaContext.quotaMotionKey(account, win) },
+    classList: createClasses(),
+    querySelector: (selector) => selector === '.home-list-value' ? value : null,
+    setAttribute() {},
+    removeAttribute() {}
+  };
+  quotasEl.querySelectorAll = () => [row];
+  const mounted = quotasEl.innerHTML;
+  for (const remaining of [15, 0, 20, 38]) {
+    Object.assign(win, { remainingPercent: remaining, fillPercent: remaining });
+    quotaContext.renderQuotas(overview);
+    assert.equal(quotasEl.innerHTML, mounted);
+    assert.equal(value.textContent, `${remaining}%`);
+    assert.equal(value.classList.contains('home-limit-value-low'), remaining === 15);
+    assert.equal(value.classList.contains('home-limit-value-critical'), remaining === 0);
+    assert.equal(row.classList.contains('is-exhausted'), remaining === 0);
+  }
+
+  Object.assign(win, { remainingPercent: 0, fillPercent: 0 });
+  for (const enabled of [false, true]) {
+    quotaContext.state.settings.dashboardHighlightLowLimits = enabled;
+    quotaContext.renderQuotas(overview);
+    assert.equal(quotasEl.innerHTML, mounted);
+    assert.equal(value.textContent, '0%');
+    assert.equal(value.classList.contains('home-limit-value-critical'), enabled);
+    assert.equal(row.classList.contains('is-exhausted'), enabled);
+  }
+
+  // 2. Quoted workspace ID in refreshActiveHover uses dataset lookup and does not throw
+  let focusedNode = null;
+  let tooltipHead = null;
+  const quotedNode = { dataset: { topoKind: 'hub', topoId: 'ws:client "a"' } };
+  const hoverContext = {
+    activeHover: { kind: 'topo', nodeKind: 'hub', nodeId: 'ws:client "a"' },
+    state: { stageView: 'flow', overview: {} },
+    els: {
+      tooltip: { matches: () => true, classList: { contains: () => false } },
+      topology: { querySelectorAll: () => [quotedNode] }
+    },
+    findByDataset: (root, _sel, pred) => root.querySelectorAll().find(pred) || null,
+    applyTopologyFocus: (k, id) => { focusedNode = `${k}:${id}`; },
+    showTopologyTooltip: (_k, id) => { tooltipHead = id; }
+  };
+  vm.runInNewContext(js.slice(js.indexOf('function refreshActiveHover'), js.indexOf('\nlet localSessionActivity')), hoverContext);
+  hoverContext.refreshActiveHover();
+  assert.equal(focusedNode, 'hub:ws:client "a"');
+  assert.equal(tooltipHead, 'ws:client "a"');
+
+  // 3. Per-device measured velocity excludes idle samples from currentLiveRatesByDevice and schedules expiry repaint
+  let scheduledTimer = null;
+  const timers = [];
+  let nowVal = 1_760_000_000_000;
+  const realDateNow = Date.now;
+  Date.now = () => nowVal;
+  try {
+    const rateContext = {
+      Date: { now: () => nowVal },
+      tokenRateApi: tokenRate,
+      deviceRateTracker: tokenRate.createLiveTokenRateGroupTracker({ now: () => nowVal, activeMs: 12_000 }),
+      rateHistory: tokenRate.createLiveTokenRateHistory({ now: () => nowVal }),
+      deviceRateTrackers: new Map(),
+      rateExpiryTimer: null,
+      state: { stats: { localDeviceId: 'dev-1' }, motion: 'update' },
+      document: { hidden: false },
+      render() {},
+      setTimeout(fn, ms) { const h = { fn, ms }; scheduledTimer = h; timers.push(h); return h; },
+      clearTimeout() {}
+    };
+    // Patch createLiveTokenRateGroupTracker now option inside observeStatsRates context via Date.now mock
+    vm.runInNewContext(js.slice(js.indexOf('function scheduleRateExpiry'), js.indexOf('\nconst REFRESH_BUTTON_FEEDBACK_MS')), rateContext);
+    rateContext.observeStatsRates({
+      devices: [
+        {
+          deviceId: 'dev-1',
+          periods: {
+            today: {
+              timedOutputTokens: 0, timedTokens: 0, timedDurationMs: 0,
+              modelThroughput: { m1: { timedOutputTokens: 0, timedTokens: 0, timedDurationMs: 0 }, m2: { timedOutputTokens: 0, timedTokens: 0, timedDurationMs: 0 } }
+            }
+          }
+        },
+        { deviceId: 'dev-2', periods: { today: { timedOutputTokens: 0, timedTokens: 0, timedDurationMs: 0 } } }
+      ]
+    });
+    nowVal += 1000;
+    rateContext.observeStatsRates({
+      devices: [
+        {
+          deviceId: 'dev-1',
+          periods: {
+            today: {
+              timedOutputTokens: 150, timedTokens: 600, timedDurationMs: 1000,
+              modelThroughput: { m1: { timedOutputTokens: 150, timedTokens: 600, timedDurationMs: 1000 }, m2: { timedOutputTokens: 150, timedTokens: 600, timedDurationMs: 1000 } }
+            }
+          }
+        },
+        { deviceId: 'dev-2', periods: { today: { timedOutputTokens: 100, timedTokens: 400, timedDurationMs: 1000 } } }
+      ]
+    });
+    assert.deepEqual(JSON.parse(JSON.stringify(rateContext.currentLiveRatesByDevice())), { 'dev-1': 150, 'dev-2': 100 });
+    assert.equal(scheduledTimer.ms, 8_020, 'repaint when device rates go idle');
+    const tracker = rateContext.deviceRateTrackers.get('dev-1').cardTracker;
+    nowVal += 7_999;
+    assert.equal(tracker.getSample().idle, false);
+    nowVal += 1;
+    assert.equal(tracker.getSample().idle, true);
+    assert.equal(rateContext.deviceRateTrackers.get('dev-1').tracker.getSample().idle, false);
+    nowVal += 4_000;
+    assert.deepEqual(JSON.parse(JSON.stringify(rateContext.currentLiveRatesByDevice())), {}, 'retained readings do not drive active flows');
+    rateContext.scheduleRateExpiry();
+    assert.ok(scheduledTimer.ms > 0, 'repaint remains scheduled after the device rate goes idle');
+    nowVal += 167_999;
+    assert.equal(tracker.getSample().speed, 150);
+    nowVal += 1;
+    assert.equal(tracker.getSample(), null);
+  } finally {
+    Date.now = realDateNow;
+  }
+
+  // 4. Ledger calendar range excludes old November 10 from 7-day range on November 26 + focus preserved across rebuilds
+  let focusCalls = 0;
+  const focusTarget = { dataset: { day: '2026-11-26' }, closest: () => focusTarget };
+  const rebuiltFocusTarget = { dataset: { day: '2026-11-26' }, addEventListener() {}, focus() { focusCalls += 1; } };
+  const ledgerEl = {
+    innerHTML: '',
+    contains: (el) => el === focusTarget,
+    querySelectorAll: (sel) => (sel.includes('data-day') ? [rebuiltFocusTarget] : [])
+  };
+  const legendRow = { dataset: { legendKey: 'codex' }, closest: () => legendRow };
+  const rebuiltLegendRow = { dataset: { legendKey: 'codex' }, focus() { focusCalls += 1; }, addEventListener() {} };
+  const legendEl = {
+    innerHTML: '',
+    contains: (el) => el === legendRow,
+    querySelectorAll: () => [rebuiltLegendRow]
+  };
+  const uiContext = {
+    els: { dailyLedger: ledgerEl, ledgerMeta: { textContent: '' }, legend: legendEl },
+    state: { range: '7', soloKey: null, trendMetric: 'tokens' },
+    charts,
+    document: { activeElement: focusTarget },
+    todayKey: () => '2026-11-26',
+    shortDate: (d) => d,
+    escapeHtml: (s) => String(s ?? ''),
+    formatCompact: String,
+    formatCost: String,
+    displayColor: (c) => c,
+    colorFor: () => '#fff',
+    applySwatchColors() {},
+    openDrawer() {},
+    renderTrends() {},
+    t: (k) => k
+  };
+  vm.runInNewContext(js.slice(js.indexOf('function findByDataset'), js.indexOf('\nfunction renderTrends')), uiContext);
+  uiContext.renderDailyLedger({
+    dailyLedger: [
+      { date: '2026-11-26', tokens: 300, cost: 1, deltaPercent: null },
+      { date: '2026-11-10', tokens: 100, cost: 0.5, deltaPercent: null }
+    ]
+  });
+  assert.match(ledgerEl.innerHTML, /2026-11-26/);
+  assert.doesNotMatch(ledgerEl.innerHTML, /2026-11-10/);
+  assert.equal(focusCalls, 1, 'keyboard focus should restore onto matching rebuilt ledger row');
+
+  uiContext.document.activeElement = legendRow;
+  uiContext.renderLegend({ keys: ['codex'], bars: [{ segments: [{ key: 'codex', value: 10 }] }] });
+  assert.equal(focusCalls, 2, 'keyboard focus should restore onto matching rebuilt legend row');
+});
+
+test('dashboard guards synced ambiguous transcripts, native activity redaction, source-switch refresh, and aggregate rate fallback', async () => {
+  const js = read('src', 'electron', 'renderer', 'dashboard', 'dashboard.js');
+  const dashboardModel = require('../../src/electron/renderer/dashboard/dashboardModel');
+  const { projectSessionDeviceStats } = require('../../src/electron/sessionDeviceSources');
+  const sessionTitleDisplay = require('../../src/electron/sessionTitleDisplay');
+  const sessionActivityProjection = require('../../src/shared/sessionActivityProjection');
+  const tokenRate = require('../../src/electron/renderer/tokenRatePresentation');
+
+  const detailCalls = [];
+  const drawerBody = { innerHTML: '' };
+  const drawerTitle = { textContent: '' };
+  const drawerSubtitle = { textContent: '' };
+  let resolvePage = null;
+  let settingsHandler = null;
+  let statsHandler = null;
+  let scheduledFrames = [];
+  let resolveHubAHistory = null;
+  let historyFetchCount = 0;
+
+  const rawTwoDeviceStats = {
+    localDeviceId: 'mac-local',
+    snapshot: { id: 20, source: 1 },
+    sessionDetailsOmitted: { today: 1 },
+    fixedRangeRevisions: { 'linux-remote': 'rev-1' },
+    devices: [
+      {
+        deviceId: 'mac-local',
+        displayName: 'MacBook',
+        platform: 'darwin',
+        periods: {
+          today: {
+            totalTokens: 200,
+            sessions: {
+              'codex:shared': { client: 'codex', sessionId: 'shared', totalTokens: 50 },
+              'codex:local-only': { client: 'codex', sessionId: 'local-only', totalTokens: 150 }
+            }
+          }
+        }
+      },
+      {
+        deviceId: 'linux-remote',
+        displayName: 'Linux',
+        platform: 'linux',
+        periods: {
+          today: {
+            totalTokens: 50,
+            sessions: {
+              'codex:shared': { client: 'codex', sessionId: 'shared', totalTokens: 50 }
+            }
+          }
+        }
+      }
+    ],
+    periods: {
+      today: {
+        totalTokens: 250,
+        sessions: {
+          'codex:shared': { client: 'codex', sessionId: 'shared', title: 'Shared Session', totalTokens: 100 },
+          'codex:local-only': { client: 'codex', sessionId: 'local-only', title: 'Local Only Session', totalTokens: 150 },
+          'codex:paged-shared': {
+            client: 'codex',
+            sessionId: 'paged-shared',
+            title: 'Inline Local Stamp',
+            totalTokens: 60,
+            sourceDevice: { deviceId: 'mac-local', name: 'MacBook' }
+          }
+        }
+      }
+    }
+  };
+  const projected = projectSessionDeviceStats(rawTwoDeviceStats, 'mac-local');
+
+  const context = {
+    state: {
+      periodKey: 'today',
+      selectedDeviceId: 'all',
+      history: { daily: [{ date: '2026-11-25', tokens: 11 }] },
+      stats: projected,
+      settings: { deviceId: 'mac-local', sessionTitlesEnabled: true, hubMode: 'client', hubUrl: 'https://hub-a' },
+      statsMode: 'sync',
+      motion: 'none',
+      drawer: null,
+      locale: 'en'
+    },
+    els: {
+      drawer: { showPopover() {}, matches() { return false; } },
+      drawerScrim: { classList: { remove() {}, add() {} } },
+      drawerIcon: { className: '', style: {} },
+      drawerTitle,
+      drawerSubtitle,
+      drawerBody,
+      tooltip: { classList: { contains() { return true; } } },
+      refreshBtn: { classList: { toggle() {} }, setAttribute() {}, removeAttribute() {}, disabled: false },
+      body: { classList: { toggle() {} } }
+    },
+    fixedPeriodRangesApi: require('../../src/electron/renderer/fixedPeriodRanges'),
+    modelApi: dashboardModel,
+    sessionTitleDisplayApi: sessionTitleDisplay,
+    sessionActivityProjectionApi: sessionActivityProjection,
+    allTimeSessionsApi: null,
+    tokenRateApi: null,
+    charts: { clientColors: {} },
+    deviceRateTracker: { getSample() { return null; }, reset() {}, observe() {} },
+    rateHistory: { getSamples() { return []; }, reset() {}, observe() {} },
+    deviceRateTrackers: new Map(),
+    rateExpiryTimer: null,
+    dashboardReady: true,
+    dashboardRefreshFrame: 0,
+    document: { hidden: false },
+    requestAnimationFrame(cb) {
+      scheduledFrames.push(cb);
+      return scheduledFrames.length;
+    },
+    cancelAnimationFrame() {
+      scheduledFrames = [];
+    },
+    escapeHtml: (s) => String(s ?? ''),
+    formatCompact: String,
+    formatCost: String,
+    applySwatchColors() {},
+    applyAppearance() {},
+    handleKeyboardClick() {},
+    drawerStatGrid: () => '<div></div>',
+    drawerRequestToken: 0,
+    applyReduceMotionPreference() {},
+    render() {},
+    i18n: { resolveLocale: () => 'en' },
+    compactTokenApi: { normalizeCompactTokenUnits: (v) => v },
+    navigator: { languages: ['en'] },
+    reducedMotionMedia: null,
+    console: { log() {} },
+    setTimeout,
+    clearTimeout,
+    t: (k) => k,
+    window: {
+      tokenMonitor: {
+        getSessionDetail(args) {
+          detailCalls.push(args);
+          return Promise.resolve({ found: false });
+        },
+        getSyncedFixedPeriod: () => new Promise((r) => { resolvePage = r; }),
+        onSettingsPush(fn) { settingsHandler = fn; },
+        onStatsPush(fn) { statsHandler = fn; },
+        getDashboardHistory: () => {
+          historyFetchCount += 1;
+          if (historyFetchCount === 1) {
+            return new Promise((r) => { resolveHubAHistory = r; });
+          }
+          return Promise.resolve({ daily: [{ date: '2026-11-26', tokens: 222 }] });
+        },
+        getStats: async () => ({ snapshot: { id: 1, source: 3 }, periods: { today: { totalTokens: 222 } } })
+      }
+    }
+  };
+
+  const slice = js.slice(js.indexOf('function closeDrawer('), js.indexOf('\nfunction renderNow('))
+    + '\n'
+    + js.slice(js.indexOf('function scheduleDashboardRefresh('), js.indexOf('\nfunction handleDashboardVisibilityChange('))
+    + '\n'
+    + js.slice(js.indexOf('function observeStatsRates('), js.indexOf('\nasync function boot('))
+    + '\n'
+    + js.slice(js.indexOf('window.tokenMonitor.onSettingsPush?.'), js.indexOf('\nreducedMotionMedia?.addEventListener'));
+  vm.runInNewContext(slice, context);
+
+  // 1A. Held-pending paged ownership check: inline local stamp defers transcript IPC until paging resolves
+  context.openDrawer({
+    kind: 'session',
+    session: context.state.stats.periods.today.sessions['codex:paged-shared']
+  });
+  await Promise.resolve();
+  assert.equal(drawerTitle.textContent, 'Inline Local Stamp', 'summary drawer renders while ownership is pending');
+  assert.equal(detailCalls.length, 0, 'transcript IPC must defer while synced ownership page is pending');
+  assert.equal(typeof resolvePage, 'function');
+  const finishPage1 = resolvePage;
+  resolvePage = null;
+  const currentInline = context.state.stats.periods.today.sessions['codex:paged-shared'];
+  context.state.stats.periods.today.sessions['codex:paged-shared'] = {
+    ...currentInline, sourceDevice: { ambiguous: true }
+  };
+  finishPage1({
+    detailsAvailable: true,
+    period: {
+      sessions: {
+        'codex:paged-shared': {
+          client: 'codex',
+          sessionId: 'paged-shared',
+          title: 'Paged Local Stamp',
+          totalTokens: 60,
+          sourceDevice: { deviceId: 'mac-local', name: 'MacBook' }
+        },
+        'codex:local-only': {
+          client: 'codex',
+          sessionId: 'local-only',
+          title: 'Local Only Session',
+          totalTokens: 150,
+          sourceDevice: { deviceId: 'mac-local', name: 'MacBook' }
+        }
+      }
+    }
+  });
+  await new Promise((r) => setTimeout(r, 0));
+  assert.equal(context.state.stats.periods.today.sessions['codex:paged-shared'].sourceDevice?.ambiguous, true, 'inline ambiguity must survive the page merge');
+  assert.equal(context.state.drawer.session.sourceDevice?.ambiguous, true);
+  assert.doesNotMatch(drawerSubtitle.textContent, /MacBook/);
+  assert.equal(detailCalls.length, 0, 'a local stamp in the raw page must not override merged ambiguity');
+
+  // 1B. Held-pending drawer opens transcript IPC once paging confirms positive local ownership for current snapshot
+  context.applyIncomingStats({
+    ...projected,
+    snapshot: { id: 21, source: 1 },
+    sessionDetailsOmitted: { today: 1 },
+    fixedRangeRevisions: { 'linux-remote': 'rev-2' }
+  });
+  context.openDrawer({
+    kind: 'session',
+    session: {
+      ...projected.periods.today.sessions['codex:local-only'],
+      key: 'codex:local-only',
+      title: 'Local Only Session'
+    }
+  });
+  await Promise.resolve();
+  assert.equal(detailCalls.length, 0, 'local-only session also waits until snapshot ownership paging completes');
+  assert.equal(typeof resolvePage, 'function');
+  const finishPage2 = resolvePage;
+  finishPage2({
+    detailsAvailable: true,
+    period: {
+      sessions: {
+        'codex:local-only': {
+          client: 'codex',
+          sessionId: 'local-only',
+          title: 'Local Only Session',
+          totalTokens: 150,
+          sourceDevice: { deviceId: 'mac-local', name: 'MacBook' }
+        }
+      }
+    }
+  });
+  await new Promise((r) => setTimeout(r, 0));
+  assert.equal(detailCalls.length, 1);
+  assert.equal(detailCalls[0].sessionId, 'local-only');
+
+  // 1C. Complete snapshot (no omitted details): shared projected session never reads local transcript, local-only does
+  context.applyIncomingStats({
+    ...projected,
+    snapshot: { id: 22, source: 1 },
+    sessionDetailsOmitted: undefined
+  });
+  const sessionList = dashboardModel.buildSessionList({
+    stats: projected,
+    periodKey: 'today',
+    settings: context.state.settings,
+    statsMode: context.state.statsMode
+  });
+  const sharedEntry = sessionList.find((s) => s.key === 'codex:shared');
+  const localOnlyEntry = sessionList.find((s) => s.key === 'codex:local-only');
+  assert.equal(sharedEntry.sourceDevice, null);
+  context.openDrawer({ kind: 'session', session: sharedEntry });
+  assert.equal(detailCalls.length, 1, 'ambiguous shared synced session must not read local transcript');
+  context.openDrawer({ kind: 'session', session: localOnlyEntry });
+  assert.equal(detailCalls.length, 2, 'positively owned local synced session can read local transcript');
+
+  // 2. Cached native activity patch stays redacted after disabling sessionTitlesEnabled
+  const liveIso = new Date().toISOString();
+  statsHandler({
+    event: 'stats',
+    data: {
+      stats: {
+        localDeviceId: 'mac-local',
+        snapshot: { id: 30, source: 2 },
+        periods: { today: { totalTokens: 10, sessions: {} } }
+      },
+      reason: 'hub'
+    }
+  });
+  statsHandler({
+    event: 'session-activity',
+    data: {
+      snapshot: { id: 30, source: 2 },
+      patch: {
+        observations: [],
+        nativeSessions: {
+          today: {
+            'claude:n1': {
+              client: 'claude',
+              sessionId: 'n1',
+              title: 'Secret Native Title',
+              projectLabel: 'NativeRepo',
+              lastUsedAt: liveIso
+            }
+          }
+        }
+      }
+    }
+  });
+  assert.equal(context.state.stats.nativeSessions.today['claude:n1'].title, 'Secret Native Title');
+  context.openDrawer({
+    kind: 'session',
+    session: { client: 'claude', sessionId: 'n1', title: 'Secret Native Title', projectLabel: 'NativeRepo', isNativeLocal: true }
+  });
+  assert.equal(drawerTitle.textContent, 'Secret Native Title');
+
+  settingsHandler({ sessionTitlesEnabled: false });
+  assert.equal(context.state.stats.nativeSessions.today['claude:n1'].title, undefined, 'native session title must stay redacted after activity patch');
+  assert.equal(drawerTitle.textContent, 'NativeRepo', 'open drawer title must redact immediately');
+  statsHandler({
+    event: 'session-activity',
+    data: {
+      snapshot: { id: 30, source: 2 },
+      patch: {
+        observations: [],
+        nativeSessions: {
+          today: {
+            'claude:n1': {
+              client: 'claude',
+              sessionId: 'n1',
+              title: 'Second Native Title',
+              projectLabel: 'NativeRepo',
+              lastUsedAt: liveIso
+            }
+          }
+        }
+      }
+    }
+  });
+  assert.equal(context.state.stats.nativeSessions.today['claude:n1'].title, undefined);
+
+  // 3. Switching sources during an in-flight Hub A refresh clears Hub A history and completes Hub B refresh without historyChanged
+  context.state.history = { daily: [{ date: '2026-11-25', tokens: 11 }] };
+  const hubARefresh = context.refresh();
+  await new Promise((r) => setTimeout(r, 0));
+  statsHandler({
+    event: 'stats',
+    data: {
+      stats: { snapshot: { id: 1, source: 3 }, periods: { today: { totalTokens: 222 } } },
+      reason: 'hub'
+    }
+  });
+  assert.equal(context.state.history, null, 'source switch must clear prior Hub history immediately');
+  // Simulate pre-existing animation frame firing while Hub A refresh is still running
+  context.scheduleDashboardRefresh();
+  for (const cb of scheduledFrames.splice(0)) cb();
+  resolveHubAHistory({ daily: [{ date: '2026-11-25', tokens: 11 }] });
+  await hubARefresh;
+  await new Promise((r) => setTimeout(r, 0));
+  assert.equal(historyFetchCount, 2, 'queued replacement refresh must run automatically on source switch');
+  assert.equal(context.state.history?.daily?.[0]?.tokens, 222, 'Hub B history must replace cleared Hub A history');
+
+  // 4. Synced snapshot with no usable device rows must never attribute aggregate rate to local device
+  let nowVal = 1_760_000_000_000;
+  const realDateNow = Date.now;
+  Date.now = () => nowVal;
+  try {
+    const rateContext = {
+      Date: { now: () => nowVal },
+      tokenRateApi: tokenRate,
+      deviceRateTracker: tokenRate.createLiveTokenRateGroupTracker({ now: () => nowVal, activeMs: 12_000 }),
+      rateHistory: tokenRate.createLiveTokenRateHistory({ now: () => nowVal }),
+      deviceRateTrackers: new Map(),
+      rateExpiryTimer: null,
+      state: {
+        stats: { localDeviceId: 'mac-local', devices: [] },
+        settings: { hubMode: 'client', hubUrl: 'https://hub.example', deviceId: 'mac-local' },
+        motion: 'update'
+      },
+      document: { hidden: false },
+      render() {},
+      setTimeout,
+      clearTimeout
+    };
+    vm.runInNewContext(
+      js.slice(js.indexOf('function isRemoteSession('), js.indexOf('\nfunction openDrawer('))
+      + '\n'
+      + js.slice(js.indexOf('function scheduleRateExpiry('), js.indexOf('\nconst REFRESH_BUTTON_FEEDBACK_MS')),
+      rateContext
+    );
+    const baselinePeriod = {
+      timedOutputTokens: 0, timedTokens: 0, timedDurationMs: 0,
+      modelThroughput: { 'gpt-6.2-sol': { timedOutputTokens: 0, timedTokens: 0, timedDurationMs: 0 } }
+    };
+    const nextPeriod = {
+      timedOutputTokens: 100, timedTokens: 400, timedDurationMs: 1000,
+      modelThroughput: { 'gpt-6.2-sol': { timedOutputTokens: 100, timedTokens: 400, timedDurationMs: 1000 } }
+    };
+    rateContext.observeStatsRates({ localDeviceId: 'mac-local', devices: [], periods: { today: baselinePeriod } });
+    nowVal += 1000;
+    rateContext.observeStatsRates({ localDeviceId: 'mac-local', devices: [], periods: { today: nextPeriod } });
+    assert.deepEqual(JSON.parse(JSON.stringify(rateContext.currentLiveRatesByDevice())), {}, 'synced aggregate period without devices must not synthesize local rate');
+    assert.equal(rateContext.deviceRateTrackers.size, 0);
+
+    // Pure local mode (non-synced) continues to observe stats.periods.today for localDeviceId
+    rateContext.state.settings = { hubMode: 'local', hubUrl: 'https://hub.example', deviceId: 'mac-local' };
+    rateContext.observeStatsRates({ localDeviceId: 'mac-local', devices: [], periods: { today: baselinePeriod } });
+    nowVal += 1000;
+    rateContext.observeStatsRates({ localDeviceId: 'mac-local', devices: [], periods: { today: nextPeriod } });
+    assert.deepEqual(JSON.parse(JSON.stringify(rateContext.currentLiveRatesByDevice())), { 'mac-local': 100 });
+  } finally {
+    Date.now = realDateNow;
+  }
+
+  // 5. Switching to Local Only while preserving saved hubUrl still reads local Last 7 Days session details
+  settingsHandler({ hubMode: 'local' });
+  assert.equal(context.state.settings.hubUrl, 'https://hub-a');
+  assert.equal(context.state.stats, null, 'old destination Stats disappear immediately');
+  assert.equal(context.state.history, null, 'old destination History disappears immediately');
+  let finishStats;
+  context.window.tokenMonitor.getStats = () => new Promise(resolve => { finishStats = resolve; });
+  await context.refresh();
+  assert.equal(context.state.stats, null, 'early destination History never shares a view with old Stats');
+  assert.equal(context.state.history.daily[0].tokens, 222);
+  finishStats(null);
+  statsHandler({
+    event: 'stats',
+    data: {
+      mode: 'local',
+      reason: 'local',
+      stats: {
+        localDeviceId: 'mac-local',
+        snapshot: { id: 1, source: 4 },
+        devices: [{ deviceId: 'mac-local', displayName: 'MacBook', periods: { last7: { totalTokens: 120 } } }],
+        periods: {
+          last7: {
+            totalTokens: 120,
+            sessions: {
+              'codex:l7': { client: 'codex', sessionId: 'l7', title: 'Local 7d', totalTokens: 120 }
+            }
+          }
+        }
+      }
+    }
+  });
+  context.state.periodKey = 'last7';
+  const callsBeforeLocalOnly = detailCalls.length;
+  const localLast7List = dashboardModel.buildSessionList({
+    stats: context.state.stats,
+    periodKey: 'last7',
+    settings: context.state.settings,
+    statsMode: context.state.statsMode
+  });
+  context.openDrawer({ kind: 'session', session: localLast7List[0] });
+  assert.equal(detailCalls.length, callsBeforeLocalOnly + 1, 'local-only session with retained hubUrl must invoke getSessionDetail');
+  assert.equal(detailCalls.at(-1)?.sessionId, 'l7');
+});
+
+test('dashboard binds deferred drawer ownership to supplying period and invalidates pending drawer across source changes', async () => {
+  const js = read('src', 'electron', 'renderer', 'dashboard', 'dashboard.js');
+  const dashboardModel = require('../../src/electron/renderer/dashboard/dashboardModel');
+  const { resolveSyncedSessionPeriod } = require('../../src/electron/syncedFixedPeriod');
+
+  const detailCalls = [];
+  const drawerTitle = { textContent: '' };
+  const drawerSubtitle = { textContent: '' };
+  const drawerBody = { innerHTML: '' };
+  const pendingPages = new Map();
+  let statsHandler = null;
+  const nowIso = new Date().toISOString();
+  const todayKey = nowIso.slice(0, 10);
+
+  const devicesWithCollision = [
+    {
+      deviceId: 'mac-local',
+      displayName: 'MacBook',
+      platform: 'darwin',
+      periodWindows: { today: { key: todayKey } },
+      sessionDetailsOmitted: { today: 1, month: 1 },
+      periods: {
+        today: { totalTokens: 100, sessions: {} },
+        month: {
+          totalTokens: 500,
+          sessions: {
+            'codex:carried': {
+              client: 'codex',
+              sessionId: 'carried',
+              title: 'Carried Session',
+              totalTokens: 500,
+              status: 'running',
+              lastUsedAt: nowIso
+            }
+          }
+        }
+      }
+    },
+    {
+      deviceId: 'linux-remote',
+      displayName: 'Linux',
+      platform: 'linux',
+      periodWindows: { today: { key: todayKey } },
+      sessionDetailsOmitted: { today: 1, month: 1 },
+      periods: {
+        today: { totalTokens: 100, sessions: {} },
+        month: { totalTokens: 500, sessions: {} }
+      }
+    }
+  ];
+
+  const statsBothOmitted = {
+    localDeviceId: 'mac-local',
+    snapshot: { id: 1, source: 1 },
+    devices: devicesWithCollision,
+    sessionDetailsOmitted: { today: 1, month: 1 },
+    fixedRangeRevisions: { 'mac-local': 'r-mac', 'linux-remote': 'r-linux' },
+    periods: {
+      today: { totalTokens: 200, sessions: {} },
+      month: {
+        totalTokens: 1000,
+        sessions: {
+          'codex:carried': {
+            client: 'codex',
+            sessionId: 'carried',
+            title: 'Carried Session',
+            totalTokens: 500,
+            status: 'running',
+            lastUsedAt: nowIso,
+            sourceDevice: { deviceId: 'mac-local', name: 'MacBook' }
+          }
+        }
+      }
+    }
+  };
+
+  const context = {
+    state: {
+      periodKey: 'today',
+      selectedDeviceId: 'all',
+      history: null,
+      stats: statsBothOmitted,
+      settings: { deviceId: 'mac-local', sessionTitlesEnabled: true, hubMode: 'client', hubUrl: 'https://hub-a' },
+      statsMode: 'sync',
+      motion: 'none',
+      drawer: null,
+      locale: 'en'
+    },
+    els: {
+      drawer: { showPopover() {}, matches() { return false; } },
+      drawerScrim: { classList: { remove() {}, add() {} } },
+      drawerIcon: { className: '', style: {} },
+      drawerTitle,
+      drawerSubtitle,
+      drawerBody,
+      tooltip: { classList: { contains() { return true; } } },
+      refreshBtn: { classList: { toggle() {} }, setAttribute() {}, removeAttribute() {}, disabled: false },
+      body: { classList: { toggle() {} } }
+    },
+    fixedPeriodRangesApi: require('../../src/electron/renderer/fixedPeriodRanges'),
+    modelApi: dashboardModel,
+    sessionTitleDisplayApi: require('../../src/electron/sessionTitleDisplay'),
+    sessionActivityProjectionApi: null,
+    allTimeSessionsApi: require('../../src/electron/renderer/allTimeSessions'),
+    tokenRateApi: null,
+    charts: { clientColors: {} },
+    deviceRateTracker: { getSample() { return null; }, reset() {}, observe() {} },
+    rateHistory: { getSamples() { return []; }, reset() {}, observe() {} },
+    deviceRateTrackers: new Map(),
+    rateExpiryTimer: null,
+    dashboardReady: true,
+    dashboardRefreshFrame: 0,
+    document: { hidden: false },
+    requestAnimationFrame: () => 0,
+    cancelAnimationFrame() {},
+    scheduleDashboardRefresh() {},
+    escapeHtml: (s) => String(s ?? ''),
+    formatCompact: String,
+    formatCost: String,
+    applySwatchColors() {},
+    applyAppearance() {},
+    handleKeyboardClick() {},
+    drawerStatGrid: () => '<div></div>',
+    drawerRequestToken: 0,
+    applyReduceMotionPreference() {},
+    render() {},
+    i18n: { resolveLocale: () => 'en' },
+    compactTokenApi: { normalizeCompactTokenUnits: (v) => v },
+    navigator: { languages: ['en'] },
+    reducedMotionMedia: null,
+    console: { log() {} },
+    setTimeout,
+    clearTimeout,
+    t: (k) => k,
+    window: {
+      tokenMonitor: {
+        getSessionDetail(args) {
+          detailCalls.push(args);
+          return Promise.resolve({ found: false });
+        },
+        getSyncedFixedPeriod(id, source, period) {
+          return new Promise((resolve) => {
+            pendingPages.set(`${source}:${id}:${period}`, resolve);
+          });
+        },
+        onStatsPush(fn) { statsHandler = fn; }
+      }
+    }
+  };
+
+  const slice = js.slice(js.indexOf('function closeDrawer('), js.indexOf('\nfunction renderNow('))
+    + '\n'
+    + js.slice(js.indexOf('function observeStatsRates('), js.indexOf('\nasync function boot('))
+    + '\n'
+    + js.slice(js.indexOf('window.tokenMonitor.onStatsPush?.'), js.indexOf('\nreducedMotionMedia?.addEventListener'));
+  vm.runInNewContext(slice, context);
+
+  // 1. Both today and month omitted: Month-carried session waits on Month, ignores Today completion, stays blocked on ambiguous Month page
+  context.ensureSyncedSessionPages('today');
+  const todayCarriedList = dashboardModel.buildSessionList({
+    stats: statsBothOmitted,
+    periodKey: 'today',
+    settings: context.state.settings,
+    statsMode: context.state.statsMode,
+    nowMs: Date.parse(nowIso)
+  });
+  const carriedEntry = todayCarriedList.find((s) => s.key === 'codex:carried');
+  assert.equal(carriedEntry.resumedFromPriorPeriod, true);
+  assert.equal(carriedEntry.sourcePeriodKey, 'month');
+
+  context.openDrawer({ kind: 'session', session: carriedEntry });
+  await Promise.resolve();
+  assert.ok(pendingPages.has('1:1:today'));
+  assert.ok(pendingPages.has('1:1:month'), 'drawer for Month-carried session must fetch month period');
+  assert.equal(detailCalls.length, 0);
+
+  pendingPages.get('1:1:today')({ detailsAvailable: true, period: { sessions: {} } });
+  await new Promise((r) => setTimeout(r, 0));
+  assert.equal(detailCalls.length, 0, 'completing Today page must not release Month-carried local transcript IPC');
+
+  const resolvedMonthWithCollision = await resolveSyncedSessionPeriod(
+    'month',
+    devicesWithCollision,
+    statsBothOmitted.fixedRangeRevisions,
+    {
+      read: async (deviceId) => (deviceId === 'linux-remote'
+        ? { sessions: { 'codex:carried': { client: 'codex', sessionId: 'carried', title: 'Carried Session', totalTokens: 500, status: 'running', lastUsedAt: nowIso } } }
+        : { sessions: {} })
+    }
+  );
+  assert.equal(resolvedMonthWithCollision.period.sessions['codex:carried'].sourceDevice?.ambiguous, true);
+  pendingPages.get('1:1:month')(resolvedMonthWithCollision);
+  await new Promise((r) => setTimeout(r, 0));
+  assert.equal(detailCalls.length, 0, 'ambiguous Month resolution must keep local transcript IPC blocked');
+  pendingPages.clear();
+
+  // 2. Only month has omissions: Today drawer fetches Month and opens transcript once Month confirms local ownership
+  statsHandler({
+    event: 'stats',
+    data: {
+      mode: 'sync',
+      stats: {
+        ...statsBothOmitted,
+        snapshot: { id: 2, source: 1 },
+        sessionDetailsOmitted: { today: 0, month: 1 },
+        fixedRangeRevisions: { 'mac-local': 'r-mac', 'linux-remote': 'r-linux-2' }
+      }
+    }
+  });
+  context.openDrawer({ kind: 'session', session: carriedEntry });
+  await Promise.resolve();
+  assert.ok(pendingPages.has('1:2:month'), 'month-only omission must still trigger month page fetch from Today drawer');
+  assert.equal(detailCalls.length, 0);
+  pendingPages.get('1:2:month')({
+    detailsAvailable: true,
+    period: {
+      sessions: {
+        'codex:carried': {
+          client: 'codex',
+          sessionId: 'carried',
+          title: 'Carried Session',
+          totalTokens: 500,
+          sourceDevice: { deviceId: 'mac-local', name: 'MacBook' }
+        }
+      }
+    }
+  });
+  await new Promise((r) => setTimeout(r, 0));
+  assert.equal(detailCalls.length, 1);
+  assert.equal(detailCalls[0].sessionId, 'carried');
+  assert.equal(detailCalls[0].period, 'today', 'Month confirms ownership, but the carried row shows Today usage');
+  pendingPages.clear();
+
+  // 3. Hub A deferred drawer must not be resolved by Hub B's page for the same session key
+  statsHandler({
+    event: 'stats',
+    data: {
+      mode: 'sync',
+      stats: {
+        localDeviceId: 'mac-local',
+        snapshot: { id: 3, source: 1 },
+        sessionDetailsOmitted: { today: 1 },
+        fixedRangeRevisions: { 'linux-remote': 'rev-a' },
+        periods: {
+          today: {
+            totalTokens: 100,
+            sessions: {
+              'codex:same-key': {
+                client: 'codex',
+                sessionId: 'same-key',
+                title: 'Hub A Title',
+                totalTokens: 100,
+                sourceDevice: { deviceId: 'mac-local', name: 'MacBook' }
+              }
+            }
+          }
+        }
+      }
+    }
+  });
+  context.openDrawer({
+    kind: 'session',
+    session: {
+      client: 'codex',
+      sessionId: 'same-key',
+      key: 'codex:same-key',
+      title: 'Hub A Title',
+      totalTokens: 100,
+      sourceDevice: { deviceId: 'mac-local', name: 'MacBook' }
+    }
+  });
+  await Promise.resolve();
+  assert.ok(pendingPages.has('1:3:today'));
+  assert.equal(drawerTitle.textContent, 'Hub A Title');
+
+  statsHandler({
+    event: 'stats',
+    data: {
+      mode: 'sync',
+      stats: {
+        localDeviceId: 'mac-local',
+        snapshot: { id: 1, source: 2 },
+        sessionDetailsOmitted: { today: 1 },
+        fixedRangeRevisions: { 'linux-remote': 'rev-b' },
+        periods: {
+          today: {
+            totalTokens: 200,
+            sessions: {
+              'codex:same-key': {
+                client: 'codex',
+                sessionId: 'same-key',
+                title: 'Hub B Title',
+                totalTokens: 200,
+                sourceDevice: { deviceId: 'mac-local', name: 'MacBook' }
+              }
+            }
+          }
+        }
+      }
+    }
+  });
+  await Promise.resolve();
+  assert.ok(pendingPages.has('2:1:today'));
+  pendingPages.get('2:1:today')({
+    detailsAvailable: true,
+    period: {
+      sessions: {
+        'codex:same-key': {
+          client: 'codex',
+          sessionId: 'same-key',
+          title: 'Hub B Title',
+          totalTokens: 200,
+          sourceDevice: { deviceId: 'mac-local', name: 'MacBook' }
+        }
+      }
+    }
+  });
+  pendingPages.get('1:3:today')({
+    detailsAvailable: true,
+    period: {
+      sessions: {
+        'codex:same-key': {
+          client: 'codex',
+          sessionId: 'same-key',
+          title: 'Hub A Title',
+          totalTokens: 100,
+          sourceDevice: { deviceId: 'mac-local', name: 'MacBook' }
+        }
+      }
+    }
+  });
+  await new Promise((r) => setTimeout(r, 0));
+  assert.equal(detailCalls.length, 1, 'Hub B page completion must never trigger local transcript IPC for stale Hub A drawer');
+  pendingPages.clear();
+
+  // 4. Month rollover drops expired device from resolved page (session absent -> stays blocked on completion AND cached reopen)
+  const callsBeforeRollover = detailCalls.length;
+  const rolloverMonthKey = '2026-10-01';
+  const expiredMonthDevices = [
+    {
+      deviceId: 'mac-local',
+      displayName: 'MacBook',
+      platform: 'darwin',
+      periodWindows: { month: { key: '2026-10', endsAt: '2026-11-01T00:00:00.000Z' }, today: { key: rolloverMonthKey } },
+      sessionDetailsOmitted: { month: 1 },
+      periods: {
+        month: {
+          totalTokens: 500,
+          sessions: {
+            'codex:rolled': {
+              client: 'codex',
+              sessionId: 'rolled',
+              title: 'Rolled Month Session',
+              totalTokens: 500,
+              status: 'running',
+              lastUsedAt: nowIso,
+              sourceDevice: { deviceId: 'mac-local', name: 'MacBook' }
+            }
+          }
+        }
+      }
+    }
+  ];
+  statsHandler({
+    event: 'stats',
+    data: {
+      mode: 'sync',
+      stats: {
+        localDeviceId: 'mac-local',
+        snapshot: { id: 10, source: 3 },
+        devices: expiredMonthDevices,
+        sessionDetailsOmitted: { today: 0, month: 1 },
+        fixedRangeRevisions: { 'mac-local': 'rev-roll' },
+        periods: {
+          today: { totalTokens: 0, sessions: {} },
+          month: expiredMonthDevices[0].periods.month
+        }
+      }
+    }
+  });
+  const rolledEntry = {
+    client: 'codex',
+    sessionId: 'rolled',
+    key: 'codex:rolled',
+    title: 'Rolled Month Session',
+    totalTokens: 500,
+    resumedFromPriorPeriod: true,
+    sourcePeriodKey: 'month',
+    sourceDevice: { deviceId: 'mac-local', name: 'MacBook' }
+  };
+  context.openDrawer({ kind: 'session', session: rolledEntry });
+  await Promise.resolve();
+  assert.ok(pendingPages.has('3:10:month'));
+  const resolvedRolloverMonth = await resolveSyncedSessionPeriod(
+    'month',
+    expiredMonthDevices,
+    { 'mac-local': 'rev-roll' },
+    { now: Date.parse('2026-11-02T12:00:00.000Z'), read: async () => ({ sessions: {} }) }
+  );
+  assert.equal(resolvedRolloverMonth.detailsAvailable, true);
+  assert.equal(resolvedRolloverMonth.period.sessions['codex:rolled'], undefined);
+  pendingPages.get('3:10:month')(resolvedRolloverMonth);
+  await new Promise((r) => setTimeout(r, 0));
+  assert.equal(detailCalls.length, callsBeforeRollover, 'rollover page lacking session must not read local transcript via stale inline owner');
+  // Reopen the same stale entry while Month page is cached: must still deny local transcript IPC and clear stale device name
+  context.openDrawer({ kind: 'session', session: rolledEntry });
+  await Promise.resolve();
+  assert.equal(detailCalls.length, callsBeforeRollover, 'reopening stale entry with cached page lacking session must not read local transcript');
+  assert.doesNotMatch(drawerSubtitle.textContent, /MacBook/, 'reopening stale entry with cached page lacking session must clear stale device name');
+  pendingPages.clear();
+
+  // 5. Same-Hub newer snapshot push refreshes pending Month drawer without reopening
+  statsHandler({
+    event: 'stats',
+    data: {
+      mode: 'sync',
+      stats: {
+        ...statsBothOmitted,
+        snapshot: { id: 20, source: 3 },
+        sessionDetailsOmitted: { today: 1, month: 1 },
+        fixedRangeRevisions: { 'mac-local': 'r-mac-20', 'linux-remote': 'r-linux-20' }
+      }
+    }
+  });
+  context.openDrawer({ kind: 'session', session: carriedEntry });
+  await Promise.resolve();
+  assert.ok(pendingPages.has('3:20:today'));
+  assert.ok(pendingPages.has('3:20:month'));
+
+  statsHandler({
+    event: 'stats',
+    data: {
+      mode: 'sync',
+      stats: {
+        ...statsBothOmitted,
+        snapshot: { id: 21, source: 3 },
+        sessionDetailsOmitted: { today: 1, month: 1 },
+        fixedRangeRevisions: { 'mac-local': 'r-mac-21', 'linux-remote': 'r-linux-21' }
+      }
+    }
+  });
+  await Promise.resolve();
+  assert.ok(pendingPages.has('3:21:today'));
+  assert.ok(pendingPages.has('3:21:month'), 'same-Hub push must re-request supplying Month page for open pending drawer');
+
+  pendingPages.get('3:20:month')({ detailsAvailable: true, period: { sessions: {} } });
+  pendingPages.get('3:21:month')({
+    detailsAvailable: true,
+    period: {
+      sessions: {
+        'codex:carried': {
+          client: 'codex',
+          sessionId: 'carried',
+          title: 'Carried Session',
+          totalTokens: 500,
+          sourceDevice: { deviceId: 'mac-local', name: 'MacBook' }
+        }
+      }
+    }
+  });
+  await new Promise((r) => setTimeout(r, 0));
+  assert.equal(detailCalls.length, callsBeforeRollover + 1);
+  assert.equal(detailCalls.at(-1)?.sessionId, 'carried');
+  pendingPages.clear();
+
+  // 6. Newer same-Hub snapshot clears Month omissions and confirms local owner directly
+  const callsBeforeCompleteSnapshot = detailCalls.length;
+  statsHandler({
+    event: 'stats',
+    data: {
+      mode: 'sync',
+      stats: {
+        ...statsBothOmitted,
+        snapshot: { id: 30, source: 3 },
+        sessionDetailsOmitted: { today: 0, month: 1 },
+        fixedRangeRevisions: { 'mac-local': 'r-mac-30', 'linux-remote': 'r-linux-30' }
+      }
+    }
+  });
+  context.openDrawer({ kind: 'session', session: carriedEntry });
+  await Promise.resolve();
+  assert.ok(pendingPages.has('3:30:month'));
+  assert.equal(context.state.drawer.pendingOwnershipDetail, true);
+  assert.equal(detailCalls.length, callsBeforeCompleteSnapshot);
+
+  statsHandler({
+    event: 'stats',
+    data: {
+      mode: 'sync',
+      stats: {
+        ...statsBothOmitted,
+        snapshot: { id: 31, source: 3 },
+        sessionDetailsOmitted: { today: 0, month: 0 },
+        fixedRangeRevisions: { 'mac-local': 'r-mac-31', 'linux-remote': 'r-linux-31' },
+        periods: {
+          today: { totalTokens: 0, sessions: {} },
+          month: {
+            totalTokens: 500,
+            sessions: {
+              'codex:carried': {
+                client: 'codex',
+                sessionId: 'carried',
+                title: 'Carried Session',
+                totalTokens: 500,
+                sourceDevice: { deviceId: 'mac-local', name: 'MacBook' }
+              }
+            }
+          }
+        }
+      }
+    }
+  });
+  await Promise.resolve();
+  assert.equal(pendingPages.has('3:31:month'), false, 'complete Month snapshot should not request omitted page');
+  assert.equal(context.state.drawer.pendingOwnershipDetail, false);
+  assert.equal(detailCalls.length, callsBeforeCompleteSnapshot + 1, 'complete Month snapshot confirming local owner must resolve pending drawer');
+  assert.equal(detailCalls.at(-1)?.sessionId, 'carried');
+  pendingPages.get('3:30:month')({ detailsAvailable: true, period: { sessions: {} } });
+  await new Promise((r) => setTimeout(r, 0));
+  assert.equal(detailCalls.length, callsBeforeCompleteSnapshot + 1);
+  pendingPages.clear();
+
+  // 7. Newer same-Hub snapshot clears Month omissions, but session is absent or ambiguous -> clears pending without local transcript IPC
+  statsHandler({
+    event: 'stats',
+    data: {
+      mode: 'sync',
+      stats: {
+        ...statsBothOmitted,
+        snapshot: { id: 32, source: 3 },
+        sessionDetailsOmitted: { today: 0, month: 1 },
+        fixedRangeRevisions: { 'mac-local': 'r-mac-32', 'linux-remote': 'r-linux-32' }
+      }
+    }
+  });
+  context.openDrawer({ kind: 'session', session: carriedEntry });
+  await Promise.resolve();
+  assert.equal(context.state.drawer.pendingOwnershipDetail, true);
+
+  statsHandler({
+    event: 'stats',
+    data: {
+      mode: 'sync',
+      stats: {
+        ...statsBothOmitted,
+        snapshot: { id: 33, source: 3 },
+        sessionDetailsOmitted: { today: 0, month: 0 },
+        fixedRangeRevisions: { 'mac-local': 'r-mac-33', 'linux-remote': 'r-linux-33' },
+        periods: {
+          today: { totalTokens: 0, sessions: {} },
+          month: { totalTokens: 0, sessions: {} }
+        }
+      }
+    }
+  });
+  await Promise.resolve();
+  assert.equal(context.state.drawer.pendingOwnershipDetail, false);
+  assert.equal(detailCalls.length, callsBeforeCompleteSnapshot + 1, 'complete Month snapshot without explicit local owner must clear pending without reading local transcript');
+  assert.doesNotMatch(drawerSubtitle.textContent, /MacBook/, 'complete Month snapshot dropping session must clear stale device name');
+
+  // Case 7B: Complete Month snapshot projected via projectSessionDeviceStats on multi-device collision leaves sourceDevice unset and must clear stale device name
+  const { projectSessionDeviceStats } = require('../../src/electron/sessionDeviceSources');
+  statsHandler({
+    event: 'stats',
+    data: {
+      mode: 'sync',
+      stats: {
+        ...statsBothOmitted,
+        snapshot: { id: 34, source: 3 },
+        fixedRangeRevisions: { 'mac-local': 'r-mac-34', 'linux-remote': 'r-linux-34' }
+      }
+    }
+  });
+  await Promise.resolve();
+  context.openDrawer({ kind: 'session', session: carriedEntry });
+  await Promise.resolve();
+  assert.equal(context.state.drawer.pendingOwnershipDetail, true);
+  assert.match(drawerSubtitle.textContent, /MacBook/, 'pending drawer initially retains row device name before complete snapshot clears ownership');
+
+  const collidedDevices = [
+    {
+      deviceId: 'mac-local',
+      displayName: 'MacBook',
+      platform: 'darwin',
+      periods: {
+        today: { totalTokens: 0, sessions: {} },
+        month: {
+          totalTokens: 1200,
+          sessions: {
+            'codex:carried': { client: 'codex', sessionId: 'carried', title: 'Carried Session', totalTokens: 1200, lastUsedAt: nowIso }
+          }
+        }
+      }
+    },
+    {
+      deviceId: 'linux-remote',
+      displayName: 'Linux Box',
+      platform: 'linux',
+      periods: {
+        today: { totalTokens: 0, sessions: {} },
+        month: {
+          totalTokens: 900,
+          sessions: {
+            'codex:carried': { client: 'codex', sessionId: 'carried', title: 'Carried Session', totalTokens: 900, lastUsedAt: nowIso }
+          }
+        }
+      }
+    }
+  ];
+  const projectedCollisionStats = projectSessionDeviceStats({
+    ...statsBothOmitted,
+    snapshot: { id: 35, source: 3 },
+    sessionDetailsOmitted: { today: 0, month: 0 },
+    fixedRangeRevisions: { 'mac-local': 'r-mac-35', 'linux-remote': 'r-linux-35' },
+    devices: collidedDevices,
+    periods: {
+      today: { totalTokens: 0, sessions: {} },
+      month: {
+        totalTokens: 2100,
+        sessions: {
+          'codex:carried': { client: 'codex', sessionId: 'carried', title: 'Carried Session', totalTokens: 2100, lastUsedAt: nowIso }
+        }
+      }
+    }
+  }, 'mac-local');
+  const collidedRow = projectedCollisionStats.periods.month.sessions['codex:carried'];
+  assert.ok(collidedRow, 'projected collision snapshot must retain the codex:carried row');
+  assert.equal(collidedRow.sourceDevice, undefined, 'collision projection leaves sourceDevice unset');
+  statsHandler({
+    event: 'stats',
+    data: {
+      mode: 'sync',
+      stats: projectedCollisionStats
+    }
+  });
+  await Promise.resolve();
+  assert.equal(context.state.drawer.pendingOwnershipDetail, false);
+  assert.equal(detailCalls.length, callsBeforeCompleteSnapshot + 1, 'complete Month collision snapshot must clear pending without reading local transcript');
+  assert.doesNotMatch(drawerSubtitle.textContent, /MacBook/, 'complete Month collision snapshot without confirmed owner must clear stale device name');
+
+  // Case 8: Same-Hub collision while a confirmed-local Month drawer is open cancels delayed anatomy and clears already-rendered anatomy
+  let resolveDelayedDetail = null;
+  context.window.tokenMonitor.getSessionDetail = (args) => {
+    detailCalls.push(args);
+    if (resolveDelayedDetail === 'defer') {
+      return new Promise((resolve) => { resolveDelayedDetail = resolve; });
+    }
+    return Promise.resolve({
+      found: true,
+      totals: { totalTokens: 100, costUsd: 0.1 },
+      exchanges: [{ tokens: { input: 20, cacheRead: 60, cacheWrite: 0, output: 20, total: 100 } }]
+    });
+  };
+  const singleLocalMonthStats = projectSessionDeviceStats({
+    localDeviceId: 'mac-local',
+    snapshot: { id: 40, source: 3 },
+    sessionDetailsOmitted: { today: 0, month: 0 },
+    devices: [
+      {
+        deviceId: 'mac-local',
+        displayName: 'MacBook',
+        platform: 'darwin',
+        periods: {
+          today: { totalTokens: 0, sessions: {} },
+          month: {
+            totalTokens: 1200,
+            sessions: {
+              'codex:local-month': { client: 'codex', sessionId: 'local-month', title: 'Local Month', totalTokens: 1200, lastUsedAt: nowIso }
+            }
+          }
+        }
+      },
+      {
+        deviceId: 'linux-remote',
+        displayName: 'Linux Box',
+        platform: 'linux',
+        periods: { today: { totalTokens: 0, sessions: {} }, month: { totalTokens: 0, sessions: {} } }
+      }
+    ],
+    periods: {
+      today: { totalTokens: 0, sessions: {} },
+      month: {
+        totalTokens: 1200,
+        sessions: {
+          'codex:local-month': { client: 'codex', sessionId: 'local-month', title: 'Local Month', totalTokens: 1200, lastUsedAt: nowIso }
+        }
+      }
+    }
+  }, 'mac-local');
+  assert.equal(singleLocalMonthStats.periods.month.sessions['codex:local-month']?.sourceDevice?.deviceId, 'mac-local');
+  statsHandler({ event: 'stats', data: { mode: 'sync', stats: singleLocalMonthStats } });
+  context.state.periodKey = 'month';
+  const monthSessionList = dashboardModel.buildSessionList({
+    stats: context.state.stats,
+    periodKey: 'month',
+    settings: context.state.settings,
+    statsMode: context.state.statsMode,
+    nowMs: Date.parse(nowIso)
+  });
+  const localMonthEntry = monthSessionList.find((s) => s.key === 'codex:local-month');
+  assert.ok(localMonthEntry);
+
+  resolveDelayedDetail = 'defer';
+  context.openDrawer({ kind: 'session', session: localMonthEntry });
+  await Promise.resolve();
+  assert.match(drawerSubtitle.textContent, /MacBook/);
+  assert.equal(typeof resolveDelayedDetail, 'function');
+
+  const collidedMonthStats = projectSessionDeviceStats({
+    ...singleLocalMonthStats,
+    snapshot: { id: 41, source: 3 },
+    devices: [
+      singleLocalMonthStats.devices[0],
+      {
+        deviceId: 'linux-remote',
+        displayName: 'Linux Box',
+        platform: 'linux',
+        periods: {
+          today: { totalTokens: 0, sessions: {} },
+          month: {
+            totalTokens: 900,
+            sessions: {
+              'codex:local-month': { client: 'codex', sessionId: 'local-month', title: 'Local Month', totalTokens: 900, lastUsedAt: nowIso }
+            }
+          }
+        }
+      }
+    ],
+    periods: {
+      today: { totalTokens: 0, sessions: {} },
+      month: {
+        totalTokens: 2100,
+        sessions: {
+          'codex:local-month': { client: 'codex', sessionId: 'local-month', title: 'Local Month', totalTokens: 2100, lastUsedAt: nowIso }
+        }
+      }
+    }
+  }, 'mac-local');
+  assert.ok(collidedMonthStats.periods.month.sessions['codex:local-month']);
+  assert.equal(collidedMonthStats.periods.month.sessions['codex:local-month'].sourceDevice, undefined);
+  statsHandler({ event: 'stats', data: { mode: 'sync', stats: collidedMonthStats } });
+  await Promise.resolve();
+  assert.doesNotMatch(drawerSubtitle.textContent, /MacBook/, 'same-Hub collision must clear subtitle on an open confirmed-local drawer');
+
+  resolveDelayedDetail({
+    found: true,
+    totals: { totalTokens: 100, costUsd: 0.1 },
+    exchanges: [{ tokens: { input: 20, cacheRead: 60, cacheWrite: 0, output: 20, total: 100 } }]
+  });
+  await new Promise((r) => setTimeout(r, 0));
+  assert.doesNotMatch(drawerBody.innerHTML, /dash-drawer-section-title/, 'delayed local transcript response must be discarded after collision');
+
+  // Reopen with immediate anatomy rendering, then confirm collision clears already-rendered anatomy too
+  statsHandler({ event: 'stats', data: { mode: 'sync', stats: { ...singleLocalMonthStats, snapshot: { id: 42, source: 3 } } } });
+  context.openDrawer({ kind: 'session', session: localMonthEntry });
+  await new Promise((r) => setTimeout(r, 0));
+  assert.match(drawerSubtitle.textContent, /MacBook/);
+  assert.match(drawerBody.innerHTML, /dash-drawer-section-title/, 'local anatomy renders while confirmed local');
+
+  statsHandler({ event: 'stats', data: { mode: 'sync', stats: { ...collidedMonthStats, snapshot: { id: 43, source: 3 } } } });
+  await Promise.resolve();
+  assert.doesNotMatch(drawerSubtitle.textContent, /MacBook/);
+  assert.doesNotMatch(drawerBody.innerHTML, /dash-drawer-section-title/, 'same-Hub collision must strip already-rendered local anatomy');
+  // All Time still renders its retained summaries, but a new snapshot fences detail until
+  // its own ownership arrives. An ambiguous result must never release the read.
+  context.state.periodKey = 'allTime';
+  const local = { client: 'codex', sessionId: 'total', title: 'Shared', totalTokens: 10, lastUsedAt: new Date().toISOString(),
+    sourceDevice: { deviceId: 'mac-local', name: 'Mac' } };
+  const pendingTotals = new Map();
+  context.window.tokenMonitor.getAllTimeSessions = id => new Promise(resolve => pendingTotals.set(id, resolve));
+  const totalStats = id => ({
+    localDeviceId: 'mac-local', snapshot: { id, source: 100 }, mode: 'sync',
+    periods: { allTime: { totalTokens: 10 } }
+  });
+  const callsBeforeAllTime = detailCalls.length;
+  context.applyIncomingStats(totalStats(100));
+  await Promise.resolve();
+  pendingTotals.get(100)({ 'codex:total': local });
+  await new Promise(setImmediate);
+  context.openDrawer({ kind: 'session', session: { ...local, key: 'codex:total', sourcePeriodKey: 'allTime' } });
+  assert.equal(detailCalls.length, callsBeforeAllTime + 1, 'current ownership can authorize a local read');
+  context.applyIncomingStats(totalStats(101));
+  assert.equal(context.state.drawer.detailRequested, false, 'new stats revoke the previous transcript read');
+  assert.equal(context.state.stats.periods.allTime.sessions['codex:total'].sourceDevice.deviceId, 'mac-local');
+  context.state.periodKey = 'today';
+  const carriedTotal = dashboardModel.buildSessionList({
+    stats: context.state.stats,
+    settings: context.state.settings,
+    statsMode: 'sync',
+    periodKey: 'today'
+  }).find(row => row.key === 'codex:total');
+  assert.equal(carriedTotal.sourcePeriodKey, 'allTime');
+  assert.equal(carriedTotal.resumedFromPriorPeriod, true);
+  context.openDrawer({ kind: 'session', session: carriedTotal });
+  assert.equal(detailCalls.length, callsBeforeAllTime + 1);
+  await Promise.resolve();
+  pendingTotals.get(101)({ 'codex:total': { ...local, sourceDevice: { ambiguous: true } } });
+  await new Promise(setImmediate);
+  assert.equal(detailCalls.length, callsBeforeAllTime + 1);
+  assert.equal(context.state.drawer.session.sourceDevice?.ambiguous, true);
+
+});
+
+test('dashboard groups subagent hierarchies and review groups in Work Panel, Topology, and interactive group drawer', () => {
+  const js = read('src', 'electron', 'renderer', 'dashboard', 'dashboard.js');
+  const dashboardModel = require('../../src/electron/renderer/dashboard/dashboardModel');
+  const charts = require('../../src/electron/renderer/usageCharts');
+  const nowIso = new Date().toISOString();
+
+  const detailCalls = [];
+  const drawerTitle = { textContent: '' };
+  const drawerSubtitle = { textContent: '' };
+  const drawerBody = {
+    innerHTML: '',
+    listeners: new Map(),
+    addEventListener(type, fn) { this.listeners.set(type, fn); },
+    querySelectorAll: () => []
+  };
+  const workPanel = { innerHTML: '', querySelectorAll: () => [], contains: () => false };
+  const topology = { innerHTML: '', querySelectorAll: () => [], querySelector: () => null, contains: () => false };
+
+  const context = {
+    state: {
+      periodKey: 'today',
+      selectedDeviceId: 'all',
+      workMode: 'sessions',
+      stageView: 'flow',
+      locale: 'en',
+      motion: 'none',
+      settings: { deviceId: 'mac-1', sessionTitlesEnabled: true },
+      stats: {
+        localDeviceId: 'mac-1',
+        devices: [{ deviceId: 'mac-1', displayName: 'MacBook', periods: { today: { totalTokens: 5000 } } }],
+        periods: {
+          today: {
+            totalTokens: 5000,
+            costUsd: 2.5,
+            sessions: {
+              'claude:parent-s': {
+                client: 'claude',
+                sessionId: 'parent-s',
+                title: 'Main Task',
+                projectLabel: 'Repo',
+                latestModel: 'claude-sonnet-4-5',
+                models: { 'claude-sonnet-4-5': 3000 },
+                totalTokens: 3000,
+                costUsd: 1.5,
+                lastUsedAt: nowIso,
+                sourceDevice: { deviceId: 'mac-1', name: 'MacBook' }
+              },
+              'claude:child-s': {
+                client: 'claude',
+                sessionId: 'child-s',
+                title: 'Child Helper',
+                projectLabel: 'Repo',
+                parentClient: 'claude',
+                parentSessionId: 'parent-s',
+                latestModel: 'claude-haiku-4-5',
+                models: { 'claude-haiku-4-5': 1200 },
+                totalTokens: 1200,
+                costUsd: 0.6,
+                lastUsedAt: nowIso,
+                sourceDevice: { deviceId: 'mac-1', name: 'MacBook' }
+              },
+              'codex:bg-1': {
+                client: 'codex',
+                sessionId: 'bg-1',
+                sessionKind: 'background-review',
+                latestModel: 'gpt-6.2-sol',
+                totalTokens: 800,
+                costUsd: 0.4,
+                lastUsedAt: nowIso,
+                sourceDevice: { deviceId: 'mac-1', name: 'MacBook' }
+              }
+            }
+          }
+        }
+      },
+      drawer: null
+    },
+    els: {
+      drawer: { showPopover() {}, matches() { return false; } },
+      drawerScrim: { classList: { remove() {}, add() {} } },
+      drawerIcon: { className: '', style: {} },
+      drawerTitle,
+      drawerSubtitle,
+      drawerBody,
+      workTitle: { textContent: '' },
+      workSummary: { textContent: '' },
+      workPanel,
+      topology,
+      heatmap: { classList: { add() {}, remove() {} } },
+      skylineStage: { classList: { add() {}, remove() {} } },
+      heatFooter: { classList: { add() {}, remove() {} } },
+      heatmapMeta: { textContent: '' },
+      tooltip: { matches: () => false, classList: { contains: () => true } },
+      body: { classList: { toggle() {} } }
+    },
+    modelApi: dashboardModel,
+    charts,
+    sessionLiveApi: require('../../src/shared/sessionLive'),
+    fixedPeriodRangesApi: require('../../src/electron/renderer/fixedPeriodRanges'),
+    sessionTitleDisplayApi: require('../../src/electron/sessionTitleDisplay'),
+    sessionActivityProjectionApi: null,
+    allTimeSessionsApi: null,
+    tokenRateApi: null,
+    deviceRateTracker: { getSample() { return null; }, reset() {}, observe() {} },
+    rateHistory: { getSamples() { return []; }, reset() {}, observe() {} },
+    deviceRateTrackers: new Map(),
+    rateExpiryTimer: null,
+    dashboardReady: true,
+    lastWorkStructureSig: '',
+    patchDashboardMarkup(element, html) { element.innerHTML = html; return true; },
+    topologyResizeObserver: null,
+    topologyLayoutFrame: 0,
+    heatmapMotionGeneration: 0,
+    drawerRequestToken: 0,
+    document: { hidden: false },
+    requestAnimationFrame: () => 0,
+    cancelAnimationFrame() {},
+    escapeHtml: (s) => String(s ?? ''),
+    displayColor: (c) => String(c || ''),
+    formatCompact: (v) => String(v),
+    formatCost: (v) => `$${v}`,
+    applySwatchColors() {},
+    applyAppearance() {},
+    applyTranslations() {},
+    populatePeriodSelect() {},
+    populateRangeSelect() {},
+    activateSegButton() {},
+    hideTooltip() {},
+    clearTopologyFocus() {},
+    renderHeatLegend() {},
+    captureListSnapshot: () => null,
+    animateListSnapshot() {},
+    withPreservedFocus(_el, _sel, _key, fn) { fn(); },
+    prefersReducedMotion: () => true,
+    handleKeyboardClick() {},
+    closeDrawer() {},
+    render() {},
+    i18n: { resolveLocale: () => 'en' },
+    compactTokenApi: { normalizeCompactTokenUnits: (v) => v },
+    navigator: { languages: ['en'] },
+    reducedMotionMedia: null,
+    console: { log() {} },
+    setTimeout,
+    clearTimeout,
+    drawerStatGrid: () => '<div class="grid"></div>',
+    t: (k, vars = {}) => {
+      if (k === 'sessions.subagentCount') return `${vars.count} subagents`;
+      if (k === 'sessions.backgroundReviewCount') return `${vars.count} background runs`;
+      if (k === 'sessions.backgroundReviews') return 'Codex Auto Review';
+      if (k === 'sessions.subagent') return 'Subagent';
+      return k;
+    },
+    window: {
+      tokenMonitor: {
+        getSessionDetail(args) { detailCalls.push(args); return Promise.resolve({ found: false }); },
+        onSettingsPush(fn) { context.__settingsHandler = fn; }
+      }
+    }
+  };
+
+  const slice = js.slice(js.indexOf('function formatAccountingValue('), js.indexOf('function renderDeviceMenu('))
+    + js.slice(js.indexOf('function sessionGroupBadgeLabel('), js.indexOf('\nfunction dismissSkylineHint('))
+    + '\n'
+    + js.slice(js.indexOf('function closeDrawer('), js.indexOf('\nfunction renderNow('))
+    + '\n'
+    + js.slice(js.indexOf('window.tokenMonitor.onSettingsPush?.'), js.indexOf('\nreducedMotionMedia?.addEventListener'))
+    + '\n'
+    + js.slice(js.indexOf('els.drawerBody?.addEventListener?.'), js.indexOf("\nwindow.addEventListener('keydown'"));
+  vm.runInNewContext(slice, context);
+
+  const overview = dashboardModel.buildScopedOverview({
+    stats: context.state.stats,
+    periodKey: 'today',
+    settings: context.state.settings,
+    sessionLabels: {
+      subagent: 'Subagent',
+      subagentCount: (c) => `${c} subagents`,
+      backgroundReviews: 'Codex Auto Review',
+      backgroundReviewCount: (c) => `${c} background runs`,
+      grokBot: 'Grok Bot',
+      grokBotCount: (c) => `${c} activity records`
+    }
+  });
+  context.state.overview = overview;
+  context.renderWorkPanel(overview);
+  assert.match(workPanel.innerHTML, /1 subagents/);
+  assert.match(workPanel.innerHTML, /1 background runs/);
+  assert.match(workPanel.innerHTML, /Main Task/);
+  assert.doesNotMatch(workPanel.innerHTML, /Child Helper/, 'child session stays folded under parent row');
+
+  context.renderTopology(overview);
+  assert.match(topology.innerHTML, /1 subagents/);
+  assert.match(topology.innerHTML, /1 background runs/);
+  const device = overview.topology.devices[0];
+  device.cardProject = 'Token Monitor';
+  context.renderTopology(overview, false, { [device.id]: { speed: 150, idle: false } });
+  assert.match(topology.innerHTML, /class="topo-live-rate is-rate">150 tok\/s/);
+  context.renderTopology(overview, false, { [device.id]: { speed: 150, idle: true } });
+  assert.match(topology.innerHTML, /class="topo-live-rate is-rate is-idle">150 tok\/s/);
+  context.renderTopology(overview);
+  assert.match(topology.innerHTML, /class="topo-node-sub-text">Token Monitor</);
+  const syntheticOverview = {
+    ...overview,
+    topology: { ...overview.topology, devices: [{ ...device, id: 'local', raw: null, liveTokPerSec: 0 }] }
+  };
+  const localDeviceId = context.state.stats.localDeviceId;
+  context.renderTopology(syntheticOverview, false, { [localDeviceId]: { speed: 150, idle: true } });
+  assert.match(topology.innerHTML, /class="topo-live-rate is-rate is-idle">150 tok\/s/);
+
+  const groupedParent = overview.sessions.find((s) => s.subagentGroup);
+  context.openDrawer({ kind: 'session', session: groupedParent });
+  assert.equal(detailCalls.length, 0, 'opening group drawer must not invoke local transcript IPC on wrapper');
+  assert.match(drawerSubtitle.textContent, /1 subagents/);
+  assert.match(drawerBody.innerHTML, /Child Helper/);
+
+  // Redacting titles immediately scrubs group & member titles in the open drawer
+  context.__settingsHandler({ sessionTitlesEnabled: false });
+  assert.doesNotMatch(drawerBody.innerHTML, /Child Helper/);
+  context.__settingsHandler({ sessionTitlesEnabled: true });
+  assert.match(drawerBody.innerHTML, /Child Helper/);
+
+  // Clicking member 1 opens individual child session with Back button; clicking Back returns to group
+  const drawerClick = drawerBody.listeners.get('click');
+  const childIdx = groupedParent.groupRows.findIndex((r) => r.sessionId === 'child-s');
+  drawerClick({ target: { closest: (sel) => (sel.includes('data-drawer-member-idx') ? { dataset: { drawerMemberIdx: String(childIdx) } } : null) } });
+  assert.equal(detailCalls.length, 1);
+  assert.equal(detailCalls[0].sessionId, 'child-s');
+  assert.match(drawerBody.innerHTML, /data-drawer-back="true"/);
+
+  // Toggling sessionTitlesEnabled: false while viewing drilled-in member redacts both returnToGroup Back button and returned group drawer
+  context.__settingsHandler({ sessionTitlesEnabled: false });
+  assert.doesNotMatch(drawerTitle.textContent, /Child Helper/);
+  assert.doesNotMatch(drawerBody.innerHTML, /Main Task/);
+  drawerClick({ target: { closest: (sel) => (sel.includes('dash-drawer-back') ? {} : null) } });
+  assert.doesNotMatch(drawerBody.innerHTML, /Child Helper/);
+  assert.doesNotMatch(drawerTitle.textContent, /Main Task/);
+
+  context.__settingsHandler({ sessionTitlesEnabled: true });
+  assert.match(drawerBody.innerHTML, /Child Helper/);
+  assert.equal(detailCalls.length, 1);
+});
+
+test('dashboard Trends and device selector recover to All Devices when selected device disappears from fleet', () => {
+  const js = read('src', 'electron', 'renderer', 'dashboard', 'dashboard.js');
+  const dashboardModel = require('../../src/electron/renderer/dashboard/dashboardModel');
+  const charts = require('../../src/electron/renderer/usageCharts');
+
+  const today = new Date().toISOString().slice(0, 10);
+  const mkStats = (ids) => ({
+    localDeviceId: ids[0],
+    devices: ids.map((id, i) => ({
+      deviceId: id,
+      displayName: `Machine ${id}`,
+      platform: i === 0 ? 'darwin' : 'linux',
+      periods: { today: { totalTokens: 500 + i * 100, costUsd: 0.25 } }
+    })),
+    periods: { today: { totalTokens: 1100, costUsd: 0.5, sessions: {} } }
+  });
+  const mkHistory = (ids) => ({
+    daily: [{ date: today, tokens: 900, cost: 0.45, perClient: { codex: { tokens: 900 } } }],
+    deviceHistories: ids.map((id, i) => ({
+      deviceId: id,
+      history: { daily: [{ date: today, tokens: 300 + i * 100, cost: 0.15, perClient: { codex: { tokens: 300 + i * 100 } } }] }
+    }))
+  });
+
+  const makeEl = () => ({
+    cloneNode: () => ({ set innerHTML(value) { this.childNodes = [value]; } }),
+    innerHTML: '',
+    textContent: '',
+    classList: { toggle() {}, add() {}, remove() {} },
+    style: { setProperty() {} },
+    setAttribute() {},
+    querySelector: () => null,
+    querySelectorAll: () => [],
+    contains: () => false
+  });
+  const deviceMenu = makeEl();
+  const deviceTrigger = makeEl();
+  const chartEl = makeEl();
+  const dailyLedgerEl = makeEl();
+  let boundaryRefreshes = 0;
+
+  const context = {
+    state: {
+      tab: 'trends',
+      periodKey: 'today',
+      selectedDeviceId: 'dev-a',
+      deviceMenuOpen: true,
+      range: '7',
+      stackBy: 'client',
+      mode: 'bars',
+      trendMetric: 'tokens',
+      stageView: 'flow',
+      heatmapView: '3d',
+      heatmapMetric: 'cost',
+      skylineColorMode: 'heat',
+      rateMode: 'speed',
+      breakdownMode: 'both',
+      workMode: 'sessions',
+      soloKey: null,
+      locale: 'en',
+      currency: 'USD',
+      settings: {},
+      stats: mkStats(['dev-a', 'dev-b']),
+      history: mkHistory(['dev-a', 'dev-b']),
+      chartModel: null,
+      chartKind: 'bars',
+      motion: 'none',
+      statsMode: 'sync',
+      overview: null,
+      drawer: null
+    },
+    els: {
+      deviceScope: makeEl(),
+      deviceTrigger,
+      deviceMenu,
+      empty: makeEl(),
+      trendsPane: makeEl(),
+      activityPane: makeEl(),
+      heatmap: makeEl(),
+      chart: chartEl,
+      legend: makeEl(),
+      dailyLedger: dailyLedgerEl,
+      ledgerMeta: makeEl(),
+      modeBtns: [],
+      stackBtns: [],
+      trendMetricBtns: [],
+      stageViewBtns: [],
+      heatmapMetricBtns: [],
+      skylineColorBtns: [],
+      breakdownModeBtns: [],
+      workModeBtns: [],
+      tooltip: { matches: () => false, classList: { contains: () => true } }
+    },
+    modelApi: dashboardModel,
+    charts,
+    deviceRateTracker: { getSample: () => null },
+    rateHistory: { getSamples: () => [] },
+    deviceRateTrackers: new Map(),
+    activeHover: null,
+    heatmapMotionGeneration: 0,
+    lastRenderedTab: 'trends',
+    currentLiveRatesByDevice: () => ({}),
+    isSyncedSessionPagesLoaded: () => false,
+    render: () => context.renderNow(),
+    todayKey: () => today,
+    shortDate: (d) => d,
+    escapeHtml: (s) => String(s ?? ''),
+    displayColor: (c) => String(c || '#6ab4f0'),
+    colorFor: () => '#6ab4f0',
+    formatCompact: String,
+    formatCost: (v) => `$${v}`,
+    formatCostCompact: (v) => `$${v}`,
+    applySwatchColors() {},
+    setDeviceMenuOpen() {},
+    hideTooltip() {},
+    openDrawer() {},
+    closeDrawer({ restoreFocus }) {
+      assert.equal(restoreFocus, false);
+      context.state.drawer = null;
+    },
+    axisEvery: () => 1,
+    chartSize: () => ({ w: 600, h: 240 }),
+    captureGeometry: () => null,
+    animateChartGeometry() {},
+    withPreservedFocus(_el, _sel, _key, fn) { fn(); },
+    rendererDom: { reconcileChildren(el, children) { el.innerHTML = children[0]; } },
+    syncAllSegIndicators() {},
+    revalidateSyncedPeriodOnRender: () => 0,
+    refreshAfterAccountingRollover() { boundaryRefreshes += 1; },
+    prefersReducedMotion: () => true,
+    refreshActiveHover() {},
+    scheduleRateExpiry() {},
+    t: (k, vars = {}) => {
+      if (k === 'dashboard.fleet.all') return 'All Devices';
+      if (k === 'settings.sync.panel.onlineCount') return `${vars.online}/${vars.total} online`;
+      return k;
+    },
+    document: { hidden: false, querySelector: () => null }
+  };
+
+  const snippet = js.slice(js.indexOf('function renderLegend('), js.indexOf('\nfunction renderBreakdown('))
+    + '\n'
+    + js.slice(js.indexOf('function renderDeviceSelector('), js.indexOf('\nfunction animateMetricText('))
+    + '\n'
+    + js.slice(js.indexOf('function closeRolledOverAccountingDrawer('), js.indexOf('\nconst dashboardRenderScheduler'));
+  vm.runInNewContext(snippet, context);
+
+  context.renderNow();
+  assert.match(deviceTrigger.innerHTML, /Machine dev-a/);
+  assert.match(chartEl.innerHTML, /<svg/);
+
+  // Replace fleet with two entirely different machines so dev-a disappears
+  context.state.stats = mkStats(['dev-c', 'dev-d']);
+  context.state.history = mkHistory(['dev-c', 'dev-d']);
+  context.state.drawer = { kind: 'workspace' };
+  context.renderNow();
+
+  assert.equal(context.state.selectedDeviceId, 'all', 'disappeared selected device must reset to All Devices');
+  assert.equal(context.state.drawer, null);
+  assert.match(deviceTrigger.innerHTML, /device-kind-icon.*>All Devices<.*dash-device-trigger-chevron/);
+  assert.doesNotMatch(deviceTrigger.innerHTML, /2\/2/);
+  assert.match(deviceMenu.innerHTML, /2\/2 online/);
+  assert.match(deviceMenu.innerHTML, /is-selected" data-device="all" data-key="all" role="menuitemradio" aria-checked="true"/);
+  assert.match(chartEl.innerHTML, /<svg/, 'Trends chart must not go blank when selected device leaves fleet');
+  assert.ok(context.state.chartModel && context.state.chartModel.bars.length > 0);
+  assert.match(dailyLedgerEl.innerHTML, /900/, 'daily ledger renders aggregate usage');
+
+  // Shrink two-device fleet down to a single surviving selected device (dev-a):
+  // Trends chart AND Daily Breakdown must both report the aggregate 900 (not 300 device-only).
+  context.state.selectedDeviceId = 'dev-a';
+  context.state.stats = mkStats(['dev-a', 'dev-b']);
+  context.state.history = mkHistory(['dev-a', 'dev-b']);
+  context.renderNow();
+  assert.equal(context.state.overview?.dailyLedger?.[0]?.tokens, 300);
+  const scopedBar = context.state.chartModel?.bars?.find((b) => b.label === today);
+  assert.equal(scopedBar?.total, 300);
+
+  context.state.stats = mkStats(['dev-a']);
+  context.state.history = mkHistory(['dev-a']);
+  context.renderNow();
+  assert.equal(context.state.selectedDeviceId, 'all', 'single-device fleet resets selectedDeviceId to All Devices');
+  assert.equal(context.state.overview?.activeMachine, null);
+  assert.equal(context.state.overview?.dailyLedger?.[0]?.tokens, 900);
+  assert.match(dailyLedgerEl.innerHTML, /900/);
+  assert.doesNotMatch(dailyLedgerEl.innerHTML, />300</);
+  const aggregateBar = context.state.chartModel?.bars?.find((b) => b.label === today);
+  assert.equal(aggregateBar?.total, 900);
+
+  const now = Date.now();
+  const expiredStats = mkStats(['dev-a', 'dev-b']);
+  expiredStats.updatedAt = new Date(now - 2000).toISOString();
+  expiredStats.devices[0].periodWindows = { today: { endsAt: new Date(now - 1000).toISOString() } };
+  expiredStats.devices[1].periodWindows = { today: { endsAt: new Date(now + 60_000).toISOString() } };
+  context.state.stats = expiredStats;
+  context.renderNow();
+  context.renderNow();
+  assert.equal(boundaryRefreshes, 1, 'the first repaint queues refresh even if it beat the timer');
+  assert.match(deviceMenu.innerHTML, /dash-device-menu-val">—<\/span><span class="dash-device-menu-share">—/);
+  assert.match(deviceMenu.innerHTML, /dash-device-menu-val">600<\/span><span class="dash-device-menu-share">—/);
+  assert.doesNotMatch(deviceMenu.innerHTML, /100%/);
+});
+
+test('dashboard open group drawer revalidates member ownership on click and preserves redacted Back title across delayed detail responses', async () => {
+  const js = read('src', 'electron', 'renderer', 'dashboard', 'dashboard.js');
+  const dashboardModel = require('../../src/electron/renderer/dashboard/dashboardModel');
+  const { projectSessionDeviceStats } = require('../../src/electron/sessionDeviceSources');
+  const nowIso = new Date().toISOString();
+
+  const detailCalls = [];
+  let resolveDelayedDetail = null;
+  let settingsHandler = null;
+  let statsHandler = null;
+  const drawerTitle = { textContent: '' };
+  const drawerSubtitle = { textContent: '' };
+  const drawerBody = {
+    innerHTML: '',
+    listeners: new Map(),
+    addEventListener(type, fn) { this.listeners.set(type, fn); },
+    querySelectorAll: () => []
+  };
+
+  const singleLocalGroupStats = projectSessionDeviceStats({
+    localDeviceId: 'mac-local',
+    snapshot: { id: 50, source: 4 },
+    devices: [
+      {
+        deviceId: 'mac-local',
+        displayName: 'MacBook',
+        platform: 'darwin',
+        periods: {
+          today: {
+            totalTokens: 2000,
+            sessions: {
+              'codex:p1': { client: 'codex', sessionId: 'p1', title: 'Main Task', projectLabel: 'Repo', totalTokens: 1200, lastUsedAt: nowIso },
+              'codex:c1': { client: 'codex', sessionId: 'c1', title: 'Child Task', projectLabel: 'Repo', parentClient: 'codex', parentSessionId: 'p1', totalTokens: 800, lastUsedAt: nowIso }
+            }
+          }
+        }
+      }
+    ],
+    periods: {
+      today: {
+        totalTokens: 2000,
+        sessions: {
+          'codex:p1': { client: 'codex', sessionId: 'p1', title: 'Main Task', projectLabel: 'Repo', totalTokens: 1200, lastUsedAt: nowIso },
+          'codex:c1': { client: 'codex', sessionId: 'c1', title: 'Child Task', projectLabel: 'Repo', parentClient: 'codex', parentSessionId: 'p1', totalTokens: 800, lastUsedAt: nowIso }
+        }
+      }
+    }
+  }, 'mac-local');
+
+  const context = {
+    state: {
+      periodKey: 'today',
+      selectedDeviceId: 'all',
+      history: null,
+      stats: singleLocalGroupStats,
+      settings: { deviceId: 'mac-local', sessionTitlesEnabled: true, hubMode: 'client', hubUrl: 'https://hub-a' },
+      motion: 'none',
+      drawer: null,
+      locale: 'en',
+      statsMode: 'sync'
+    },
+    els: {
+      drawer: { showPopover() {}, matches() { return false; } },
+      drawerScrim: { classList: { remove() {}, add() {} } },
+      drawerIcon: { className: '', style: {} },
+      drawerTitle,
+      drawerSubtitle,
+      drawerBody,
+      tooltip: { classList: { contains() { return true; } } },
+      refreshBtn: { classList: { toggle() {} }, setAttribute() {}, removeAttribute() {}, disabled: false },
+      body: { classList: { toggle() {} } }
+    },
+    fixedPeriodRangesApi: require('../../src/electron/renderer/fixedPeriodRanges'),
+    modelApi: dashboardModel,
+    sessionTitleDisplayApi: require('../../src/electron/sessionTitleDisplay'),
+    sessionActivityProjectionApi: null,
+    allTimeSessionsApi: null,
+    tokenRateApi: null,
+    charts: { clientColors: {} },
+    deviceRateTracker: { getSample() { return null; }, reset() {}, observe() {} },
+    rateHistory: { getSamples() { return []; }, reset() {}, observe() {} },
+    deviceRateTrackers: new Map(),
+    rateExpiryTimer: null,
+    dashboardReady: true,
+    document: { hidden: false },
+    escapeHtml: (s) => String(s ?? ''),
+    displayColor: (c) => String(c || ''),
+    formatCompact: String,
+    formatCost: String,
+    applySwatchColors() {},
+    applyAppearance() {},
+    handleKeyboardClick() {},
+    drawerStatGrid: () => '<div></div>',
+    drawerRequestToken: 0,
+    applyReduceMotionPreference() {},
+    render() {},
+    scheduleDashboardRefresh() {},
+    i18n: { resolveLocale: () => 'en' },
+    compactTokenApi: { normalizeCompactTokenUnits: (v) => v },
+    navigator: { languages: ['en'] },
+    reducedMotionMedia: null,
+    console: { log() {} },
+    setTimeout,
+    clearTimeout,
+    t: (k, vars = {}) => (k === 'sessions.subagentCount' ? `${vars.count} subagents` : k),
+    window: {
+      tokenMonitor: {
+        getSessionDetail(args) {
+          detailCalls.push(args);
+          return new Promise((r) => { resolveDelayedDetail = r; });
+        },
+        onSettingsPush(fn) { settingsHandler = fn; },
+        onStatsPush(fn) { statsHandler = fn; },
+        getDashboardHistory: async () => ({ daily: [] }),
+        getStats: async () => context.state.stats
+      }
+    }
+  };
+
+  const slice = js.slice(js.indexOf('function sessionGroupBadgeLabel('), js.indexOf('\nfunction dismissSkylineHint('))
+    + '\n'
+    + js.slice(js.indexOf('function closeDrawer('), js.indexOf('\nfunction renderNow('))
+    + '\n'
+    + js.slice(js.indexOf('function observeStatsRates('), js.indexOf('\nasync function boot('))
+    + '\n'
+    + js.slice(js.indexOf('window.tokenMonitor.onSettingsPush?.'), js.indexOf('\nreducedMotionMedia?.addEventListener'))
+    + '\n'
+    + js.slice(js.indexOf('els.drawerBody?.addEventListener?.'), js.indexOf("\nwindow.addEventListener('keydown'"));
+  vm.runInNewContext(slice, context);
+
+  // Case A: open group drawer with confirmed local child, then push same-Hub collision snapshot;
+  // clicking child inside the still-open drawer must NOT read local detail or show MacBook.
+  const initialSessions = dashboardModel.buildSessionList({
+    stats: context.state.stats,
+    periodKey: 'today',
+    settings: context.state.settings,
+    statsMode: 'sync',
+    nowMs: Date.parse(nowIso)
+  });
+  const groupRow = initialSessions.find((s) => s.subagentGroup);
+  assert.ok(groupRow);
+  context.openDrawer({ kind: 'session', session: groupRow });
+
+  const collidedGroupStats = projectSessionDeviceStats({
+    ...singleLocalGroupStats,
+    snapshot: { id: 51, source: 4 },
+    devices: [
+      singleLocalGroupStats.devices[0],
+      {
+        deviceId: 'linux-remote',
+        displayName: 'Linux Box',
+        platform: 'linux',
+        periods: {
+          today: {
+            totalTokens: 800,
+            sessions: {
+              'codex:c1': { client: 'codex', sessionId: 'c1', title: 'Child Task', projectLabel: 'Repo', totalTokens: 800, lastUsedAt: nowIso }
+            }
+          }
+        }
+      }
+    ],
+    periods: {
+      today: {
+        totalTokens: 2800,
+        sessions: {
+          'codex:p1': { client: 'codex', sessionId: 'p1', title: 'Main Task', projectLabel: 'Repo', totalTokens: 1200, lastUsedAt: nowIso },
+          'codex:c1': { client: 'codex', sessionId: 'c1', title: 'Child Task', projectLabel: 'Repo', parentClient: 'codex', parentSessionId: 'p1', totalTokens: 1600, lastUsedAt: nowIso }
+        }
+      }
+    }
+  }, 'mac-local');
+  assert.ok(collidedGroupStats.periods.today.sessions['codex:c1']);
+  assert.equal(collidedGroupStats.periods.today.sessions['codex:c1'].sourceDevice, undefined);
+  statsHandler({ event: 'stats', data: { mode: 'sync', stats: collidedGroupStats } });
+
+  const drawerClick = drawerBody.listeners.get('click');
+  const childIdx = groupRow.groupRows.findIndex((r) => r.sessionId === 'c1');
+  drawerClick({ target: { closest: (sel) => (sel.includes('data-drawer-member-idx') ? { dataset: { drawerMemberIdx: String(childIdx) } } : null) } });
+  assert.equal(detailCalls.length, 0, 'member click in still-open group drawer must revalidate against collided snapshot');
+  assert.doesNotMatch(drawerSubtitle.textContent, /MacBook/);
+
+  // Case B: confirm local child detail load held in flight; hiding session titles must stay redacted
+  // on the Back button even after the delayed detail response resolves and renders anatomy.
+  statsHandler({ event: 'stats', data: { mode: 'sync', stats: { ...singleLocalGroupStats, snapshot: { id: 52, source: 4 } } } });
+  const freshSessions = dashboardModel.buildSessionList({
+    stats: context.state.stats,
+    periodKey: 'today',
+    settings: context.state.settings,
+    statsMode: 'sync',
+    nowMs: Date.parse(nowIso)
+  });
+  const freshGroup = freshSessions.find((s) => s.subagentGroup);
+  context.openDrawer({ kind: 'session', session: freshGroup });
+  drawerClick({ target: { closest: (sel) => (sel.includes('data-drawer-member-idx') ? { dataset: { drawerMemberIdx: String(freshGroup.groupRows.findIndex((r) => r.sessionId === 'c1')) } } : null) } });
+  assert.equal(detailCalls.length, 1);
+  assert.match(drawerBody.innerHTML, /Main Task/);
+
+  settingsHandler({ sessionTitlesEnabled: false });
+  assert.doesNotMatch(drawerBody.innerHTML, /Main Task/, 'Back button must redact parent title immediately');
+  assert.match(drawerBody.innerHTML, /← Repo/);
+
+  resolveDelayedDetail({
+    found: true,
+    totals: { totalTokens: 800, costUsd: 0.4 },
+    exchanges: [{ tokens: { input: 100, cacheRead: 600, cacheWrite: 0, output: 100, total: 800 } }]
+  });
+  await new Promise((r) => setTimeout(r, 0));
+  assert.match(drawerBody.innerHTML, /dashboard\.anatomy\.title/, 'delayed detail response still renders anatomy');
+  assert.doesNotMatch(drawerBody.innerHTML, /Main Task/, 'delayed detail response must not restore redacted Back button title');
+  assert.match(drawerBody.innerHTML, /← Repo/);
+
+  // Case C: stale remote member replaced by local session in a newer snapshot from the same Hub
+  // must NOT relabel the stale remote row as local or read local transcript detail
+  const initialCallCount = detailCalls.length;
+  const remoteChildGroupStats = projectSessionDeviceStats({
+    localDeviceId: 'mac-local',
+    snapshot: { id: 53, source: 4 },
+    devices: [
+      {
+        deviceId: 'mac-local',
+        displayName: 'MacBook',
+        platform: 'darwin',
+        periods: {
+          today: {
+            totalTokens: 1200,
+            sessions: {
+              'codex:p2': { client: 'codex', sessionId: 'p2', title: 'Group Two', projectLabel: 'Repo', totalTokens: 1200, lastUsedAt: nowIso }
+            }
+          }
+        }
+      },
+      {
+        deviceId: 'linux-remote',
+        displayName: 'Linux Box',
+        platform: 'linux',
+        periods: {
+          today: {
+            totalTokens: 500,
+            sessions: {
+              'codex:r-swap': { client: 'codex', sessionId: 'r-swap', title: 'Remote Secret', projectLabel: 'Repo', parentClient: 'codex', parentSessionId: 'p2', totalTokens: 500, lastUsedAt: nowIso }
+            }
+          }
+        }
+      }
+    ],
+    periods: {
+      today: {
+        totalTokens: 1700,
+        sessions: {
+          'codex:p2': { client: 'codex', sessionId: 'p2', title: 'Group Two', projectLabel: 'Repo', totalTokens: 1200, lastUsedAt: nowIso },
+          'codex:r-swap': { client: 'codex', sessionId: 'r-swap', title: 'Remote Secret', projectLabel: 'Repo', parentClient: 'codex', parentSessionId: 'p2', totalTokens: 500, lastUsedAt: nowIso }
+        }
+      }
+    }
+  }, 'mac-local');
+  settingsHandler({ sessionTitlesEnabled: true });
+  statsHandler({ event: 'stats', data: { mode: 'sync', stats: remoteChildGroupStats } });
+  const swapGroup = dashboardModel.buildSessionList({
+    stats: context.state.stats,
+    periodKey: 'today',
+    settings: context.state.settings,
+    statsMode: 'sync',
+    nowMs: Date.parse(nowIso)
+  }).find((s) => s.sessionId === 'p2');
+  assert.ok(swapGroup);
+  context.openDrawer({ kind: 'session', session: swapGroup });
+
+  const localReplacedStats = projectSessionDeviceStats({
+    localDeviceId: 'mac-local',
+    snapshot: { id: 54, source: 4 },
+    devices: [
+      {
+        deviceId: 'mac-local',
+        displayName: 'MacBook',
+        platform: 'darwin',
+        periods: {
+          today: {
+            totalTokens: 2100,
+            sessions: {
+              'codex:p2': { client: 'codex', sessionId: 'p2', title: 'Group Two', projectLabel: 'Repo', totalTokens: 1200, lastUsedAt: nowIso },
+              'codex:r-swap': { client: 'codex', sessionId: 'r-swap', title: 'Local Task', projectLabel: 'Repo', parentClient: 'codex', parentSessionId: 'p2', totalTokens: 900, lastUsedAt: nowIso }
+            }
+          }
+        }
+      },
+      {
+        deviceId: 'linux-remote',
+        displayName: 'Linux Box',
+        platform: 'linux',
+        periods: { today: { totalTokens: 0, sessions: {} } }
+      }
+    ],
+    periods: {
+      today: {
+        totalTokens: 2100,
+        sessions: {
+          'codex:p2': { client: 'codex', sessionId: 'p2', title: 'Group Two', projectLabel: 'Repo', totalTokens: 1200, lastUsedAt: nowIso },
+          'codex:r-swap': { client: 'codex', sessionId: 'r-swap', title: 'Local Task', projectLabel: 'Repo', parentClient: 'codex', parentSessionId: 'p2', totalTokens: 900, lastUsedAt: nowIso }
+        }
+      }
+    }
+  }, 'mac-local');
+  statsHandler({ event: 'stats', data: { mode: 'sync', stats: localReplacedStats } });
+
+  const swapIdx = swapGroup.groupRows.findIndex((r) => r.sessionId === 'r-swap');
+  drawerClick({ target: { closest: (sel) => (sel.includes('data-drawer-member-idx') ? { dataset: { drawerMemberIdx: String(swapIdx) } } : null) } });
+  assert.equal(detailCalls.length, initialCallCount, 'stale remote member replaced by local owner must NOT read local transcript');
+  assert.doesNotMatch(drawerSubtitle.textContent, /MacBook/);
+  assert.match(drawerSubtitle.textContent, /Linux Box/);
+});
+
+test('dashboard resolves synced fixed periods (yesterday, week, last7, last30) with sessions, workspaces, and Live Flow in aggregate and device scope', async () => {
+  const js = read('src', 'electron', 'renderer', 'dashboard', 'dashboard.js');
+  const dashboardModel = require('../../src/electron/renderer/dashboard/dashboardModel');
+  const { resolveSyncedFixedPeriod } = require('../../src/electron/syncedFixedPeriod');
+  const { normalizePeriod } = require('../../src/shared/usage');
+  const now = new Date(2026, 10, 25, 12);
+  const nowIso = now.toISOString();
+  const todayKey = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+  const yestDate = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 1);
+  const yestKey = `${yestDate.getFullYear()}-${String(yestDate.getMonth() + 1).padStart(2, '0')}-${String(yestDate.getDate()).padStart(2, '0')}`;
+  const yestIso = new Date(yestDate.getFullYear(), yestDate.getMonth(), yestDate.getDate(), 12).toISOString();
+
+  const remotePeriods = {
+    'mac-1:yesterday': normalizePeriod({
+      totalTokens: 40,
+      costUsd: 0.04,
+      clients: { codex: 40 },
+      clientCosts: { codex: 0.04 },
+      models: { 'gpt-6.2-sol': 40 },
+      modelCosts: { 'gpt-6.2-sol': 0.04 },
+      projects: { RepoA: { totalTokens: 40, costUsd: 0.04, clients: { codex: 40 } } },
+      sessions: {
+        'codex:y1': { client: 'codex', sessionId: 'y1', title: 'Mac Yest', projectLabel: 'RepoA', totalTokens: 40, costUsd: 0.04, lastUsedAt: yestIso }
+      }
+    }),
+    'linux-2:yesterday': normalizePeriod({
+      totalTokens: 30,
+      costUsd: 0.03,
+      clients: { claude: 30 },
+      clientCosts: { claude: 0.03 },
+      models: { 'claude-sonnet-4-5': 30 },
+      modelCosts: { 'claude-sonnet-4-5': 0.03 },
+      projects: { RepoA: { totalTokens: 30, costUsd: 0.03, clients: { claude: 30 } } },
+      sessions: {
+        'claude:y2': { client: 'claude', sessionId: 'y2', title: 'Linux Yest', projectLabel: 'RepoA', totalTokens: 30, costUsd: 0.03, lastUsedAt: yestIso }
+      }
+    })
+  };
+
+  const expectedRanges = {
+    week: { start: '2026-11-23', end: todayKey },
+    last7: { start: '2026-11-19', end: todayKey },
+    last30: { start: '2026-10-27', end: todayKey }
+  };
+  for (const [index, name] of Object.keys(expectedRanges).entries()) {
+    for (const [deviceId, client] of [['mac-1', 'codex'], ['linux-2', 'claude']]) {
+      const totalTokens = 100 * (index + 1);
+      remotePeriods[`${deviceId}:${name}`] = normalizePeriod({
+        totalTokens, clients: { [client]: totalTokens },
+        sessions: {
+          [`${client}:${name}`]: { client, sessionId: name, totalTokens, lastUsedAt: nowIso }
+        }
+      });
+    }
+  }
+
+  const endsAtIso = new Date(now.getTime() + 3_600_000).toISOString();
+  const baseStats = {
+    localDeviceId: 'mac-1',
+    mode: 'sync',
+    snapshot: { id: 60, source: 5 },
+    fixedRangeRevisions: { 'mac-1': 'rev-m1', 'linux-2': 'rev-l2' },
+    devices: [
+      { deviceId: 'mac-1', displayName: 'MacBook', platform: 'darwin', updatedAt: nowIso, periodWindows: { today: { key: todayKey, endsAt: endsAtIso } }, periods: { today: { totalTokens: 0, sessions: {} } } },
+      { deviceId: 'linux-2', displayName: 'Linux', platform: 'linux', updatedAt: nowIso, periodWindows: { today: { key: todayKey, endsAt: endsAtIso } }, periods: { today: { totalTokens: 0, sessions: {} } } }
+    ],
+    periods: {
+      today: { totalTokens: 0, sessions: {} },
+      month: { totalTokens: 70, sessions: {} }
+    }
+  };
+
+  let requestedSelection = null;
+  let missingDevice = 'linux-2';
+  let delayedRead;
+  const detailCalls = [];
+  const context = {
+    state: {
+      periodKey: 'yesterday',
+      selectedDeviceId: 'all',
+      settings: { deviceId: 'mac-1', sessionTitlesEnabled: true, hubMode: 'client', hubUrl: 'https://hub-a' },
+      stats: baseStats,
+      history: { daily: [{ date: yestKey, tokens: 70, cost: 0.07 }], deviceHistories: [] },
+      statsMode: 'sync',
+      locale: 'en',
+      motion: 'none',
+      drawer: null
+    },
+    els: {
+      drawer: { showPopover() {}, matches() { return false; } },
+      drawerScrim: { classList: { remove() {}, add() {} } },
+      drawerIcon: { className: '', style: {} },
+      drawerTitle: { textContent: '' },
+      drawerSubtitle: { textContent: '' },
+      drawerBody: { innerHTML: '', addEventListener() {} },
+      tooltip: { classList: { contains() { return true; } } },
+      refreshBtn: { classList: { toggle() {} }, setAttribute() {}, removeAttribute() {}, disabled: false },
+      body: { classList: { toggle() {} } }
+    },
+    fixedPeriodRangesApi: require('../../src/electron/renderer/fixedPeriodRanges'),
+    modelApi: dashboardModel,
+    sessionTitleDisplayApi: require('../../src/electron/sessionTitleDisplay'),
+    sessionActivityProjectionApi: null,
+    allTimeSessionsApi: null,
+    tokenRateApi: null,
+    charts: { clientColors: {} },
+    deviceRateTracker: { getSample() { return null; }, reset() {}, observe() {} },
+    rateHistory: { getSamples() { return []; }, reset() {}, observe() {} },
+    deviceRateTrackers: new Map(),
+    rateExpiryTimer: null,
+    dashboardReady: true,
+    document: { hidden: false },
+    escapeHtml: (s) => String(s ?? ''),
+    formatCompact: String,
+    formatCost: String,
+    applySwatchColors() {},
+    applyAppearance() {},
+    drawerStatGrid: () => '<div></div>',
+    drawerRequestToken: 0,
+    applyReduceMotionPreference() {},
+    render() {},
+    scheduleDashboardRefresh() {},
+    observeStatsRates() {},
+    i18n: { resolveLocale: () => 'en' },
+    compactTokenApi: { normalizeCompactTokenUnits: (v) => v },
+    navigator: { languages: ['en'] },
+    reducedMotionMedia: null,
+    console: { log() {} },
+    setTimeout,
+    clearTimeout,
+    t: (k) => k,
+    window: {
+      tokenMonitor: {
+        async getSyncedFixedPeriod(_id, _source, selection) {
+          requestedSelection = selection;
+          if (delayedRead) await delayedRead;
+          return resolveSyncedFixedPeriod(selection, baseStats.devices, baseStats.fixedRangeRevisions, {
+            now: now.getTime(),
+            weekStartsOn: 1,
+            read: (devId, name) => devId === missingDevice ? null : remotePeriods[`${devId}:${name}`],
+            history: async devices => devices.map(device => ({
+              deviceId: device.deviceId,
+              range: { start: yestKey, end: yestKey },
+              period: { totalTokens: 30, costUsd: 0.03 }
+            }))
+          });
+        },
+        getSessionDetail(args) { detailCalls.push(args); return Promise.resolve(null); }
+      }
+    }
+  };
+
+  const slice = js.slice(js.indexOf('let localSessionActivity = null;'), js.indexOf('\nfunction renderNow('));
+  vm.runInNewContext(slice, context);
+
+  for (const periodName of ['yesterday', 'week', 'last7', 'last30']) {
+    assert.ok(context.syncedSessionPagesKeyFor(context.state.stats, periodName), `${periodName} must produce a synced fetch key`);
+  }
+
+  context.ensureSyncedSessionPages('yesterday');
+  await new Promise((r) => setTimeout(r, 0));
+  assert.equal(requestedSelection, 'yesterday');
+
+  const partial = dashboardModel.buildScopedOverview({
+    stats: context.state.stats, periodKey: 'yesterday', statsMode: 'sync'
+  });
+  assert.equal(partial.hero.tokens, 70, 'keep History totals for the device without detail');
+  assert.equal(partial.sessionsIncomplete, true);
+  assert.equal(partial.sessions.length, 0);
+  assert.equal(partial.workspaces.length, 0);
+
+  missingDevice = '';
+  context.ensureSyncedSessionPages('yesterday');
+  await new Promise((r) => setTimeout(r, 0));
+
+  const aggOverview = dashboardModel.buildScopedOverview({
+    stats: context.state.stats,
+    history: context.state.history,
+    periodKey: 'yesterday',
+    selectedDeviceId: 'all',
+    settings: context.state.settings,
+    statsMode: 'sync',
+    nowMs: now.getTime()
+  });
+  assert.equal(aggOverview.hero.tokens, 70);
+  assert.equal(aggOverview.sessions.length, 2);
+  assert.equal(aggOverview.workspaces.length, 1);
+  assert.equal(aggOverview.workspaces[0].tokens, 70);
+  assert.equal(aggOverview.topology.mode, 'sessions');
+
+  const devOverview = dashboardModel.buildScopedOverview({
+    stats: context.state.stats,
+    history: context.state.history,
+    periodKey: 'yesterday',
+    selectedDeviceId: 'mac-1',
+    settings: context.state.settings,
+    statsMode: 'sync',
+    nowMs: now.getTime()
+  });
+  assert.equal(devOverview.hero.tokens, 40);
+  assert.equal(devOverview.sessions.length, 1);
+  assert.equal(devOverview.sessions[0].sessionId, 'y1');
+  assert.equal(devOverview.workspaces.length, 1);
+  assert.equal(devOverview.workspaces[0].tokens, 40);
+  assert.equal(devOverview.topology.mode, 'sessions');
+  assert.deepEqual(context.state.stats.syncedFixedPeriodDeviceWindows.yesterday['mac-1'], { start: yestKey, end: yestKey });
+  // Exercise a fleet-wide range extending past the local owner's day.
+  context.state.stats.nativeRangeWindows.yesterday = { start: '2000-01-01', end: yestKey };
+  const loadDetail = dashboardFunction('loadSessionDrawerDetail', '\nfunction openDrawer(', context);
+  loadDetail(devOverview.sessions[0], 0, '');
+  assert.equal(detailCalls[0].period, `range:${yestKey}:${yestKey}`);
+  assert.equal(detailCalls[0].snapshotSource, 5);
+
+  // A new revision arriving before its pages must retain the previous complete view.
+  let release;
+  delayedRead = new Promise(resolve => { release = resolve; });
+  context.applyIncomingStats({
+    ...baseStats,
+    snapshot: { id: 61, source: 5 },
+    fixedRangeRevisions: { ...baseStats.fixedRangeRevisions, 'linux-2': 'rev-l3' }
+  });
+  assert.equal(context.isSyncedSessionPagesLoaded(), false, 'ownership is pending for the new revision');
+  assert.equal(dashboardModel.buildScopedOverview({
+    stats: context.state.stats, periodKey: 'yesterday', statsMode: 'sync'
+  }).topology.mode, 'sessions', 'refresh keeps the previous complete view visible');
+  release();
+  await new Promise((r) => setTimeout(r, 0));
+  assert.equal(context.isSyncedSessionPagesLoaded(), true);
+
+  for (const periodName of ['week', 'last7', 'last30']) {
+    context.ensureSyncedSessionPages(periodName);
+    await new Promise((r) => setTimeout(r, 0));
+    assert.equal(requestedSelection, periodName);
+    assert.equal(context.isSyncedSessionPagesLoaded(context.state.stats, periodName), true);
+    for (const selectedDeviceId of ['all', 'mac-1']) {
+      const overview = dashboardModel.buildScopedOverview({
+        stats: context.state.stats, periodKey: periodName, statsMode: 'sync', selectedDeviceId, nowMs: now.getTime()
+      });
+      assert.deepEqual(selectedDeviceId === 'all'
+        ? context.state.stats.nativeRangeWindows[periodName]
+        : context.state.stats.syncedFixedPeriodDeviceWindows[periodName][selectedDeviceId], expectedRanges[periodName]);
+      assert.equal(overview.sessions.length, selectedDeviceId === 'all' ? 2 : 1);
+      assert.ok(overview.sessions.every(session => session.sessionId === periodName));
+      assert.equal(overview.hero.tokens, remotePeriods[`mac-1:${periodName}`].totalTokens * overview.sessions.length);
+    }
+  }
+});
+
+test('renderWorkPanel updates running group subagent badge in place and rebuilds on 0-to-1 transition', () => {
+  const js = read('src', 'electron', 'renderer', 'dashboard', 'dashboard.js');
+
+  const makeBadgeRow = ({ withInitialBadge = true } = {}) => {
+    const badgeEl = withInitialBadge ? { textContent: '1 subagents' } : null;
+    const ctxWrap = { setAttribute() {}, removeAttribute() {} };
+    const ctxFill = { setAttribute() {}, style: { setProperty() {} } };
+    const ctxVal = { textContent: '40%' };
+    const metaText = { innerHTML: '' };
+    const subEl = {
+      innerHTML: '',
+      querySelector(sel) {
+        if (sel === '.home-session-context-fill') return ctxFill;
+        if (sel.includes('dash-session-badge')) return badgeEl;
+        if (sel === '.dash-session-meta-text') return metaText;
+        if (sel === '.home-session-context') return ctxWrap;
+        if (sel === '.home-session-context-value') return ctxVal;
+        return null;
+      }
+    };
+    const titleEl = { textContent: 'Parent Group' };
+    const tokEl = { textContent: '100' };
+    const costEl = { textContent: '$0.10' };
+    const stateNode = { dataset: { state: 'running' }, replaceWith() {} };
+    const row = {
+      dataset: { sessionKey: 'codex:p1' },
+      className: 'dash-session-row state-running',
+      querySelector(sel) {
+        if (sel === '.dash-session-lead') return { querySelector: () => stateNode };
+        if (sel === '.dash-session-title-text') return titleEl;
+        if (sel === '.dash-session-sub') return subEl;
+        if (sel === '.dash-row-tokens') return tokEl;
+        if (sel === '.dash-row-cost') return costEl;
+        return null;
+      }
+    };
+    return { row, subEl, badgeEl };
+  };
+
+  let mockRows = [];
+  const workPanel = {
+    innerHTML: '',
+    querySelectorAll(sel) { return sel === '.dash-session-row' ? mockRows : []; },
+    contains: () => false
+  };
+
+  const context = {
+    state: { workMode: 'sessions', selectedDeviceId: 'all', locale: 'en' },
+    els: { workPanel, workTitle: { textContent: '' }, workSummary: { textContent: '' } },
+    sessionLiveApi: require('../../src/shared/sessionLive'),
+    lastWorkStructureSig: '',
+    displayColor: (c) => String(c || '#6ab4f0'),
+    escapeHtml: (s) => String(s ?? ''),
+    formatCompact: String,
+    formatCost: String,
+    applySwatchColors() {},
+    captureListSnapshot: () => null,
+    animateListSnapshot() {},
+    withPreservedFocus(_el, _sel, _key, fn) { fn(); },
+    t: (k, vars = {}) => (k === 'sessions.subagentCount' ? `${vars.count} subagents` : k)
+  };
+
+  vm.runInNewContext(js.slice(js.indexOf('function sessionGroupBadgeLabel('), js.indexOf('\nfunction renderTopology(')), context);
+
+  const mkOverview = (groupCount) => ({
+    sessions: [{
+      key: 'codex:p1',
+      title: 'Parent Group',
+      projectLabel: 'Repo',
+      modelLabel: 'gpt-6.2-sol',
+      color: '#6ab4f0',
+      activityState: 'running',
+      totalTokens: 100 + groupCount * 50,
+      costUsd: 0.1,
+      unpricedTokens: 0,
+      context: { displayPercent: 40, tone: 'ok' },
+      subagentGroup: groupCount > 1,
+      groupKind: groupCount > 1 ? 'subagents' : '',
+      subagentCount: Math.max(0, groupCount - 1),
+      groupCount
+    }]
+  });
+
+  // 0 -> 1 subagent with same row key must rebuild subEl to insert the new badge
+  context.renderWorkPanel(mkOverview(1));
+  const noBadgeRow = makeBadgeRow({ withInitialBadge: false });
+  mockRows = [noBadgeRow.row];
+  context.renderWorkPanel(mkOverview(2));
+  assert.match(noBadgeRow.subEl.innerHTML, /1 subagents/, '0-to-1 subagent transition must insert subagent badge');
+
+  // 1 -> 2 subagents with existing badge & context meter updates badge text in place
+  const withBadgeRow = makeBadgeRow({ withInitialBadge: true });
+  mockRows = [withBadgeRow.row];
+  context.renderWorkPanel(mkOverview(3));
+  assert.equal(withBadgeRow.badgeEl.textContent, '2 subagents', '1-to-2 subagent growth must update badge text in place');
+  assert.equal(withBadgeRow.subEl.innerHTML, '', 'in-place badge update preserves existing context meter DOM');
+});
+
+
+test('Dashboard applies Stats without History and fences older successful History responses', async () => {
+  const js = read('src', 'electron', 'renderer', 'dashboard', 'dashboard.js');
+  const reads = [];
+  let snapshot = 0;
+  const context = {
+    state: { stats: null, history: null },
+    window: { tokenMonitor: {
+      getStats: async () => ({ snapshot: { id: ++snapshot, source: 1 } }),
+      getDashboardHistory: () => new Promise((resolve, reject) => reads.push({ resolve, reject }))
+    } },
+    observeStatsRates() {},
+    render() {}
+  };
+  vm.runInNewContext(js.slice(js.indexOf('let historyRequestSeq'), js.indexOf('async function manualRefresh(')), context);
+  const failed = context.pullDashboardData();
+  const rejected = assert.rejects(failed, /History offline/);
+  await new Promise(setImmediate);
+  assert.equal(context.state.stats.snapshot.id, 1);
+  reads[0].reject(new Error('History offline'));
+  await rejected;
+
+  const older = context.pullDashboardData();
+  await Promise.resolve();
+  const manual = context.pullDashboardData({ manual: true });
+  await new Promise(setImmediate);
+  reads[2].resolve({ revision: 'manual' });
+  await manual;
+  reads[1].resolve({ revision: 'older' });
+  await older;
+  assert.equal(context.state.history.revision, 'manual');
+
+  let finishManualScan;
+  context.window.tokenMonitor.getStats = async (options) => options?.force
+    ? new Promise(resolve => { finishManualScan = resolve; })
+    : { snapshot: { id: ++snapshot, source: 1 } };
+  const manualFirst = context.pullDashboardData({ manual: true });
+  const backgroundWhileScanning = context.pullDashboardData();
+  await new Promise(setImmediate);
+  reads[3].resolve({ revision: 'before-scan' });
+  await backgroundWhileScanning;
+  finishManualScan({ snapshot: { id: ++snapshot, source: 1 } });
+  await new Promise(setImmediate);
+  reads[4].resolve({ revision: 'after-scan' });
+  await manualFirst;
+  assert.equal(context.state.history.revision, 'after-scan');
+});
+
+
+test('Dashboard schedules a repaint for session expiry without throughput samples', () => {
+  const now = Date.now();
+  const raw = { lastUsedAt: new Date(now - 1_000).toISOString() };
+  const sessionLiveApi = require('../../src/shared/sessionLive');
+  const expected = sessionLiveApi.nextSessionStatusChangeAt([raw], now);
+  assert.ok(expected > now);
+  let timer;
+  let rendered = 0;
+  const schedule = dashboardFunction('scheduleRateExpiry', '\nfunction observeStatsRates', {
+    state: { overview: { sessions: [{ groupRows: [{ raw }] }] } },
+    sessionLiveApi, document: { hidden: false }, Date: { now: () => now },
+    deviceRateTracker: null, rateHistory: null, deviceRateTrackers: new Map(),
+    rateExpiryTimer: null,
+    setTimeout(callback, delay) { timer = { callback, delay }; },
+    render() { rendered += 1; }
+  });
+  schedule();
+  assert.equal(timer.delay, expected - now + 20);
+  timer.callback();
+  assert.equal(rendered, 1);
+});
+
+test('Dashboard preserves pushed settings during both startup reads', async () => {
+  let resolveSettings;
+  let resolveStream;
+  const state = { settings: {} };
+  const boot = dashboardFunction('boot', '\nwindow.tokenMonitor.onSettingsPush', {
+    state,
+    document: {},
+    navigator: { languages: ['en'] },
+    i18n: { resolveLocale: () => 'en' },
+    compactTokenApi: { normalizeCompactTokenUnits: value => value },
+    nativeMaterialRevision: 0,
+    statsSourceGeneration: 0,
+    dashboardReady: false,
+    applyAppearance() {},
+    applyTranslations() {},
+    populateDashboardSettings() {},
+    syncDashboardSettings() {},
+    populatePeriodSelect() {},
+    populateRangeSelect() {},
+    render() {},
+    refresh() {},
+    window: { tokenMonitor: {
+      getSettings: () => new Promise(resolve => { resolveSettings = resolve; }),
+      getStreamStatus: () => new Promise(resolve => { resolveStream = resolve; }),
+      dashboard: { ready() {} }
+    } }
+  });
+  const started = boot();
+  await Promise.resolve();
+  state.settings = { dashboardStageView: '3d' };
+  resolveSettings({ dashboardStageView: 'flow', currency: 'HKD' });
+  await new Promise(setImmediate);
+  assert.equal(state.stageView, '3d');
+  assert.equal(state.currency, 'HKD');
+
+  state.settings = { ...state.settings, dashboardStageView: '2d' };
+  state.stageView = '2d';
+  resolveStream({ mode: 'sync' });
+  await started;
+  assert.equal(state.stageView, '2d');
+  assert.equal(state.settings.dashboardStageView, '2d');
+});
+
+test('Dashboard replaces a rejected fixed-period read only if its selected revision advanced', async () => {
+  const reads = [];
+  const state = { periodKey: 'week', stats: { snapshot: { id: 1, source: 1 } } };
+  const ensure = dashboardFunction('ensureSyncedSessionPages', '\nconst allTimeSessions =', {
+    state,
+    syncedSessionPagesKeyFor: stats => String(stats.snapshot.id),
+    syncedSessionPagesRevisionsKey: stats => String(stats.snapshot.id),
+    syncedPeriodCalendarKey: () => 'same-week',
+    isSyncedDerivedPeriod: () => true,
+    syncedSessionPagesByPeriod: new Map(),
+    syncedSessionPagesRequests: new Map(),
+    window: { tokenMonitor: {
+      getSyncedFixedPeriod: id => new Promise((_, reject) => reads.push({ id, reject }))
+    } }
+  });
+  ensure();
+  await new Promise(setImmediate);
+  state.stats = { snapshot: { id: 2, source: 1 } };
+  ensure();
+  assert.deepEqual(reads.map(read => read.id), [1]);
+  reads[0].reject(new Error('Old revision failed'));
+  await new Promise(setImmediate);
+  assert.deepEqual(reads.map(read => read.id), [1, 2]);
+  reads[1].reject(new Error('Current revision failed'));
+  await new Promise(setImmediate);
+  assert.deepEqual(reads.map(read => read.id), [1, 2]);
+});
+
+test('Dashboard drops cached iCloud session pages at Today and Month accounting rollover', () => {
+  const boundary = Date.parse('2026-12-01T00:00:00Z');
+  let now = boundary - 1;
+  const modelApi = require('../../src/electron/renderer/dashboard/dashboardModel');
+  const context = vm.createContext({
+    Date: { now: () => now }, modelApi,
+    state: { settings: {}, statsMode: 'icloud' },
+    sessionTitleDisplayApi: null, sessionActivityProjectionApi: null, allTimeSessionsApi: null,
+    window: { tokenMonitor: {} }
+  });
+  const js = read('src', 'electron', 'renderer', 'dashboard', 'dashboard.js');
+  vm.runInContext(js.slice(js.indexOf('let localSessionActivity = null;'), js.indexOf('function syncOpenSessionDrawer('))
+    + '\nconst allTimeSessions = null;\nfunction ensureSyncedSessionPages() {}\nglobalThis.cache = syncedSessionPagesByPeriod;', context);
+  for (const periodKey of ['today', 'month']) {
+    now = boundary - 1;
+    const raw = {
+      mode: 'icloud', snapshot: { id: 1, source: 1 }, fixedRangeRevisions: { mac: 'unchanged' },
+      sessionDetailsOmitted: { [periodKey]: 1 },
+      devices: [{ deviceId: 'mac', periodWindows: { [periodKey]: { endsAt: new Date(boundary).toISOString() } } }],
+      periods: { [periodKey]: { sessions: {} } }
+    };
+    context.state.periodKey = periodKey;
+    context.base = raw;
+    vm.runInContext('latestBaseStats = base;', context);
+    const revisionsKey = context.syncedSessionPagesRevisionsKey(raw, periodKey);
+    context.cache.set(periodKey, { revisionsKey, sessions: { cached: { sourceDevice: { deviceId: 'mac' } } } });
+    context.state.stats = context.attachSyncedSessionPages(raw);
+    assert.ok(context.state.stats.periods[periodKey].sessions.cached);
+    now = boundary;
+    const publication = { ...raw, snapshot: { id: 2, source: 1 } };
+    assert.notEqual(context.syncedSessionPagesRevisionsKey(publication, periodKey), revisionsKey);
+    context.revalidateSyncedPeriodOnRender();
+    assert.equal(context.cache.has(periodKey), false);
+    assert.deepEqual(context.state.stats.periods[periodKey].sessions, {});
+    context.cache.set(periodKey, { revisionsKey, sessions: { cached: { sourceDevice: { deviceId: 'mac' } } } });
+    assert.equal(context.attachSyncedSessionPages(publication), publication);
+    assert.equal(context.cache.has(periodKey), false);
+  }
+});
+
+test('Dashboard discards synced Yesterday at device midnight without a Stats push', async () => {
+  const boundary = Date.parse('2026-11-26T15:00:00Z');
+  let now = boundary - 1000;
+  class Clock extends Date {
+    constructor(value = now) { super(value); }
+    static now() { return now; }
+    setHours(...args) { return this.setUTCHours(...args); }
+  }
+  const ranges = require('../../src/electron/renderer/fixedPeriodRanges');
+  const model = require('../../src/electron/renderer/dashboard/dashboardModel');
+  const stats = {
+    mode: 'sync', snapshot: { id: 1, source: 1 }, fixedRangeRevisions: { mac: 'rev' },
+    devices: [{ deviceId: 'mac', periodWindows: { timeZone: 'Asia/Tokyo', today: { key: '2026-11-26', endsAt: new Date(boundary).toISOString() } },
+      periods: { today: { totalTokens: 0 } } }], periods: { today: { totalTokens: 0 } }
+  };
+  const history = { fixedPeriods: { historyTransportAvailable: true }, deviceHistories: [{ deviceId: 'mac', historyAvailable: true,
+    history: { daily: [{ date: '2026-11-25', tokens: 100 }, { date: '2026-11-26', tokens: 0 }] } }] };
+  let reads = 0;
+  const context = vm.createContext({
+    Date: Clock, state: { stats, history, periodKey: 'yesterday', settings: {} },
+    isSyncedStatsContext: () => true,
+    fixedPeriodRangesApi: { ...ranges, localDayKey: value => new Date(value).toISOString().slice(0, 10) },
+    sessionTitleDisplayApi: null, sessionActivityProjectionApi: null, allTimeSessionsApi: null,
+    window: { tokenMonitor: { getSyncedFixedPeriod: async () => { reads++; return { status: 'unavailable' }; } } }
+  });
+  const js = read('src', 'electron', 'renderer', 'dashboard', 'dashboard.js');
+  vm.runInContext(js.slice(js.indexOf('let localSessionActivity = null;'), js.indexOf('\nfunction renderNow(')), context);
+  vm.runInContext(`latestBaseStats = state.stats;
+    const period = {totalTokens:100};
+    syncedSessionPagesByPeriod.set('yesterday', {derived:true, period, devices:[{deviceId:'mac', period}],
+      calendarKey:syncedPeriodCalendarKey(state.stats, 'yesterday')});
+    state.stats = attachSyncedSessionPages(state.stats);`, context);
+  const tokens = () => model.buildScopedOverview({ stats: context.state.stats, history, periodKey: 'yesterday', nowMs: now }).hero.tokens;
+  assert.equal(tokens(), 100);
+  assert.equal(context.revalidateSyncedPeriodOnRender(), boundary);
+  now = boundary + 1000;
+  context.revalidateSyncedPeriodOnRender();
+  assert.equal(context.state.stats, stats);
+  assert.equal(tokens(), 0);
+  context.revalidateSyncedPeriodOnRender();
+  await new Promise(setImmediate);
+  assert.equal(reads, 1);
+
+  // A different request can rebuild Stats and remove the outdated entry before render.
+  now = boundary - 1000;
+  context.revalidateSyncedPeriodOnRender();
+  await new Promise(setImmediate);
+  reads = 0;
+  now = boundary + 1000;
+  context.revalidateSyncedPeriodOnRender();
+  await new Promise(setImmediate);
+  assert.equal(reads, 1, 'calendar transition triggers a replacement read even without an attached entry');
+
+  delete stats.fixedRangeRevisions;
+  now = boundary - 1000;
+  assert.equal(context.revalidateSyncedPeriodOnRender(), boundary, 'History-only periods still have a deadline');
+});
+
+test('Local Dashboard repaints Yesterday at local midnight without a Stats push', () => {
+  const boundary = new Date(2026, 10, 27).getTime();
+  let now = boundary - 1000;
+  let timer;
+  class Clock extends Date {
+    static now() { return now; }
+  }
+  const state = { periodKey: 'yesterday', overview: null, motion: 'none', drawer: { kind: 'session' } };
+  const stats = {
+    mode: 'local',
+    nativeRangeWindows: { yesterday: { start: '2026-11-25', end: '2026-11-25' } },
+    periods: { yesterday: { totalTokens: 100 } }
+  };
+  const history = {
+    fixedPeriods: { historyTransportAvailable: true },
+    daily: [{ date: '2026-11-25', tokens: 100 }, { date: '2026-11-26', tokens: 50 }]
+  };
+  const model = require('../../src/electron/renderer/dashboard/dashboardModel');
+  const context = {
+    state, Date: Clock, latestBaseStats: stats, renderedFixedCalendar: null, drawerRequestToken: 0,
+    els: {}, fixedPeriodRangesApi: require('../../src/electron/renderer/fixedPeriodRanges'),
+    isSyncedDerivedPeriod: () => true, isSyncedStatsContext: () => false
+  };
+  const js = read('src', 'electron', 'renderer', 'dashboard', 'dashboard.js');
+  vm.runInNewContext(js.slice(js.indexOf('function closeDrawer('), js.indexOf('function isRemoteSession('))
+    + js.slice(js.indexOf('function revalidateSyncedPeriodOnRender('), js.indexOf('function resolvedSyncedPageSession(')), context);
+  const revalidate = context.revalidateSyncedPeriodOnRender;
+  const render = () => {
+    state.overview = model.buildScopedOverview({ stats, history, periodKey: state.periodKey, nowMs: now });
+    state.overview.nextFixedPeriodExpiryAt = revalidate();
+  };
+  const schedule = dashboardFunction('scheduleRateExpiry', '\nfunction observeStatsRates', {
+    state, Date: Clock, document: { hidden: false }, rateExpiryTimer: null,
+    deviceRateTracker: null, rateHistory: null, deviceRateTrackers: new Map(), render,
+    setTimeout(callback, delay) { timer = { callback, delay }; }
+  });
+  render();
+  assert.equal(state.overview.hero.tokens, 100);
+  render();
+  assert.equal(state.drawer.kind, 'session');
+  assert.equal(context.drawerRequestToken, 0);
+  schedule();
+  assert.equal(timer.delay, 1020);
+  now += timer.delay;
+  timer.callback();
+  assert.equal(state.overview.hero.tokens, 50);
+  assert.equal(state.drawer, null);
+  assert.equal(context.drawerRequestToken, 1);
+  state.drawer = { kind: 'workspace' };
+  render();
+  assert.equal(state.drawer.kind, 'workspace');
+  now = new Date(2026, 10, 28).getTime();
+  render();
+  assert.equal(state.drawer, null);
+  assert.equal(context.drawerRequestToken, 2);
+});
+
+test('native accounting rollover closes only drawers affected by the displayed period', () => {
+  let closed = 0;
+  const state = { drawer: { kind: 'workspace' } };
+  const close = dashboardFunction('closeRolledOverAccountingDrawer', '\nfunction renderNow', {
+    state, Date: { now: () => 1000 },
+    closeDrawer(options) { assert.equal(options.restoreFocus, false); closed++; }
+  });
+  const windows = (endsAt, expired = false) => new Map([
+    ['mac', { endsAt, expired }],
+    ['pc', { endsAt: 4000, expired: false }]
+  ]);
+  for (const periodKey of ['today', 'month']) {
+    const previous = { periodKey, accountingWindows: windows(1000) };
+    const before = closed;
+    close(previous, { ...previous, accountingWindows: windows(1000) });
+    close({ ...previous, activeMachine: { deviceId: 'pc' } }, {
+      ...previous, activeMachine: { deviceId: 'pc' }, accountingWindows: windows(1000, true)
+    });
+    assert.equal(closed, before);
+    close(previous, { ...previous, accountingWindows: windows(1000, true) });
+    close(previous, { ...previous, accountingWindows: windows(3000) });
+    assert.equal(closed, before + 2);
+  }
+  const prior = { periodKey: 'today', accountingWindows: windows(1000) };
+  const pc = { sourceDevice: { deviceId: 'pc' } };
+  state.drawer = { kind: 'session', session: { ...pc, groupRows: [pc, pc] } };
+  close(prior, { ...prior, accountingWindows: windows(1000, true) });
+  assert.equal(closed, 4);
+  const pcRolled = windows(1000, true);
+  pcRolled.set('pc', { endsAt: 4000, expired: true });
+  close(prior, { ...prior, accountingWindows: pcRolled });
+  assert.equal(closed, 5);
+  state.drawer = { kind: 'session', session: { groupRows: [pc, { sourceDevice: { deviceId: 'linux' } }] } };
+  close(prior, { ...prior, accountingWindows: windows(1000, true) });
+  assert.equal(closed, 5);
+  close(prior, { ...prior, accountingWindows: pcRolled });
+  assert.equal(closed, 6);
+  state.drawer = { kind: 'day' };
+  close({ periodKey: 'today', accountingWindows: windows(1000) },
+    { periodKey: 'today', accountingWindows: windows(3000) });
+  assert.equal(closed, 6);
+});
+
+test('All Devices menu shows the overview aggregate and labels partial metrics', () => {
+  const js = read('src', 'electron', 'renderer', 'dashboard', 'dashboard.js');
+  let html;
+  const context = {
+    state: { selectedDeviceId: 'all' },
+    els: { deviceMenu: {} },
+    t: key => key === 'dashboard.accounting.partial' ? 'Partial totals' : key,
+    escapeHtml: String, formatCompact: String,
+    patchDashboardMarkup(_menu, markup) { html = markup; }
+  };
+  vm.runInNewContext(js.slice(js.indexOf('function formatAccountingValue('), js.indexOf('function animateMetricText(')), context);
+  const fleet = {
+    accountingComplete: false,
+    aggregateAccounting: { accountingStatus: 'ready', tokens: 100, hasShares: false },
+    fleetTotals: { tokens: 30, onlineCount: 2 },
+    machines: [
+      { deviceId: 'mac', accountingStatus: 'unavailable', tokens: 0 },
+      { deviceId: 'pc', accountingStatus: 'partial', tokens: 30 }
+    ]
+  };
+  context.renderDeviceMenu(fleet);
+  assert.match(html, /data-device="all".*?dash-device-menu-val">100</);
+  assert.match(html, /data-device="mac".*?dash-device-menu-val">—</);
+  assert.match(html, /data-device="pc".*?dash-device-menu-val">30 · Partial totals</);
+  assert.doesNotMatch(html, />100%</);
+  fleet.aggregateAccounting.accountingStatus = 'partial';
+  context.renderDeviceMenu(fleet);
+  assert.match(html, /data-device="all".*?dash-device-menu-val">100 · Partial totals</);
+});
+
+test('Dashboard repaints when the displayed accounting period expires', () => {
+  let now = 1_000;
+  let timer;
+  let rendered = 0;
+  const state = { overview: { nextAccountingExpiryAt: 2_000 } };
+  const schedule = dashboardFunction('scheduleRateExpiry', '\nfunction observeStatsRates', {
+    state,
+    document: { hidden: false }, Date: { now: () => now },
+    deviceRateTracker: null, rateHistory: null, deviceRateTrackers: new Map(), rateExpiryTimer: null,
+    setTimeout(callback, delay) { timer = { callback, delay }; },
+    render() { rendered += 1; }
+  });
+  schedule();
+  assert.equal(timer.delay, 1_020);
+  now = 2_020;
+  timer.callback();
+  assert.equal(rendered, 1);
+  timer = null;
+  // The model calculated the deadline before rollover, but rendering can run past it.
+  schedule();
+  assert.equal(timer?.delay, 50);
+  timer.callback();
+  assert.equal(rendered, 2);
+
+  state.overview.nextAccountingExpiryAt = 0;
+  timer = null;
+  schedule();
+  assert.equal(timer, null);
+  state.overview.nextAccountingExpiryAt = now + 31 * 86_400_000;
+  schedule();
+  assert.equal(timer.delay, 2_147_483_647);
+});
+
+test('Dashboard queues a rollover refresh after pre-boundary Stats and History requests settle', async () => {
+  let finishStats;
+  let finishHistory;
+  let reads = 0;
+  const context = {
+    state: { overview: { fleet: { accountingExpired: true } } },
+    document: { hidden: false },
+    silentStatsRequest: { promise: new Promise(resolve => { finishStats = resolve; }) },
+    pullDashboardData() {
+      reads += 1;
+      return reads === 1 ? new Promise(resolve => { finishHistory = resolve; }) : Promise.resolve();
+    }
+  };
+  const js = read('src', 'electron', 'renderer', 'dashboard', 'dashboard.js');
+  vm.runInNewContext(js.slice(js.indexOf('let refreshRunning = false;'), js.indexOf('\nasync function boot()')), context);
+  const oldRefresh = context.refresh();
+  const boundaryRefresh = context.refreshAfterAccountingRollover();
+  assert.equal(reads, 1);
+  finishStats();
+  await boundaryRefresh;
+  assert.equal(reads, 1, 'the new request is queued until the older refresh settles');
+  finishHistory();
+  await oldRefresh;
+  assert.equal(reads, 2);
+});
+
+
+test('Dashboard can reveal History while a silent Stats request is pending', async () => {
+  const js = read('src', 'electron', 'renderer', 'dashboard', 'dashboard.js');
+  const pendingStats = [];
+  const context = {
+    statsSourceGeneration: 1,
+    state: { stats: null, history: null },
+    window: { tokenMonitor: {
+      getStats: () => new Promise(resolve => pendingStats.push(resolve)),
+      getDashboardHistory: async () => ({ daily: [{ tokens: 12 }] })
+    } },
+    observeStatsRates() {},
+    render() {}
+  };
+  vm.runInNewContext(js.slice(js.indexOf('let historyRequestSeq'), js.indexOf('async function manualRefresh(')), context);
+  await context.pullDashboardData();
+  assert.equal(context.state.history.daily[0].tokens, 12);
+  assert.equal(context.state.stats, null);
+  await context.pullDashboardData();
+  assert.equal(pendingStats.length, 1, 'History invalidation shares the pending Stats read');
+  context.statsSourceGeneration++;
+  await context.pullDashboardData();
+  assert.equal(pendingStats.length, 2, 'a new source has its own Stats read');
+  pendingStats[0](null);
+  await new Promise(setImmediate);
+  await context.pullDashboardData();
+  assert.equal(pendingStats.length, 2, 'finishing the old request keeps the new one in flight');
+  pendingStats[1]({ periods: { today: { totalTokens: 42 } } });
+  await new Promise(setImmediate);
+  assert.equal(context.state.stats.periods.today.totalTokens, 42);
+  await context.pullDashboardData();
+  assert.equal(pendingStats.length, 3, 'a finished read allows the next refresh');
+  pendingStats[2](null);
+});
+
+
+test('Dashboard manual refresh never reports success for History discarded during a source change', async () => {
+  const js = read('src', 'electron', 'renderer', 'dashboard', 'dashboard.js');
+  for (const stage of ['Stats', 'History']) {
+    let finish;
+    const held = new Promise(resolve => { finish = resolve; });
+    const feedback = [];
+    const stats = { snapshot: { id: 1, source: 1 } };
+    const context = {
+      statsSourceGeneration: 1, latestAcceptedSnapshot: stats.snapshot,
+      state: { stats, history: null },
+      window: { tokenMonitor: {
+        getStats: () => stage === 'Stats' ? held.then(() => stats) : Promise.resolve(stats),
+        getDashboardHistory: () => stage === 'History' ? held.then(() => ({})) : Promise.resolve({})
+      } },
+      applyIncomingStats: () => true,
+      render() {}, console: { log() {} },
+      setRefreshBtnState: status => feedback.push(status),
+      settleRefreshBtnState: status => feedback.push(status),
+      clearRefreshBtnFeedbackTimer() {}, manualRefreshBusy: false
+    };
+    vm.runInNewContext(js.slice(js.indexOf('function shouldAcceptPulledHistory('), js.indexOf('function applyIncomingStats('))
+      + js.slice(js.indexOf('let historyRequestSeq'), js.indexOf('let refreshRunning = false;')), context);
+    const refreshing = context.manualRefresh();
+    await new Promise(setImmediate);
+    context.statsSourceGeneration++;
+    finish();
+    await refreshing;
+    assert.equal(context.state.history, null, stage);
+    assert.deepEqual(feedback, ['refreshing', 'error'], stage);
+  }
+});
+
+test('Dashboard manual scan can accept History from the source it committed', async () => {
+  const js = read('src', 'electron', 'renderer', 'dashboard', 'dashboard.js');
+  const previous = { snapshot: { id: 1, source: 1 } };
+  const incoming = { snapshot: { id: 1, source: 2 } };
+  const history = { daily: [{ tokens: 12 }] };
+  const context = {
+    statsSourceGeneration: 1, latestAcceptedSnapshot: previous.snapshot,
+    state: { stats: previous, history: null },
+    window: { tokenMonitor: { getStats: async () => incoming, getDashboardHistory: async () => history } },
+    applyIncomingStats(stats) {
+      context.statsSourceGeneration++;
+      context.latestAcceptedSnapshot = stats.snapshot;
+      context.state.stats = stats;
+      return true;
+    },
+    render() {}
+  };
+  vm.runInNewContext(js.slice(js.indexOf('function shouldAcceptPulledHistory('), js.indexOf('function applyIncomingStats('))
+    + js.slice(js.indexOf('let historyRequestSeq'), js.indexOf('async function manualRefresh(')), context);
+  assert.equal(await context.pullDashboardData({ manual: true }), true);
+  assert.equal(context.state.history, history);
+});
+
+test('Dashboard shortcuts share the settings queue and report a rejected write outside the popover', async () => {
+  const js = read('src', 'electron', 'renderer', 'dashboard', 'dashboard.js');
+  const alert = () => {
+    const element = { hidden: true };
+    element.classList = { add() { element.hidden = true; }, remove() { element.hidden = false; } };
+    return element;
+  };
+  const error = alert();
+  const shortcutError = alert();
+  const pending = [];
+  const state = { settings: { dashboardStageView: 'flow' }, stageView: 'flow' };
+  const context = {
+    state, dashboardSettingsSave: Promise.resolve(), queuedDashboardQuotaOrder: null,
+    dashboardSettings: { error, shortcutError, popover: { matches: () => false } },
+    window: { tokenMonitor: { updateSettings: patch => new Promise((resolve, reject) => pending.push({ patch, resolve, reject })) } },
+    syncDashboardSettings() {
+      assert.equal(state.stageView, 'flow');
+      assert.equal(shortcutError.hidden, false);
+      assert.equal(error.hidden, true);
+    }
+  };
+  vm.runInNewContext(js.slice(js.indexOf('function saveDashboardSettings('), js.indexOf('function populatePeriodSelect(')), context);
+  const first = context.saveDashboardSettings({ dashboardStageView: '3d' }, { shortcut: true });
+  const second = context.saveDashboardSettings({ dashboardShowVelocity: false });
+  await Promise.resolve();
+  assert.equal(pending.length, 1);
+  assert.equal(state.stageView, 'flow');
+  pending[0].reject(new Error('disk unavailable'));
+  await first;
+  await Promise.resolve();
+  assert.equal(pending.length, 2);
+  pending[1].resolve();
+  await second;
+  assert.equal(shortcutError.hidden, false, 'another queued write cannot hide this failure');
+  const retry = context.saveDashboardSettings({ dashboardStageView: '3d' }, { shortcut: true });
+  await Promise.resolve();
+  assert.equal(shortcutError.hidden, true);
+  pending[2].resolve();
+  await retry;
+});
+
+test('Dashboard queues quota drops before resets and keeps the newest order through older acknowledgements', async () => {
+  const js = read('src', 'electron', 'renderer', 'dashboard', 'dashboard.js');
+  const pending = [];
+  const reset = {};
+  const seenOrders = [];
+  let drag;
+  const context = {
+    state: { settings: { dashboardQuotaProviderOrder: 'claude,codex,opencode' } },
+    queuedDashboardQuotaOrder: null, dashboardSettingsSave: Promise.resolve(),
+    dashboardSettings: { quotaOrderReset: reset, error: { classList: { add() {} } }, shortcutError: { classList: { add() {} } } },
+    applyDashboardQuotaOrder() {},
+    renderDashboardQuotaOrder() { seenOrders.push(context.queuedDashboardQuotaOrder?.dashboardQuotaProviderOrder); },
+    syncDashboardSettings() { context.renderDashboardQuotaOrder(); },
+    window: {
+      TokenMonitorSettingsListFilter: require('../../src/electron/renderer/settingsListFilter'),
+      TokenMonitorRowDragController: { createRowDragController(config) { drag = config; } },
+      tokenMonitor: { updateSettings: patch => new Promise(resolve => pending.push({ patch, resolve })) }
+    }
+  };
+  vm.runInNewContext(js.slice(js.indexOf('function saveDashboardSettings('), js.indexOf('function populatePeriodSelect('))
+    + js.slice(js.indexOf('const dashboardQuotaOrderDrag ='), js.indexOf('function dashboardQuotaOrderRows('))
+    + js.slice(js.indexOf('function saveDashboardQuotaOrder('), js.indexOf('function renderDashboardQuotaOrder(')), context);
+  const first = context.saveDashboardQuotaOrder(['opencode', 'codex']);
+  await Promise.resolve();
+  assert.equal(pending[0].patch.dashboardQuotaProviderOrder, 'claude,opencode,codex');
+  drag.mirrorOrder(['codex', 'opencode']);
+  const last = context.saveDashboardQuotaOrder(null);
+  assert.equal(seenOrders.at(-1), '');
+  context.state.settings.dashboardQuotaProviderOrder = pending[0].patch.dashboardQuotaProviderOrder;
+  pending[0].resolve();
+  await first;
+  await Promise.resolve();
+  assert.equal(context.queuedDashboardQuotaOrder.dashboardQuotaProviderOrder, '');
+  assert.equal(pending[1].patch.dashboardQuotaProviderOrder, 'claude,codex,opencode');
+  pending[1].resolve();
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(pending[2].patch.dashboardQuotaProviderOrder, '');
+  pending[2].resolve();
+  await last;
+  assert.equal(context.queuedDashboardQuotaOrder, null);
+});
+
+test('Dashboard offers Mica only on supported Windows builds and shows Acrylic for a saved Mica fallback', () => {
+  const select = {};
+  const context = {
+    state: { platform: 'win32', osRelease: '10.0.22000' },
+    dashboardSettings: { backdrop: select }, dashboardBackdropOptionsMarkup: '',
+    window: { TokenMonitorWindowsBackdropMode: require('../../src/electron/windowsBackdropMode') },
+    t: value => value, escapeHtml: value => value
+  };
+  const render = dashboardFunction('renderDashboardBackdrop', '\nfunction showDashboardQuotaOrder(', context);
+  render({ dashboardBackdrop: 'mica-alt' });
+  assert.doesNotMatch(select.innerHTML, /value="mica/);
+  assert.equal(select.value, 'acrylic');
+  context.state.osRelease = '10.0.22621';
+  render({ dashboardBackdrop: 'mica-alt' });
+  assert.match(select.innerHTML, /value="mica-alt"/);
+  assert.equal(select.value, 'mica-alt');
+});
+
+
+test('Live Flow highlights only the device paths leading to each workspace contribution', () => {
+  const lineage = dashboardFunction('topologyLineage', '\nfunction applyTopologyFocus(', {});
+  const graph = {
+    mode: 'sessions',
+    devToHub: [
+      { id: 'mac-a', from: 'mac', to: 'a' },
+      { id: 'pc-b', from: 'pc', to: 'b' },
+      { id: 'mac-b', from: 'mac', to: 'b' }
+    ],
+    hubToEnd: [
+      { id: 'a-group', from: 'a', to: 'group', deviceIds: ['mac'] },
+      { id: 'b-group', from: 'b', to: 'group', deviceIds: ['pc'] },
+      { id: 'b-other', from: 'b', to: 'other', deviceIds: ['mac'] }
+    ],
+    endpoints: [{ id: 'group', memberDeviceIds: ['mac', 'pc'] }, { id: 'other', deviceId: 'mac' }]
+  };
+  assert.deepEqual([...lineage(graph, 'endpoint', 'group').relatedEdges].sort(),
+    ['a-group', 'b-group', 'mac-a', 'pc-b']);
+  assert.deepEqual([...lineage(graph, 'device', 'mac').relatedEdges].sort(),
+    ['a-group', 'b-other', 'mac-a', 'mac-b']);
+});
+
+test('Work Panel refreshes renamed device labels and preserves its row for metrics-only pushes', () => {
+  const tokens = { textContent: '' };
+  const row = {
+    dataset: { deviceId: 'mac-1' }, classList: { toggle() {} },
+    querySelector: selector => selector === '.dash-row-tokens' ? tokens : null
+  };
+  const panel = { innerHTML: '' };
+  let rebuilds = 0;
+  const render = dashboardFunction('renderWorkPanel', '\nfunction topologyLineage(', {
+    els: { workPanel: panel }, state: { workMode: 'devices', locale: 'en', selectedDeviceId: 'all' },
+    lastWorkStructureSig: '', t: String, escapeHtml: String, formatCompact: String,
+    formatAccountingValue: dashboardFunction('formatAccountingValue', '\nfunction renderDeviceMenu', { t: String }),
+    captureListSnapshot() {}, animateListSnapshot() {}, applySwatchColors() {},
+    withPreservedFocus(_root, _selector, _key, update) { rebuilds++; update(); },
+    findByDataset: (_root, _selector, match) => match(row) ? row : null
+  });
+  const device = { deviceId: 'mac-1', name: 'Old name', deviceKind: 'desktop', isLocal: false, tokens: 10, share: 1 };
+  const update = () => render({ fleet: { machines: [device], fleetTotals: { tokens: device.tokens } } });
+  update();
+  assert.match(panel.innerHTML, /Old name/);
+  assert.doesNotMatch(panel.innerHTML, /dashboard.devices.you/);
+  device.tokens = 20;
+  update();
+  assert.equal(tokens.textContent, '20');
+  assert.equal(rebuilds, 1);
+  device.name = 'New name';
+  update();
+  assert.match(panel.innerHTML, /New name/);
+  assert.doesNotMatch(panel.innerHTML, /dashboard.devices.you/);
+  assert.equal(rebuilds, 2);
+  device.isLocal = true;
+  update();
+  assert.match(panel.innerHTML, /dashboard.devices.you/);
+  assert.equal(rebuilds, 3);
+});
+
+
+test('Work Panel updates workspace tool attribution without replacing a retained row', () => {
+  const attributes = new Map([['data-bg', 'red']]);
+  const fill = {
+    getAttribute: key => attributes.get(key), setAttribute: (key, value) => attributes.set(key, value),
+    style: { background: 'red', setProperty() {} }
+  };
+  const row = {
+    dataset: { wsKey: 'repo' },
+    querySelector: selector => selector === '.dash-project-bar-fill' ? fill : null
+  };
+  const panel = { innerHTML: '', querySelectorAll: () => [row] };
+  let rebuilds = 0;
+  const render = dashboardFunction('renderWorkPanel', '\nfunction topologyLineage(', {
+    els: { workPanel: panel }, state: { workMode: 'workspaces', locale: 'en' },
+    lastWorkStructureSig: '', t: String, escapeHtml: String, formatCompact: String, formatCost: String,
+    captureListSnapshot() {}, animateListSnapshot() {}, applySwatchColors() {},
+    withPreservedFocus(_root, _selector, _key, update) { rebuilds++; update(); }
+  });
+  const workspace = { key: 'repo', name: 'Repo', relWidth: 1, barBackground: 'red' };
+  render({ workspaces: [workspace] });
+  workspace.barBackground = 'linear-gradient(90deg, red 40%, blue 40%)';
+  render({ workspaces: [workspace] });
+  assert.equal(rebuilds, 1);
+  assert.equal(attributes.get('data-bg'), workspace.barBackground);
+  assert.equal(fill.style.background, workspace.barBackground);
+});
+
+
+test('reduced motion reveals mounted heatmap cells and invalidates the pending frame', () => {
+  const js = read('src', 'electron', 'renderer', 'dashboard', 'dashboard.js');
+  const cellAttributes = new Set(['data-motion-hidden', 'opacity', 'data-d']);
+  const classes = new Set(['is-motion-pending']);
+  const context = {
+    state: { motion: 'entry' }, heatmapMotionGeneration: 1, settleHeroNumber: null, homeLimitMotion: null,
+    motionPreferenceApi: { normalize: value => value }, prefersReducedMotion: () => true,
+    document: { documentElement: { dataset: {} } },
+    els: { heatmap: {
+      querySelectorAll: () => [{ removeAttribute: name => cellAttributes.delete(name) }],
+      classList: { remove: name => classes.delete(name) }
+    } }
+  };
+  vm.runInNewContext(js.slice(js.indexOf('function applyReduceMotionPreference('), js.indexOf('function captureGeometry('))
+    + js.slice(js.indexOf('function revealHeatmapEntry('), js.indexOf('function animateHeatmapEntry(')), context);
+  context.applyReduceMotionPreference('on');
+  assert.deepEqual([...cellAttributes], ['data-d']);
+  assert.equal(classes.has('is-motion-pending'), false);
+  assert.equal(context.heatmapMotionGeneration, 2);
+});
+
+test('Dashboard date labels format UTC calendar keys independently of the desktop timezone', () => {
+  const expected = [];
+  const context = {
+    state: { locale: 'en-US' },
+    Date: class {
+      static UTC(...args) { return Date.UTC(...args); }
+      constructor(epoch) { this.date = new Date(epoch); }
+      toLocaleString(locale, options) {
+        expected.push(options.timeZone);
+        return this.date.toLocaleString(locale, { timeZone: 'America/Los_Angeles', ...options });
+      }
+    }
+  };
+  const js = read('src', 'electron', 'renderer', 'dashboard', 'dashboard.js');
+  vm.runInNewContext(js.slice(js.indexOf('function monthLabel('), js.indexOf('function chartSize(')), context);
+  assert.equal(context.monthLabel('2026-11'), 'Nov');
+  assert.equal(context.longDate('2026-11-26'), 'Nov 26');
+  assert.deepEqual(expected, ['UTC', 'UTC']);
+});
+
+
+test('2D heatmap assigns one tab stop across recorded dates and retains the selected day', () => {
+  const document = { activeElement: null };
+  let focusCalls = 0;
+  const cell = date => {
+    const attributes = new Map([['data-d', date]]);
+    return {
+      getAttribute: name => attributes.get(name),
+      hasAttribute: name => attributes.has(name),
+      setAttribute: (name, value) => attributes.set(name, value),
+      removeAttribute: name => attributes.delete(name),
+      focus(options) {
+        assert.equal(options.preventScroll, true);
+        document.activeElement = this;
+        focusCalls += 1;
+      }
+    };
+  };
+  const [earlier, unrecorded, latest] = ['2026-11-24', '2026-11-25', '2026-11-26'].map(cell);
+  const js = read('src', 'electron', 'renderer', 'dashboard', 'dashboard.js');
+  const state = { locale: 'en-US', dayMap: new Map([['2026-11-24', {}], ['2026-11-26', {}]]) };
+  const context = { state, document, els: { heatmap: { querySelectorAll: () => [earlier, unrecorded, latest] } } };
+  vm.runInNewContext(js.slice(js.indexOf('const HEATMAP_DAY_SELECTOR'), js.indexOf('function setHeatmapMarkup(')), context);
+  assert.equal(context.syncHeatmapKeyboard(), latest);
+  assert.equal(latest.getAttribute('tabindex'), '0');
+  assert.equal(latest.getAttribute('aria-label'), 'November 26, 2026');
+  assert.equal(earlier.getAttribute('tabindex'), '-1');
+  assert.equal(unrecorded.hasAttribute('tabindex'), false);
+  assert.equal(context.syncHeatmapKeyboard('2026-11-24'), earlier);
+  document.activeElement = earlier;
+  assert.equal(context.syncHeatmapKeyboard(), earlier);
+  assert.equal(focusCalls, 0);
+  state.dayMap.delete('2026-11-24');
+  assert.equal(context.syncHeatmapKeyboard(), latest);
+  assert.equal(earlier.hasAttribute('tabindex'), false);
+  assert.equal(document.activeElement, latest);
+  assert.equal(focusCalls, 1);
+});
+
+test('Live Flow configures sync/stagger flowMode and applies workspace-gradient and flowPhase via CSSOM without inline style', () => {
+  const js = read('src', 'electron', 'renderer', 'dashboard', 'dashboard.js');
+  const html = read('src', 'electron', 'renderer', 'dashboard', 'dashboard.html');
+  const mainJs = read('src', 'electron', 'main.js');
+  const props = new Map();
+  const makeNode = (attr, value) => ({
+    attributes: new Map([[attr, value]]),
+    getAttribute(name) { return this.attributes.get(name) ?? null; },
+    style: {
+      setProperty(k, v) { props.set(`${attr}:${k}`, v); }
+    }
+  });
+  const gradientNode = makeNode('data-workspace-gradient', 'linear-gradient(115deg, red, blue)');
+  const phaseNode = makeNode('data-flow-phase', '-1.5');
+  const applySwatch = dashboardFunction('applySwatchColors', '\nfunction findByDataset(', {});
+  applySwatch({
+    querySelectorAll(sel) {
+      if (sel === '[data-workspace-gradient]') return [gradientNode];
+      if (sel === '[data-flow-phase]') return [phaseNode];
+      return [];
+    }
+  });
+  assert.equal(props.get('data-workspace-gradient:--workspace-gradient'), 'linear-gradient(115deg, red, blue)');
+  assert.equal(props.get('data-flow-phase:--topo-flow-phase'), '-1.5');
+  assert.doesNotMatch(js, /style="[^"]*(?:--workspace-gradient|--topo-flow-phase)/);
+
+  const syncClock = dashboardFunction('syncTopologyAnimationClock', '\nfunction layoutTopologyLinks(', {});
+  const topoAligned = { animationName: 'topoBeamTravel', startTime: 0 };
+  const topoLate = { animationName: 'topoWorkspaceSweep', startTime: 1450 };
+  const other = { animationName: 'fadeIn', startTime: 800 };
+  syncClock({
+    getAnimations(opts) {
+      assert.equal(opts?.subtree, true);
+      return [topoAligned, topoLate, other];
+    }
+  });
+  assert.equal(topoAligned.startTime, 0);
+  assert.equal(topoLate.startTime, 0);
+  assert.equal(other.startTime, 800);
+
+  assert.match(mainJs, /dashboardFlowMode:\s*'sync'/);
+  const start = mainJs.indexOf('function normalizeDashboardFlowMode(');
+  const end = mainJs.indexOf('\nfunction normalizeDashboardPeriods(', start);
+  const ctx = {};
+  vm.runInNewContext(mainJs.slice(start, end), ctx);
+  assert.equal(ctx.normalizeDashboardFlowMode('stagger'), 'stagger');
+  assert.equal(ctx.normalizeDashboardFlowMode('sync'), 'sync');
+  assert.equal(ctx.normalizeDashboardFlowMode('unexpected'), 'sync');
+  assert.equal(ctx.normalizeDashboardFlowMode(undefined), 'sync');
+
+  assert.match(html, /<select id="dashFlowMode">[\s\S]*?<option value="sync"[^>]*>[\s\S]*?<option value="stagger"[^>]*>/);
+});
+
+test('returning to Live Flow requests clock sync even when its topology is retained', () => {
+  let hidden = true;
+  const reveals = [];
+  const context = {
+    state: { stageView: 'flow', settings: { dashboardShowVelocity: false, dashboardShowQuotas: false } },
+    lastRenderedTab: 'activity',
+    els: {
+      topology: { classList: {
+        contains: () => hidden,
+        toggle(_name, value) { hidden = value; }
+      } },
+      cards: { querySelectorAll: () => [], querySelector: () => null }
+    },
+    charts: { statsCards: () => [], statsCardsHtml: () => '' },
+    t: key => key,
+    heatmapMotionGeneration: 0,
+    renderHeatLegend() {},
+    balanceStatCards() {},
+    renderHero() {},
+    renderWorkPanel() {},
+    renderBreakdown() {},
+    renderTopology(_overview, revealed) {
+      assert.equal(hidden, false);
+      reveals.push(revealed);
+    }
+  };
+  const renderActivity = dashboardFunction('renderActivity', '\nfunction drawerStatGrid(', context);
+  renderActivity({});
+  renderActivity({});
+  context.lastRenderedTab = 'trends';
+  renderActivity({});
+  assert.deepEqual(reveals, [true, false, true]);
 });
