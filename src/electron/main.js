@@ -7843,6 +7843,24 @@ function persistDashboardWindowBounds(win) {
   persistWindowBounds(bounds, 'dashboardWindowBounds');
 }
 
+function restoredDashboardBounds() {
+  const saved = restoredBounds(settings?.dashboardWindowBounds, DASHBOARD_WINDOW_LIMITS);
+  const bounds = saved || DEFAULT_DASHBOARD_WINDOW;
+  const canPosition = canPositionWindow();
+  const { workArea } = (canPosition && displayForBounds(saved)) || screen.getPrimaryDisplay();
+  const width = Math.min(bounds.width, workArea.width);
+  const height = Math.min(bounds.height, workArea.height);
+  if (!saved || !canPosition) return { width, height };
+  const x = saved.x ?? workArea.x + Math.floor((workArea.width - width) / 2);
+  const y = saved.y ?? workArea.y + Math.floor((workArea.height - height) / 2);
+  return {
+    x: Math.max(workArea.x, Math.min(x, workArea.x + workArea.width - width)),
+    y: Math.max(workArea.y, Math.min(y, workArea.y + workArea.height - height)),
+    width,
+    height
+  };
+}
+
 function createDashboardWindow() {
   if (dashboardWindow && !dashboardWindow.isDestroyed()) {
     // Focus/visibility already refresh history in place. Preserve the selected
@@ -7850,10 +7868,11 @@ function createDashboardWindow() {
     if (dashboardWindowReady) showDashboardWindow(dashboardWindow);
     return dashboardWindow;
   }
-  const bounds = restoredBounds(settings?.dashboardWindowBounds, DASHBOARD_WINDOW_LIMITS) || DEFAULT_DASHBOARD_WINDOW;
+  const bounds = restoredDashboardBounds();
   const windowOptions = {
     ...bounds,
-    ...DASHBOARD_WINDOW_LIMITS,
+    minWidth: Math.min(bounds.width, DASHBOARD_WINDOW_LIMITS.minWidth),
+    minHeight: Math.min(bounds.height, DASHBOARD_WINDOW_LIMITS.minHeight),
     frame: false,
     transparent: true,
     show: false,
@@ -9353,7 +9372,7 @@ app.whenReady().then(() => {
     // A shared renderer can retain an opaque canvas over the native material.
     // Restore transparency after load, before revealing the prepared Dashboard.
     if (process.platform === 'darwin') win.setBackgroundColor('#00000000');
-    const bounds = dashboardWindowReady ? null : restoredBounds(settings?.dashboardWindowBounds, DASHBOARD_WINDOW_LIMITS);
+    const bounds = dashboardWindowReady ? null : restoredDashboardBounds();
     dashboardWindowReady = true;
     showDashboardWindow(win, bounds);
   });

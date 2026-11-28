@@ -65,7 +65,10 @@ function dashboardWindowFixture(platform = 'win32', settings = {}) {
     dashboardWindow: null, dashboardWindowReady: false, mainWindow: null, lastRendererStatsFingerprint: null,
     pendingDashboardWindowBounds: null,
     BrowserWindow: Window, process: { platform }, path, __dirname: path.join(rootDir, 'src', 'electron'),
-    screen: { getDisplayMatching: ({ x }) => displays.findLast(({ workArea }) => x >= workArea.x) || displays[0] },
+    screen: {
+      getDisplayMatching: ({ x }) => displays.findLast(({ workArea }) => x >= workArea.x) || displays[0],
+      getPrimaryDisplay: () => displays[0]
+    },
     canPositionWindow: () => true,
     normalWindowBounds: require('../../src/electron/windowState').normalWindowBounds,
     saveSettings() {},
@@ -88,6 +91,7 @@ function dashboardWindowFixture(platform = 'win32', settings = {}) {
   const main = read('src', 'electron', 'main.js');
   vm.runInContext(main.slice(main.indexOf('const DEFAULT_WINDOW ='), main.indexOf('const ZOOM_LIMITS ='))
     + main.slice(main.indexOf('function isBoundsOnScreen('), main.indexOf('let persistBoundsTimer'))
+    + main.slice(main.indexOf('function displayForBounds('), main.indexOf('function displayForPoint('))
     + main.slice(main.indexOf('function persistWindowBounds('), main.indexOf('function collapseFloatingBubble(')), context);
   vm.runInContext(main.slice(main.indexOf('function normalizeDashboardBackdrop('), main.indexOf('function withHistoryPreview(')), context);
   vm.runInContext(main.slice(main.indexOf('function discardFailedDashboardWindow('), main.indexOf('async function getDashboardHistory(')), context);
@@ -184,7 +188,24 @@ test('Dashboard reopens pinned at its last bounds and falls back to an available
   assert.deepEqual(reopened.getBounds(), bounds);
   reopened.close();
   f.displays.pop();
-  assert.deepEqual(f.open().getBounds(), { ...bounds, x: 40, y: 50 });
+  assert.deepEqual(f.open().getBounds(), { ...bounds, x: 240, y: 120 });
+});
+
+test('Dashboard keeps pinned controls on-screen after changes to the display layout', () => {
+  const scenarios = [
+    [{ x: 1700, y: 80, width: 1180, height: 760 }, { x: 740, y: 80, width: 1180, height: 760 }],
+    [{ x: 2100, y: 50, width: 3000, height: 1700 }, { x: 0, y: 0, width: 1920, height: 1080 }],
+    [{ x: 100, y: 90, width: 2400, height: 1400 }, { x: 0, y: 0, width: 1920, height: 1080 }]
+  ];
+  for (const [saved, expected] of scenarios) {
+    const f = dashboardWindowFixture('darwin', { dashboardWindowBounds: saved, dashboardWindowBehavior: 'desktop' });
+    const win = f.open();
+    win.shiftOnShow = true;
+    f.ready(win);
+    assert.deepEqual(win.getBounds(), expected);
+    assert.equal(win.movable, false);
+    assert.equal(win.resizable, false);
+  }
 });
 
 test('Dashboard saves a move immediately followed by minimizing and closing', () => {
