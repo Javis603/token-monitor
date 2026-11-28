@@ -10,6 +10,7 @@ const { EventEmitter } = require('node:events');
 const rootDir = path.join(__dirname, '..', '..');
 const read = (...p) => fs.readFileSync(path.join(rootDir, ...p), 'utf8');
 const { usageConfigFromSettings } = require('../../src/electron/runtimeConfig');
+const sessionRowsApi = require('../../src/electron/renderer/sessionRows');
 
 function dashboardFunction(name, endMarker, context) {
   const source = read('src', 'electron', 'renderer', 'dashboard', 'dashboard.js');
@@ -3085,6 +3086,7 @@ test('dashboard groups subagent hierarchies and review groups in Work Panel, Top
                 projectLabel: 'Repo',
                 latestModel: 'claude-sonnet-4-5',
                 models: { 'claude-sonnet-4-5': 3000 },
+                reasoningEffort: 'high',
                 totalTokens: 3000,
                 costUsd: 1.5,
                 lastUsedAt: nowIso,
@@ -3099,6 +3101,7 @@ test('dashboard groups subagent hierarchies and review groups in Work Panel, Top
                 parentSessionId: 'parent-s',
                 latestModel: 'claude-haiku-4-5',
                 models: { 'claude-haiku-4-5': 1200 },
+                reasoningEffort: 'low',
                 totalTokens: 1200,
                 costUsd: 0.6,
                 lastUsedAt: nowIso,
@@ -3109,6 +3112,7 @@ test('dashboard groups subagent hierarchies and review groups in Work Panel, Top
                 sessionId: 'bg-1',
                 sessionKind: 'background-review',
                 latestModel: 'gpt-6.2-sol',
+                reasoningEffort: 'medium',
                 totalTokens: 800,
                 costUsd: 0.4,
                 lastUsedAt: nowIso,
@@ -3141,6 +3145,7 @@ test('dashboard groups subagent hierarchies and review groups in Work Panel, Top
     modelApi: dashboardModel,
     charts,
     sessionLiveApi: require('../../src/shared/sessionLive'),
+    sessionRowsApi,
     fixedPeriodRangesApi: require('../../src/electron/renderer/fixedPeriodRanges'),
     sessionTitleDisplayApi: require('../../src/electron/sessionTitleDisplay'),
     sessionActivityProjectionApi: null,
@@ -3231,10 +3236,13 @@ test('dashboard groups subagent hierarchies and review groups in Work Panel, Top
   assert.match(workPanel.innerHTML, /1 subagents/);
   assert.match(workPanel.innerHTML, /1 background runs/);
   assert.match(workPanel.innerHTML, /Main Task/);
+  assert.match(workPanel.innerHTML, /claude-sonnet-4-5 \+1<\/span><span class="dash-meta-dot"[^>]*>·<\/span><span class="dash-session-effort"[^>]*>high<\/span>/);
+  assert.doesNotMatch(workPanel.innerHTML, />(low|medium)<\/span>/);
   assert.doesNotMatch(workPanel.innerHTML, /Child Helper/, 'child session stays folded under parent row');
 
   context.renderTopology(overview);
-  assert.match(topology.innerHTML, /1 subagents/);
+  assert.match(topology.innerHTML, /claude-sonnet-4-5 \+1<\/span> · <span class="dash-session-effort"[^>]*>high<\/span><span[^>]*> · 1 subagents/);
+  assert.doesNotMatch(topology.innerHTML, />(low|medium)<\/span>/);
   assert.match(topology.innerHTML, /1 background runs/);
   const device = overview.topology.devices[0];
   device.cardProject = 'Token Monitor';
@@ -4127,6 +4135,7 @@ test('renderWorkPanel updates running group subagent badge in place and rebuilds
     state: { workMode: 'sessions', selectedDeviceId: 'all', locale: 'en' },
     els: { workPanel, workTitle: { textContent: '' }, workSummary: { textContent: '' } },
     sessionLiveApi: require('../../src/shared/sessionLive'),
+    sessionRowsApi,
     lastWorkStructureSig: '',
     displayColor: (c) => String(c || '#6ab4f0'),
     escapeHtml: (s) => String(s ?? ''),

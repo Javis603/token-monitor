@@ -1498,6 +1498,45 @@ test('fleet and topology agree on shared running sessions, remote-only local bad
   assert.equal(localWithSavedUrl.topology.endpoints[0]?.deviceId, 'mac-local');
 });
 
+test('Dashboard keeps reasoning effort on sessions and their Live Flow endpoints', () => {
+  const nowMs = Date.parse('2026-11-28T12:00:00Z');
+  const session = (client, sessionId, latestModel, metadata = {}) => ({
+    client,
+    sessionId,
+    title: sessionId,
+    projectLabel: 'Repo',
+    latestModel,
+    models: { [latestModel]: 100 },
+    totalTokens: 100,
+    lastUsedAt: new Date(nowMs).toISOString(),
+    ...metadata
+  });
+  const overview = model.buildScopedOverview({
+    nowMs,
+    periodKey: 'today',
+    stats: {
+      localDeviceId: 'mac-1',
+      periods: {
+        today: {
+          totalTokens: 400,
+          sessions: {
+            'codex:main': session('codex', 'main', 'gpt-6.2-sol', { reasoningEffort: 'high' }),
+            'claude:parent': session('claude', 'parent', 'claude-sonnet-4-5', { reasoningEffort: 'medium' }),
+            'claude:child': session('claude', 'child', 'claude-haiku-4-5', { parentClient: 'claude', parentSessionId: 'parent', reasoningEffort: 'low' }),
+            'codex:legacy': session('codex', 'legacy', 'gpt-6.2-sol')
+          }
+        }
+      }
+    }
+  });
+
+  for (const [title, effort] of [['main', 'high'], ['parent', 'medium'], ['legacy', null]]) {
+    const row = overview.sessions.find(sessionRow => sessionRow.title === title);
+    assert.equal(row?.reasoningEffort, effort);
+    assert.equal(overview.topology.endpoints.find(endpoint => endpoint.id === row.key)?.reasoningEffort, effort);
+  }
+});
+
 test('buildSessionList folds subagents, background reviews, and Grok Bot runs while preserving Fleet and Topology parity', () => {
   const now = Date.now();
   const nowIso = new Date(now).toISOString();

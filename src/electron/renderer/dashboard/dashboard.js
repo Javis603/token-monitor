@@ -19,6 +19,7 @@ const homeLimitMotionApi = window.TokenMonitorHomeLimitMotion;
 const limitResetMotionApi = window.TokenMonitorLimitResetMotion;
 const limitResetAnimatorApi = window.TokenMonitorLimitResetAnimator;
 const sessionLiveApi = window.TokenMonitorSessionLive;
+const sessionRowsApi = window.TokenMonitorSessionRows;
 const sessionActivityProjectionApi = window.TokenMonitorSessionActivityProjection;
 const sessionTitleDisplayApi = window.TokenMonitorSessionTitleDisplay;
 const allTimeSessionsApi = window.TokenMonitorAllTimeSessions;
@@ -1864,14 +1865,28 @@ function sessionGroupBadgeLabel(s) {
   return '';
 }
 
-function topologyEndpointSubText(ep, isSessionMode) {
-  if (!isSessionMode) return ep.latestModel && ep.latestModel !== ep.title ? ep.latestModel : (ep.clientLabel || '');
+function sessionEffortHtml(effort) {
+  const label = escapeHtml(t('session.reasoningEffortLabel', { effort }));
+  return `<span class="dash-session-effort" aria-label="${label}">${escapeHtml(effort)}</span>`;
+}
+
+function topologyEndpointSubHtml(ep, isSessionMode) {
+  if (!isSessionMode) {
+    const text = ep.latestModel && ep.latestModel !== ep.title ? ep.latestModel : (ep.clientLabel || '');
+    return `<span class="topo-node-sub-text">${escapeHtml(text)}</span>`;
+  }
   const countLabel = sessionGroupBadgeLabel(ep);
   const rawModel = ep.modelLabel || ep.latestModel;
   const modelOrClient = (ep.groupKind === 'background-review' || ep.groupKind === 'grok-bot')
     ? (rawModel && rawModel !== ep.title ? rawModel : '')
     : (rawModel && rawModel !== ep.title ? rawModel : (ep.clientLabel || ''));
-  return [modelOrClient, countLabel].filter(Boolean).join(' · ');
+  const effort = sessionRowsApi.sessionReasoningEffortForRow(ep);
+  if (!effort) {
+    return `<span class="topo-node-sub-text">${escapeHtml([modelOrClient, countLabel].filter(Boolean).join(' · '))}</span>`;
+  }
+  const model = modelOrClient ? `<span class="topo-node-sub-text">${escapeHtml(modelOrClient)}</span>` : '';
+  const count = countLabel ? `<span class="topo-node-sub-text"> · ${escapeHtml(countLabel)}</span>` : '';
+  return `<span class="topo-session-meta">${model}${model ? ' · ' : ''}${sessionEffortHtml(effort)}${count}</span>`;
 }
 
 const CLIENT_MARK_LIMIT = 3;
@@ -1932,6 +1947,8 @@ function sessionRowParts(s, overview) {
   if (s.projectLabel) metaParts.push(`<span>${escapeHtml(s.projectLabel)}</span>`);
   const modelText = s.modelLabel || s.latestModel;
   if (modelText) metaParts.push(`<span>${escapeHtml(modelText)}</span>`);
+  const effort = sessionRowsApi.sessionReasoningEffortForRow({ client: s.client, reasoningEffort: s.reasoningEffort });
+  if (effort) metaParts.push(sessionEffortHtml(effort));
 
   const subExtras = [];
   const groupBadge = sessionGroupBadgeLabel(s);
@@ -2388,7 +2405,8 @@ function showTopologyTooltip(kind, id, anchorEl) {
     head = ep.title;
     rows.push([t('dashboard.hero.tokens'), formatCompact(ep.totalTokens)]);
     rows.push([t('dashboard.hero.cost'), formatCost(ep.costUsd, ep.unpricedTokens)]);
-    if (ep.modelLabel || ep.latestModel) rows.push([t('dashboard.stack.model'), ep.modelLabel || ep.latestModel]);
+    const modelMetadata = sessionRowsApi.sessionModelMetadataLabel(ep);
+    if (modelMetadata) rows.push([t('dashboard.stack.model'), modelMetadata]);
     const groupBadge = sessionGroupBadgeLabel(ep);
     if (groupBadge) rows.push([t('dashboard.work.sessions'), groupBadge]);
     if (ep.context) rows.push([t('dashboard.sessions.context'), `${ep.context.displayPercent}%`]);
@@ -2667,7 +2685,7 @@ function renderTopology(overview, revealed = false, cardRateSamples = {}) {
       ? `<span class="dash-session-brand row-icon ${escapeHtml(ep.iconClass)}" aria-hidden="true"></span>`
       : `<span class="dash-bd-swatch" data-c="${accent}"></span>`;
     const stateHtml = isSessionMode ? sessionStateIconHtml(ep.activityState) : '';
-    const subLeft = topologyEndpointSubText(ep, isSessionMode);
+    const subLeft = topologyEndpointSubHtml(ep, isSessionMode);
     const rightMeta = ep.context
       ? `<span class="home-session-context"${ep.context.tone ? ` data-tone="${escapeHtml(ep.context.tone)}"` : ''}><span class="home-session-context-meter"><span class="home-session-context-fill" data-w="${Math.max(0, Math.min(1, Number(ep.context.displayPercent || 0) / 100)).toFixed(3)}"></span></span><span class="home-session-context-value">${ep.context.displayPercent}%</span></span>`
       : `<span>${escapeHtml(formatCost(ep.costUsd, ep.unpricedTokens))}</span>`;
@@ -2677,7 +2695,7 @@ function renderTopology(overview, revealed = false, cardRateSamples = {}) {
       + `<span class="topo-node-ident">${iconHtml}${stateHtml}<span class="topo-node-title">${escapeHtml(ep.title)}</span></span>`
       + `<span class="topo-node-val">${escapeHtml(formatCompact(ep.totalTokens))}</span>`
       + `</div>`
-      + `<div class="topo-node-sub"><span class="topo-node-sub-text">${escapeHtml(subLeft)}</span>${rightMeta}</div>`
+      + `<div class="topo-node-sub">${subLeft}${rightMeta}</div>`
       + `</div>`;
   }).join('');
 

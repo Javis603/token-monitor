@@ -2446,6 +2446,7 @@
             projectLabel: String(s.projectLabel || ''),
             latestModel: String(s.latestModel || ''),
             modelLabel: String(s.modelLabel || s.latestModel || ''),
+            reasoningEffort: s.reasoningEffort,
             iconClass: String(s.iconClass || ''),
             color: String(s.color || '#6ab4f0'),
             totalTokens: Math.max(0, n(s.totalTokens)),
