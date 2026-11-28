@@ -87,6 +87,7 @@ function atlasPlaybackFixture({ secondY = 90, atlasSize = 20 } = {}) {
   const window = {};
   let runScheduled;
   let rejectPlayback = false;
+  let failNextBuild = false;
   const source = readFileSync(path.join(__dirname, '../../src/electron/renderer/dashboard/flowAtlas.js'), 'utf8');
   vm.runInNewContext(source, {
     window,
@@ -115,6 +116,10 @@ function atlasPlaybackFixture({ secondY = 90, atlasSize = 20 } = {}) {
   const batches = [];
   const build = async beams => {
     batches.push(Array.from(beams, ({ strokes }) => strokes[0].width));
+    if (failNextBuild) {
+      failNextBuild = false;
+      return null;
+    }
     return beams.map(() => ({ width: atlasSize, height: atlasSize, rows: 7, columns: 8, frameCount: 54, left: 0, top: 0, stop: 870, step: 1000 / 60, png: 'fixture' }));
   };
   const update = () => window.dashboardFlowAtlas.update(canvas, svg, true, false, build);
@@ -125,6 +130,7 @@ function atlasPlaybackFixture({ secondY = 90, atlasSize = 20 } = {}) {
   }
   return {
     overlays, edges, batches, update, flush,
+    failBuildOnce: () => { failNextBuild = true; },
     rejectPlayback: () => { rejectPlayback = true; },
     clear: () => window.dashboardFlowAtlas.clear()
   };
@@ -190,4 +196,32 @@ test('Live Flow retries a beam skipped for memory when another atlas retires', a
   await flush();
   assert.equal(edges[0].hasAttribute('data-atlas'), true);
   assert.deepEqual(batches, [[3, 3], [3]]);
+});
+
+test('Live Flow retries a failed atlas once without rebuilding steady edges', async () => {
+  const fixture = atlasPlaybackFixture();
+  const { edges, overlays, batches, update, flush } = fixture;
+  update();
+  await flush();
+  const [steady] = overlays;
+
+  edges[1].width = '3.01';
+  fixture.failBuildOnce();
+  update();
+  await flush();
+  assert.deepEqual([...overlays], [steady]);
+  update();
+  await flush();
+  assert.equal(edges[1].hasAttribute('data-atlas'), true);
+  assert.equal([...overlays][0], steady);
+  assert.deepEqual(batches, [[3, 3], [3.01], [3.01]]);
+
+  edges[1].width = '3.02';
+  fixture.rejectPlayback();
+  for (let i = 0; i < 3; i++) {
+    update();
+    await flush();
+  }
+  assert.deepEqual([...overlays], [steady]);
+  assert.deepEqual(batches, [[3, 3], [3.01], [3.01], [3.02], [3.02]]);
 });

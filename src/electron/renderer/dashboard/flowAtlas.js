@@ -5,7 +5,7 @@ const dashboardFlowAtlas = (() => {
   /** @typedef {import('../../dashboardFlowAtlas').AtlasBeam} AtlasBeam */
   /** @typedef {import('../../dashboardFlowAtlas').BeamAtlas} BeamAtlas */
   /** @typedef {{overlay:SVGForeignObjectElement, animation:Animation, bytes:number}} Playback */
-  /** @typedef {{beam:AtlasBeam, edge:SVGGElement, delay:number, key:string, playback?:Playback, blockedBytes?:number}} Plan */
+  /** @typedef {{beam:AtlasBeam, edge:SVGGElement, delay:number, key:string, playback?:Playback, blockedBytes?:number, retry?:'pending'|'used'}} Plan */
   /** @type {Map<SVGGElement, Plan>} */
   const current = new Map();
   /** @type {Set<Plan>} */
@@ -75,8 +75,16 @@ const dashboardFlowAtlas = (() => {
       if (!plans.length) return;
       busy = true;
       try {
-        const atlases = await build(plans.map(plan => plan.beam));
-        if (!atlases) return;
+        let atlases;
+        try {
+          atlases = await build(plans.map(plan => plan.beam));
+        } catch {
+          atlases = null;
+        }
+        if (!atlases) {
+          for (const plan of plans) plan.retry ??= 'pending';
+          return;
+        }
         for (const [index,plan] of plans.entries()) {
           const atlas = atlases[index];
           if (!atlas || current.get(plan.edge) !== plan) continue;
@@ -95,11 +103,9 @@ const dashboardFlowAtlas = (() => {
             plan.playback = {overlay,animation,bytes};
             playbackBytes += bytes;
           } catch {
-            // This edge keeps its live SVG if decoding or playback fails.
+            plan.retry ??= 'pending';
           }
         }
-      } catch {
-        // The live SVG stays in use if preparing an image or its worker fails.
       } finally {
         busy = false;
         schedule(build);
@@ -155,7 +161,11 @@ const dashboardFlowAtlas = (() => {
     for (const plan of plans) {
       const retained = current.get(plan.edge);
       if (retained) {
-        if (retained.blockedBytes && playbackBytes + retained.blockedBytes <= maxPlaybackBytes) {
+        // Retry once on a normal layout while keeping the SVG active.
+        if (retained.retry === 'pending') {
+          retained.retry = 'used';
+          pending.add(retained);
+        } else if (retained.blockedBytes && playbackBytes + retained.blockedBytes <= maxPlaybackBytes) {
           retained.blockedBytes = undefined;
           pending.add(retained);
         }
