@@ -8565,9 +8565,10 @@ function applyHomeActivityScroll(scroller) {
     followEnd: state.homeActivityFollowEnd,
     savedLeft: state.homeActivityScrollLeft
   });
-  if (Math.abs(scroller.scrollLeft - target) > 0.5) {
-    homeActivityProgrammaticScrollers.add(scroller);
+  const previousLeft = scroller.scrollLeft;
+  if (Math.abs(previousLeft - target) > 0.5) {
     scroller.scrollLeft = target;
+    if (scroller.scrollLeft !== previousLeft) homeActivityProgrammaticScrollers.add(scroller);
   }
   scroller.classList.toggle('is-scrolled', target > 2);
 }
@@ -8585,6 +8586,10 @@ function setupHomeActivityScroller(scroller, onReady = null) {
   };
   scroller.addEventListener('scroll', () => {
     scroller.classList.toggle('is-scrolled', scroller.scrollLeft > 2);
+    // Our own restore dispatches its scroll event a frame later. While the window is
+    // being resized the width has changed again by then, so recording that event would
+    // turn the right-edge snap into a user scroll back. The hover listener consumes it.
+    if (homeActivityProgrammaticScrollers.has(scroller)) return;
     const record = homeOverviewApi.homeActivityScrollRecord({
       scrollLeft: scroller.scrollLeft,
       scrollWidth: scroller.scrollWidth,
@@ -8605,7 +8610,10 @@ function setupHomeActivityScroller(scroller, onReady = null) {
   scroller.addEventListener('pointermove', (event) => {
     if (!drag) return;
     event.preventDefault();
+    const previousLeft = scroller.scrollLeft;
     scroller.scrollLeft = drag.left - (event.clientX - drag.x);
+    // The browser may combine this drag with a pending restore's scroll event.
+    if (scroller.scrollLeft !== previousLeft) homeActivityProgrammaticScrollers.delete(scroller);
   });
   const endDrag = (event) => {
     if (!drag) return;
