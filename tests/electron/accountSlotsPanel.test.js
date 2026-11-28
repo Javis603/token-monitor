@@ -743,7 +743,26 @@ test('a failing default row opens the same retained default editor from its reco
 });
 
 
-test('shared menu module navigates enabled controls, restores focus and retains native target semantics', () => {
+test('a successful remove retry clears the shared error after switching languages', async () => {
+  let locale = 'en';
+  const h = harness((key, params) => translate(locale, key, params));
+  const message = h.panel.element.querySelector('.slot-message');
+  const remove = () => {
+    const action = h.row('a').querySelector('.menu-destructive');
+    action.click();
+    return action.click();
+  };
+  h.ipc.remove = async () => { throw new Error('write failed'); };
+  await remove();
+  assert.equal(message.textContent, t('settings.slots.failed'));
+  locale = 'zh-TW';
+  h.ipc.remove = async () => ({ ok: true });
+  await remove();
+  assert.equal(message.textContent, '');
+  assert.equal(message.dataset.i18n, undefined);
+});
+
+test('shared menu navigates visible and enabled controls and restores focus', () => {
   const h = harness();
   const { create } = require('../../src/electron/renderer/actionMenu');
   const menu = create(h.document, 'Actions', (text, fn, className) => {
@@ -751,8 +770,11 @@ test('shared menu module navigates enabled controls, restores focus and retains 
   });
   const first = new Node('button', h.document);
   const disabled = new Node('button', h.document); disabled.disabled = true;
+  const hidden = new Node('button', h.document); hidden.classList.add('hidden');
+  const hiddenRow = new Node('label', h.document); hiddenRow.classList.add('hidden');
+  hiddenRow.append(new Node('input', h.document));
   const last = new Node('button', h.document);
-  menu.popover.append(first, disabled, last);
+  menu.popover.append(first, disabled, hidden, hiddenRow, last);
   h.document.root.append(menu.element);
   assert.equal(menu.trigger.attributes.popovertarget, menu.popover.id);
   assert.equal(menu.popover.attributes.popover, 'auto');

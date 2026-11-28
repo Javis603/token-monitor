@@ -23,6 +23,7 @@ const providerPolicies = Object.freeze({
   opencode: require('../providers/opencode/corePolicy'),
   opendesign: require('../providers/opendesign/corePolicy'),
   qoder: require('../providers/qoder/corePolicy'),
+  qwenwork: require('../providers/qwenwork/corePolicy'),
   workbuddy: require('../providers/workbuddy/corePolicy')
 });
 module.exports = { providerPolicies };

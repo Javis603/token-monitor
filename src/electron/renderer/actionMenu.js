@@ -21,7 +21,8 @@
     const icon = el(document, 'span', 'plugin-more-icon'); icon.setAttribute('aria-hidden', 'true'); trigger.append(icon);
     trigger.setAttribute('popovertarget', popover.id); trigger.setAttribute('aria-controls', popover.id); trigger.setAttribute('aria-expanded', 'false');
     let keyboardOpen = false, focusLast = false;
-    const menuItems = () => [...popover.querySelectorAll('button:not(:disabled), input:not(:disabled)')].map(node => /** @type {HTMLElement} */ (node));
+    const menuItems = () => [...popover.querySelectorAll('button:not(:disabled), input:not(:disabled)')]
+      .filter(node => !node.closest('.hidden, [hidden]')).map(node => /** @type {HTMLElement} */ (node));
     trigger.addEventListener('click', /** @param {any} event */ event => { keyboardOpen = event.detail === 0; focusLast = false; });
     trigger.addEventListener('keydown', /** @param {any} event */ event => {
       if (event.key !== 'ArrowDown' && event.key !== 'ArrowUp') return;

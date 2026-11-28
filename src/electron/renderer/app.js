@@ -102,6 +102,7 @@ const LIMIT_PROVIDER_ACCOUNT_NODES = {
   antigravity: { group: 'antigravityAccountGroup', status: 'antigravityAccountStatus' },
   mimo: { group: 'mimoAccountGroup', status: 'mimoAccountStatus' },
   workbuddy: { group: 'workbuddyAccountGroup', status: 'workbuddyAccountStatus' },
+  qwenwork: { group: 'qwenworkAccountGroup', status: 'qwenworkAccountStatus' },
   // The only header still summarising this device; the others count every device's accounts.
   minimax: { group: 'minimaxAccountGroup', status: 'minimaxStatus', localSummary: true },
   thirdparty: { group: 'thirdpartyAccountGroup', status: 'thirdpartyStatus' }
@@ -11908,6 +11909,7 @@ function syncSettingsForm() {
   renderAntigravityStatus();
   renderWorkbuddyStatus();
   renderMimoStatus();
+  legacyAccountOwners.qwenwork.refreshReadings();
   renderViewPreferences();
   renderToolPreferences();
   renderLimitProviderCheckboxes();
@@ -19837,6 +19839,21 @@ function createLegacyAccountOwners() {
  Object.defineProperty(state, 'minimaxAccountExpanded', { configurable: true, get: () => owners.minimax.state.minimaxAccountExpanded, set: value => { owners.minimax.state.minimaxAccountExpanded = value; } });
  owners.thirdparty = window.TokenMonitorThirdpartyAccountOwner.create({ document, window, providerLabel: LIMIT_PROVIDERS.find(entry => entry.id === 'thirdparty').label, initial: {thirdPartyAccountExpanded: state.thirdPartyAccountExpanded}, getSettings: () => state.settings, getAccountContext: () => limitAccountContext('thirdparty'), preserveScroll: preserveSettingsPanelScroll, localProviderStatuses, applySettings: settings => applyPersistedSettings(settings, state.settingsPushRevision), setAccountGroupExpanded: (...args) => setAccountGroupExpanded(...args), t: (...args) => t(...args), limitProviderPresentationApi, optionalFiniteNumber: (...args) => optionalFiniteNumber(...args), formatCompactMoney: (...args) => formatCompactMoney(...args), currentLocale: (...args) => currentLocale(...args), limitProviderEnabled: (...args) => limitProviderEnabled(...args), accountShellApi, renderSettingsSummaries: (...args) => renderSettingsSummaries(...args), setAccountShellError: (...args) => setAccountShellError(...args), isSettingsSurfaceVisible: (...args) => isSettingsSurfaceVisible(...args), renderAccountShellError: (...args) => renderAccountShellError(...args), accountProfileRequests, accountProfileSaves, refreshStats: (...args) => refreshStats(...args) });
  Object.defineProperty(state, 'thirdPartyAccountExpanded', { configurable: true, get: () => owners.thirdparty.state.thirdPartyAccountExpanded, set: value => { owners.thirdparty.state.thirdPartyAccountExpanded = value; } });
+ owners.qwenwork = window.TokenMonitorQwenworkAccountOwner.create({
+   document, bridge: window.tokenMonitor.qwenwork, accountShellApi, limitProviderPresentationApi,
+   accountSlotsPanel: window.TokenMonitorAccountSlotsPanel,
+   legacyAccountList: window.TokenMonitorLegacyAccountList,
+   getAccountContext: () => limitAccountContext('qwenwork'),
+   maskEmail: value => state.settings?.maskLimitAccountEmails === true ? accountIdentityApi.maskEmailAddress(value) : value,
+   preserveScroll: preserveSettingsPanelScroll,
+   getSettings: () => state.settings,
+   getReading: () => strictLocalProviderStatuses('qwenwork')[0],
+   isEnabled: () => limitProviderEnabled('qwenwork'),
+   setExpanded: expanded => setAccountGroupExpanded('qwenwork', expanded),
+   refreshQuota: () => refreshLimitAccount({ provider: 'qwenwork' }),
+   refreshStats: () => refreshStats(),
+   t: (...args) => t(...args)
+ });
  return owners;
 }
 legacyAccountOwners = createLegacyAccountOwners();

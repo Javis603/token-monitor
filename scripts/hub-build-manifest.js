@@ -27,6 +27,7 @@ const WORKER_SHARED_MODULES = Object.freeze([
   'providers/opencode/corePolicy.js',
   'providers/opendesign/corePolicy.js',
   'providers/qoder/corePolicy.js',
+  'providers/qwenwork/corePolicy.js',
   'providers/workbuddy/corePolicy.js',
   'providers/workbuddy/identity.js',
   'usage.js',

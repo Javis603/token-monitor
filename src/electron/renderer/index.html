@@ -1155,6 +1155,20 @@
                 <div id="workbuddyAccountErrorMessage" class="settings-note error hidden" role="alert"></div>
               </div>
             </div>
+            <div id="qwenworkAccountGroup" class="settings-group cursor-account-group">
+              <button id="qwenworkSettingsToggle" class="settings-group-header cursor-settings-toggle" type="button" aria-expanded="false" aria-controls="qwenworkSettingsDetails">
+                <span data-i18n="settings.qwenwork.title">QwenWork Account</span>
+                <span class="cursor-settings-summary">
+                  <span id="qwenworkAccountStatus" class="cursor-status-pill">Not configured</span>
+                  <span class="cursor-disclosure-icon" aria-hidden="true"></span>
+                </span>
+              </button>
+              <div id="qwenworkSettingsDetails" class="cursor-settings-details hidden">
+                <div id="qwenworkAccountList" class="managed-account-list"></div>
+                <div id="qwenworkLoginStatus" class="settings-note hidden" role="status" aria-live="polite"></div>
+                <div id="qwenworkErrorMessage" class="settings-note error hidden" role="alert"></div>
+              </div>
+            </div>
             <div id="minimaxAccountGroup" class="settings-group cursor-account-group">
               <button id="minimaxSettingsToggle" class="settings-group-header cursor-settings-toggle" type="button" aria-expanded="false" aria-controls="minimaxSettingsDetails">
                 <span data-i18n="settings.minimax.title">MiniMax Accounts</span>
@@ -1926,6 +1940,7 @@
   <script src="limits/providerOwners/opencode.js"></script>
   <script src="limits/providerOwners/thirdparty.js"></script>
   <script src="limits/providerOwners/workbuddy.js"></script>
+  <script src="limits/providerOwners/qwenwork.js"></script>
   <script src="app.js"></script>
   </body>
 </html>

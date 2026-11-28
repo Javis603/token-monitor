@@ -3263,3 +3263,175 @@ test('Alibaba CLI readings keep saved Cookie setup reachable while web readings 
     assert.equal(elements.get('alibabaLogoutButton').classList.contains('hidden'), false);
   }
 });
+
+
+function qwenworkAccountOwner({ source = 'settings', enabled = true, readStatus = 'linked', cancelSignIn = async () => {} } = {}) {
+  const { create } = require('../../src/electron/renderer/limits/providerOwners/qwenwork');
+  const hidden = new Map();
+  const handlers = new Map();
+  const output = {};
+  let finishSignIn;
+  let panel;
+  let accounts;
+  const sourceId = { settings: 'oauth', environment: 'api', magpie: 'local' }[source];
+  const owner = create({
+    document: { getElementById: id => ({
+      classList: { toggle: (_name, value) => hidden.set(id, value) },
+      addEventListener: (_name, fn) => handlers.set(id, fn), append() {}
+    }) },
+    getSettings: () => ({ qwenworkSessionConfigured: true, qwenworkSessionSource: source }),
+    getReading: () => ({ status: 'ok', source: sourceId }),
+    getAccountContext: () => ({ providerEnabled: enabled }),
+    legacyAccountList: { mountEditor({ editor }) {
+      handlers.set('cancel', editor.cancel);
+      return { sync: () => hidden.set('cancel', !editor.isOpen() || !editor.canCancel()) };
+    } },
+    accountSlotsPanel: { createPanel(options) {
+      panel = options;
+      return {
+        element: { querySelector: () => ({ classList: { toggle: (_name, value) => hidden.set('add', value) } }) },
+        update: rows => { accounts = rows; }
+      };
+    } },
+    isEnabled: () => enabled,
+    accountShellApi: { render: value => Object.assign(output, value) },
+    limitProviderPresentationApi: { apiKeyAccountStatus: () => readStatus },
+    bridge: { signIn: () => new Promise(resolve => { finishSignIn = resolve; }), cancelSignIn, onLoginStatus() {} },
+    t: key => key,
+    refreshQuota() {}
+  });
+  owner.setup();
+  return { hidden, handlers, output, panel, accounts, finish: () => finishSignIn({ ok: false }) };
+}
+
+test('QwenWork keeps sign-out reachable and only offers refresh for monitored local accounts', () => {
+  for (const enabled of [true, false]) {
+    const { accounts, panel } = qwenworkAccountOwner({ enabled });
+    assert.equal(panel.extraActions(() => accounts[0])[0].visible(), enabled);
+    assert.equal(panel.extraActions(() => ({ source: 'remote' }))[0].visible(), false);
+    assert.equal(panel.capabilities(accounts[0]).remove, true);
+  }
+});
+
+test('QwenWork fallback accounts can start and cancel a stored browser sign-in', async () => {
+  for (const source of ['environment', 'magpie', 'settings']) {
+    const { hidden, handlers, finish, panel } = qwenworkAccountOwner({ source });
+    assert.equal(hidden.get('add'), source === 'settings');
+    if (source === 'settings') continue;
+    const signIn = panel.onAdd();
+    assert.equal(hidden.get('cancel'), false);
+    await handlers.get('cancel')();
+    assert.equal(hidden.get('cancel'), true);
+    finish();
+    await signIn;
+  }
+});
+
+test('QwenWork login preserves disabled limits with an existing provider selection', async () => {
+  const main = fs.readFileSync(path.join(rendererDir, '..', 'main.js'), 'utf8');
+  const start = main.indexOf("  ipcMain.handle('qwenwork:signIn'");
+  const end = main.indexOf("  ipcMain.handle('qwenwork:cancelSignIn'", start);
+  for (const selection of ['claude', 'plugin:sample-plugin:one', 'claude,plugin:sample-plugin:one']) {
+    const settings = { limitsEnabled: false, limitProviders: selection, limitProviderOrder: 'codex,claude', homeLimitProviderOrder: 'codex' };
+    const calls = [];
+    let handler;
+    vm.runInNewContext(main.slice(start, end), {
+      ipcMain: { handle: (_name, fn) => { handler = fn; } },
+      initialLimitProvidersPending: true, qwenworkLoginController: null, qwenworkLoginFlowId: '', AbortController,
+      runQwenworkDeviceFlowLogin: async () => ({ session: { access: 'fixture' } }),
+      qwenworkAuthBaseUrl: () => '', qwenworkBaseUrl: () => '', process: { env: {} },
+      shell: { openExternal() {} }, electronLimitsFetch() {}, settings,
+      migrateLimitProviders: value => require('../../src/electron/plugins/limits').desktopProviderPreference(
+        value, require('../../src/shared/limits/collector').parseLimitProviders
+      ),
+      saveSettings() {}, pushSettingsToRenderer() {},
+      deviceRuntimeHandle: { reconfigureLimits: config => calls.push(['config', config.limitProviders]) },
+      electronLimitsConfig: () => ({ limitProviders: settings.limitProviders }),
+      queueLimitInvalidation: () => { calls.push(['invalidate']); }
+    });
+    const result = await handler({ sender: { isDestroyed: () => false, send() {} } }, { flowId: 'fixture' });
+    assert.equal(result.ok, true);
+    assert.deepEqual(calls, [['config', selection + ',qwenwork'], ['invalidate']]);
+    assert.equal(settings.limitsEnabled, false);
+    assert.equal(settings.limitProviderOrder, 'codex,claude');
+    assert.equal(settings.homeLimitProviderOrder, 'codex');
+  }
+});
+
+test('QwenWork sign-in consumes the pending first-run provider seed only after the save', async () => {
+  const main = fs.readFileSync(path.join(rendererDir, '..', 'main.js'), 'utf8');
+  const start = main.indexOf("  ipcMain.handle('qwenwork:signIn'");
+  const end = main.indexOf("  ipcMain.handle('qwenwork:cancelSignIn'", start);
+  for (const [saveFails, expectedOk, expectedPending] of [[false, true, false], [true, false, true]]) {
+    const context = {
+      ipcMain: { handle: (_name, fn) => { context.handler = fn; } },
+      initialLimitProvidersPending: true, qwenworkLoginController: null, qwenworkLoginFlowId: '', AbortController,
+      runQwenworkDeviceFlowLogin: async () => ({ session: { access: 'fixture' } }),
+      qwenworkAuthBaseUrl: () => '', qwenworkBaseUrl: () => '', process: { env: {} },
+      shell: { openExternal() {} }, electronLimitsFetch() {}, settings: { limitsEnabled: false, limitProviders: '' },
+      migrateLimitProviders: value => require('../../src/electron/plugins/limits').desktopProviderPreference(
+        value, require('../../src/shared/limits/collector').parseLimitProviders
+      ),
+      saveSettings: () => { if (saveFails) throw new Error('disk'); },
+      pushSettingsToRenderer() {}, deviceRuntimeHandle: null,
+      electronLimitsConfig: () => ({}), queueLimitInvalidation: () => {}
+    };
+    vm.runInNewContext(main.slice(start, end), context);
+    const result = await context.handler({ sender: { isDestroyed: () => false, send() {} } }, { flowId: 'fixture' });
+    assert.equal(result.ok, expectedOk);
+    assert.equal(context.initialLimitProvidersPending, expectedPending);
+    if (!saveFails) assert.equal(context.settings.limitsEnabled, true);
+  }
+});
+
+test('QwenWork account status reports disabled, unchecked and failed states distinctly', () => {
+  for (const [readStatus, expected] of [
+    ['disabled', 'settings.limits.status.disabled'],
+    ['notChecked', 'settings.common.notChecked'],
+    ['error', 'settings.common.error'],
+    ['unavailable', 'settings.qwenwork.statusUnavailable']
+  ]) {
+    const { output } = qwenworkAccountOwner({ readStatus });
+    assert.equal(output.statusText, expected, readStatus);
+  }
+});
+
+test('QwenWork cancel keeps the flow cancelable when the cancel request fails', async () => {
+  let attempts = 0;
+  const { hidden, handlers, output, finish, panel } = qwenworkAccountOwner({
+    source: 'magpie',
+    cancelSignIn: async () => {
+      if (++attempts === 1) throw new Error('cancel IPC failed');
+    }
+  });
+  const signIn = panel.onAdd();
+  await handlers.get('cancel')();
+  assert.equal(hidden.get('cancel'), false);
+  assert.match(output.errorText, /cancel IPC failed/);
+  await handlers.get('cancel')();
+  assert.equal(hidden.get('cancel'), true);
+  finish();
+  await signIn;
+});
+
+test('QwenWork upgrade leaves saved selections and custom orders alone', () => {
+  const main = fs.readFileSync(path.join(rendererDir, '..', 'main.js'), 'utf8');
+  const selectionStart = main.indexOf('    if (saved.limitProviders !== undefined) {');
+  const selectionEnd = main.indexOf('    if (saved.clientDisplayOrder !== undefined)', selectionStart);
+  const homeStart = main.indexOf('    if (saved.homeLimitProviderOrder !== undefined) {');
+  const homeEnd = main.indexOf('    if (saved.hiddenHomeLimitProviders !== undefined)', homeStart);
+  for (const selection of [undefined, '', 'claude,codex']) {
+    const saved = { limitProviderOrder: 'codex,claude', homeLimitProviderOrder: 'claude' };
+    if (selection !== undefined) saved.limitProviders = selection;
+    const merged = { limitProviders: 'codex' };
+    const context = { saved, merged,
+      migrateLimitProviders: value => value, migrateLimitProviderOrder: value => value,
+      migrateHomeLimitProviderOrder: value => value,
+      migrateQwenworkLimitProvider: () => { throw new Error('upgrade must preserve provider selection'); },
+      migrateQwenworkHomeLimitProvider: () => { throw new Error('upgrade must preserve Home order'); } };
+    vm.runInNewContext(main.slice(selectionStart, selectionEnd) + main.slice(homeStart, homeEnd), context);
+    assert.equal(merged.limitProviders, selection === undefined ? 'codex' : selection);
+    assert.equal(merged.limitProviderOrder, 'codex,claude');
+    assert.equal(merged.homeLimitProviderOrder, 'claude');
+  }
+});

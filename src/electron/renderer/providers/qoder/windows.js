@@ -6,17 +6,17 @@
   if (typeof module === 'object' && module.exports) module.exports = factory;
   if (root) (root.TokenMonitorProviderWindows ||= {}).qoder = factory;
 })(/** @type {any} */ (typeof window !== 'undefined' ? window : globalThis), /** @param {Record<string, any>} deps */ function createWindows(deps) {
-  const { windowsForKind, limitWindowNode, providerWindowText } = deps;
+  const { windowsForKind, limitWindowNode, providerWindowText, isCreditsWindow, creditsBalanceValue } = deps;
 
   /** @param {any} provider @param {any} color @param {any} windows @returns {any} */ function renderWindows(provider, color, windows) {
-    windows.classList.add('limit-windows-qoder');
+    windows.classList.add(`limit-windows-${provider.provider}`);
     for (const credits of windowsForKind(provider, 'billing')) {
       const node = limitWindowNode(
         credits?.label || 'Credits',
         credits,
         color,
         0.68,
-        null,
+        isCreditsWindow(credits) ? creditsBalanceValue(provider, credits) : null,
         providerWindowText(provider, credits).detail
       );
       node.classList.add('limit-window-wide');

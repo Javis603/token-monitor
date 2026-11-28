@@ -224,7 +224,13 @@
     let editorPanel;
     let editorOpenUrl;
     let editorRevision = 0;
-    const error = () => { message.textContent = tr('failed'); };
+    const operationErrorKey = 'settings.slots.failed';
+    const error = () => { localized(message, operationErrorKey); };
+    const clearOperationError = () => {
+      if (message.dataset.i18n !== operationErrorKey) return;
+      delete message.dataset.i18n;
+      message.textContent = '';
+    };
     const enqueue = operation => {
       const task = operationLane.then(async () => {
         try {
@@ -233,6 +239,7 @@
             if (result.errorCode !== 'slotLimit') error();
             return result;
           }
+          clearOperationError();
           if (result.presentation) presentation = result.presentation[form.id] || {};
           if (result.accounts) {
             slots = result.accounts;
@@ -412,6 +419,7 @@
           } else if (result.saved) {
             clearInput();
             preserveScroll(() => { closeEditor(); add.focus({ preventScroll: true }); });
+            clearOperationError();
             message.textContent = result.verdict === 'valid' ? '' : t('settings.common.credentialSavedUnconfirmed', { provider: label });
           } else {
             const key = result.status === 'required' ? 'credentialRequired' : result.status === 'invalidFormat' ? 'credentialInvalidFormat' : 'credentialRejected';
@@ -628,10 +636,11 @@
         const separator = () => { const node = make('hr', 'action-menu-separator'); node.setAttribute('role', 'separator'); return node; };
         const replace = action(`replace${credentialWord}`, () => openEditor(item.slot));
         const additionalActions = extraActions(() => item.slot);
-        item.hasExtraActions = additionalActions.length > 0;
-        for (const entry of additionalActions) {
-          shared.appendItems(button(entry.label, () => { closeMenu(); return entry.run(item.slot); }));
-        }
+        item.extraActions = additionalActions.map(entry => {
+          const node = button(entry.label, () => { closeMenu(); return entry.run(item.slot); });
+          shared.appendItems(node);
+          return { node, visible: entry.visible };
+        });
         if (source === 'remote') {
           shared.appendItems(action('rename', rename), up, down);
           menu.append(localized(make('div', 'settings-note slot-remote-note'), 'settings.slots.remoteNote'));
@@ -883,7 +892,8 @@
           item.detail.classList.toggle('hidden', !detail);
         }
         const permission = permissions(slot);
-        item.menuTrigger.classList.toggle('hidden', !item.hasExtraActions
+        for (const { node, visible } of item.extraActions || []) node.classList.toggle('hidden', visible?.() === false);
+        item.menuTrigger.classList.toggle('hidden', !item.extraActions?.some(({ node }) => !node.classList.contains('hidden'))
           && ['rename', 'move', 'replace', 'setEnabled', 'remove'].every(operation => permission[operation] === false));
         item.renameButton.disabled = isBusy();
         item.renameAction?.classList.toggle('hidden', permission.rename === false);
