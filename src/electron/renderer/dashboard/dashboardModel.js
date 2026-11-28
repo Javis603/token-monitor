@@ -2765,6 +2765,7 @@
    *   rateSamplesByDevice?: Record<string, any[]> | Map<string, any[]>,
    *   syncedPagesLoaded?: boolean,
    *   rateMode?: 'speed' | 'burn',
+   *   clientColorFor?: (client: string) => string,
    *   sessionLabels?: any,
    *   topology?: { maxDevices?: number, maxHubs?: number, maxEndpoints?: number, flowMode?: 'sync' | 'stagger' },
    *   nowMs?: number
@@ -2951,6 +2952,7 @@
       settings,
       statsMode,
       sessions,
+      colorFor: options.clientColorFor,
       nowMs
     });
     const quotas = buildQuotaAccounts(stats, settings, nowMs);

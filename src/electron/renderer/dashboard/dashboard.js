@@ -4093,6 +4093,8 @@ function renderNow() {
     rateSamplesByDevice,
     syncedPagesLoaded: isSyncedSessionPagesLoaded(),
     rateMode: state.rateMode,
+    // Workspace bars, drawer shares and tool swatches use the same lifted palette.
+    clientColorFor: (client) => displayColor(charts.clientColors[client] || charts.clientColors.default),
     sessionLabels: {
       subagent: t('sessions.subagent'),
       subagentCount: (count) => t('sessions.subagentCount', { count }),
