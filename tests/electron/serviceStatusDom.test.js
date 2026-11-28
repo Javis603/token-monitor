@@ -378,7 +378,7 @@ test('project identity helpers load before the Projects row renderer', () => {
 test('Projects TOTAL view explains an incomplete cross-device breakdown', () => {
   const app = readRendererFile('app.js');
   const css = readRendererFile('styles.css');
-  assert.match(app, /projectRowsApi\.projectBreakdownIncomplete\(state\.stats, state\.period\)/);
+  assert.match(app, /projectRowsApi\.projectBreakdownIncomplete\(projectStats, state\.period\)/);
   assert.match(app, /hint\.className = 'breakdown-incomplete-hint'/);
   assert.doesNotMatch(app, /hint\.dataset\.key/);
   assert.match(app, /\.filter\(\(child\) => child !== existingHint\)/);

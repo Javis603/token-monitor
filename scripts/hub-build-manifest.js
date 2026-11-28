@@ -32,6 +32,7 @@ const WORKER_SHARED_MODULES = Object.freeze([
   'usage.js',
   'fixedRangeSync.js',
   'fixedRangeUploads.js',
+  'projectPages.js',
   'sessionLive.js',
   'sessionActivityProviders.js',
   'history.js',

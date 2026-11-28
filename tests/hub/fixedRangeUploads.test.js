@@ -606,3 +606,60 @@ for (const kind of ['Node', 'Worker']) test(`${kind} preserves the calendar and 
   assert.equal(Object.keys(incomplete.payload.month.sessions).length, 90);
   assert.equal((await send(legacyUrl + '&daily=1', { headers })).status, 404);
 });
+
+for (const kind of ['Node', 'Worker']) test(`${kind} publishes oversized all-time project rollups separately`, async (t) => {
+  const { base, send } = await backend(kind, t, true);
+  const { fetchProjectPages } = require('../../src/shared/projectPageClient');
+  const headers = { authorization: 'Bearer fixture', 'content-type': 'application/json' };
+  const id = 'paged-projects';
+  const endpoint = base + '/api/all-time-projects?deviceId=' + id;
+  const projects = Object.fromEntries(Array.from({ length: 2800 }, (_, i) => {
+    const label = `project-${String(i).padStart(4, '0')}`;
+    const models = Object.fromEntries(Array.from({ length: 36 }, (_, model) => [
+      `fixture-model-${String(model).padStart(2, '0')}`, 1
+    ]));
+    return [label, { label, tokens: 36, costUsd: 1, clients: { claude: 36 }, models }];
+  }));
+  const summary = {
+    deviceId: id, updatedAt: '2026-11-28T12:00:00.000Z', projectsEnabled: true,
+    allTime: { totalTokens: 100_800, projects }
+  };
+  const upload = createSyncPayloadUploader();
+  let puts = 0;
+  const changedRows = [];
+  const inspect = async (url, init) => {
+    const response = await send(url, init);
+    if (url === endpoint && init.method === 'PUT') {
+      puts++;
+      const body = JSON.parse(init.body);
+      if (body.baseRevision) changedRows.push(...body.changes);
+      assert.equal(response.status, 200);
+      if (puts === 1) {
+        assert.equal((await response.clone().json()).complete, false);
+        assert.equal((await send(endpoint, { headers })).status, 404);
+      }
+    }
+    return response;
+  };
+  const deliver = data => upload(inspect, base + '/api/ingest', { headers, summary: data });
+  const result = await deliver(summary);
+  assert.equal(result.response.status, 200);
+  assert.equal(result.payload.allTimeProjectsOmitted, true);
+  assert.ok(puts > 1);
+  const revision = result.payload.allTimeProjectsRevision;
+  const stats = await (await send(base + '/api/stats', { headers })).json();
+  assert.equal(stats.allTimeProjectRevisions[id], revision);
+  assert.equal(stats.periods.allTime.totalTokens, 100_800);
+  assert.deepEqual(await fetchProjectPages(send, base, id, revision, headers), projects);
+  const publishedPuts = puts;
+  await deliver({ ...summary, updatedAt: '2026-11-28T12:01:00.000Z' });
+  assert.equal(puts, publishedPuts, 'unchanged projects do not republish on a new usage timestamp');
+  const modified = { ...projects, 'project-0000': { ...projects['project-0000'], costUsd: 2 } };
+  const updated = await deliver({ ...summary, updatedAt: '2026-11-28T12:02:00.000Z',
+    allTime: { ...summary.allTime, projects: modified } });
+  assert.deepEqual(changedRows, [['project-0000', modified['project-0000']]]);
+  assert.deepEqual(await fetchProjectPages(send, base, id, updated.payload.allTimeProjectsRevision, headers), modified);
+  await deliver({ ...summary, updatedAt: '2026-11-28T12:03:00.000Z', projectsEnabled: false });
+  assert.equal((await send(endpoint, { headers })).status, 404);
+  assert.equal((await (await send(base + '/api/stats', { headers })).json()).allTimeProjectRevisions[id], undefined);
+});

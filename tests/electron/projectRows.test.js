@@ -307,3 +307,92 @@ test('project missing-price counts stay finite and bounded for rollups and sessi
     }
   }
 });
+
+test('paged projects supplement inline projects only for the matching Hub revision', async () => {
+  const { createPagedProjectReader } = require('../../src/electron/renderer/projectRows');
+  const { projectModelAliasStats } = require('../../src/electron/modelAliasPresentation');
+  const local = { label: 'Example', tokens: 12, costUsd: 1, clients: { codex: 12 }, models: { 'x/Llama.3': 5, 'y/Llama.3': 7 } };
+  const remote = { label: 'Example', tokens: 6, costUsd: 2, clients: { claude: 6 }, models: { 'llama-3': 6 } };
+  const stats = projectModelAliasStats({
+    snapshot: { id: 1, source: 7 },
+    allTimeProjectRevisions: { remote: 'revision' },
+    projectsIncomplete: true,
+    periods: { allTime: { totalTokens: 18, projects: { example: local } } },
+    devices: [
+      { deviceId: 'local', periods: { allTime: { projects: { example: local } } } },
+      { deviceId: 'remote', allTimeProjectsOmitted: true, periods: { allTime: {} } }
+    ]
+  }, {}, { grouping: 'duplicates' });
+  assert.deepEqual({ ...stats.periods.allTime.projects.example.models }, { 'Llama.3': 12 });
+  let reads = 0;
+  let rendered;
+  const repaint = new Promise(resolve => { rendered = resolve; });
+  const attach = createPagedProjectReader(async snapshot => {
+    reads++;
+    assert.equal(snapshot.source, 7);
+    return { example: remote };
+  }, rendered);
+  assert.equal(attach(stats, {}), stats);
+  await repaint;
+  const result = attach(stats, {});
+  const project = result.periods.allTime.projects.example;
+  assert.equal(project.tokens, 18);
+  assert.equal(project.costUsd, 3);
+  assert.deepEqual({ ...project.models }, { 'llama-3': 18 });
+  assert.equal(result.devices[1].periods.allTime.projects.example.models['llama-3'], 6);
+  assert.equal(result.projectsIncomplete, false);
+  assert.equal(reads, 1);
+  const revoked = { ...stats, allTimeProjectRevisions: {} };
+  assert.equal(attach(revoked, {}), revoked);
+  assert.equal(revoked.periods.allTime.projects.example.tokens, 12);
+});
+
+
+test('an unavailable device leaves verified project rows visible and the total incomplete', async () => {
+  const { createPagedProjectReader } = require('../../src/electron/renderer/projectRows');
+  const source = {
+    snapshot: { id: 1, source: 1 },
+    allTimeProjectRevisions: { a: 'rev-a', b: 'rev-b' },
+    periods: { allTime: { projects: {} } },
+    devices: ['a', 'b'].map(deviceId => ({ deviceId, allTimeProjectsOmitted: true }))
+  };
+  let finish;
+  const ready = new Promise(resolve => { finish = resolve; });
+  const reads = [];
+  const attach = createPagedProjectReader(async (_, id) => {
+    reads.push(id);
+    return id === 'a' ? { sample: { label: 'Sample', tokens: 7 } } : new Promise(() => {});
+  }, finish);
+  attach(source, {});
+  await ready;
+  const display = attach(source, {});
+  assert.equal(display.devices[0].periods.allTime.projects.sample.tokens, 7);
+  assert.equal(display.devices[1].allTimeProjectsOmitted, true);
+  assert.equal(display.projectsIncomplete, true);
+  const changed = attach({ ...source, allTimeProjectRevisions: { a: 'rev-a', b: 'new-rev-b' } }, {});
+  assert.equal(changed.devices[0].periods.allTime.projects.sample.tokens, 7);
+  assert.equal(changed.projectsIncomplete, true);
+  await Promise.resolve();
+  assert.deepEqual(reads, ['a', 'b', 'b']);
+});
+
+
+test('attaching a page applies chained explicit model aliases only once with grouping off', async () => {
+  const { createPagedProjectReader } = require('../../src/electron/renderer/projectRows');
+  const { projectModelAliasStats } = require('../../src/electron/modelAliasPresentation');
+  const settings = { modelAliases: { a: 'b', b: 'c' }, modelAliasGrouping: 'off' };
+  const inline = { label: 'Sample', tokens: 12, models: { a: 12 } };
+  const stats = projectModelAliasStats({
+    snapshot: { id: 1, source: 1 },
+    allTimeProjectRevisions: { remote: 'rev' },
+    periods: { allTime: { projects: { sample: inline } } },
+    devices: [{ deviceId: 'remote', allTimeProjectsOmitted: true }]
+  }, settings.modelAliases, { grouping: settings.modelAliasGrouping });
+  assert.deepEqual({ ...stats.periods.allTime.projects.sample.models }, { b: 12 });
+  let finish;
+  const ready = new Promise(resolve => { finish = resolve; });
+  const attach = createPagedProjectReader(async () => ({ sample: { label: 'Sample', tokens: 6, models: { a: 6 } } }), finish);
+  attach(stats, settings);
+  await ready;
+  assert.deepEqual({ ...attach(stats, settings).periods.allTime.projects.sample.models }, { b: 18 });
+});

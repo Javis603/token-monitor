@@ -23,6 +23,11 @@ const sessionActivityProjectionApi = window.TokenMonitorSessionActivityProjectio
 const sessionTitleDisplayApi = window.TokenMonitorSessionTitleDisplay;
 const allTimeSessionsApi = window.TokenMonitorAllTimeSessions;
 const fixedPeriodRangesApi = window.TokenMonitorFixedPeriodRanges;
+const readAllTimeProjects = window.TokenMonitorProjectRows?.createPagedProjectReader(
+  (snapshot, deviceId) => window.tokenMonitor.getSyncedFixedPeriod?.(snapshot.id, snapshot.source, 'allTimeProjects', deviceId),
+  render
+);
+
 const skylineApi = window.TokenMonitorActivitySkyline3D;
 const rendererDom = window.TokenMonitorDomReconcile.create();
 
@@ -4081,7 +4086,8 @@ function renderNow() {
     rateSamplesByDevice[devId] = devState.history.getSamples?.() || [];
   }
   const overview = modelApi?.buildScopedOverview?.({
-    stats: state.stats,
+    stats: state.periodKey === 'allTime' && state.stats?.allTimeProjectRevisions && readAllTimeProjects
+      ? readAllTimeProjects(state.stats, state.settings) : state.stats,
     history: state.history,
     periodKey: state.periodKey,
     selectedDeviceId: state.selectedDeviceId,
