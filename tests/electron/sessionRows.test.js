@@ -1236,7 +1236,7 @@ test('group sections keep main continuations above children without changing usa
       return this.selectors.get(selector);
     }
   });
-  const els = { sessionToolFilter: node(), breakdown: node(), sessionDetail: node(), sessionDetailHead: node() };
+  const els = { sessionToolFilter: node(), sessionEntryFilter: node(), breakdown: node(), sessionDetail: node(), sessionDetailHead: node() };
   const render = Function('els', 'document', 't', 'closeSessionDetail', 'bindHoverMarquee',
     'detailNote', 'formatNumber', 'formatDetailTokens', 'decorateDetailTokenElement', 'formatCost', 'sessionGroupRunNode', 'rendererDom', `${body}\nreturn renderSessionGroupDetail;`)(
     els, { createElement: node }, key => ({ 'sessions.mainSession': '主會話', 'sessions.subagent': '子代理' })[key] || key,
@@ -1268,6 +1268,7 @@ test('group sections keep main continuations above children without changing usa
 });
 
 
+
 test('on-demand Reasonix rows show a session title or the client/model fallback', () => {
   const session = { client: 'reasonix', sessionId: 'reasonix:fixture', model: 'reasonix-test-model', totalTokens: 5 };
   const rows = (extra) => sessionRowsForPeriod({}, {
@@ -1287,4 +1288,23 @@ test('on-demand Reasonix keeps zero-token rows when the transcript is readable',
   });
   assert.deepEqual(rows.map(row => [row.key, row.value, row.sessionDetailAvailable]),
     [['session:reasonix:readable', 0, true]]);
+});
+
+test('session rows carry their launch entry and label it only while an entry filter is active', () => {
+  const period = { sessions: {
+    a: { client: 'codex', sessionId: 'a', totalTokens: 30, lastUsedAt: '2026-11-25T08:00:00Z', sessionEntry: 't3' },
+    b: { client: 'codex', sessionId: 'b', totalTokens: 20, lastUsedAt: '2026-11-25T07:00:00Z' }
+  } };
+  const [t3Row, unattributed] = sessionRowsForPeriod(period);
+  assert.equal(t3Row.sessionEntry, 't3');
+  assert.equal(unattributed.sessionEntry, '');
+  // An unfiltered list renders exactly as before: no entry label anywhere.
+  assert.equal(t3Row.activity, undefined);
+  assert.ok(!String(t3Row.subtitle).includes('T3 Code'));
+  assert.ok(!String(unattributed.subtitle).includes('Unknown'));
+  // An active filter labels every surviving row, unattributed ones included.
+  const labels = { t3: 'T3 Code', 'codex-cli': 'Codex CLI', 'antigravity-cli': 'Antigravity CLI', unknown: 'Unknown' };
+  const [t3Labeled, unknownLabeled] = sessionRowsForPeriod(period, { entryLabels: labels });
+  assert.ok(String(unknownLabeled.subtitle).endsWith('Unknown'));
+  assert.ok(String(t3Labeled.subtitle).endsWith('T3 Code'));
 });

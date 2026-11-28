@@ -181,6 +181,50 @@ function applyT3ThreadId(target, source) {
   } else target.t3ThreadId = id;
 }
 
+// Launch-entry attribution: which surface started the session. The bounded set
+// grows with new entries; absence is "unknown" and never a literal value.
+const SESSION_ENTRY_T3 = 't3';
+const SESSION_ENTRY_CODEX_CLI = 'codex-cli';
+const SESSION_ENTRY_ANTIGRAVITY_CLI = 'antigravity-cli';
+const SESSION_ENTRY_VALUES = new Set([SESSION_ENTRY_T3, SESSION_ENTRY_CODEX_CLI, SESSION_ENTRY_ANTIGRAVITY_CLI]);
+// The native entry a client falls back to when the same evidence pass that
+// resolves T3 bindings read the T3 catalog and proved the session unbound.
+// Clients without a listed entry stay unattributed rather than guessing one.
+const NATIVE_SESSION_ENTRY_BY_CLIENT = Object.freeze({
+  codex: SESSION_ENTRY_CODEX_CLI,
+  antigravity: SESSION_ENTRY_ANTIGRAVITY_CLI
+});
+// Evidence states the metadata pass derives per session. Only a catalog that
+// was actually read this tick may claim `native`; failed or skipped reads are
+// `unavailable`, which never contradicts an attribution already held.
+const SESSION_ENTRY_EVIDENCE = Object.freeze({
+  verifiedT3: 'verified-t3',
+  native: 'native',
+  unavailable: 'unavailable'
+});
+
+function normalizeSessionEntry(value) {
+  return typeof value === 'string' && SESSION_ENTRY_VALUES.has(value) ? value : '';
+}
+
+// Pure evidence → entry mapping. `verified-t3` wins regardless of client;
+// `native` names the client's own entry only where one is defined.
+function sessionEntryForEvidence(evidence, client) {
+  if (evidence === SESSION_ENTRY_EVIDENCE.verifiedT3) return SESSION_ENTRY_T3;
+  if (evidence === SESSION_ENTRY_EVIDENCE.native) return NATIVE_SESSION_ENTRY_BY_CLIENT[client] || '';
+  return '';
+}
+
+const conflictingSessionEntries = new WeakSet();
+function applySessionEntry(target, source) {
+  const entry = normalizeSessionEntry(source.sessionEntry);
+  if (!entry || conflictingSessionEntries.has(target)) return;
+  if (target.sessionEntry && target.sessionEntry !== entry) {
+    delete target.sessionEntry;
+    conflictingSessionEntries.add(target);
+  } else target.sessionEntry = entry;
+}
+
 function applyParentLink(target, source) {
   const parentClient = normalizeClientName(source.parentClient ?? source.parent_client) || target.client;
   const parentSessionId = normalizeParentSessionId(source.parentSessionId ?? source.parent_session_id, target.sessionId, parentClient, target.client);
@@ -830,6 +874,7 @@ function mergeSession(target, source, now) {
   if (!target.sessionKind && source.sessionKind) target.sessionKind = normalizeSessionKind(source.sessionKind);
   applyNativeSessionId(target, source);
   applyT3ThreadId(target, source);
+  applySessionEntry(target, source);
   if (!target.parentSessionId && source.parentSessionId) {
     applyParentLink(target, source);
   }
@@ -952,6 +997,7 @@ function normalizeSession(input, fallbackKey) {
   session.sessionKind = normalizeSessionKind(input.sessionKind || input.session_kind);
   applyNativeSessionId(session, input);
   applyT3ThreadId(session, input);
+  applySessionEntry(session, input);
   applyParentLink(session, input);
   if (client === 'codex' && input.usageSource === 'codex-dots-local') {
     session.usageSource = 'codex-dots-local';
@@ -2451,6 +2497,12 @@ function deltaValue(base, fresh, anchor, key) {
 module.exports = {
   PERIODS,
   UNATTRIBUTED_USAGE_CLIENT,
+  SESSION_ENTRY_T3,
+  SESSION_ENTRY_CODEX_CLI,
+  SESSION_ENTRY_ANTIGRAVITY_CLI,
+  SESSION_ENTRY_VALUES,
+  SESSION_ENTRY_EVIDENCE,
+  NATIVE_SESSION_ENTRY_BY_CLIENT,
   addPeriodInto,
   isPeriodExpired,
   aggregateDevices,
@@ -2473,7 +2525,9 @@ module.exports = {
   normalizeLatestModel,
   normalizeDeviceRecord,
   normalizePeriod,
+  normalizeSessionEntry,
   projectRollupFromSessions,
+  sessionEntryForEvidence,
   stripSessionTextFromDeviceRecord,
   stripSessionTextFromPeriod
 };

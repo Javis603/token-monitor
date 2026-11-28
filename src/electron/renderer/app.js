@@ -399,6 +399,8 @@ state.syncedFixedPeriodCache = new Map();
 state.syncedFixedPeriodWarmup = null;
 state.periodMenuOpen = false;
 state.sessionToolFilter = '';
+state.sessionEntryFilter = '';
+state.trendEntryFilter = '';
 state.sessionPage = 0;
 state.sessionPagerSignature = '';
 state.sessionSearchOpen = false;
@@ -423,7 +425,7 @@ let viewSwitcherLongPressTriggered = false;
 let viewSwitcherHoverCloseTimer = null;
 let viewSwitcherRenderKey = '';
 const els = {
-  shell: document.querySelector('.shell'), status: document.getElementById('status'), liveDot: document.getElementById('liveDot'), tokenRateReveal: document.getElementById('tokenRateReveal'), liveTokenRate: document.getElementById('liveTokenRate'), liveTokenRateValue: document.getElementById('liveTokenRateValue'), totalTokens: document.getElementById('totalTokens'), totalTokensCompact: document.getElementById('totalTokensCompact'), cost: document.getElementById('cost'), homePanel: document.getElementById('homePanel'), breakdown: document.getElementById('breakdown'), sessionPagerHost: document.getElementById('sessionPagerHost'), sessionToolFilter: document.getElementById('sessionToolFilter'), sessionToolFilterItems: document.getElementById('sessionToolFilterItems'), sessionToolPrevious: document.getElementById('sessionToolPrevious'), sessionToolNext: document.getElementById('sessionToolNext'), serviceStatusPanel: document.getElementById('serviceStatusPanel'), limitsPanel: document.getElementById('limitsPanel'), trendsPanel: document.getElementById('trendsPanel'), viewSwitcher: document.getElementById('viewSwitcher'), pinButton: document.getElementById('pinButton'), utilityActions: document.getElementById('utilityActions'), settingsButton: document.getElementById('settingsButton'), settingsPanel: document.getElementById('settingsPanel'), languageInput: document.getElementById('languageInput'), currencyInput: document.getElementById('currencyInput'), currencyRateRow: document.getElementById('currencyRateRow'), currencyRateModeAuto: document.getElementById('currencyRateModeAuto'), currencyRateModeManual: document.getElementById('currencyRateModeManual'), currencyRateManualField: document.getElementById('currencyRateManualField'), currencyRateOverrideInput: document.getElementById('currencyRateOverrideInput'), currencyRateStatus: document.getElementById('currencyRateStatus'), hubUrlInput: document.getElementById('hubUrlInput'), secretInput: document.getElementById('secretInput'), deviceIdInput: document.getElementById('deviceIdInput'), limitProviderCheckboxes: document.getElementById('limitProviderCheckboxes'), limitsRefreshInput: document.getElementById('limitsRefreshInput'), showLimitSourceInput: document.getElementById('showLimitSourceInput'), maskLimitAccountEmailsInput: document.getElementById('maskLimitAccountEmailsInput'), showLimitUsedInputs: Array.from(document.querySelectorAll('input[name="showLimitUsed"]')), liveDotInput: document.getElementById('liveDotInput'), toolIconsInput: document.getElementById('toolIconsInput'), floatingBubbleInput: document.getElementById('floatingBubbleInput'), floatingBubbleTriggerInputs: Array.from(document.querySelectorAll('input[name="floatingBubbleTrigger"]')), floatingBubbleTriggerRow: document.getElementById('floatingBubbleTriggerRow'), floatingBubbleContentInput: document.getElementById('floatingBubbleContentInput'), floatingBubbleContentRow: document.getElementById('floatingBubbleContentRow'), floatingBubbleComposer: document.getElementById('floatingBubbleComposer'), floatingBubbleContent: document.getElementById('floatingBubbleContent'), discordRpcInput: document.getElementById('discordRpcInput'), windowBehaviorInput: document.getElementById('windowBehaviorInput'), keepAboveTaskbarInput: document.getElementById('keepAboveTaskbarInput'), keepAboveTaskbarRow: document.getElementById('keepAboveTaskbarRow'), showTrayIconInput: document.getElementById('showTrayIconInput'), showTrayProviderBadgeInput: document.getElementById('showTrayProviderBadgeInput'), hideAppIconInput: document.getElementById('hideAppIconInput'), hideAppIconRow: document.getElementById('hideAppIconRow'), hideAppIconOptions: document.getElementById('hideAppIconOptions'), trayModeInput: document.getElementById('trayModeInput'), trayContentInput: document.getElementById('trayContentInput'), trayComposer: document.getElementById('trayComposer'), windowToggleShortcutValue: document.getElementById('windowToggleShortcutValue'), windowToggleShortcutClearButton: document.getElementById('windowToggleShortcutClearButton'), windowToggleShortcutNote: document.getElementById('windowToggleShortcutNote'), glassInput: document.getElementById('glassInput'), blurInput: document.getElementById('blurInput'), zoomInput: document.getElementById('zoomInput'), resetGlassButton: document.getElementById('resetGlassButton'), resetDepthButton: document.getElementById('resetDepthButton'), resetZoomButton: document.getElementById('resetZoomButton'), saveSettingsButton: document.getElementById('saveSettingsButton'), clientDisplayList: document.getElementById('clientDisplayList'), wslScanInput: document.getElementById('wslScanInput'), wslScanRow: document.getElementById('wslScanRow'), wslPanel: document.getElementById('wslPanel'), openConfigButton: document.getElementById('openConfigButton'), exportAutoInput: document.getElementById('exportAutoInput'), exportAutoDetails: document.getElementById('exportAutoDetails'), exportAutoStatus: document.getElementById('exportAutoStatus'), exportDirLabel: document.getElementById('exportDirLabel'), exportPickDirButton: document.getElementById('exportPickDirButton'), exportIntervalInput: document.getElementById('exportIntervalInput'), exportNowButton: document.getElementById('exportNowButton'), refreshButton: document.getElementById('refreshButton'), minButton: document.getElementById('minButton'), closeButton: document.getElementById('closeButton'), floatingBubbleTab: document.getElementById('floatingBubbleTab'),
+  shell: document.querySelector('.shell'), status: document.getElementById('status'), liveDot: document.getElementById('liveDot'), tokenRateReveal: document.getElementById('tokenRateReveal'), liveTokenRate: document.getElementById('liveTokenRate'), liveTokenRateValue: document.getElementById('liveTokenRateValue'), totalTokens: document.getElementById('totalTokens'), totalTokensCompact: document.getElementById('totalTokensCompact'), cost: document.getElementById('cost'), homePanel: document.getElementById('homePanel'), breakdown: document.getElementById('breakdown'), sessionPagerHost: document.getElementById('sessionPagerHost'), sessionToolFilter: document.getElementById('sessionToolFilter'), sessionToolFilterItems: document.getElementById('sessionToolFilterItems'), sessionToolPrevious: document.getElementById('sessionToolPrevious'), sessionToolNext: document.getElementById('sessionToolNext'), sessionEntryFilter: document.getElementById('sessionEntryFilter'), serviceStatusPanel: document.getElementById('serviceStatusPanel'), limitsPanel: document.getElementById('limitsPanel'), trendsPanel: document.getElementById('trendsPanel'), viewSwitcher: document.getElementById('viewSwitcher'), pinButton: document.getElementById('pinButton'), utilityActions: document.getElementById('utilityActions'), settingsButton: document.getElementById('settingsButton'), settingsPanel: document.getElementById('settingsPanel'), languageInput: document.getElementById('languageInput'), currencyInput: document.getElementById('currencyInput'), currencyRateRow: document.getElementById('currencyRateRow'), currencyRateModeAuto: document.getElementById('currencyRateModeAuto'), currencyRateModeManual: document.getElementById('currencyRateModeManual'), currencyRateManualField: document.getElementById('currencyRateManualField'), currencyRateOverrideInput: document.getElementById('currencyRateOverrideInput'), currencyRateStatus: document.getElementById('currencyRateStatus'), hubUrlInput: document.getElementById('hubUrlInput'), secretInput: document.getElementById('secretInput'), deviceIdInput: document.getElementById('deviceIdInput'), limitProviderCheckboxes: document.getElementById('limitProviderCheckboxes'), limitsRefreshInput: document.getElementById('limitsRefreshInput'), showLimitSourceInput: document.getElementById('showLimitSourceInput'), maskLimitAccountEmailsInput: document.getElementById('maskLimitAccountEmailsInput'), showLimitUsedInputs: Array.from(document.querySelectorAll('input[name="showLimitUsed"]')), liveDotInput: document.getElementById('liveDotInput'), toolIconsInput: document.getElementById('toolIconsInput'), floatingBubbleInput: document.getElementById('floatingBubbleInput'), floatingBubbleTriggerInputs: Array.from(document.querySelectorAll('input[name="floatingBubbleTrigger"]')), floatingBubbleTriggerRow: document.getElementById('floatingBubbleTriggerRow'), floatingBubbleContentInput: document.getElementById('floatingBubbleContentInput'), floatingBubbleContentRow: document.getElementById('floatingBubbleContentRow'), floatingBubbleComposer: document.getElementById('floatingBubbleComposer'), floatingBubbleContent: document.getElementById('floatingBubbleContent'), discordRpcInput: document.getElementById('discordRpcInput'), windowBehaviorInput: document.getElementById('windowBehaviorInput'), keepAboveTaskbarInput: document.getElementById('keepAboveTaskbarInput'), keepAboveTaskbarRow: document.getElementById('keepAboveTaskbarRow'), showTrayIconInput: document.getElementById('showTrayIconInput'), showTrayProviderBadgeInput: document.getElementById('showTrayProviderBadgeInput'), hideAppIconInput: document.getElementById('hideAppIconInput'), hideAppIconRow: document.getElementById('hideAppIconRow'), hideAppIconOptions: document.getElementById('hideAppIconOptions'), trayModeInput: document.getElementById('trayModeInput'), trayContentInput: document.getElementById('trayContentInput'), trayComposer: document.getElementById('trayComposer'), windowToggleShortcutValue: document.getElementById('windowToggleShortcutValue'), windowToggleShortcutClearButton: document.getElementById('windowToggleShortcutClearButton'), windowToggleShortcutNote: document.getElementById('windowToggleShortcutNote'), glassInput: document.getElementById('glassInput'), blurInput: document.getElementById('blurInput'), zoomInput: document.getElementById('zoomInput'), resetGlassButton: document.getElementById('resetGlassButton'), resetDepthButton: document.getElementById('resetDepthButton'), resetZoomButton: document.getElementById('resetZoomButton'), saveSettingsButton: document.getElementById('saveSettingsButton'), clientDisplayList: document.getElementById('clientDisplayList'), wslScanInput: document.getElementById('wslScanInput'), wslScanRow: document.getElementById('wslScanRow'), wslPanel: document.getElementById('wslPanel'), openConfigButton: document.getElementById('openConfigButton'), exportAutoInput: document.getElementById('exportAutoInput'), exportAutoDetails: document.getElementById('exportAutoDetails'), exportAutoStatus: document.getElementById('exportAutoStatus'), exportDirLabel: document.getElementById('exportDirLabel'), exportPickDirButton: document.getElementById('exportPickDirButton'), exportIntervalInput: document.getElementById('exportIntervalInput'), exportNowButton: document.getElementById('exportNowButton'), refreshButton: document.getElementById('refreshButton'), minButton: document.getElementById('minButton'), closeButton: document.getElementById('closeButton'), floatingBubbleTab: document.getElementById('floatingBubbleTab'),
   subscriptionList: document.getElementById('subscriptionList'), subscriptionAddForm: document.getElementById('subscriptionAddForm'), subscriptionAddToggle: document.getElementById('subscriptionAddToggle'), subscriptionAddDetails: document.getElementById('subscriptionAddDetails'), subscriptionProviderInput: document.getElementById('subscriptionProviderInput'), subscriptionAccountInput: document.getElementById('subscriptionAccountInput'), subscriptionPlanNameInput: document.getElementById('subscriptionPlanNameInput'), subscriptionAmountInput: document.getElementById('subscriptionAmountInput'), subscriptionCurrencyInput: document.getElementById('subscriptionCurrencyInput'), subscriptionIntervalCountInput: document.getElementById('subscriptionIntervalCountInput'), subscriptionIntervalInput: document.getElementById('subscriptionIntervalInput'), subscriptionStartDateInput: document.getElementById('subscriptionStartDateInput'), subscriptionAutoRenewInput: document.getElementById('subscriptionAutoRenewInput'), subscriptionNextRenewalInput: document.getElementById('subscriptionNextRenewalInput'), subscriptionNote: document.getElementById('subscriptionNote'), subscriptionOrphanNotice: document.getElementById('subscriptionOrphanNotice'), subscriptionOrphanText: document.getElementById('subscriptionOrphanText'), subscriptionOrphanAdopt: document.getElementById('subscriptionOrphanAdopt'), subscriptionOrphanDiscard: document.getElementById('subscriptionOrphanDiscard'), subscriptionSyncError: document.getElementById('subscriptionSyncError'), subscriptionNextRenewalLabel: document.getElementById('subscriptionNextRenewalLabel'), subscriptionNextRenewalNote: document.getElementById('subscriptionNextRenewalNote'), subscriptionSubmit: document.getElementById('subscriptionSubmit'), subscriptionCancelEdit: document.getElementById('subscriptionCancelEdit'), subscriptionTotalRow: document.getElementById('subscriptionTotalRow'), subscriptionErrorMessage: document.getElementById('subscriptionErrorMessage'), subscriptionPlanFields: document.getElementById('subscriptionPlanFields'), subscriptionTopUpFields: document.getElementById('subscriptionTopUpFields'), subscriptionTopUpList: document.getElementById('subscriptionTopUpList'), subscriptionTopUpDateInput: document.getElementById('subscriptionTopUpDateInput'), subscriptionTopUpAmountInput: document.getElementById('subscriptionTopUpAmountInput'), subscriptionTopUpAddButton: document.getElementById('subscriptionTopUpAddButton'), subscriptionAmountRow: document.getElementById('subscriptionAmountRow'), subscriptionTopUpHeadingRow: document.getElementById('subscriptionTopUpHeadingRow'), subscriptionKindInputs: [...document.querySelectorAll('input[name="subscriptionKind"]')]
 };
 Object.assign(els, {
@@ -3486,12 +3488,102 @@ function renderSessionToolFilter(rows) {
   return state.sessionToolFilter ? rows.filter(row => sessionToolClients(row).includes(state.sessionToolFilter)) : rows;
 }
 
+function sessionEntryLabels() {
+  return {
+    t3: t('sessions.entryT3'),
+    'codex-cli': t('sessions.entryCodexCli'),
+    'antigravity-cli': t('sessions.entryAntigravityCli')
+  };
+}
+
+// The entry values a row and its folded group members carry, mirroring the
+// tool filter's group semantics: a group survives a filter when any member
+// matches. Unattributed rows and rows with no entry at all read as unknown.
+// Summary rows (background reviews, bot groups) aggregate members and carry no
+// attribution of their own, so only members speak; a session row is itself a
+// participant beside its folded members, so its own value counts too.
+function sessionEntryValues(row) {
+  if (row.kind !== 'session' && row.kind !== 'summary') return [];
+  const members = row.kind === 'summary'
+    ? (Array.isArray(row.groupRows) ? row.groupRows : [])
+    : [row, ...(Array.isArray(row.groupRows) ? row.groupRows : [])];
+  return members.map(member => (typeof member.sessionEntry === 'string' ? member.sessionEntry : ''));
+}
+
+// A cleared selection must reach the row labels too, but those are baked when
+// the rows are built — before this pass could know the selection was stale.
+// One deferred rebuild fixes the display without re-entering a live render.
+let sessionEntryRepaintTimer = null;
+function scheduleSessionEntryRepaint() {
+  if (sessionEntryRepaintTimer) return;
+  sessionEntryRepaintTimer = setTimeout(() => {
+    sessionEntryRepaintTimer = null;
+    if (state.breakdown === 'session' && !state.openSession) render();
+  }, 0);
+}
+
+// Orthogonal to the tool filter: an entry narrows the list to sessions
+// attributed to that launch surface, with unattributed sessions reachable
+// through the unknown option. Options come from the rows themselves, so the
+// strip only appears when the records actually distinguish entries.
+function renderSessionEntryFilter(rows) {
+  const host = els.sessionEntryFilter;
+  const values = new Set();
+  for (const row of rows) for (const value of sessionEntryValues(row)) values.add(value);
+  const choices = [...values].filter(Boolean).sort();
+  if (values.has('')) choices.push('unknown');
+  if (state.sessionEntryFilter && (choices.length < 2 || !choices.includes(state.sessionEntryFilter))) {
+    state.sessionEntryFilter = '';
+    state.sessionPage = 0;
+    scheduleSessionEntryRepaint();
+  }
+  host.classList.toggle('hidden', choices.length < 2);
+  host.setAttribute('aria-label', t('sessions.filterEntry'));
+  const signature = JSON.stringify([currentLocale(), choices, state.sessionEntryFilter]);
+  if (host.dataset.signature !== signature) {
+    host.dataset.signature = signature;
+    const focused = host.contains(document.activeElement) ? document.activeElement.dataset.entry : null;
+    const labels = sessionEntryLabels();
+    labels.unknown = t('sessions.entryUnknown');
+    const buttons = ['', ...choices].map(choice => {
+      const button = document.createElement('button');
+      button.type = 'button';
+      button.className = 'session-tool-filter-button';
+      button.dataset.entry = choice;
+      const label = choice ? labels[choice] || choice : t('sessions.allEntries');
+      button.textContent = label;
+      button.setAttribute('aria-label', label);
+      button.setAttribute('aria-pressed', String(state.sessionEntryFilter === choice));
+      button.addEventListener('click', () => {
+        state.sessionEntryFilter = state.sessionEntryFilter === choice ? '' : choice;
+        state.sessionPage = 0;
+        state.rowSignature = '';
+        els.breakdown.scrollTop = 0;
+        render();
+      });
+      return button;
+    });
+    host.replaceChildren(...buttons);
+    if (focused !== null) buttons.find(button => button.dataset.entry === focused)?.focus({ preventScroll: true });
+  }
+  // `unknown` targets the empty attribution explicitly; only no selection at
+  // all takes the All path.
+  const wanted = state.sessionEntryFilter === 'unknown' ? '' : state.sessionEntryFilter;
+  return state.sessionEntryFilter ? rows.filter(row => sessionEntryValues(row).includes(wanted)) : rows;
+}
+
 function renderRows(rows, { incompleteHint = '', fromSearch = false, reuseToolFilter = false } = {}) {
   const searchQuery = state.breakdown === 'session' ? sessionSearchQuery() : '';
   if (state.breakdown === 'session') {
     rows = reuseToolFilter
       ? state.sessionToolFilter ? rows.filter(row => sessionToolClients(row).includes(state.sessionToolFilter)) : rows
       : renderSessionToolFilter(rows);
+    rows = reuseToolFilter
+      ? (state.sessionEntryFilter
+        ? rows.filter(row => sessionEntryValues(row)
+          .includes(state.sessionEntryFilter === 'unknown' ? '' : state.sessionEntryFilter))
+        : rows)
+      : renderSessionEntryFilter(rows);
     rows = sessionRowsApi.filterSessionRows(rows, searchQuery);
   }
   const searchEmpty = Boolean(searchQuery && rows.length === 0);
@@ -3766,6 +3858,11 @@ function sessionPresentationOptions() {
     fallbackColors: fallbackModelColors,
     archivedLabel: t('session.archived'),
     subagentLabel: t('sessions.subagent'),
+    // Entry labels explain why a row survived the active entry filter; an
+    // unfiltered list renders exactly as before.
+    ...(state.breakdown === 'session' && state.sessionEntryFilter
+      ? { entryLabels: { ...sessionEntryLabels(), unknown: t('sessions.entryUnknown') } }
+      : {}),
     latestModelLabel: t('session.latestModel'),
     unattributedLabel: t('dashboard.tooltip.unclassified'),
     formatTokens: formatDetailTokens,
@@ -5982,6 +6079,7 @@ function sessionDetailBack() {
 
 function renderSessionDetail({ detail, loading, error, preserveScroll = false } = {}) {
   els.sessionToolFilter.classList.add('hidden');
+  els.sessionEntryFilter.classList.add('hidden');
   els.sessionSearchHost?.classList.add('hidden');
   els.sessionSortToggle?.classList.add('hidden');
   els.sessionSearchToggle?.classList.add('hidden');
@@ -6238,6 +6336,7 @@ function sessionGroupRunNode(row, max, parent) {
 
 function renderSessionGroupDetail(request) {
   els.sessionToolFilter.classList.add('hidden');
+  els.sessionEntryFilter.classList.add('hidden');
   els.sessionSearchHost?.classList.add('hidden');
   els.sessionSortToggle?.classList.add('hidden');
   els.sessionSearchToggle?.classList.add('hidden');
@@ -6529,7 +6628,19 @@ function renderTrends() {
   // active-time and peak cards below still describe the selected fixed period.
   const selected = charts.selectPreviewSeries(preview, fixed?.status === 'ready' ? 'allTime' : state.period);
   const { points, metric, labelKey } = selected;
-  const finalPoints = state.period === 'today' ? charts.patchTodayBar(points, todayTotal) : points;
+  const patchedPoints = state.period === 'today' ? charts.patchTodayBar(points, todayTotal) : points;
+  // An entry filter re-derives the curve from the retained session detail;
+  // uncovered days and undercounts land in the unknown bucket, so the split
+  // adds back up to the untouched total curve unless the detail overcounts a
+  // point — that case cannot be rebalanced without inventing values and
+  // floors unknown at zero instead.
+  const entryDays = state.stats?.dailySessionPeriods;
+  const entryChoices = charts.entryTrendChoices(patchedPoints, entryDays, { labelKey, metric });
+  if (state.trendEntryFilter && !entryChoices.includes(state.trendEntryFilter)) state.trendEntryFilter = '';
+  const entryActive = Boolean(state.trendEntryFilter) && entryChoices.length >= 2;
+  const finalPoints = entryActive
+    ? charts.entryTrendPoints(patchedPoints, entryDays, state.trendEntryFilter, { labelKey, metric })
+    : patchedPoints;
 
   if (finalPoints.length === 0) {
     hideTrendTooltip();
@@ -6565,10 +6676,22 @@ function renderTrends() {
   const statsHtml = stats
     .map(([k, v]) => `<div class="trends-stat"><span class="trends-stat-v">${v}</span><span class="trends-stat-k">${k}</span></div>`)
     .join('');
+  // The strip only appears when the retained session detail can split the
+  // curve at least two ways; otherwise every choice would render the same bars.
+  const entryLabels = { ...sessionEntryLabels(), unknown: t('sessions.entryUnknown') };
+  const entryChips = entryChoices.length >= 2
+    ? `<div class="trend-entry-filter" role="group" aria-label="${t('trends.filterEntry')}">`
+      + ['', ...entryChoices].map((choice) => {
+        const label = choice ? entryLabels[choice] || choice : t('sessions.allEntries');
+        return `<button type="button" class="session-tool-filter-button trend-entry-chip" data-entry="${choice}" aria-pressed="${String((state.trendEntryFilter || '') === choice)}">${label}</button>`;
+      }).join('')
+    + '</div>'
+    : '';
 
   const next = document.createElement('div');
   next.innerHTML =
     `<div class="trends-cap"><span>${rangeLabel}</span><span class="trends-open-hint" aria-label="${t('trends.open')}">↗</span></div>`
+    + entryChips
     + `<div class="trends-spark" role="button" tabindex="0" aria-label="${t('trends.open')}">${svg}</div>`
     + `<div class="trends-axis"><span>${first}</span><span>${last}</span></div>`
     + `<div class="trends-stats">${statsHtml}</div>`;
@@ -9058,7 +9181,10 @@ function renderAppContent({ fromSearch = false } = {}) {
   ensureBreakdownVisible();
   loadReasonixSessionList();
   syncSessionSearchChrome();
-  if (state.breakdown !== 'session' || state.openSession) els.sessionToolFilter.classList.add('hidden');
+  if (state.breakdown !== 'session' || state.openSession) {
+    els.sessionToolFilter.classList.add('hidden');
+    els.sessionEntryFilter.classList.add('hidden');
+  }
   const pluginPage = pluginMainPages?.render(pluginPageOptions(), state.breakdown) || false;
   els.shell.classList.toggle('plugin-page-mode', pluginPage);
   if (pluginPage) {
@@ -9105,6 +9231,7 @@ function renderAppContent({ fromSearch = false } = {}) {
   const { fixedUnavailable, detailUnavailable } = periodContentAvailability();
   if (fixedUnavailable || detailUnavailable) {
     els.sessionToolFilter.classList.add('hidden');
+    els.sessionEntryFilter.classList.add('hidden');
     els.sessionSortToggle.classList.add('hidden');
     els.sessionSearchToggle.classList.add('hidden');
     els.sessionSearchHost.classList.add('hidden');
@@ -17270,6 +17397,13 @@ els.closeButton.addEventListener('click', (event) => {
   window.tokenMonitor.close();
 });
 els.trendsPanel.addEventListener('click', (event) => {
+  const chip = event.target.closest('.trend-entry-chip');
+  if (chip) {
+    const choice = chip.dataset.entry || '';
+    state.trendEntryFilter = (state.trendEntryFilter || '') === choice ? '' : choice;
+    render();
+    return;
+  }
   if (event.target.closest('.trends-spark, .trends-open-hint')) window.tokenMonitor.openDashboard();
 });
 els.trendsPanel.addEventListener('keydown', (event) => {

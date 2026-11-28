@@ -5790,8 +5790,12 @@ html.is-windows .settings-panel select option {
 .session-tool-scroll:disabled { opacity: 0; cursor: default; }
 .session-tool-scroll:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
 
-/* Keep these related controls closer than the shell's 8px section gap. */
-.session-tool-filter:not(.hidden) + .session-pager-host { margin-block-start: -6px; }
+/* Keep these related controls closer than the shell's 8px section gap. The
+   entry filter strip can sit between the tool strip and the pager, so every
+   visible adjacency pulls in by the same amount. */
+.session-tool-filter:not(.hidden) + .session-pager-host,
+.session-tool-filter:not(.hidden) + .session-tool-filter:not(.hidden),
+.session-tool-filter:not(.hidden) + .session-tool-filter:not(.hidden) + .session-pager-host { margin-block-start: -6px; }
 .session-tool-filter-button {
   position: relative;
   display: flex;
@@ -9119,6 +9123,8 @@ html.native-liquid-glass .view-switcher-menu-item { border-radius: 9px; }
 
 .trends-panel { flex: 1; min-height: 0; display: flex; flex-direction: column; gap: 10px; padding-right: 2px; overflow: hidden; }
 .trends-cap { flex: none; display: flex; align-items: center; justify-content: space-between; font-size: 0.6875rem; letter-spacing: 0.04em; text-transform: uppercase; opacity: 0.6; }
+.trend-entry-filter { flex: none; display: flex; flex-wrap: wrap; justify-content: center; gap: 2px; margin-block-start: -4px; }
+.trend-entry-filter .session-tool-filter-button { min-width: 0; }
 .trends-open-hint { opacity: 0.75; cursor: pointer; font-size: 0.8125rem; }
 .trends-spark { flex: 1 1 auto; min-height: 0; display: flex; cursor: pointer; border-radius: 8px; padding: 6px 4px; transition: background 0.12s ease; }
 .trends-spark:hover { background: rgba(var(--overlay-rgb), 0.05); }

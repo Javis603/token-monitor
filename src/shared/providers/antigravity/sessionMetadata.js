@@ -235,12 +235,20 @@ function resolveSessionMetadata(sessionIds, context = {}) {
 
   const home = context.home || os.homedir();
   const env = context.deps?.scopedHome ? {} : (context.deps?.env || process.env);
+  const acpDirs = Array.isArray(context.deps?.antigravityAcpPaths)
+    ? context.deps.antigravityAcpPaths
+    : discoverAntigravityAcpPaths({ homeDir: home, env, useEnvRoot: !context.deps?.scopedHome });
   const candidates = antigravityConversationSummaryCandidates({
     home,
     env,
     useEnvRoot: !context.deps?.scopedHome,
-    antigravityAcpPaths: context.deps?.antigravityAcpPaths
+    antigravityAcpPaths: acpDirs
   });
+  // T3's ACP provider keeps its own conversation catalog beside its transcript
+  // directories. A row selected from one of those stores is directory evidence
+  // that the conversation was launched through T3 Code; a row from any other
+  // store names the native CLI instead.
+  const acpSummaryDbs = new Set(acpDirs.map((dir) => path.join(path.dirname(dir), 'conversation_summaries.db')));
   const cache = context.deps?.antigravityTitleCache || titleCache;
   const unresolved = new Set();
   const unresolvedNativeSources = new Set();
@@ -251,10 +259,43 @@ function resolveSessionMetadata(sessionIds, context = {}) {
     const source = sourceFor(key);
     return typeof source === 'string' ? source : source?.native;
   };
+  // Directory evidence for the launch entry, from the store this pass selected
+  // the session's catalog row from. A T3 ACP store row — or a title the T3
+  // thread catalog joined this pass — is positive T3 evidence; a validated row
+  // from any other store names the native CLI. A session with no row anywhere,
+  // a stale read or an unresolved store claims nothing — only something this
+  // pass actually read is evidence. The values spell the evidence contract
+  // shared with `usage.js` (SESSION_ENTRY_EVIDENCE); this module stays out of
+  // the wire graph, so the watch policy can keep loading it.
+  const entryEvidenceFor = (sessionId, source) => {
+    if (source && typeof source === 'object') {
+      // A retained title source is not this tick's evidence: only a title the
+      // catalog read joined this pass proves t3. Title retention is display
+      // state and says nothing about the binding now; an unavailable read
+      // claims nothing, so a held entry survives instead of a missing one
+      // being established from old state.
+      if (!source.t3) return '';
+      const match = t3Relations.get(`antigravity:${sessionId}`);
+      return match?.title && match.titleStore === source.t3 ? 'verified-t3' : '';
+    }
+    if (typeof source === 'string' && source) {
+      // The persisted source is only evidence while this pass still sees the
+      // store and a validated row for the session: a confirmed miss or an
+      // unreadable store claims nothing, so an attribution already held can
+      // survive as unavailable instead of being re-proven by stale rows.
+      const selected = cache.get(source);
+      const validated = selected && currentStamps.get(source) && selected.validatedIds.has(sessionId);
+      if (!validated) return '';
+      return acpSummaryDbs.has(source) ? 'verified-t3' : 'native';
+    }
+    return '';
+  };
 
+  const currentStamps = new Map();
   for (const dbPath of candidates) {
     const canReadTurn = canReadTurns(dbPath);
     const stamp = databaseStamp(dbPath);
+    currentStamps.set(dbPath, stamp);
     let cached = cache.get(dbPath);
     if (!stamp) {
       for (const id of sessionIds) {
@@ -357,10 +398,10 @@ function resolveSessionMetadata(sessionIds, context = {}) {
       delete meta.projectId;
       delete meta.projectLabel;
     }
+    // A successful missing-row query can revoke a persisted override even
+    // on a cold cache. Check all candidate stores before deciding absence.
+    const confirmedMissing = !unresolved.has(sessionId) && candidates.some((dbPath) => cache.get(dbPath)?.misses.has(sessionId));
     if (!result.has(sessionId)) {
-      // A successful missing-row query can revoke a persisted override even
-      // on a cold cache. Check all candidate stores before deciding absence.
-      const confirmedMissing = !unresolved.has(sessionId) && candidates.some((dbPath) => cache.get(dbPath)?.misses.has(sessionId));
       const knownSummary = candidates.some((dbPath) => cache.get(dbPath)?.summaries.has(sessionId));
       if (confirmedMissing && (retained !== undefined || hasAnchoredProject || knownSummary)) {
         for (const dbPath of candidates) {
@@ -418,6 +459,12 @@ function resolveSessionMetadata(sessionIds, context = {}) {
       if (turn.inputAt) meta.lastUsedAt = new Date(turn.inputAt).toISOString();
     }
     if (meta && previous && Object.prototype.hasOwnProperty.call(previous, 'titleFallback')) meta.titleFallback = previous.titleFallback;
+    if (meta) {
+      const entrySource = Object.prototype.hasOwnProperty.call(meta, 'catalogTitleSource')
+        ? meta.catalogTitleSource : sourceFor(key);
+      const entryEvidence = entryEvidenceFor(sessionId, entrySource);
+      if (entryEvidence) meta.sessionEntryEvidence = entryEvidence;
+    }
     if (meta?.catalogTitle !== null) continue;
     context.deps?.invalidatedTitleKeys?.add(key);
     const oldTitle = previous?.catalogTitle || anchored;

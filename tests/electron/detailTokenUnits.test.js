@@ -614,6 +614,7 @@ test('session detail, session group header, sessionRows tooltips, and row animat
     rendererDom,
     els: {
       sessionToolFilter: document.createElement('div'),
+      sessionEntryFilter: document.createElement('div'),
       sessionSearchHost: document.createElement('div'),
       sessionSortToggle: document.createElement('div'),
       sessionSearchToggle: document.createElement('div'),
@@ -955,6 +956,7 @@ test('open session group toggle refreshes both group total and member model tool
     window: { TokenMonitorDomReconcile: require('../../src/electron/renderer/domReconcile') },
     els: {
       sessionToolFilter: document.createElement('div'),
+      sessionEntryFilter: document.createElement('div'),
       sessionSearchHost: document.createElement('div'),
       sessionSortToggle: document.createElement('div'),
       sessionSearchToggle: document.createElement('div'),

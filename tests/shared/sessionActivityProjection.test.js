@@ -335,3 +335,27 @@ test('fresh native relationship evidence takes precedence as an atomic parent pa
   assert.deepEqual(linked, fresh);
   assert.equal(linked.parentClient, undefined, 'same-client parent must not inherit the old Codex namespace');
 });
+
+test('native retention keeps the entry with its link and drops a revoked one', () => {
+  const summary = fixture(1);
+  const fresh = { client: 'claude', sessionId: 'id-0' };
+  const rows = { 'claude:id-0': fresh };
+  // A previous with a link retains both the link and its entry.
+  summary.nativeSessions = { today: { 'claude:id-0': { client: 'claude', sessionId: 'id-0',
+    t3ThreadId: 'app-thread', sessionEntry: 't3' } } };
+  const retained = projection.nativeSessionsForPeriod(summary, 'claude', rows, 'today')['claude:id-0'];
+  assert.equal(retained.t3ThreadId, 'app-thread');
+  assert.equal(retained.sessionEntry, 't3');
+  // After a revocation the collector has cleared the link and the entry
+  // from the stored native row as well; the projection must not resurrect
+  // either from anywhere.
+  summary.nativeSessions = { today: { 'claude:id-0': { client: 'claude', sessionId: 'id-0' } } };
+  const afterRevocation = projection.nativeSessionsForPeriod(summary, 'claude', rows, 'today')['claude:id-0'];
+  assert.equal(afterRevocation.t3ThreadId, undefined);
+  assert.equal(afterRevocation.sessionEntry, undefined);
+  // A previous with no link never carried one; its entry still fills.
+  summary.nativeSessions = { today: { 'claude:id-0': { client: 'claude', sessionId: 'id-0', sessionEntry: 'codex-cli' } } };
+  const unbound = projection.nativeSessionsForPeriod(summary, 'claude', rows, 'today')['claude:id-0'];
+  assert.equal(unbound.t3ThreadId, undefined);
+  assert.equal(unbound.sessionEntry, 'codex-cli');
+});

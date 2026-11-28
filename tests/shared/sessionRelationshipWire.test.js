@@ -62,4 +62,35 @@ for (const [name, usage] of Object.entries(implementations)) {
     assert.equal(same.parentSessionId, 'parent');
     assert.equal(same.parentClient, undefined);
   });
+
+  test(`${name}: session entry attribution is optional, bounded and accounting-neutral`, () => {
+    for (const entry of ['t3', 'codex-cli', 'antigravity-cli']) {
+      assert.equal(row(make({ sessionEntry: entry })).sessionEntry, entry);
+    }
+    for (const entry of ['', 'T3', 'unknown', 'codex', 't3-code', 'codex cli', 7, null, {}]) {
+      assert.equal(row(make({ sessionEntry: entry })).sessionEntry, undefined, `reject ${JSON.stringify(entry)}`);
+    }
+    const plain = make({});
+    const attributed = make({ sessionEntry: 't3' });
+    assert.equal(row(attributed).totalTokens, row(plain).totalTokens);
+    assert.equal(row(attributed).costUsd, row(plain).costUsd);
+    const mergedPlain = usage.mergePeriods(plain, plain);
+    const mergedAttributed = usage.mergePeriods(attributed, attributed);
+    assert.deepEqual(
+      { tokens: mergedPlain.totalTokens, clients: mergedPlain.clients, models: mergedPlain.models, cost: mergedPlain.costUsd },
+      { tokens: mergedAttributed.totalTokens, clients: mergedAttributed.clients, models: mergedAttributed.models, cost: mergedAttributed.costUsd }
+    );
+  });
+
+  test(`${name}: conflicting session entries are discarded like conflicting T3 identities`, () => {
+    const a = make({ sessionEntry: 't3' });
+    const b = make({ sessionEntry: 'codex-cli' });
+    const missing = make({});
+    for (const inputs of [[a, b, a], [b, a, b], [missing, a, b], [a, missing, b]]) {
+      const merged = row(usage.mergePeriods(...inputs));
+      assert.equal(merged.sessionEntry, undefined);
+      assert.equal(merged.totalTokens, 30);
+    }
+    assert.equal(row(usage.mergePeriods(a, missing, a)).sessionEntry, 't3');
+  });
 }

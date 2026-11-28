@@ -893,6 +893,9 @@ function propagateTodayProjects(today, periods, titleMetadata = {}) {
       // deleted, say) yields to the fresh link when that one resolves.
       if (session.nativeSessionId) target.nativeSessionId = session.nativeSessionId;
       if (session.t3ThreadId && !target.t3ParentLink) target.t3ThreadId = session.t3ThreadId;
+      // Fresh entry evidence fills the anchor like the link above; an
+      // unavailable read leaves the anchor's attribution in place.
+      if (session.sessionEntry) target.sessionEntry = session.sessionEntry;
       const parentClient = session.parentClient || session.client;
       const targetParentClient = target.parentClient || target.client;
       if (session.parentSessionId && ((target.t3ParentLink && !session.t3ParentLink
@@ -976,7 +979,7 @@ function projectRetainedAntigravityTurns(today, periods, turns) {
 // Yesterday is a closed day: it takes a session's current title, project and
 // links, but its times, context and turn state stay those of that day.
 const PAST_DAY_IDENTITY_FIELDS = Object.freeze([
-  'title', 'projectId', 'projectLabel', 'sessionKind', 'nativeSessionId', 't3ThreadId', 'parentSessionId', 'parentClient', 't3ParentLink'
+  'title', 'projectId', 'projectLabel', 'sessionKind', 'nativeSessionId', 't3ThreadId', 'parentSessionId', 'parentClient', 't3ParentLink', 'sessionEntry'
 ]);
 
 function propagateIdentity(source, periods, titleMetadata) {
@@ -1000,7 +1003,7 @@ function propagateIdentity(source, periods, titleMetadata) {
 function copySessionLinks(source, target, { preserveRangeParents = false } = {}) {
   for (const [key, session] of Object.entries(target?.sessions || {})) {
     const resolved = source?.sessions?.[key];
-    for (const field of ['nativeSessionId', 't3ThreadId']) {
+    for (const field of ['nativeSessionId', 't3ThreadId', 'sessionEntry']) {
       if (resolved?.[field]) session[field] = resolved[field];
     }
     if (resolved?.parentSessionId) {
@@ -1024,9 +1027,18 @@ function t3SessionLinksChanged(session, resolved) {
 
 function refreshT3SessionLinks(session, resolved, revoked = false) {
   if (!revoked && !t3SessionLinksChanged(session, resolved)) return;
+  // A revoked identity loses its launch-entry attribution with its link.
+  if (revoked) delete session.sessionEntry;
   const hadT3Parent = session.t3ParentLink;
   revokeT3SessionLinks(session);
-  if (!revoked) session.t3ThreadId = resolved.t3ThreadId;
+  if (!revoked) {
+    session.t3ThreadId = resolved.t3ThreadId;
+    // The confirmed binding is entry evidence too: a session the anchor still
+    // labels as native CLI moves to T3 with its link. Copy only a confirmed
+    // value — an absent one is not evidence of removal, mirroring how the
+    // fill-only anchor copy above treats an unavailable read.
+    if (resolved.sessionEntry) session.sessionEntry = resolved.sessionEntry;
+  }
   if (session.parentSessionId || !resolved?.parentSessionId || (revoked && (!hadT3Parent || resolved.t3ParentLink))) return;
   session.parentSessionId = resolved.parentSessionId;
   if (resolved.parentClient) session.parentClient = resolved.parentClient;
@@ -1623,9 +1635,27 @@ async function collectUsageOnce(options) {
         if (revoked) {
           for (const period of [today, month, allTime, ...Object.values(todayPartitions)]) {
             const retained = period.sessions?.[key];
-            if (!retained?.t3ThreadId && !retained?.t3ParentLink) continue;
+            if (!retained) continue;
+            if (!retained.t3ThreadId && !retained.t3ParentLink) {
+              // An entry-only row has no link to revoke, but its launch-entry
+              // attribution came from the identity the conflict invalidated.
+              delete retained.sessionEntry;
+              continue;
+            }
             revokeT3SessionLinks(retained);
+            delete retained.sessionEntry;
             localSessionMetadataDeps.revokedT3ThreadKeys.add(key);
+          }
+          // The activity projection keeps its own native view beside the
+          // periods; a stale entry there would be copied back onto the row by
+          // the projection's retention rules on the next heartbeat. The
+          // served summary takes this view from the anchor.
+          for (const rows of Object.values(anchor.nativeSessions || {})) {
+            const retained = rows?.[key];
+            if (retained) {
+              revokeT3SessionLinks(retained);
+              delete retained.sessionEntry;
+            }
           }
         }
         const broader = [[anchor.month, month], [anchor.allTime, allTime]];
@@ -1926,9 +1956,16 @@ async function collectUsageOnce(options) {
       const { metadataCache, revokedT3ThreadKeys } = localSessionMetadataDeps;
       for (const period of Object.values(days)) {
         for (const [key, row] of Object.entries(period.sessions)) {
-          if (!(row.t3ThreadId || row.t3ParentLink)) continue;
-          if (!revokedT3ThreadKeys.has(key) && !metadataCache.get(key)?.t3ThreadRevoked) continue;
+          const revoked = revokedT3ThreadKeys.has(key) || metadataCache.get(key)?.t3ThreadRevoked;
+          if (!(row.t3ThreadId || row.t3ParentLink)) {
+            // Entry-only rows keep no link to revoke; the invalidated identity
+            // still unattributes them.
+            if (revoked) delete row.sessionEntry;
+            continue;
+          }
+          if (!revoked) continue;
           revokeT3SessionLinks(row);
+          delete row.sessionEntry;
           revokedT3ThreadKeys.add(key);
         }
       }
@@ -3062,13 +3099,39 @@ function startCollector(options) {
           if (captured.nativePastRanges) anchor.nativePastRanges = captured.nativePastRanges;
           anchor.sessionIdentityVersion = captured.sessionIdentityVersion;
         }
+        // Entry attribution the anchored windows confirmed this tick joins the
+        // saved anchor, so an unavailable read cannot erase it from the served
+        // broader periods; copying is fill-only, and revocations have already
+        // removed the value from the captured rows above. A fill counts as an
+        // anchor change, so a restart cannot lose the confirmed value.
+        let entriesFilled = false;
+        for (const [capturedPeriod, anchorPeriod] of [
+          [captured.windowsPeriods.today, anchor.today],
+          [captured.windowsPeriods.month, anchor.month],
+          [captured.windowsPeriods.allTime, anchor.allTime]
+        ]) {
+          for (const [key, capturedRow] of Object.entries(capturedPeriod?.sessions || {})) {
+            const anchorRow = anchorPeriod?.sessions?.[key];
+            if (anchorRow && !anchorRow.sessionEntry && capturedRow.sessionEntry) {
+              anchorRow.sessionEntry = capturedRow.sessionEntry;
+              entriesFilled = true;
+            }
+          }
+        }
         const revokedLinks = captured.revokedT3ThreadKeys || [];
         const changedLinks = captured.changedT3ThreadKeys || [];
         if (revokedLinks.length || changedLinks.length) {
           for (const period of Object.values(anchor.dailySessionPastDays || {})) {
             for (const key of revokedLinks) {
               const row = period?.sessions?.[key];
-              if (row) revokeT3SessionLinks(row);
+              // Past-day rows normally carry no launch-entry attribution, but
+              // a revoked key must not leave one behind if a row ever holds
+              // it: the revocation invalidates the identity the entry came
+              // from, exactly as it invalidates the link.
+              if (row) {
+                revokeT3SessionLinks(row);
+                delete row.sessionEntry;
+              }
             }
           }
           for (const period of ['today', 'month', 'allTime']) {
@@ -3131,7 +3194,7 @@ function startCollector(options) {
           wslAnchor = captured.wslBundle;
           wslStatusAnchor = captured.wslStatus || null;
         }
-        if (titlesChanged || projectsChanged || sourcesChanged || identitiesUpgraded || revokedLinks.length || changedLinks.length) {
+        if (titlesChanged || projectsChanged || sourcesChanged || identitiesUpgraded || revokedLinks.length || changedLinks.length || entriesFilled) {
           persistAnchor(tickPricingRevision, tickSourceRevision);
         }
       }
