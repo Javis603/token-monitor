@@ -2588,6 +2588,9 @@ function layoutTopologyBeams(canvas, rect, edgeSpecs, svg, stagger, reduced) {
   });
 }
 
+const topologySweepHtml = '<span class="topo-sweep-border" aria-hidden="true"><span class="topo-sweep-gradient"></span></span>'
+  + '<span class="topo-sweep-sheen" aria-hidden="true"><span class="topo-sweep-gradient"></span></span>';
+
 function renderTopology(overview, revealed = false, cardRateSamples = {}) {
   if (!els.topology) return;
   const graph = overview?.topology;
@@ -2641,6 +2644,7 @@ function renderTopology(overview, revealed = false, cardRateSamples = {}) {
       + `</div>`
       + `<div class="topo-node-sub"><span class="topo-node-sub-text">${subLeft}</span><span>${escapeHtml(subRight)}</span></div>`
       + `<div class="topo-mini-bar"><div class="topo-mini-bar-fill" data-w="${shareScale}" data-c="${barColor}"></div></div>`
+      + (hasLiveFlow ? topologySweepHtml : '')
       + (borderColor ? `<span class="topo-device-edge" data-bg="${escapeHtml(borderColor)}" aria-hidden="true"></span>` : '')
       + `<span class="topo-port topo-port--out${hasLiveFlow ? ' is-live' : ''}" data-port="dev:${escapeHtml(d.id)}"></span>`
       + `</div>`;
@@ -2673,6 +2677,7 @@ function renderTopology(overview, revealed = false, cardRateSamples = {}) {
       + `</div>`
       + `<div class="topo-node-sub"><span class="topo-node-sub-text">${subLeft}</span><span>${subRight}</span></div>`
       + `<div class="topo-mini-bar"><div class="topo-mini-bar-fill" data-w="${fillScale}" ${barAttr}></div></div>`
+      + (active && !border ? topologySweepHtml : '')
       + (border ? '<span class="topo-workspace-border" aria-hidden="true"></span>' : '')
       + `<span class="topo-port topo-port--out${active ? ' is-live' : ''}" data-port="hub-out:${escapeHtml(h.id)}"></span>`
       + `</div>`;
@@ -2696,6 +2701,7 @@ function renderTopology(overview, revealed = false, cardRateSamples = {}) {
       + `<span class="topo-node-val">${escapeHtml(formatCompact(ep.totalTokens))}</span>`
       + `</div>`
       + `<div class="topo-node-sub">${subLeft}${rightMeta}</div>`
+      + (ep.isActive ? topologySweepHtml : '')
       + `</div>`;
   }).join('');
 

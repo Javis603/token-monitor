@@ -1126,7 +1126,7 @@ html.native-high-contrast .dash-stage {
   z-index: 1;
 }
 
-.topo-node.is-active::before,
+.topo-sweep-border,
 .topo-workspace-border {
   position: absolute;
   inset: -1px;
@@ -1140,9 +1140,41 @@ html.native-high-contrast .dash-stage {
   mask-composite: exclude;
 }
 
-/* The border highlight and the sheen move together along the flow. */
-.topo-node.is-active::before {
+/* Keep the gradient still in its own layer. A 280% background translates
+   by -(280 - 100) / 280 times the old background-position percentage. */
+.topo-sweep-border,
+.topo-sweep-sheen {
+  overflow: hidden;
+}
+
+.topo-sweep-sheen,
+.topo-node--hub.has-tool-gradient::after {
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  pointer-events: none;
+  z-index: 0;
+}
+
+.topo-node--hub.has-tool-gradient::after {
   content: '';
+  opacity: 0;
+}
+
+.topo-sweep-gradient {
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: 280%;
+  opacity: 0;
+  animation-duration: var(--topo-dur);
+  animation-timing-function: cubic-bezier(0.35, 0.05, 0.25, 1);
+  animation-delay: var(--topo-phase-offset);
+  animation-iteration-count: infinite;
+  animation-fill-mode: both;
+}
+
+.topo-sweep-border > .topo-sweep-gradient {
+  --sweep-peak: 1;
   background-image: linear-gradient(
     95deg,
     transparent 0%,
@@ -1153,18 +1185,10 @@ html.native-high-contrast .dash-stage {
     transparent 66%,
     transparent 100%
   );
-  background-size: 280% 100%;
-  background-repeat: no-repeat;
-  opacity: 0;
 }
 
-.topo-node.is-active::after {
-  content: '';
-  position: absolute;
-  inset: 0;
-  border-radius: inherit;
-  pointer-events: none;
-  z-index: 0;
+.topo-sweep-sheen > .topo-sweep-gradient {
+  --sweep-peak: 0.85;
   background-image: linear-gradient(
     105deg,
     transparent 0%,
@@ -1173,30 +1197,22 @@ html.native-high-contrast .dash-stage {
     transparent 62%,
     transparent 100%
   );
-  background-size: 280% 100%;
-  background-repeat: no-repeat;
-  opacity: 0;
 }
 
-.topo-node--device.is-active::before {
-  animation: topoBorderEmit var(--topo-dur) cubic-bezier(0.35, 0.05, 0.25, 1) var(--topo-phase-offset) infinite both;
-}
-.topo-node--device.is-active::after {
-  animation: topoSheenEmit var(--topo-dur) cubic-bezier(0.35, 0.05, 0.25, 1) var(--topo-phase-offset) infinite both;
+.topo-node--hub .topo-sweep-sheen > .topo-sweep-gradient {
+  --sweep-peak: 0.9;
 }
 
-.topo-node--hub.is-active::before {
-  animation: topoBorderPass var(--topo-dur) cubic-bezier(0.35, 0.05, 0.25, 1) var(--topo-phase-offset) infinite both;
-}
-.topo-node--hub.is-active::after {
-  animation: topoSheenPass var(--topo-dur) cubic-bezier(0.35, 0.05, 0.25, 1) var(--topo-phase-offset) infinite both;
+.topo-node--device .topo-sweep-gradient {
+  animation-name: topoSweepEmit;
 }
 
-.topo-node--endpoint.is-active::before {
-  animation: topoBorderArrive var(--topo-dur) cubic-bezier(0.35, 0.05, 0.25, 1) var(--topo-phase-offset) infinite both;
+.topo-node--hub .topo-sweep-gradient {
+  animation-name: topoSweepPass;
 }
-.topo-node--endpoint.is-active::after {
-  animation: topoSheenArrive var(--topo-dur) cubic-bezier(0.35, 0.05, 0.25, 1) var(--topo-phase-offset) infinite both;
+
+.topo-node--endpoint .topo-sweep-gradient {
+  animation-name: topoSweepArrive;
 }
 
 .topo-node:hover,
@@ -1216,10 +1232,6 @@ html.native-high-contrast .dash-stage {
 .topo-node--hub.has-tool-gradient {
   border-color: transparent;
   box-shadow: none;
-}
-
-.topo-node--hub.has-tool-gradient::before {
-  display: none;
 }
 
 .topo-workspace-border {
@@ -1564,32 +1576,25 @@ html.native-high-contrast .dash-stage {
   stop-opacity: 0.6;
 }
 
-@keyframes topoBorderEmit {
-  0% { background-position: 55% 0; opacity: 0; }
-  5% { opacity: 1; }
-  15% { background-position: 18% 0; opacity: 1; }
-  21%, 100% { background-position: 0% 0; opacity: 0; }
+@keyframes topoSweepEmit {
+  0% { transform: translateX(calc(-55% * 9 / 14)); opacity: 0; }
+  5% { opacity: var(--sweep-peak); }
+  15% { transform: translateX(calc(-18% * 9 / 14)); opacity: var(--sweep-peak); }
+  21%, 100% { transform: translateX(0%); opacity: 0; }
 }
 
-@keyframes topoSheenEmit {
-  0% { background-position: 55% 0; opacity: 0; }
-  5% { opacity: 0.85; }
-  15% { background-position: 18% 0; opacity: 0.85; }
-  21%, 100% { background-position: 0% 0; opacity: 0; }
+@keyframes topoSweepPass {
+  0%, 38% { transform: translateX(calc(-92% * 9 / 14)); opacity: 0; }
+  43% { transform: translateX(calc(-74% * 9 / 14)); opacity: var(--sweep-peak); }
+  58% { transform: translateX(calc(-24% * 9 / 14)); opacity: var(--sweep-peak); }
+  62%, 100% { transform: translateX(calc(-4% * 9 / 14)); opacity: 0; }
 }
 
-@keyframes topoBorderPass {
-  0%, 38% { background-position: 92% 0; opacity: 0; }
-  43% { background-position: 74% 0; opacity: 1; }
-  58% { background-position: 24% 0; opacity: 1; }
-  62%, 100% { background-position: 4% 0; opacity: 0; }
-}
-
-@keyframes topoSheenPass {
-  0%, 38% { background-position: 92% 0; opacity: 0; }
-  43% { background-position: 74% 0; opacity: 0.9; }
-  58% { background-position: 24% 0; opacity: 0.9; }
-  62%, 100% { background-position: 4% 0; opacity: 0; }
+@keyframes topoSweepArrive {
+  0%, 84% { transform: translateX(calc(-92% * 9 / 14)); opacity: 0; }
+  88% { transform: translateX(calc(-74% * 9 / 14)); opacity: var(--sweep-peak); }
+  96% { transform: translateX(calc(-24% * 9 / 14)); opacity: var(--sweep-peak); }
+  100% { transform: translateX(calc(-4% * 9 / 14)); opacity: 0; }
 }
 
 @keyframes topoWorkspaceSweep {
@@ -1597,20 +1602,6 @@ html.native-high-contrast .dash-stage {
   43% { mask-position: 74% 0; opacity: var(--workspace-sweep-opacity, 0.22); }
   58% { mask-position: 24% 0; opacity: var(--workspace-sweep-opacity, 0.22); }
   62%, 100% { mask-position: 4% 0; opacity: 0; }
-}
-
-@keyframes topoBorderArrive {
-  0%, 84% { background-position: 92% 0; opacity: 0; }
-  88% { background-position: 74% 0; opacity: 1; }
-  96% { background-position: 24% 0; opacity: 1; }
-  100% { background-position: 4% 0; opacity: 0; }
-}
-
-@keyframes topoSheenArrive {
-  0%, 84% { background-position: 92% 0; opacity: 0; }
-  88% { background-position: 74% 0; opacity: 0.85; }
-  96% { background-position: 24% 0; opacity: 0.85; }
-  100% { background-position: 4% 0; opacity: 0; }
 }
 
 @keyframes topoPortEmit {
@@ -2821,8 +2812,8 @@ body.flat .dash-drawer {
   transition-duration: 0.01ms !important;
 }
 
-:root[data-reduce-motion="on"] .topo-node.is-active::before,
-:root[data-reduce-motion="on"] .topo-node.is-active::after,
+:root[data-reduce-motion="on"] .topo-sweep-gradient,
+:root[data-reduce-motion="on"] .topo-node--hub.has-tool-gradient::after,
 :root[data-reduce-motion="on"] .topo-workspace-border::after {
   animation: none !important;
   opacity: 0 !important;
@@ -2842,8 +2833,8 @@ body.flat .dash-drawer {
     transition-duration: 0.01ms !important;
   }
 
-  :root:not([data-reduce-motion="off"]) .topo-node.is-active::before,
-  :root:not([data-reduce-motion="off"]) .topo-node.is-active::after,
+  :root:not([data-reduce-motion="off"]) .topo-sweep-gradient,
+  :root:not([data-reduce-motion="off"]) .topo-node--hub.has-tool-gradient::after,
   :root:not([data-reduce-motion="off"]) .topo-workspace-border::after {
     animation: none !important;
     opacity: 0 !important;

@@ -513,8 +513,11 @@ test('dashboard.js fetches history over IPC and renders both tabs', () => {
   assert.match(css, /\.dash-topo-beams/);
   assert.doesNotMatch(css, /topo-edge-aura|topoBeamTravel/);
   assert.match(css, /mask-composite:\s*exclude/);
-  assert.match(css, /topoBorderPass/);
-  assert.match(css, /topoSheenPass/);
+  assert.match(js, /topo-sweep-border/);
+  assert.match(js, /topo-sweep-sheen/);
+  const sweepPass = css.match(/@keyframes topoSweepPass\s*\{((?:[^{}]*\{[^{}]*\})+)\s*\}/)?.[1] ?? '';
+  assert.match(sweepPass, /transform:\s*translateX\(/);
+  assert.doesNotMatch(sweepPass, /background-position\s*:/);
   assert.match(css, /topoPortEmit/);
   assert.match(css, /topoPortHubIn/);
   assert.match(css, /topoPortHubOut/);
