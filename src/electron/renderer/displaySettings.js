@@ -366,7 +366,10 @@
 
     function sync() {
       container.dataset.platform = platform() || 'unknown';
-      container.dataset.edgeSide = settings()?.edgeDockSide === 'left' ? 'left' : 'right';
+      // The overview thumbnail follows the chosen edge, so a top or bottom bar is
+      // not previewed as a side rail the user did not pick.
+      const dockSide = settings()?.edgeDockSide;
+      container.dataset.edgeSide = ['left', 'top', 'bottom'].includes(dockSide) ? dockSide : 'right';
       if (!available(active)) open('main');
       for (const node of container.querySelectorAll('[data-i18n]')) {
         node.textContent = t(node.dataset.i18n);

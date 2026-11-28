@@ -11092,6 +11092,9 @@ html.native-liquid-glass .view-switcher-menu-item { border-radius: 9px; }
 .display-settings-thumb-bubble i { width: 13px; height: 5px; left: 50%; top: 50%; transform: translate(-50%, -50%); border-radius: 4px; }
 .display-settings-thumb-tray i { width: 11px; height: 2px; top: 0.5px; right: 2.5px; border-radius: 1px; }
 .display-settings[data-edge-side=left] .display-settings-thumb-edge i { right: auto; left: 0; border-radius: 0 2px 2px 0; }
+.display-settings[data-edge-side=top] .display-settings-thumb-edge i,
+.display-settings[data-edge-side=bottom] .display-settings-thumb-edge i { width: 30px; height: 7px; left: 50%; right: auto; transform: translateX(-50%); border-radius: 4px; }
+.display-settings[data-edge-side=bottom] .display-settings-thumb-edge i { top: auto; bottom: 9px; }
 .display-settings[data-platform=win32] .display-settings-thumb::before { top: auto; bottom: 0; }
 .display-settings[data-platform=win32] .display-settings-thumb-tray i { top: auto; bottom: 0.5px; }
 .display-settings[data-platform=linux] .display-settings-thumb::before { display: none; }
