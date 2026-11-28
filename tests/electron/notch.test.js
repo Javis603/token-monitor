@@ -698,7 +698,7 @@ test('disabling only the side dock preserves the shared rate expiry timer for th
   const code = source.slice(source.indexOf('function syncDockSurfaces('), source.indexOf('function refreshLimitStatsPresentation('));
   const cleared = [];
   let topRunning = true;
-  const context = { settings: {}, screenUiSuspended: false, syncPluginQuotaSurfaceDemand() {}, syncNotch() {}, canUseEdgeDock: () => false,
+  const context = { settings: {}, screenUiSuspended: false, syncPluginQuotaSurfaceDemand() {}, syncNotch() {}, canUseEdgeDock: () => false, scheduleEdgeDockPeriodRollover() {},
     edgeDockController: { stop() {} }, notchController: { isRunning: () => topRunning },
     edgeDockRateTimer: 42, edgeDockRateTracker: null, edgeDockRateContext: '', edgeDockRateHistory: require('../../src/electron/renderer/tokenRatePresentation').createLiveTokenRateHistory(), clearTimeout: (timer) => cleared.push(timer) };
   vm.runInNewContext(`${code}; syncDockSurfaces({});`, context);

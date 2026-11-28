@@ -182,6 +182,24 @@ test('an idle legacy device with empty History leaves the exact range and detail
   assert.deepEqual(result.devices.map(row => row.deviceId), ['a']);
 });
 
+test('a failed published range is reported even when empty History preserves detail coverage', async () => {
+  const a = device('a');
+  const b = { ...device('b'), periods: {} };
+  const legacy = { ...device('legacy'), periods: {} };
+  let misses = 0;
+  const result = await resolveSyncedFixedPeriod('yesterday', [a, b, legacy], { a: 'rev-a', b: 'rev-b' }, {
+    ...options,
+    read: id => id === 'a' ? period('a', 20) : null,
+    onRangeReadMiss: () => { misses++; },
+    history: devices => historyFallbackForDevices('yesterday', devices, [b, legacy].map(row => ({
+      ...row, historyAvailable: true, history: { daily: [] }
+    })), options)
+  });
+  assert.equal(result.detailsAvailable, true);
+  assert.equal(result.period.totalTokens, 20);
+  assert.equal(misses, 1, 'only the failed published range can be retried');
+});
+
 test('a stale device with History usage only outside Week does not hide exact Week details', async () => {
   const a = device('a');
   const b = device('b', '2026-11-24');

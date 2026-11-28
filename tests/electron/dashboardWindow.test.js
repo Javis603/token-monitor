@@ -356,7 +356,7 @@ test('Dashboard and Widget share the complete local/host/client history resolver
 
 test('getDashboardHistory reads local history directly without a blocking collection tick', () => {
   const main = read('src', 'electron', 'main.js');
-  const fn = /async function getDashboardHistory\(options = \{\}\)\s*\{([\s\S]*?)\n\}/.exec(main);
+  const fn = /async function getDashboardHistory\([^\n]*?\)\s*\{([\s\S]*?)\n\}/.exec(main);
   assert.ok(fn, 'getDashboardHistory should be defined');
   // Awaiting a full collection tick here delayed the fetch for seconds; on a
   // quick close/reopen the response outlived the renderer and the dashboard
