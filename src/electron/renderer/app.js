@@ -5143,7 +5143,7 @@ function limitAccountContext(providerId) {
     devices, localDeviceId: state.settings?.deviceId, probes: limitProbes,
     providerEnabled: limitProviderEnabled(providerId), presentation: state.settings?.limitAccountPresentation?.[providerId] };
 }
-function renderProviderAccountLinks() {
+function renderProviderAccountLinks(replacementOptions) {
   // The previous snapshot can stay visible while a different Hub connects.
   // Its pairs must never become actions for the new destination.
   const snapshot = state.stats;
@@ -5163,8 +5163,8 @@ function renderProviderAccountLinks() {
       ? t('settings.sync.panel.thisDevice') : deviceBreakdownApi.deviceLabel(device)
   }));
   for (const id of providers) {
-    const options = document.getElementById(`limitProviderOptions-${id}`)
-      ?.querySelector(':scope > .limit-provider-options-inner');
+    const options = replacementOptions ? replacementOptions.get(id)
+      : document.getElementById(`limitProviderOptions-${id}`)?.querySelector(':scope > .limit-provider-options-inner');
     if (!options) continue;
     let panel = accountLinkPanels.get(id);
     if (!panel) {
@@ -14790,6 +14790,7 @@ function renderLimitProviderCheckboxesNow() {
     return;
   }
   const previousChildren = Array.from(els.limitProviderCheckboxes.children);
+  const replacementOptions = new Map();
   const previousRows = Array.from(els.limitProviderCheckboxes.querySelectorAll('.limit-provider-row[data-provider]'));
   const focusedId = document.activeElement?.id || '';
   const reusableSettingInputs = new Map();
@@ -15015,6 +15016,7 @@ function renderLimitProviderCheckboxesNow() {
     if (optionsContainer) row.append(optionsContainer);
     if (isEnabled) els.limitProviderCheckboxes.insertBefore(row, groups.before);
     else groups.rows.append(row);
+    if (optionsInner) replacementOptions.set(id, optionsInner);
     // `moveBefore()` preserves focus and edit state while reparenting. Its
     // destination must already be connected, so the row is mounted first.
     moveLimitProviderLiveNode(actions, accountStatus);
@@ -15047,8 +15049,9 @@ function renderLimitProviderCheckboxesNow() {
     }
   }
   if (!matched.size) renderSettingsListEmptyState(els.limitProviderCheckboxes);
+  // Move live panels while both rows are connected to preserve keyboard focus.
+  renderProviderAccountLinks(replacementOptions);
   for (const child of previousChildren) child.remove();
-  renderProviderAccountLinks();
   restoreSettingsListFocus(focusedId);
   playSettingsRowMotion(els.limitProviderCheckboxes, '.limit-provider-row[data-provider]', 'provider', motion);
   state.limitProviderRenderSignature = renderSignature;
