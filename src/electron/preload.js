@@ -55,6 +55,7 @@ contextBridge.exposeInMainWorld('tokenMonitor', {
     return () => ipcRenderer.removeListener('dashboard:historyChanged', listener);
   },
   dashboard: {
+    buildBeamAtlases: (beams) => ipcRenderer.invoke('dashboard:buildBeamAtlases', beams),
     ready: () => ipcRenderer.send('dashboard:ready'),
     openAppSettings: () => ipcRenderer.send('dashboard:openAppSettings'),
     minimize: () => ipcRenderer.send('dashboard:minimize'),

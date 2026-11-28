@@ -2330,7 +2330,9 @@ function applyTopologyFocus(kind, id) {
   const graph = state.overview?.topology;
   if (!canvas || !graph) return;
   const { relatedNodes, relatedEdges } = topologyLineage(graph, kind, id);
+  const restoreSvg = !canvas.hasAttribute('data-focus') && canvas.querySelector('[data-atlas]');
   canvas.setAttribute('data-focus', 'true');
+  if (restoreSvg) syncTopologyAnimationClock(canvas);
   canvas.querySelectorAll('.topo-node').forEach((node) => {
     const key = `${node.dataset.topoKind}:${node.dataset.topoId}`;
     if (relatedNodes.has(key)) node.setAttribute('data-related', 'true');
@@ -2491,10 +2493,7 @@ function layoutTopologyLinks(graph) {
       + `</g>`;
   }).join('');
 
-  const linksChanged = patchDashboardMarkup(svg, `<defs>`
-    + `<filter id="dashTopoBeamGlow" x="-30%" y="-30%" width="160%" height="160%"><feGaussianBlur stdDeviation="2.4" result="b"></feGaussianBlur><feMerge><feMergeNode in="b"></feMergeNode><feMergeNode in="SourceGraphic"></feMergeNode></feMerge></filter>`
-    + `<filter id="dashTopoAmbientGlow" x="-40%" y="-40%" width="180%" height="180%"><feGaussianBlur stdDeviation="5"></feGaussianBlur></filter>`
-    + `</defs>${edgesHtml}`);
+  const linksChanged = patchDashboardMarkup(svg, window.dashboardFlowAtlasFilters + edgesHtml);
 
   let resumedActiveEdge = false;
   const edgeSpecById = new Map(edgeSpecs.map((spec) => [spec.edge.id, spec]));
@@ -2508,6 +2507,9 @@ function layoutTopologyLinks(graph) {
     g.style.setProperty('--topo-flow-phase', String(stagger ? Number(spec.edge.flowPhase || 0) : 0));
   });
   if (!reduced && (linksChanged || resumedActiveEdge)) syncTopologyAnimationClock(canvas);
+  window.dashboardFlowAtlas?.update(canvas, svg,
+    !reduced && !document.hidden && state.tab === 'activity' && state.stageView === 'flow',
+    stagger, window.tokenMonitor?.dashboard?.buildBeamAtlases);
 
   if (activeHover?.kind === 'topo') {
     applyTopologyFocus(activeHover.nodeKind, activeHover.nodeId);
@@ -2518,6 +2520,7 @@ function renderTopology(overview, revealed = false, cardRateSamples = {}) {
   if (!els.topology) return;
   const graph = overview?.topology;
   if (!graph || !graph.devices?.length) {
+    window.dashboardFlowAtlas?.clear();
     topologyResizeObserver?.disconnect();
     topologyResizeObserver = null;
     patchDashboardMarkup(els.topology, `<div class="dash-quotas-empty">${escapeHtml(t('dashboard.topology.empty'))}</div>`);
@@ -4068,6 +4071,7 @@ function closeRolledOverAccountingDrawer(previous, current) {
 }
 
 function renderNow() {
+  if (state.tab !== 'activity' || state.stageView !== 'flow') window.dashboardFlowAtlas?.clear();
   const nextFixedPeriodExpiryAt = revalidateSyncedPeriodOnRender();
   const sample = deviceRateTracker?.getSample?.() || null;
   const deviceRateSamples = {};
@@ -4221,6 +4225,7 @@ function handleDashboardVisibilityChange() {
     if (typeof scheduleRateExpiry === 'function') scheduleRateExpiry();
     return;
   }
+  window.dashboardFlowAtlas?.clear();
   if (dashboardRefreshFrame) cancelAnimationFrame(dashboardRefreshFrame);
   dashboardRefreshFrame = 0;
   if (typeof rateExpiryTimer !== 'undefined' && rateExpiryTimer) {
@@ -4230,6 +4235,17 @@ function handleDashboardVisibilityChange() {
 }
 
 document.addEventListener('visibilitychange', handleDashboardVisibilityChange);
+
+function watchTopologyDeviceScale() {
+  window.matchMedia?.(`(resolution: ${window.devicePixelRatio}dppx)`)?.addEventListener('change', () => {
+    watchTopologyDeviceScale();
+    if (!document.hidden && state.tab === 'activity' && state.stageView === 'flow') {
+      layoutTopologyLinks(state.overview?.topology);
+    }
+  }, { once: true });
+}
+
+watchTopologyDeviceScale();
 
 function hideTooltip() {
   activeHover = null;

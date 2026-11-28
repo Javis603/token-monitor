@@ -3022,3 +3022,18 @@ body.flat .dash-drawer {
 .dash-band-single { grid-template-columns: minmax(0, 1fr); }
 
 .dash-skyline-canvas:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+
+.dash-topo-atlas-frame {
+  overflow: hidden;
+  pointer-events: none;
+}
+
+.dash-topo-atlas-frame img {
+  display: block;
+  max-width: none;
+}
+
+.dash-topo-canvas:not([data-focus]) .topo-edge[data-atlas] > :not(.topo-edge-base, .dash-topo-atlas-frame),
+.dash-topo-canvas[data-focus] .dash-topo-atlas-frame {
+  display: none;
+}

@@ -19,6 +19,8 @@ app.commandLine.appendSwitch('js-flags', existingJsFlags ? `${existingJsFlags} $
 // only. A renderer crash now takes every window down instead of one surface.
 app.commandLine.appendSwitch('process-per-site');
 
+const { createDashboardFlowAtlasBuilder } = require('./dashboardFlowAtlas');
+const buildDashboardFlowAtlases = createDashboardFlowAtlasBuilder(BrowserWindow);
 const { createRetainedWindow, captureRetainedWindowState, restoreRetainedWindowState } = require('./retainedWindow');
 const { createIdleHeapCollector } = require('./idleHeap');
 const { autoUpdater } = require('electron-updater');
@@ -9378,6 +9380,10 @@ app.whenReady().then(() => {
     if (screenUiSuspended) return false;
     createDashboardWindow();
     return true;
+  });
+  ipcMain.handle('dashboard:buildBeamAtlases', (event, beams) => {
+    if (event.sender !== dashboardWindow?.webContents || event.senderFrame !== event.sender.mainFrame) return null;
+    return buildDashboardFlowAtlases(beams, event.sender);
   });
   ipcMain.handle('dashboard:getHistory', (_event, options) => getDashboardHistory(options));
   ipcMain.handle('stats:fixedPeriod', (_event, ...args) => getSyncedFixedPeriod(...args));

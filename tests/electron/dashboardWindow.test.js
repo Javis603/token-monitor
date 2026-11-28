@@ -722,6 +722,7 @@ test('dashboard restore coalesces either native event order into one refresh', (
   let refreshes = 0;
   let frame = null;
   const context = {
+    window: {},
     document: {
       get hidden() { return hidden; },
       hasFocus: () => focused
@@ -3347,6 +3348,7 @@ test('dashboard Trends and device selector recover to All Devices when selected 
   let boundaryRefreshes = 0;
 
   const context = {
+    window: {},
     state: {
       tab: 'trends',
       periodKey: 'today',
