@@ -1592,11 +1592,6 @@ function renderVelocity(overview) {
 
   if (els.velocityModels) {
     const models = vel.models || [];
-    if (models.length === 0) {
-      els.velocityModels.innerHTML = ghostListHtml('velocity', 3);
-      syncScrollFades(els.velocityModels);
-      return;
-    }
     // Rows rebuild on every tick; keep the reader's place in a scrolled list.
     const scrollTop = els.velocityModels.scrollTop;
     els.velocityModels.innerHTML = models.map((m) => {
@@ -1956,9 +1951,6 @@ function ghostRowHtml(kind) {
       + '<div class="dash-bd-bar-bg"></div>'
       + `<span class="dash-bd-val">${ghostBar('is-num')}</span><span class="dash-bd-pct">${ghostBar('is-num-sm')}</span>`
       + '</div>';
-  }
-  if (kind === 'velocity') {
-    return `<div class="dash-velocity-model is-ghost"><span class="dash-bd-swatch dash-ghost-fill"></span>${ghostBar('is-name')}${ghostBar('is-num')}</div>`;
   }
   return '<div class="dash-session-row is-ghost">'
     + '<span class="dash-session-lead"><span class="dash-session-brand dash-ghost-fill"></span></span>'

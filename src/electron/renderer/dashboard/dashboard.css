@@ -535,6 +535,10 @@ html.native-high-contrast .dash-stage {
   min-width: 0;
 }
 
+.dash-work-heading > .dash-surface-sub {
+  white-space: normal;
+}
+
 .dash-activity-col[data-stage="flow"] .dash-heatmap-title-group {
   position: absolute;
   width: 1px;
@@ -2064,12 +2068,6 @@ html.native-liquid-glass .dash-skyline-reset-btn {
   grid-column: 1 / -1;
 }
 
-.dash-ghost-list--velocity {
-  display: flex;
-  flex-direction: column;
-  gap: 5px;
-}
-
 .is-ghost {
   pointer-events: none;
   cursor: default;
@@ -2106,7 +2104,6 @@ html.native-liquid-glass .dash-skyline-reset-btn {
 .dash-session-row.is-ghost .dash-session-body { gap: 7px; }
 .dash-session-row.is-ghost .dash-session-metrics { gap: 6px; }
 .dash-bd-row.is-ghost { min-height: 26px; }
-.dash-velocity-model.is-ghost { min-height: 14px; }
 .topo-node.is-ghost .topo-node-top { min-height: 15px; }
 .topo-node.is-ghost .topo-node-sub { min-height: 13px; }
 .home-limit-account.is-ghost .home-limit-account-head { min-height: 16px; }
