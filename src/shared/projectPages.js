@@ -1,0 +1,99 @@
+// @ts-check
+'use strict';
+
+const { FIXED_RANGE_PAGE_BYTES } = require('./fixedRangeSync');
+
+const MAX_PROJECT_PAGES = 32;
+const encoder = new TextEncoder();
+
+/** @param {unknown} revision */
+function validProjectRevision(revision) {
+  return typeof revision === 'string' && /^[a-f0-9]{64}$/.test(revision);
+}
+
+/** @param {Record<string, any> | undefined} device @param {Record<string, any> | undefined} snapshot */
+function projectSnapshotMatches(device, snapshot) {
+  return Boolean(snapshot && device?.projectsEnabled !== false
+    && device?.allTimeProjectsOmitted && device.allTimeProjectsRevision === snapshot.revision);
+}
+
+/** @param {Record<string, any> | undefined} snapshot @param {string | null} revision @param {string | null} page */
+function projectPageResponse(snapshot, revision, page) {
+  if (!snapshot) return { status: 404 };
+  if (page === null) return { status: 200, body: { revision: snapshot.revision, pageCount: snapshot.pageCount } };
+  if (revision !== snapshot.revision) return { status: 409 };
+  if (!/^(0|[1-9]\d*)$/.test(page) || Number(page) >= snapshot.pageCount) return { status: 404 };
+  return { status: 200, page: Number(page) };
+}
+
+/**
+ * @param {Record<string, any>} payload
+ * @param {string | undefined} baseRevision
+ * @param {Array<[string, unknown]> | undefined} baseRows
+ */
+function expandProjectPage(payload, baseRevision, baseRows) {
+  if (!payload?.baseRevision) return payload;
+  if (payload.baseRevision !== baseRevision || !Array.isArray(baseRows) || !Array.isArray(payload.changes)) return null;
+  const updates = new Map();
+  for (const change of payload.changes) {
+    if (!Array.isArray(change) || change.length !== 2 || updates.has(change[0])) return null;
+    updates.set(change[0], change[1]);
+  }
+  const rows = baseRows.map(row => {
+    if (!updates.has(row[0])) return row;
+    const updated = [row[0], updates.get(row[0])];
+    updates.delete(row[0]);
+    return updated;
+  });
+  return updates.size ? null : { ...payload, rows };
+}
+
+function createProjectUploads() {
+  const pending = new Map();
+  return {
+    /** @param {string} deviceId */
+    discard(deviceId) { pending.delete(deviceId); },
+    /**
+     * @param {string} deviceId
+     * @param {Record<string, any>} payload
+     * @param {Record<string, any> | undefined} device
+     * @param {Record<string, any> | undefined} published
+     */
+    accept(deviceId, payload, device, published) {
+      const { revision, page, pageCount, rows } = payload || {};
+      if (!validProjectRevision(revision) || !Number.isInteger(pageCount) || pageCount < 1
+        || pageCount > MAX_PROJECT_PAGES || !Number.isInteger(page) || page < 0 || page >= pageCount
+        || !Array.isArray(rows) || !rows.length || encoder.encode(JSON.stringify(rows)).byteLength > FIXED_RANGE_PAGE_BYTES
+        || rows.some(row => !Array.isArray(row) || row.length !== 2 || typeof row[0] !== 'string' || !row[0]
+          || !row[1] || typeof row[1] !== 'object' || Array.isArray(row[1]))) return { status: 400 };
+      if (!projectSnapshotMatches(device, payload)) return { status: 409 };
+      if (projectSnapshotMatches(device, published)) return { status: 200, complete: true };
+      const now = Date.now();
+      let staged = pending.get(deviceId);
+      if (page === 0) {
+        for (const [id, upload] of pending) {
+          if (now - upload.updatedAt >= 300_000) pending.delete(id);
+        }
+        if (!pending.has(deviceId) && pending.size >= 4) return { status: 409 };
+        staged = { revision, pageCount, updatedAt: now, pages: [], lastKey: '' };
+        pending.set(deviceId, staged);
+      }
+      if (!staged || staged.revision !== revision || staged.pageCount !== pageCount
+        || staged.pages.length !== page || now - staged.updatedAt >= 300_000) return { status: 409 };
+      // Sorted keys make duplicates invalid across page boundaries as well.
+      let lastKey = staged.lastKey;
+      for (const [key] of rows) {
+        if (key <= lastKey) return { status: 400 };
+        lastKey = key;
+      }
+      staged.pages.push(rows);
+      staged.updatedAt = now;
+      staged.lastKey = lastKey;
+      if (staged.pages.length < pageCount) return { status: 200, complete: false };
+      pending.delete(deviceId);
+      return { status: 200, complete: true, snapshot: { revision, pageCount, pages: staged.pages } };
+    }
+  };
+}
+
+module.exports = { MAX_PROJECT_PAGES, validProjectRevision, projectSnapshotMatches, projectPageResponse, expandProjectPage, createProjectUploads };

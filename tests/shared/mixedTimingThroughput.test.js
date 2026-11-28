@@ -3,7 +3,7 @@
 const assert = require('node:assert/strict');
 const test = require('node:test');
 const { extractUsageFromTokscale, extractUsageBundleFromTokscale, normalizeDeviceRecord, aggregateDevices, applyPeriodDelta } = require('../../src/shared/usage');
-const { syncPayload } = require('../../src/shared/syncPayload');
+const { serializeSyncPayload, syncPayload, SYNC_PAYLOAD_BUDGET_BYTES } = require('../../src/shared/syncPayload');
 const { tokenRatePerSecond, createLiveTokenRateTracker } = require('../../src/electron/renderer/tokenRatePresentation');
 
 function row(overrides = {}) {
@@ -132,4 +132,37 @@ test('a later timed generation counts only its output after an untimed-only base
   assert.equal(tracker.observe(after).speed, 100);
   assert.equal(after.outputTokens, 300);
   assert.equal(after.timedOutputTokens, 100);
+});
+
+
+test('oversized sync snapshots still drive remote per-model live speed', () => {
+  const sessions = Object.fromEntries(Array.from({ length: 6000 }, (_, index) => [
+    `claude:s${index}`, {
+      client: 'claude', sessionId: `s${index}`, totalTokens: 100,
+      projectLabel: 'workspace-' + 'x'.repeat(340)
+    }
+  ]));
+  const deviceId = 'source-device';
+  function receive(multiplier) {
+    const speed = { timedTokens: 100 * multiplier, timedOutputTokens: 100 * multiplier, timedDurationMs: 1000 * multiplier };
+    const today = { totalTokens: speed.timedTokens, outputTokens: speed.timedOutputTokens,
+      ...speed, modelThroughput: { 'shared-model': speed } };
+    const { bytes, payload } = serializeSyncPayload({
+      deviceId, today,
+      month: { totalTokens: 600_000, sessions, modelThroughput: today.modelThroughput },
+      allTime: { totalTokens: 600_000, modelThroughput: today.modelThroughput }
+    });
+    assert.ok(bytes <= SYNC_PAYLOAD_BUDGET_BYTES);
+    assert.ok(payload.sessionDetailsOmitted.month > 0);
+    assert.equal(payload.month.modelThroughput, undefined);
+    assert.equal(payload.allTime.modelThroughput, undefined);
+    assert.equal(payload.month.totalTokens, 600_000);
+    return aggregateDevices([payload]).devices[0].periods.today;
+  }
+
+  const tracker = createLiveTokenRateTracker();
+  tracker.observe(receive(1));
+  const sample = tracker.observe(receive(2));
+  assert.equal(sample.speed, 100);
+  assert.deepEqual(sample.models.map(({ model, speed }) => ({ model, speed })), [{ model: 'shared-model', speed: 100 }]);
 });

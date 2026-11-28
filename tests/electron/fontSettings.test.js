@@ -200,9 +200,9 @@ test('font controls and zoom share a visible Appearance group', () => {
 test('font settings wiring keeps renderer defaults concrete and technical monospace roles intact', () => {
   const app = readProjectFile('src', 'electron', 'renderer', 'app.js');
   const html = readProjectFile('src', 'electron', 'renderer', 'index.html');
-  const dashboard = readProjectFile('src', 'electron', 'renderer', 'dashboard.js');
+  const dashboard = readProjectFile('src', 'electron', 'renderer', 'dashboard', 'dashboard.js');
   const styles = readProjectFile('src', 'electron', 'renderer', 'styles.css');
-  const dashboardStyles = readProjectFile('src', 'electron', 'renderer', 'dashboard.css');
+  const dashboardStyles = readProjectFile('src', 'electron', 'renderer', 'dashboard', 'dashboard.css');
   const main = readProjectFile('src', 'electron', 'main.js');
 
   assert.match(main, /interfaceFontFamily/);

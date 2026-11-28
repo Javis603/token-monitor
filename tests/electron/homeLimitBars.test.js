@@ -359,37 +359,35 @@ test('Home shows the plan on the account heading in both modes and omits unknown
   }
 });
 
-test('Home low-limit highlighting is opt-in with vendor colours and in monochrome', () => {
-  // Vendor colours: the opt-in highlight, critical under 20%, low under 50%.
-  for (const [remainingPercent, expected] of [[50, ''], [49, 'home-limit-value-low'], [20, 'home-limit-value-low'], [19, 'home-limit-value-critical'], [0, 'home-limit-value-critical']]) {
-    for (const showHomeLimitBars of [true, false]) {
-      const metric = renderHomeWindow({ remainingPercent }, { homeLimitDisplayMode: 'rows', homeVendorColors: true, showHomeLimitBars });
-      const { value } = homeRowParts(metric);
-      for (const className of ['home-limit-value-low', 'home-limit-value-critical']) {
-        assert.equal(value.classList.contains(className), showHomeLimitBars && expected === className);
+test('Home quota readings share warning thresholds across layouts and vendor colours', () => {
+  for (const homeLimitDisplayMode of ['rows', 'text', 'bars']) {
+    for (const homeVendorColors of [false, true]) {
+      for (const showHomeLimitBars of [false, true]) {
+        for (const remainingPercent of [49, 20, 19, 1, 0, null]) {
+          const settings = { homeLimitDisplayMode, homeVendorColors, showHomeLimitBars };
+          const metric = renderHomeWindow({ remainingPercent }, settings);
+          const { value, track } = homeRowParts(metric);
+          const reading = value || metric.children[0].children[1];
+          const exhausted = showHomeLimitBars && remainingPercent === 0;
+          const low = showHomeLimitBars && remainingPercent != null && remainingPercent > 0 && remainingPercent < 20;
+          const scenario = JSON.stringify({ ...settings, remainingPercent });
+          assert.equal(reading.classList.contains('home-limit-value-critical'), exhausted, scenario);
+          assert.equal(reading.classList.contains('home-limit-value-low'), low, scenario);
+          assert.equal(reading.style['--home-limit-accent'], undefined, scenario);
+          assert.equal(metric.classList.contains('is-exhausted'), exhausted, scenario);
+          assert.equal(metric.classList.contains('is-low'), low, scenario);
+          if (track) {
+            assert.equal(track.style['--home-limit-bar'], homeVendorColors ? '#d97757' : undefined, scenario);
+            assert.equal(track.style['--home-limit-tail'], homeVendorColors ? '#d97757' : undefined, scenario);
+          }
+          if (homeLimitDisplayMode === 'bars' && remainingPercent != null) {
+            const meter = metric.children.find((child) => child.className === 'limit-meter');
+            assert.equal(meter.children[0].style.background, '#d97757', scenario);
+          }
+        }
       }
-      assert.equal(metric.classList.contains('is-exhausted'), showHomeLimitBars && remainingPercent === 0, 'an exhausted reset is marked only with highlighting on');
     }
   }
-  // Monochrome (the default): with the opt-in, red only when exhausted and amber under 20%.
-  for (const [remainingPercent, critical, low] of [[50, false, false], [20, false, false], [19, false, true], [1, false, true], [0, true, false]]) {
-    for (const showHomeLimitBars of [true, false]) {
-      const metric = renderHomeWindow({ remainingPercent }, { homeLimitDisplayMode: 'rows', showHomeLimitBars });
-      const { value, track } = homeRowParts(metric);
-      assert.equal(value.classList.contains('home-limit-value-critical'), showHomeLimitBars && critical, `${remainingPercent}% critical`);
-      assert.equal(value.classList.contains('home-limit-value-low'), showHomeLimitBars && low, `${remainingPercent}% low`);
-      assert.equal(metric.classList.contains('is-exhausted'), showHomeLimitBars && critical);
-      assert.equal(metric.classList.contains('is-low'), showHomeLimitBars && low);
-      assert.equal(value.style['--home-limit-accent'], undefined, 'monochrome never tints a reading with the vendor colour');
-      assert.equal(track.style['--home-limit-bar'], undefined, 'monochrome meters take the neutral ink');
-      assert.equal(metric.classList.contains('is-critical'), false, 'monochrome keeps red for an exhausted reading');
-    }
-  }
-  const vendor = renderHomeWindow({ remainingPercent: 40 }, { homeLimitDisplayMode: 'rows', homeVendorColors: true });
-  assert.equal(homeRowParts(vendor).track.style['--home-limit-bar'], '#d97757');
-  assert.equal(homeRowParts(vendor).track.style['--home-limit-tail'], '#d97757');
-  const vendorCritical = renderHomeWindow({ remainingPercent: 19 }, { homeLimitDisplayMode: 'rows', homeVendorColors: true, showHomeLimitBars: true });
-  assert.ok(vendorCritical.classList.contains('is-critical'), 'a critical vendor-coloured window keeps its tail lit');
 });
 
 test('Home rows put each window on one row of label, reset, meter and reading; text and bars keep the classic layouts', () => {
@@ -579,22 +577,16 @@ test('Home low-limit indicators and vendor colours persist through the settings 
 });
 
 test('Home highlights only low and critical remaining limits', () => {
-  const app = read('src/electron/renderer/app.js');
   const css = read('src/electron/renderer/styles.css');
 
   // The classic bars keep the shared Limits meter, which the edge dock uses too.
   const view = read('src/electron/renderer/limits/windowsView.js');
   assert.match(view, /function limitMeterNode\(color, percent, tone = 1\)/);
   assert.match(view, /const meter = limitMeterNode\(color, fillPercent, tone\)/);
-  assert.match(app, /const highlightLow = state\.settings\?\.showHomeLimitBars === true;/);
-  assert.match(app, /if \(highlightLow && remainingPercent != null\)/);
-  assert.match(app, /clamped < 20/);
-  assert.match(app, /value\.classList\.add\('home-limit-value-critical'\)/);
-  assert.match(app, /clamped < 50/);
-  assert.match(app, /value\.classList\.add\('home-limit-value-low'\)/);
   assert.match(css, /\.home-limit-window\.is-low \.home-limit-track\s*\{[^}]*var\(--yellow\)/s);
-  assert.match(css, /\.home-limit-value-low\s*\{[^}]*--home-limit-accent/s);
+  assert.match(css, /\.home-limit-value-low\s*\{[^}]*var\(--yellow\)/s);
   assert.match(css, /\.home-limit-value-critical\s*\{[^}]*color:\s*var\(--red\)/s);
+  assert.match(css, /\.home-limit-window\.is-exhausted:not\(\.home-module-limits-classic \*\) \.home-limit-reset\s*\{[^}]*color:\s*var\(--red\)/s);
   assert.doesNotMatch(css, /\.home-limit-value-critical\s*\{[^}]*display:\s*inline-flex/s);
   assert.doesNotMatch(css, /\.home-limit-value-critical::before/, 'colour alone marks a critical reading; no dot before it');
   assert.match(css, /@media \(prefers-reduced-motion: reduce\)[\s\S]*?\.limit-meter-fill,[\s\S]*?\.tab-indicator\s*\{[^}]*transition:\s*none;/);

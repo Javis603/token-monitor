@@ -1,3 +1,4 @@
+import projectPages from './shared/projectPages.js';
 import uploadDelta from './shared/uploadDelta.js';
 import fixedRangeUploads from './shared/fixedRangeUploads.js';
 import { FIXED_RANGE_HEADER, FIXED_RANGE_VERSION, legacyFixedRangeView, rangesMatchDeviceDay, redactDailyRangeSnapshot, removedPagedClients, restorePagedClientSessions } from './shared/fixedRangeSync.js';
@@ -130,6 +131,7 @@ export class HubDO {
     this.state = state;
     this.uploadBaselines = uploadDelta.createUploadBaselines();
     this.fixedRangeUploads = fixedRangeUploads.createFixedRangeUploads();
+    this.projectUploads = projectPages.createProjectUploads();
     this.env = env;
     this.sseClients = new Set();
     this.heartbeatTimer = null;
@@ -176,6 +178,64 @@ export class HubDO {
     for (const [page, rows] of pages.entries()) await storage.put(fixedRangePageKey(id, metadata.revision, page), rows);
     await storage.put(key, metadata);
     await storage.put(revisionKey, { observedAt: metadata.observedAt, revision: metadata.revision, day, daily: true });
+  }
+
+  async clearProjectPages(storage, id, index) {
+    if (!index) return;
+    for (let page = 0; page < index.pageCount; page++) {
+      await storage.delete(`projectPage:${id}:${page}`);
+    }
+    await storage.delete(`projectIndex:${id}`);
+  }
+
+  async handleProjectPages(request, url) {
+    const id = url.searchParams.get('deviceId') || '';
+    if (!id) return jsonResponse(400, { error: 'deviceId_required' });
+    const key = `projectIndex:${id}`;
+    if (request.method === 'PUT') {
+      let payload;
+      try { payload = await readIngestJson(request); }
+      catch (error) { return jsonResponse(error.status === 413 ? 413 : 400, { error: 'bad_project_page' }); }
+      const result = await this.mutate(async () => {
+        const storage = this.state.storage;
+        const device = await storage.get(`dev:${id}`);
+        const previous = await storage.get(key);
+        const baseRows = payload?.baseRevision && previous?.revision === payload.baseRevision
+          && Number.isInteger(payload.page) && payload.page >= 0 && payload.page < previous.pageCount
+          ? await storage.get(`projectPage:${id}:${payload.page}`) : undefined;
+        const expanded = projectPages.expandProjectPage(payload, previous?.revision, baseRows);
+        if (!expanded) return { status: 409 };
+        const result = this.projectUploads.accept(id, expanded, device, previous);
+        if (result.snapshot) {
+          const { pages, ...index } = result.snapshot;
+          const hash = await crypto.subtle.digest('SHA-256', this.encoder.encode(JSON.stringify(pages.flat())));
+          const revision = Array.from(new Uint8Array(hash), byte => byte.toString(16).padStart(2, '0')).join('');
+          if (revision !== index.revision) return { status: 400 };
+          await this.withStorageTransaction(async storage => {
+            await this.clearProjectPages(storage, id, previous);
+            for (const [page, rows] of pages.entries()) await storage.put(`projectPage:${id}:${page}`, rows);
+            await storage.put(key, index);
+          });
+        }
+        return result;
+      });
+      if (result.snapshot) this.queueBroadcast();
+      return jsonResponse(result.status, result.status === 200 ? { complete: result.complete } : { error: 'project_page_rejected' });
+    }
+    if (request.method === 'GET') {
+      return this.mutate(async () => {
+        const storage = this.state.storage;
+        const device = await storage.get(`dev:${id}`);
+        const index = await storage.get(key);
+        const snapshot = projectPages.projectSnapshotMatches(device, index) ? index : undefined;
+        const { status, body, page } = projectPages.projectPageResponse(snapshot, url.searchParams.get('revision'), url.searchParams.get('page'));
+        if (status !== 200) return jsonResponse(status, { error: 'project_page_unavailable' });
+        if (body) return jsonResponse(200, body);
+        const rows = await storage.get(`projectPage:${id}:${page}`);
+        return rows ? jsonResponse(200, { rows }) : jsonResponse(404, { error: 'project_page_unavailable' });
+      });
+    }
+    return jsonResponse(405, { error: 'method_not_allowed' });
   }
 
   async handleFixedRanges(request, url) {
@@ -440,6 +500,12 @@ export class HubDO {
     const devices = await this.listDevices();
     const stats = await this.getStats(devices);
     stats.subscriptionsUpdatedAt = (await this.getSubscriptions())?.updatedAt || '';
+    const projectDevices = devices.filter(device => device.allTimeProjectsRevision);
+    const projectIndexes = projectDevices.length ? await this.state.storage.list({ prefix: 'projectIndex:' }) : new Map();
+    stats.allTimeProjectRevisions = Object.fromEntries(projectDevices.flatMap(device => {
+      const index = projectIndexes.get(`projectIndex:${device.deviceId}`);
+      return projectPages.projectSnapshotMatches(device, index) ? [[device.deviceId, index.revision]] : [];
+    }));
     const rangeRevisions = await this.state.storage.list({ prefix: 'fixedRangeRevision:' });
     stats.fixedRangeRevisions = Object.fromEntries(devices.filter(fixedRangeUploads.hasCurrentFixedRangeObservation).flatMap(({ deviceId, updatedAt, periodWindows }) => {
       const stamp = rangeRevisions.get(`fixedRangeRevision:${deviceId}`);
@@ -645,6 +711,7 @@ export class HubDO {
     }
     if (!(await isAuthorized(request, this.secret))) return jsonResponse(401, { error: 'unauthorized' });
 
+    if (url.pathname === '/api/all-time-projects') return this.handleProjectPages(request, url);
     if (url.pathname === '/api/fixed-ranges') return this.handleFixedRanges(request, url);
 
     if ((request.method === 'GET' || request.method === 'HEAD') && url.pathname === '/api/sync/content') {
@@ -735,7 +802,7 @@ export class HubDO {
           error: error.status === 413 ? 'payload_too_large' : 'bad_request', message: error.message
         });
       }
-      let record, upload, fixedRangeRevision = null, historyCalendarRetained = false;
+      let record, upload, allTimeProjectsRevision = null, fixedRangeRevision = null, historyCalendarRetained = false;
       try {
         record = await this.mutate(async () => {
           const incoming = delta ? this.uploadBaselines.prepare(payload) : payload;
@@ -792,10 +859,18 @@ export class HubDO {
                 await storage.put(indexKey, fixedRangeUploads.retireFixedRangeSnapshot(index));
                 await storage.delete(revisionKey);
               }
+              if (next.projectsEnabled === false) {
+                await this.clearProjectPages(storage, deviceId, await storage.get(`projectIndex:${deviceId}`));
+              }
               await storage.put(storageKey, next);
             });
           } else {
             await this.state.storage.put(storageKey, next);
+          }
+          if (existing?.allTimeProjectsRevision !== next.allTimeProjectsRevision) this.projectUploads.discard(deviceId);
+          if (next.allTimeProjectsRevision) {
+            const index = await this.state.storage.get(`projectIndex:${deviceId}`);
+            if (projectPages.projectSnapshotMatches(next, index)) allTimeProjectsRevision = index.revision;
           }
           if (existing?.updatedAt !== next.updatedAt || dayChanged || projectsChanged) this.fixedRangeUploads.discard(deviceId);
           if (!projectsChanged && request.headers.get(FIXED_RANGE_HEADER) === FIXED_RANGE_VERSION
@@ -816,6 +891,7 @@ export class HubDO {
       this.queueBroadcast();
       const response = {
         ok: true, deviceId: record.deviceId,
+        ...(record.allTimeProjectsRevision ? { allTimeProjectPages: 1, allTimeProjectsRevision } : {}),
         ...(request.headers.get(FIXED_RANGE_HEADER) === FIXED_RANGE_VERSION ? { fixedRanges: 1, fixedRangeDelta: 1, fixedRangeBatch: 1, fixedRangeIndexDelta: 1, dailySessionRanges: 1, fixedRangeRevision } : {}),
         ...(upload ? { upload } : {}),
         ...(historyCalendarRetained ? { historyCalendarRetained: true } : {})
@@ -890,6 +966,8 @@ export class HubDO {
         const key = `${TITLE_POLICY_PREFIX}${deviceId}`;
         await storage.put(key, syncContent.nextTitlePolicy(await storage.get(key), false));
         await storage.delete(`dev:${deviceId}`);
+        await this.clearProjectPages(storage, deviceId, await storage.get(`projectIndex:${deviceId}`));
+        this.projectUploads.discard(deviceId);
         const rangeKey = `fixedRanges:${deviceId}`;
         await this.clearFixedRanges(storage, deviceId, await storage.get(rangeKey));
         await storage.delete(rangeKey);

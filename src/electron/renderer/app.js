@@ -3856,7 +3856,12 @@ function sessionRowsForPeriod(period) {
   return modelRowsForPeriod(period);
 }
 
-function projectRowsForPeriod(period) {
+const readAllTimeProjects = projectRowsApi.createPagedProjectReader(
+  (snapshot, deviceId) => window.tokenMonitor.getSyncedFixedPeriod?.(snapshot.id, snapshot.source, 'allTimeProjects', deviceId),
+  () => statsRenderScheduler.request()
+);
+
+function projectRowsForPeriod(period, stats = state.stats) {
   return projectRowsApi.projectRowsForPeriod(period, {
     clientLabels,
     clientColors,
@@ -3866,7 +3871,7 @@ function projectRowsForPeriod(period) {
     fallbackColors: fallbackModelColors,
     unknownClientLabel: t('projects.unknownTool'),
     unknownModelLabel: t('projects.unknownModel'),
-    allowSessionModelAttribution: !projectRowsApi.projectBreakdownIncomplete(state.stats, state.period),
+    allowSessionModelAttribution: !projectRowsApi.projectBreakdownIncomplete(stats, state.period),
     nativeProjects: state.stats?.nativeProjects?.[state.period] || {}
   });
 }
@@ -7367,9 +7372,11 @@ function renderViewSwitcher({ focusMenu = false, focusDisclosure = false } = {})
   const currentLabel = viewLabelById(currentId);
   const nextId = nextBreakdown(currentId);
   const nextLabel = viewLabelById(nextId);
+  const hasDashboardLauncher = typeof window !== 'undefined' && typeof window.tokenMonitor?.openDashboard === 'function';
   const renderKey = JSON.stringify([currentId, order.map(id => [id, viewLabelById(id)]),
     pluginPageOptions().map(page => [page.id, page.icon, page.identityIcon]),
-    t('views.switcher.choose'), t('views.switcher.next', { view: nextLabel })]);
+    t('views.switcher.choose'), t('views.switcher.next', { view: nextLabel }),
+    hasDashboardLauncher ? t('dashboard.menuLabel') : '']);
   // Usage pushes repaint the page without changing navigation. Keep the same
   // popover/rows so hover, focus, scroll and its entry animation survive them.
   if (renderKey === viewSwitcherRenderKey && updateViewSwitcherOpenState({ focusMenu, focusDisclosure })) return;
@@ -7456,6 +7463,32 @@ function renderViewSwitcher({ focusMenu = false, focusDisclosure = false } = {})
       else renderBreakdownChange(id);
     });
     menu.append(item);
+  }
+  if (hasDashboardLauncher) {
+    const separator = document.createElement('div');
+    separator.className = 'view-switcher-menu-separator';
+    separator.setAttribute('role', 'separator');
+    menu.append(separator);
+
+    const dashItem = document.createElement('button');
+    dashItem.type = 'button';
+    dashItem.className = 'view-switcher-menu-item view-switcher-menu-action';
+    dashItem.dataset.action = 'open-dashboard';
+    dashItem.setAttribute('role', 'menuitem');
+    dashItem.tabIndex = -1;
+    const dashExt = document.createElement('span');
+    dashExt.className = 'view-switcher-icon view-switcher-menu-ext';
+    dashExt.setAttribute('aria-hidden', 'true');
+    const dashLabel = document.createElement('span');
+    dashLabel.className = 'view-switcher-menu-label';
+    dashLabel.textContent = t('dashboard.menuLabel');
+    dashItem.append(dashExt, dashLabel);
+    dashItem.addEventListener('click', () => {
+      state.viewSwitcherOpen = false;
+      updateViewSwitcherOpenState();
+      window.tokenMonitor.openDashboard();
+    });
+    menu.append(dashItem);
   }
   menu.addEventListener('keydown', (event) => {
     const items = Array.from(menu.querySelectorAll('.view-switcher-menu-item'));
@@ -7680,12 +7713,23 @@ function renderHomeLimitModule() {
     body.append(empty);
     return module;
   }
-  const displayMode = homeModulePreferencesApi.resolveHomeLimitDisplayMode(state.settings?.homeLimitDisplayMode);
-  if (displayMode !== 'rows') return renderClassicHomeLimits(module, body, rows, displayMode === 'bars');
-  const vendorColors = homeVendorColorsEnabled();
   // Low-limit colour is opt-in in every layout; the reading and meter length
   // already show how much is left.
   const highlightLow = state.settings?.showHomeLimitBars === true;
+  function applyWarning(metric, value, remainingPercent) {
+    if (!highlightLow) return;
+    const warning = homeOverviewApi.limitWarning(remainingPercent);
+    if (warning === 'exhausted') {
+      value.classList.add('home-limit-value-critical');
+      metric.classList.add('is-exhausted');
+    } else if (warning === 'low') {
+      value.classList.add('home-limit-value-low');
+      metric.classList.add('is-low');
+    }
+  }
+  const displayMode = homeModulePreferencesApi.resolveHomeLimitDisplayMode(state.settings?.homeLimitDisplayMode);
+  if (displayMode !== 'rows') return renderClassicHomeLimits(module, body, rows, displayMode === 'bars', applyWarning);
+  const vendorColors = homeVendorColorsEnabled();
   const nowMs = Date.now();
   for (const row of rows) {
     const item = document.createElement('div');
@@ -7698,7 +7742,7 @@ function renderHomeLimitModule() {
     const mark = document.createElement('span');
     const pluginModule = state.pluginCatalog?.limits?.modules?.find(module => module.id === row.providerId);
     if (pluginModule) mark.append(window.TokenMonitorPluginViews.navigationIcon(document, pluginModule, 14));
-    else applyHomeListMark(mark, iconKindFor({ key: row.iconId || row.providerId || row.key }, 'limits'), row.color);
+    else applyHomeListMark(mark, iconKindFor({ key: row.iconId || row.providerId || row.key }, 'limits'), 'rgba(var(--overlay-rgb), 0.5)');
     const name = document.createElement('span');
     name.className = 'home-list-name';
     name.textContent = row.name;
@@ -7772,26 +7816,7 @@ function renderHomeLimitModule() {
         value.setAttribute('data-limit-motion-value', String(readingPercent));
         value.setAttribute('data-limit-motion-text', value.textContent);
       }
-      if (highlightLow && remainingPercent != null) {
-        const clamped = Math.max(0, Math.min(100, remainingPercent));
-        if (!vendorColors) {
-          // Red only when exhausted, amber when nearly out.
-          if (clamped === 0) {
-            value.classList.add('home-limit-value-critical');
-            metric.classList.add('is-exhausted');
-          } else if (clamped < 20) {
-            value.classList.add('home-limit-value-low');
-            metric.classList.add('is-low');
-          }
-        } else if (clamped < 20) {
-          value.classList.add('home-limit-value-critical');
-          metric.classList.add('is-critical');
-          if (clamped === 0) metric.classList.add('is-exhausted');
-        } else if (clamped < 50) {
-          value.classList.add('home-limit-value-low');
-          value.style.setProperty('--home-limit-accent', row.color);
-        }
-      }
+      applyWarning(metric, value, remainingPercent);
       // An untouched window needs no attention, so it steps back.
       if (remainingPercent === 100 && !fixedValue) metric.classList.add('is-untouched');
       let reading = value;
@@ -7879,10 +7904,9 @@ function classicHomeLimitWindowLabel(window, providerId = '', visibleWindows = [
 // The earlier Home layouts, kept as choices: each account's compact pick of
 // windows sits two to a row, a reading beside its name and the reset
 // underneath, with or without a meter.
-function renderClassicHomeLimits(module, body, rows, showBars) {
+function renderClassicHomeLimits(module, body, rows, showBars, applyWarning) {
   module.classList.add('home-module-limits-classic');
   const showUsed = Boolean(state.settings?.showLimitUsed);
-  const highlightLow = state.settings?.showHomeLimitBars === true;
   for (const row of rows) {
     const item = document.createElement('div');
     item.className = 'home-limit-account';
@@ -7892,7 +7916,7 @@ function renderClassicHomeLimits(module, body, rows, showBars) {
     const mark = document.createElement('span');
     const pluginModule = state.pluginCatalog?.limits?.modules?.find(module => module.id === row.providerId);
     if (pluginModule) mark.append(window.TokenMonitorPluginViews.navigationIcon(document, pluginModule, 14));
-    else applyHomeListMark(mark, iconKindFor({ key: row.iconId || row.providerId || row.key }, 'limits'), row.color);
+    else applyHomeListMark(mark, iconKindFor({ key: row.iconId || row.providerId || row.key }, 'limits'), 'rgba(var(--overlay-rgb), 0.5)');
     const name = document.createElement('span');
     name.className = 'home-list-name';
     name.textContent = row.name;
@@ -7920,20 +7944,7 @@ function renderClassicHomeLimits(module, body, rows, showBars) {
       value.className = 'home-list-value';
       value.textContent = window.value || formatHomeLimitWindowValue(window, showUsed);
       const remainingPercent = optionalFiniteNumber(window.remainingPercent);
-      if (highlightLow && remainingPercent != null) {
-        const clamped = Math.max(0, Math.min(100, remainingPercent));
-        if (!homeVendorColorsEnabled()) {
-          // Same monochrome thresholds as the default rows: red only when
-          // exhausted, amber when nearly out.
-          if (clamped === 0) value.classList.add('home-limit-value-critical');
-          else if (clamped < 20) value.classList.add('home-limit-value-low');
-        } else if (clamped < 20) {
-          value.classList.add('home-limit-value-critical');
-        } else if (clamped < 50) {
-          value.classList.add('home-limit-value-low');
-          value.style.setProperty('--home-limit-accent', row.color);
-        }
-      }
+      applyWarning(metric, value, remainingPercent);
       const info = limitWindowsView.limitDetailInfoNode(window.detailEntries);
       if (info) {
         const right = document.createElement('span');
@@ -9217,12 +9228,14 @@ function renderAppContent({ fromSearch = false } = {}) {
     els.serviceStatusPanel?.classList.add('hidden');
     els.trendsPanel.classList.add('hidden');
     els.breakdown.classList.remove('hidden');
-    const rows = rowsForPeriod(period);
+    const projectStats = state.breakdown === 'project' && state.period === 'allTime'
+      ? readAllTimeProjects(state.stats, state.settings) : state.stats;
+    const rows = projectStats === state.stats ? rowsForPeriod(period) : projectRowsForPeriod(projectStats.periods.allTime, projectStats);
     state.sessionRowsCache = state.breakdown === 'session'
       ? { stats: state.stats, period: state.period, rows }
       : null;
     let incompleteHint = '';
-    if (state.breakdown === 'project' && projectRowsApi.projectBreakdownIncomplete(state.stats, state.period)) {
+    if (state.breakdown === 'project' && projectRowsApi.projectBreakdownIncomplete(projectStats, state.period)) {
       incompleteHint = 'projects.incomplete';
     } else if (state.breakdown === 'session' && sessionBreakdownIncomplete()) {
       incompleteHint = 'sessions.incomplete';
