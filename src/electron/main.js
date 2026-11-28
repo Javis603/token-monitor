@@ -7822,6 +7822,19 @@ function discardFailedDashboardWindow(win, reason) {
 
 function showDashboardWindow(win, bounds) {
   if (win.isMinimized()) win.restore();
+  if (bounds) {
+    const { x, y, width, height } = win.getBounds();
+    if (width !== bounds.width || height !== bounds.height) {
+      win.setMinimumSize(
+        Math.min(bounds.width, DASHBOARD_WINDOW_LIMITS.minWidth),
+        Math.min(bounds.height, DASHBOARD_WINDOW_LIMITS.minHeight)
+      );
+    }
+    if (width !== bounds.width || height !== bounds.height
+      || (bounds.x !== undefined && (x !== bounds.x || y !== bounds.y))) {
+      win.setBounds(bounds);
+    }
+  }
   win.show();
   win.focus();
   // macOS can reposition the window as it orders it front for the first time.

@@ -42,6 +42,8 @@ function dashboardWindowFixture(platform = 'win32', settings = {}) {
     isVisible() { return this.visible === true; }
     isMinimized() { return this.minimized === true; }
     getBounds() { return { ...this.bounds }; }
+    setBounds(bounds) { Object.assign(this.bounds, bounds); this.calls.push('bounds'); }
+    setMinimumSize() {}
     getPosition() { return [this.bounds.x, this.bounds.y]; }
     setPosition(x, y) { Object.assign(this.bounds, { x, y }); }
     hide() { this.visible = false; this.calls.push('hide'); }
@@ -206,6 +208,17 @@ test('Dashboard keeps pinned controls on-screen after changes to the display lay
     assert.equal(win.movable, false);
     assert.equal(win.resizable, false);
   }
+});
+
+test('Dashboard applies the smaller work area before revealing a loading pinned window', () => {
+  const settings = { dashboardWindowBounds: { x: 100, y: 80, width: 1600, height: 900 }, dashboardWindowBehavior: 'desktop' };
+  const f = dashboardWindowFixture('darwin', settings);
+  const win = f.open();
+  f.displays[0].workArea = { x: 0, y: 30, width: 1024, height: 738 };
+  f.ready(win);
+  assert.deepEqual(win.getBounds(), { x: 0, y: 30, width: 1024, height: 738 });
+  assert.deepEqual(win.calls, ['load', ['background', '#00000000'], 'bounds', 'show', 'focus']);
+  assert.equal(win.resizable, false);
 });
 
 test('Dashboard saves a move immediately followed by minimizing and closing', () => {
