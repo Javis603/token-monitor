@@ -326,6 +326,7 @@ const {
 } = require('./macWidget/historyStore');
 const { createMacWidgetLaunchServicesRecovery } = require('./macWidget/launchServicesRecovery');
 const { projectLimitStatsForDisplay } = require('./limits/statsPresentation');
+const { changeLimitAccountLink } = require('./limits/limitAccountLinks');
 const { DEFAULT_WIDGET_KIND, requestMacWidgetReload, resetMacWidgetReloadThrottle } = require('./macWidget/reloader');
 const { WIDGET_DEMAND_MARKER, WIDGET_DEMAND_PROVISIONAL_MARKER, createMacWidgetDemandState } = require('./macWidget/demand');
 const linuxAutostart = require('./linuxAutostart');
@@ -3407,7 +3408,7 @@ async function requestSyncContent(context, pathname, method, body) {
     const hub = embeddedHub.hub;
     try {
       if (pathname === '/api/sync/content') return { status: 200, body: hub.getSyncContent() };
-      const match = pathname.match(/^\/api\/sync\/settings\/(modelAliases|customPricing|limitAccountPresentation)$/);
+      const match = pathname.match(/^\/api\/sync\/settings\/(modelAliases|customPricing|limitAccountPresentation|limitAccountLinks)$/);
       if (match) return { status: 200, body: { ok: true, ...(method === 'PUT'
         ? hub.setSyncSettings(match[1], body) : hub.getSyncSettings(match[1])) } };
       const titleMatch = pathname.match(/^\/api\/sync\/titles\/([^/]+)$/);
@@ -3469,10 +3470,16 @@ function getAccountPresentationSync() {
     },
     request: requestSyncContent,
     apply: (value, identity) => {
+      const changed = JSON.stringify(settings.limitAccountPresentation) !== JSON.stringify(value);
       settings = { ...settings, limitAccountPresentation: value, limitAccountPresentationCacheIdentity: identity };
       saveSettings({ throwOnError: true });
       pushSettingsToRenderer();
       void accountSlotService?.adoptSharedLabels(value);
+      if (changed && settings.hubMode === 'client' && currentHubStatsCache()) {
+        requestSyncDisplayStats({
+          reason: 'sync-settings', generation: hubModeGeneration, widgetProducerOwner: captureMacWidgetProducerOwner()
+        });
+      }
     }
   });
 }
@@ -4334,7 +4341,9 @@ function requestSyncDisplayStats(request) {
 
 function publishSyncDisplayStats({ reason, at, generation, widgetProducerOwner }) {
   if (!hubModeRequestIsCurrent(generation, 'client')) return;
-  const displayStats = composeLocalSyncSummary(latestHubStats, lastCollectedDevice);
+  const displayStats = composeLocalSyncSummary(latestHubStats, lastCollectedDevice, {
+    limitAccountPresentation: settings.limitAccountPresentation
+  });
   if (!displayStats) return;
   updateDiscordRpcDisplay(displayStats);
   sendPush({ event: 'stats', data: { type: 'stats', reason, stats: displayStats, at } }, { widgetProducerOwner });
@@ -4852,7 +4861,7 @@ function sendPush(payload, options = {}) {
     getSyncContentRuntime().notifyStats(latestStats);
     getAccountPresentationSync().notifyStats(latestStats);
     const visibleStats = electronPresentationStats(latestStats);
-    getLimitsHistoryStore().record(currentHubStatsIdentity(), visibleStats.limits);
+    getLimitsHistoryStore().record(currentHubStatsIdentity(), visibleStats.limits, visibleStats);
     limitsHistoryController?.refresh();
     migrateCodexAdditionalLimits(visibleStats);
     if (wantsRenderer || wantsDashboard) {
@@ -5484,6 +5493,7 @@ function settingsForRenderer() {
     windowsAccentActive: windowsAccentActive(mainWindow),
     windowsBackdropFallback: windowsBackdropFallback(mainWindow),
     syncContentStatus: getSyncContentRuntime().status(),
+    hubStatsSource: hubModeGeneration,
     locale,
     calendarLocale: collectorCalendarLocale(),
     syncWeekStartsOn: SYNC_WEEK_STARTS_ON,
@@ -7101,7 +7111,9 @@ async function fetchStats(options = {}) {
   if (options?.streamCache === true && streamConnected) {
     const cached = currentHubStatsCache();
     if (cached && Date.now() - Date.parse(latestHubStatsReceivedAt) < HUB_STREAM_CACHE_FRESH_MS) {
-      return injectLocalDeviceStatus(composeLocalSyncSummary(cached, lastCollectedDevice));
+      return injectLocalDeviceStatus(composeLocalSyncSummary(cached, lastCollectedDevice, {
+        limitAccountPresentation: settings.limitAccountPresentation
+      }));
     }
   }
   const url = `${hubUrl.replace(/\/$/, '')}/api/stats`;
@@ -7125,7 +7137,9 @@ async function fetchStats(options = {}) {
     });
   }
   setLatestHubStatsCache(stats, 'client', requestGeneration, requestHubIdentity);
-  return injectLocalDeviceStatus(composeLocalSyncSummary(stats, lastCollectedDevice));
+  return injectLocalDeviceStatus(composeLocalSyncSummary(stats, lastCollectedDevice, {
+    limitAccountPresentation: settings.limitAccountPresentation
+  }));
 }
 
 function managedPricingSidecarPath() {
@@ -8435,7 +8449,10 @@ app.whenReady().then(() => {
         rows.push(...Object.values(result?.profiles || {}));
         if (result?.environmentAccountKey) rows.push({ accountKey: result.environmentAccountKey });
       }
-      return rows.map(row => row.accountKey || row.canonicalAccountKey).filter(Boolean);
+      const stats = currentHubStatsCache() || (settings.hubMode === 'host' ? embeddedHub?.hub.getStats() : null);
+      const candidates = stats?.limitAccountLinkCandidates || [];
+      return [...rows.map(row => row.accountKey || row.canonicalAccountKey),
+        ...candidates.filter(row => row.provider === provider).map(row => row.labelKey)].filter(Boolean);
     },
     write: (patch) => {
       const { limitProviders, limitsEnabled, ...slotPatch } = patch;
@@ -8473,6 +8490,15 @@ app.whenReady().then(() => {
         void queueLimitInvalidation({ provider, accountKey }, 'settings-change', { clear: true, refresh: false });
       }
     }
+  });
+  ipcMain.handle('limits:limitAccountLink', async (_event, input) => {
+    // The snapshot's generation changes on a Hub, credential, or device switch.
+    if (input?.source !== hubModeGeneration) return { ok: false };
+    const context = syncContentContext();
+    if (!['client', 'host'].includes(context.mode) || !context.url) return { ok: false };
+    const stats = context.mode === 'host' ? embeddedHub?.hub.getStats() : currentHubStatsCache();
+    return changeLimitAccountLink(stats, input, settings.limitAccountPresentation || {},
+      payload => requestSyncContent(context, '/api/sync/settings/limitAccountLinks', 'PUT', payload));
   });
   for (const operation of ['list', 'add', 'replace', 'rename', 'setEnabled', 'remove', 'move', 'presentation']) {
     ipcMain.handle(`limits:accountSlots:${operation}`, (_event, ...args) => accountSlotService[operation](...args));
@@ -8572,6 +8598,7 @@ app.whenReady().then(() => {
     // Presentation writes use the serialized account command lane.
     delete normalizedPatch.limitAccountPresentation;
     delete normalizedPatch.limitAccountPresentationCacheIdentity;
+    delete normalizedPatch.hubStatsSource;
     delete normalizedPatch.limitAccountPresentationPending;
     // Derived for the renderer from the hub document, not settings. Persisting a
     // copy would leave a key on disk that describes a hub as of whenever a form

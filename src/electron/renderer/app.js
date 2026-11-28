@@ -5122,13 +5122,77 @@ function desktopLimitProviders() {
 }
 const accountSlotPanels = new Map();
 const automaticAccountPanels = new Map();
+const accountLinkPanels = new Map();
 const accountSlotLists = {};
 let accountSlotListPending = false;
 function limitAccountContext(providerId) {
-  return { settings: state.settings, records: state.stats?.limits?.providers || [],
-    devices: state.stats?.devices || [], localDeviceId: state.settings?.deviceId, probes: limitProbes,
+  const devices = state.stats?.devices || [];
+  const records = state.stats?.limits?.providers || [];
+  // Settings uses the individual readings even when Limits shows one row.
+  // In particular, a remote fallback must be renameable before it has a name.
+  const candidateRecords = (state.stats?.limitAccountLinkCandidates || []).flatMap(candidate => {
+    if (candidate.provider !== providerId) return [];
+    const matches = row => row.provider === providerId && row.region === candidate.region
+      && row.accountKey === candidate.accountKey;
+    if (records.some(matches)) return [];
+    const device = devices.find(row => row.deviceId === candidate.deviceId);
+    const row = device?.limits?.providers?.find(matches);
+    return row ? [{ ...row, sourceDeviceId: device.deviceId, stale: Boolean(row.stale || device.stale) }] : [];
+  });
+  return { settings: state.settings, records: candidateRecords.length ? [...records, ...candidateRecords] : records,
+    devices, localDeviceId: state.settings?.deviceId, probes: limitProbes,
     providerEnabled: limitProviderEnabled(providerId), presentation: state.settings?.limitAccountPresentation?.[providerId] };
 }
+function renderProviderAccountLinks(replacementOptions) {
+  // The previous snapshot can stay visible while a different Hub connects.
+  // Its pairs must never become actions for the new destination.
+  const snapshot = state.stats;
+  const source = snapshot?.snapshot?.source;
+  const stats = Number.isSafeInteger(source) && source === state.settings?.hubStatsSource ? snapshot : null;
+  const links = stats?.limitAccountLinks || [];
+  const candidates = stats?.limitAccountLinkCandidates || [];
+  const providers = new Set([...links, ...candidates].map(row => row.provider));
+  for (const [id, panel] of accountLinkPanels) {
+    if (providers.has(id)) continue;
+    panel.element.remove();
+    accountLinkPanels.delete(id);
+  }
+  const devices = (stats?.devices || []).map(device => ({
+    deviceId: device.deviceId,
+    name: device.deviceId === state.settings?.deviceId
+      ? t('settings.sync.panel.thisDevice') : deviceBreakdownApi.deviceLabel(device)
+  }));
+  for (const id of providers) {
+    const options = replacementOptions ? replacementOptions.get(id)
+      : document.getElementById(`limitProviderOptions-${id}`)?.querySelector(':scope > .limit-provider-options-inner');
+    if (!options) continue;
+    let panel = accountLinkPanels.get(id);
+    if (!panel) {
+      panel = window.TokenMonitorAccountLinkPanel.createAccountLinkPanel({
+        document, t, provider: id,
+        label: LIMIT_PROVIDERS.find(provider => provider.id === id)?.label || id,
+        save: async input => {
+          const result = await window.tokenMonitor.limits.limitAccountLink(input);
+          await refreshStats();
+          return result;
+        }
+      });
+      accountLinkPanels.set(id, panel);
+    }
+    panel.update({
+      source, revision: stats.syncSettingsRevisions?.limitAccountLinks,
+      links: links.filter(pair => pair.provider === id),
+      candidates: candidates.filter(row => row.provider === id),
+      labels: state.settings?.limitAccountPresentation?.[id]?.labels || {},
+      language: currentLocale(), devices
+    });
+    const parent = options.querySelector('.slot-panel') || options;
+    if (panel.element.isConnected) moveLimitProviderLiveNode(parent, panel.element, parent === options ? options.firstChild : null);
+    else if (parent === options) parent.prepend(panel.element);
+    else parent.append(panel.element);
+  }
+}
+
 function renderAccountSlotPanels() {
   for (const [id, panel] of accountSlotPanels) {
     panel.update(accountSlotLists[id] || [], localProviderStatuses(id),
@@ -14722,9 +14786,11 @@ function renderLimitProviderCheckboxesNow() {
     state.limitProviderRenderSignature === renderSignature
     && settingsListRendered(els.limitProviderCheckboxes, '.limit-provider-row[data-provider]', providers.length, !matched.size)
   ) {
+    renderProviderAccountLinks();
     return;
   }
   const previousChildren = Array.from(els.limitProviderCheckboxes.children);
+  const replacementOptions = new Map();
   const previousRows = Array.from(els.limitProviderCheckboxes.querySelectorAll('.limit-provider-row[data-provider]'));
   const focusedId = document.activeElement?.id || '';
   const reusableSettingInputs = new Map();
@@ -14950,6 +15016,7 @@ function renderLimitProviderCheckboxesNow() {
     if (optionsContainer) row.append(optionsContainer);
     if (isEnabled) els.limitProviderCheckboxes.insertBefore(row, groups.before);
     else groups.rows.append(row);
+    if (optionsInner) replacementOptions.set(id, optionsInner);
     // `moveBefore()` preserves focus and edit state while reparenting. Its
     // destination must already be connected, so the row is mounted first.
     moveLimitProviderLiveNode(actions, accountStatus);
@@ -14982,6 +15049,8 @@ function renderLimitProviderCheckboxesNow() {
     }
   }
   if (!matched.size) renderSettingsListEmptyState(els.limitProviderCheckboxes);
+  // Move live panels while both rows are connected to preserve keyboard focus.
+  renderProviderAccountLinks(replacementOptions);
   for (const child of previousChildren) child.remove();
   restoreSettingsListFocus(focusedId);
   playSettingsRowMotion(els.limitProviderCheckboxes, '.limit-provider-row[data-provider]', 'provider', motion);

@@ -59,7 +59,7 @@ test('the main settings IPC projection hides provider secrets while retaining co
   // are fixtures; this is not an Electron runtime test. The extracted source has
   // no source map and deliberately receives no credit against main.js coverage.
   const project = vm.runInNewContext(`${main.slice(start, end)}; settingsForRenderer`, {
-    settings, mainWindow: null, windowsAccentActive: () => false, windowsBackdropFallback: () => false,
+    settings, hubModeGeneration: 7, mainWindow: null, windowsAccentActive: () => false, windowsBackdropFallback: () => false,
     networkProxySource, normalizePluginAuthorSkin, credentialSettingsForRenderer, hubProfilesForRenderer, accountFieldProjection, accountStatusProjection,
     limitAccountFormsForRenderer,
   limitConnectionSourcesForRenderer, rendererOmittedAccountKeys, process: { env: {} },
@@ -78,6 +78,7 @@ test('the main settings IPC projection hides provider secrets while retaining co
   for (const secret of secrets) assert.ok(!encoded.includes(secret), secret);
   assert.equal(projected.hubHostSecret, settings.hubHostSecret);
   assert.equal(projected.secret, settings.secret);
+  assert.equal(projected.hubStatsSource, 7);
   assert.deepEqual(projected.hubProfiles, [{ id: 'home', name: 'Home', endpoint: 'home.example' }]);
   assert.equal(projected.deepseekApiKeyConfigured, true);
   assert.equal(projected.deepseekApiKey, '');

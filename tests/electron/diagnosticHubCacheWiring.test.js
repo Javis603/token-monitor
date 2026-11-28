@@ -33,7 +33,7 @@ test('late Hub responses cannot replace the active mode cache', () => {
     fetchStats[1],
     /const stats = await response\.json\(\);[\s\S]*if \(!hubModeRequestIsCurrent\(requestGeneration, 'client', requestHubIdentity\)\)/
   );
-  assert.match(fetchStats[1], /composeLocalSyncSummary\(stats, lastCollectedDevice\)/);
+  assert.match(fetchStats[1], /composeLocalSyncSummary\(stats, lastCollectedDevice, \{\s*limitAccountPresentation: settings.limitAccountPresentation/);
 
   const stream = mainSource.match(/async function startStatsStream\(options = \{\}\) \{([\s\S]*?)\n\}\n\nfunction/);
   assert.ok(stream, 'startStatsStream exists');

@@ -5,7 +5,7 @@ const os = require('node:os');
 const nodePath = require('node:path');
 const { execFile } = require('node:child_process');
 const { normalizeLimitProvider } = require('../../limits/core');
-const { hashKey } = require('../../hashKey');
+const { DEFAULT_WEB_SLOT_KEY: defaultWebSlotKey } = require('./corePolicy');
 const { abortError } = require('../../probeDeadline');
 const {
   errorWithStatus,
@@ -158,7 +158,6 @@ async function fetchMuseLimits(options = {}, deps = {}) {
 
 // Muse Web reports no account identity. The slot fetcher files the environment
 // credential under its default provisional key whenever saved slots exist.
-const defaultWebSlotKey = hashKey('muse', 'account-slot', 'default');
 
 async function fetchAccountSlotSnapshot(options, deps, collect) {
   const previousWeb = (options.previousLimits?.providers || []).filter(row => row.provider === 'muse' && row.source === 'web');

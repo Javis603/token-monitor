@@ -5,6 +5,7 @@ const test = require('node:test');
 
 const {
   copilotToken,
+  copilotAccountKey,
   normalizedEnterpriseHost,
   copilotApiHost,
   copilotUsageUrl,
@@ -211,6 +212,7 @@ test('fetchCopilotLimits uses the GitHub OAuth token directly for Copilot intern
 
   assert.equal(provider.status, 'ok');
   assert.equal(provider.accountName, 'octocat');
+  assert.equal(provider.accountKeyPortable, true);
   assert.equal(provider.accountLabel, 'Free');
   assert.equal(provider.accountEmail, '');
   assert.equal(provider.windows.length, 2);
@@ -218,6 +220,49 @@ test('fetchCopilotLimits uses the GitHub OAuth token directly for Copilot intern
   assert.equal(provider.windows[1].usedPercent, 50);
   assert.equal(authorizations[0], 'token gho-token');
   assert.equal(authorizations[1], 'token gho-token');
+});
+
+test('named Copilot profiles keep the provenance of their actual key when GitHub identity is unavailable', async () => {
+  const { aggregateLimits } = require('../../src/shared/limits/core');
+  const now = Date.parse('2026-06-25T00:00:00.000Z');
+  const deps = {
+    env: {}, now: () => now,
+    fetch: async url => {
+      if (url === 'https://api.github.com/user') return { ok: false, status: 503, json: async () => ({}) };
+      assert.equal(url, 'https://api.github.com/copilot_internal/user');
+      return { ok: true, status: 200, json: async () => ({
+        copilot_plan: 'free', quota_snapshots: { chat: { entitlement: 100, remaining: 80, percent_remaining: 80 } }
+      }) };
+    }
+  };
+  const profiles = ['a', 'b'].map(id => ({ token: `fixture-${id}`, accountName: 'octocat' }));
+  const collect = async profile => (await fetchCopilotLimits({ copilotProfiles: { saved: profile } }, deps))[0];
+  const aggregate = rows => aggregateLimits(rows.map((row, index) => ({
+    deviceId: `device-${index}`, limits: { providers: [row] }
+  })), 0, now, { copilot: { labels: Object.fromEntries(rows.map(row => [row.accountKey, 'Work'])), order: [] } });
+
+  const fallbacks = await Promise.all(profiles.map(profile => collect({ ...profile, accountKey: copilotAccountKey(profile.token) })));
+  for (const [index, row] of fallbacks.entries()) {
+    assert.equal(row.status, 'ok');
+    assert.equal(row.accountName, 'octocat');
+    assert.equal(row.accountKey, copilotAccountKey(profiles[index].token));
+  }
+  assert.equal(aggregate(fallbacks).linkCandidates?.length ?? 0, 2);
+  assert.deepEqual(fallbacks.map(row => row.accountKeyPortable), [false, false]);
+
+  const previousTokenKey = copilotAccountKey('previous-fixture-token');
+  const unknown = await collect({ ...profiles[0], accountKey: previousTokenKey });
+  assert.equal(unknown.accountKey, previousTokenKey);
+  assert.equal(unknown.accountKeyPortable, undefined);
+  assert.equal(aggregate([unknown]).linkCandidates, undefined);
+
+  const verifiedKey = copilotAccountKey('octocat');
+  const verified = await collect({ ...profiles[0], accountKey: verifiedKey });
+  assert.equal(verified.accountKey, verifiedKey);
+  assert.equal(verified.accountKeyPortable, true);
+  const mixed = aggregate([verified, fallbacks[1]]);
+  assert.equal(mixed.providers.length, 2);
+  assert.deepEqual(mixed.linkCandidates.map(row => row.accountKey), [fallbacks[1].accountKey]);
 });
 
 test('fetchCopilotLimits surfaces unauthorized responses', async () => {

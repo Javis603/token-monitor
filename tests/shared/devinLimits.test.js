@@ -2,6 +2,7 @@
 
 const assert = require('node:assert/strict');
 const test = require('node:test');
+const { hashKey } = require('../../src/shared/hashKey');
 
 const {
   devinBearerToken,
@@ -322,6 +323,7 @@ test('fetchDevinLimits keeps quotas and uses the configured org when optional lo
   assert.equal(provider.planLabel, '');
   assert.equal(provider.accountEmail, '');
   assert.equal(provider.accountName, 'org_example');
+  assert.equal(provider.accountQuotaScope, hashKey('devin-organization', 'organizations/org_example'));
   assert.equal(provider.windows.length, 2);
 });
 
