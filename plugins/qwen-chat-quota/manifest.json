@@ -1,0 +1,50 @@
+{
+  "tmApi": 1,
+  "id": "qwen-chat-quota",
+  "version": "0.1.0",
+  "name": {
+    "en": "Qwen Chat subscription",
+    "ru": "РџРѕРґРїРёСЃРєР° Qwen Chat"
+  },
+  "description": {
+    "en": "Actual weekly subscription quota using the existing Qwen desktop session. Reads authentication only; sends requests only to Qwen."
+  },
+  "author": "didream71",
+  "backend": "backend.cjs",
+  "files": [
+    "backend.cjs",
+    "session.cjs",
+    "LICENSE",
+    "README.md",
+    "CHANGELOG.md"
+  ],
+  "engines": {
+    "tokenMonitor": ">=0.100.0"
+  },
+  "presentation": {
+    "icon": {
+      "native": "qwen"
+    },
+    "color": {
+      "palette": "qwen"
+    }
+  },
+  "limits": [
+    {
+      "id": "subscription",
+      "name": {
+        "en": "Qwen",
+        "ru": "Qwen"
+      },
+      "capabilities": [
+        "web"
+      ],
+      "tags": [
+        {
+          "en": "Subscription"
+        }
+      ]
+    }
+  ],
+  "homepage": "https://github.com/Javis603/token-monitor/tree/main/plugins/qwen-chat-quota"
+}
