@@ -16,7 +16,7 @@ const { tokscaleHomeDir } = require('./tokscaleConfig');
 // transcripts directly, not tokscale JSONL). CodeBuddy resolves its transcripts
 // under the scoped home exactly as Claude and Codex do, so it needs the entry
 // and nothing else.
-const WSL_FALLBACK_CLIENTS = new Set(['claude', 'codebuddy', 'codex', 'dsh', 'omp', 'pi', 'senpi', 'workbuddy']);
+const WSL_FALLBACK_CLIENTS = new Set(['claude', 'claude-desktop', 'codebuddy', 'codex', 'dsh', 'omp', 'pi', 'senpi', 'workbuddy']);
 const SESSION_DETAIL_WORKER_TIMEOUT_MS = 20_000;
 
 async function resolveSessionDetailForPlatform(args = {}, deps = {}) {

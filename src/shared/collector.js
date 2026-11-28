@@ -12,7 +12,11 @@ const { abortReason, throwIfAborted } = require('./abortSignal');
 const { readJson, sharedDataDir } = require('./config');
 const { appVersion } = require('./appVersion');
 const { normalizeClientsCsv } = require('./clientTracking');
-const { FORK_ONLY_CLIENT_IDS } = require('./clientCatalog');
+const { DERIVED_CLIENT_PARENTS, FORK_ONLY_CLIENT_IDS } = require('./clientCatalog');
+const {
+  createClaudeDesktopSessionIndex,
+  splitClaudeDesktopRows
+} = require('./providers/claude/desktopSessions');
 const { canonicalWatchPath, cherryStudioTranscriptRoots, clientSourceRoots, copilotExporterWatch } = require('./clientSources');
 const { clientDiagnosticRoots, clientSourceChecks, visibleDiagnosticRoots } = require('./clientSourceObservations');
 const {
@@ -469,6 +473,66 @@ function tokscaleClientFilter(clients) {
     }
   }
   return ordered.join(',');
+}
+
+// Claude Desktop split (see providers/claude/desktopSessions.js). tokscale
+// reports Desktop's transcripts under `claude`; when the scan asked for the
+// derived `claude-desktop` row, rows of official Desktop sessions move onto it,
+// and when it asked for `claude-desktop` without `claude`, the remaining
+// Claude Code rows are not the user's selection and are dropped. The index is
+// module-level so its directory and per-transcript caches survive ticks.
+let defaultClaudeDesktopSessionIndex = null;
+
+function claudeDesktopSessionIndexFor(options = {}) {
+  if (options.claudeDesktopSessionIndex) return options.claudeDesktopSessionIndex;
+  if (options.homeDir || options.env) {
+    return createClaudeDesktopSessionIndex({ homeDir: options.homeDir, env: options.env });
+  }
+  defaultClaudeDesktopSessionIndex ||= createClaudeDesktopSessionIndex();
+  return defaultClaudeDesktopSessionIndex;
+}
+
+function applyClaudeDesktopSplit(json, clientsCsv, options = {}) {
+  const requested = new Set(normalizeClientsCsv(clientsCsv).split(',').filter(Boolean));
+  if (!requested.has('claude-desktop')) return { moved: 0, dropped: 0 };
+  // Off: behave like upstream — tokscale's `claude` rows stay under `claude`.
+  // When only the derived row is tracked there is no Desktop identity to keep,
+  // so the Claude Code rows are dropped rather than attributed to an unexpected
+  // client. The empty `claude-desktop` partition still gets cleared by the
+  // targeted-watch expansion below.
+  if (options.claudeDesktopSplitEnabled === false) {
+    if (requested.has('claude')) return { moved: 0, dropped: 0 };
+    return splitClaudeDesktopRows(json, { classify: () => null }, { keepClaude: false });
+  }
+  return splitClaudeDesktopRows(json, claudeDesktopSessionIndexFor(options), {
+    keepClaude: requested.has('claude')
+  });
+}
+
+// A watch tick that targets `claude` must rescan `claude-desktop` too (and the
+// reverse): both rows come from one tokscale client, so a scan of either
+// rewrites both, and replacing only one partition would leave the other stale.
+function expandDerivedTargets(targets, tracked) {
+  const out = [...targets];
+  const add = (client) => { if (tracked.has(client) && !out.includes(client)) out.push(client); };
+  for (const client of targets) {
+    const parent = DERIVED_CLIENT_PARENTS[client];
+    if (parent) add(parent);
+    for (const [derived, derivedParent] of Object.entries(DERIVED_CLIENT_PARENTS)) {
+      if (derivedParent === client) add(derived);
+    }
+  }
+  return out;
+}
+
+function derivedTargetGroups(targets) {
+  const groups = new Map();
+  for (const client of targets) {
+    const key = DERIVED_CLIENT_PARENTS[client] || client;
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key).push(client);
+  }
+  return [...groups.values()];
 }
 
 function resetTokscaleCapabilityCache() {
@@ -1182,6 +1246,7 @@ async function collectHistoryOnce(options) {
     try {
       const retainedGraph = retainDailyHistory(rawGraphs, {
         ...(options.dailyHistoryArchiveOptions || {}),
+        claudeDesktopSplitEnabled: options.claudeDesktopSplitEnabled !== false,
         liveDays: options.dailyHistoryLiveDays,
         timeZone: options.timeZone,
         pricingRevision: options.pricingRevision,
@@ -1283,7 +1348,8 @@ async function collectUsageOnce(options) {
     onTerminationUnconfirmed: () => reportTerminationUnconfirmed('tokscale-scan')
   }));
   const scanTitleClears = new Set();
-  const finishScanJson = (json, period, includesCursor, cursorReport = cursorSnapshot?.[period]) => {
+  const finishScanJson = (json, period, includesCursor, cursorReport = cursorSnapshot?.[period], splitClients = null) => {
+    if (splitClients) applyClaudeDesktopSplit(json, splitClients, options);
     applyTokscaleSessionMetadata(json, { resolveProjects: projectsEnabled });
     if (period === 'today') {
       for (const session of Array.isArray(json?.sessions) ? json.sessions : []) {
@@ -1308,7 +1374,7 @@ async function collectUsageOnce(options) {
       : { entries: [] };
     assertCollectionCalendar();
     const period = input.flags.includes('--today') ? 'today' : input.flags.includes('--month') ? 'month' : 'allTime';
-    return finishScanJson(json, period, includesCursor);
+    return finishScanJson(json, period, includesCursor, undefined, input.clients);
   };
   // A caller that injects the per-range scanner keeps the serial scans unless it
   // also injects a windowed one.
@@ -1337,9 +1403,9 @@ async function collectUsageOnce(options) {
     assertCollectionCalendar();
     assertWindowReports(reports, windows.slice(0, 3));
     const result = {
-      today: finishScanJson(reports.today, 'today', includesCursor),
-      month: finishScanJson(reports.month, 'month', includesCursor),
-      allTime: finishScanJson(reports.allTime, 'allTime', includesCursor),
+      today: finishScanJson(reports.today, 'today', includesCursor, undefined, clientsCsv),
+      month: finishScanJson(reports.month, 'month', includesCursor, undefined, clientsCsv),
+      allTime: finishScanJson(reports.allTime, 'allTime', includesCursor, undefined, clientsCsv),
       days: {},
       daysComplete: options.nativeRangesEnabled === true
     };
@@ -1354,7 +1420,7 @@ async function collectUsageOnce(options) {
         if (key >= dayKeyAddDays(todayKey, -NATIVE_RANGE_PAST_DAYS)) result.daysComplete = false;
         continue;
       }
-      result.days[key] = finishScanJson(reports[name], name, includesCursor, cursorDay);
+      result.days[key] = finishScanJson(reports[name], name, includesCursor, cursorDay, clientsCsv);
     }
     return result;
   };
@@ -1411,7 +1477,10 @@ async function collectUsageOnce(options) {
     { ...localSessionMetadataDeps, retryMisses, deferT3SessionParents, resolveProjects: projectsEnabled }
   );
   const trackedClientSet = new Set(normalizedClients.split(',').filter(Boolean));
-  const targetClients = [...new Set(normalizeClientsCsv(options.targetClients).split(',').filter((client) => trackedClientSet.has(client)))];
+  const targetClients = expandDerivedTargets(
+    [...new Set(normalizeClientsCsv(options.targetClients).split(',').filter((client) => trackedClientSet.has(client)))],
+    trackedClientSet
+  );
   const targetRequested = targetClients.length > 0;
   const targetClientSet = new Set(targetClients);
   const targetClientsCsv = targetClients.join(',');
@@ -1492,8 +1561,14 @@ async function collectUsageOnce(options) {
         freshPartitions = bundle.byClient;
         const unattributed = freshPartitions[UNATTRIBUTED_USAGE_CLIENT];
         const attributedClients = Object.keys(freshPartitions).filter((client) => client !== UNATTRIBUTED_USAGE_CLIENT);
+        // A derived row and its parent come out of one tokscale client, so
+        // they are one scan target here: a day with no Desktop session yet is
+        // not a missing partition of a unioned scan.
+        const targetGroups = derivedTargetGroups(targetClients);
         const missingTargets = targetClients.length > 1
-          ? targetClients.filter((client) => !Object.prototype.hasOwnProperty.call(freshPartitions, client))
+          ? targetGroups
+            .filter((group) => !group.some((client) => Object.prototype.hasOwnProperty.call(freshPartitions, client)))
+            .flat()
           : [];
         // If every target is missing, a targeted retry would repeat the same
         // scan without resolving whether the entire union was incomplete.
@@ -1789,6 +1864,7 @@ async function collectUsageOnce(options) {
     try {
       const retainedLive = retainLiveDailyHistory(today, {
         ...(options.dailyHistoryArchiveOptions || {}),
+        claudeDesktopSplitEnabled: options.claudeDesktopSplitEnabled !== false,
         liveDays: dailyHistoryLiveDays,
         timeZone: periodWindows.timeZone,
         todayKey: periodWindows.today.key,
@@ -2003,6 +2079,7 @@ async function collectUsageOnce(options) {
       dailyHistoryArchiveWriteEnabled: options.dailyHistoryArchiveWriteEnabled,
       dailyHistoryArchiveOptions: options.dailyHistoryArchiveOptions,
       dailyHistoryLiveDays,
+      claudeDesktopSplitEnabled: options.claudeDesktopSplitEnabled,
       pricingRevision: options.pricingRevision,
       customPricingActive: options.customPricingActive,
       onHistoryStatus: options.onHistoryStatus,
@@ -2316,7 +2393,11 @@ function configFingerprint(clientsCsv, allTimeSince, projectsEnabled = true, cus
     ? `|qoder:${clientSourceRoots('qoder', sourceOptions).qoder[0].dir}` : '';
   const scanKey = customScanPathsFingerprint(customScanPaths);
   const scanPart = scanKey ? `|scan:${scanKey}` : '';
-  return `${normalizeClientsCsv(clientsCsv)}|${allTimeSince}|projects:${projectsEnabled !== false ? 'on' : 'off'}${qoderCnProjectsPart}${qoderPart}${scanPart}${sourceRevision}|pricing:${pricingRevision}`;
+  const claudeDesktopSplitPart = sourceOptions?.claudeDesktopSplitEnabled === false
+    && normalizeClientsCsv(clientsCsv).split(',').includes('claude-desktop')
+    ? '|claudeDesktopSplit:off'
+    : '';
+  return `${normalizeClientsCsv(clientsCsv)}|${allTimeSince}|projects:${projectsEnabled !== false ? 'on' : 'off'}${qoderCnProjectsPart}${qoderPart}${scanPart}${claudeDesktopSplitPart}${sourceRevision}|pricing:${pricingRevision}`;
 }
 
 // The one place that decides whether a persisted anchor may be reused, shared by
@@ -2434,6 +2515,7 @@ function startCollector(options) {
   const normalizedClients = normalizeClientsCsv(clients);
   const sourceOptions = {
     customScanPaths: options.customScanPaths,
+    claudeDesktopSplitEnabled: options.claudeDesktopSplitEnabled,
     env: options.env || options.sessionMetadataDeps?.env,
     homeDir: options.homeDir,
     platform: options.platform,
@@ -3159,6 +3241,7 @@ function startCollector(options) {
             : visibleSummary.today;
           const retainedLive = retainLiveDailyHistory(retainedToday, {
             ...(options.dailyHistoryArchiveOptions || {}),
+            claudeDesktopSplitEnabled: options.claudeDesktopSplitEnabled !== false,
             liveDays: liveDailyHistoryDays,
             timeZone: summary.periodWindows.timeZone,
             todayKey: visibleDateKey,
@@ -4011,6 +4094,8 @@ module.exports = {
   tokscaleClientFilter,
   tokscaleEnvWithBlanksDropped,
   TOKSCALE_CLIENT_ALIASES,
+  applyClaudeDesktopSplit,
+  expandDerivedTargets,
   watchAttributionRootsForClients,
   watcherOptions,
   watchIgnoreMatcher,

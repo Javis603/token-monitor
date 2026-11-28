@@ -13817,6 +13817,40 @@ function clientHealthGroup(group, notes, clientId) {
       dots.append(row, visibility, note);
       body.append(dots);
     }
+    if (clientId === 'claude' || clientId === 'claude-desktop') {
+      const row = document.createElement('label');
+      row.className = 'checkbox-label codex-dots-setting';
+      const label = document.createElement('span');
+      label.textContent = t('settings.tools.claudeDesktopSplit');
+      const input = document.createElement('input');
+      input.id = 'claudeDesktopSplitInput';
+      input.type = 'checkbox';
+      const splitState = codexDotsSettingState('claudeDesktopSplitEnabled');
+      input.checked = splitState.checked;
+      input.disabled = splitState.pending;
+      input.setAttribute('aria-describedby', 'claudeDesktopSplitNote');
+      input.addEventListener('change', async () => {
+        if (codexDotsSettingState('claudeDesktopSplitEnabled').pending) return;
+        input.disabled = true;
+        try {
+          await saveSettings({ claudeDesktopSplitEnabled: input.checked });
+        } catch (_) {
+          input.checked = state.settings?.claudeDesktopSplitEnabled !== false;
+        } finally {
+          input.disabled = false;
+          refillOpenClientHealthPanel();
+        }
+      });
+      const note = document.createElement('div');
+      note.id = 'claudeDesktopSplitNote';
+      note.className = 'tool-health-group-meta';
+      note.textContent = t('settings.tools.claudeDesktopSplitNote');
+      row.append(label, input);
+      const splitSettings = document.createElement('div');
+      splitSettings.className = 'codex-dots-settings';
+      splitSettings.append(row, note);
+      body.append(splitSettings);
+    }
     const stamps = [
       ['lastAttemptAt', 'settings.tools.health.lastAttempt'],
       ['lastSuccessAt', 'settings.tools.health.lastSuccess']
@@ -14378,6 +14412,7 @@ function toolPreferenceRenderSignature(untrackedTags) {
       state.settings?.compactTokenUnits || '',
       state.settings?.codexDotsEnabled === true,
       state.settings?.codexDotsVisible !== false,
+      state.settings?.claudeDesktopSplitEnabled !== false,
       JSON.stringify(state.settings?.customScanPaths || {})
     ],
     query: toolPreferenceQuery(),

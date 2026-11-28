@@ -167,7 +167,8 @@ function codexSessionFile(home, sessionId, options = {}) {
 function resolveSessionFile(client, sessionId, home, options = {}) {
   const id = String(sessionId || '');
   if (!isSafeSessionId(id)) return '';
-  if (client === 'claude') {
+  // claude-desktop rows are Claude Code transcripts split out by session.
+  if (client === 'claude' || client === 'claude-desktop') {
     const { projects, transcripts } = claudeSessionRoots({
       homeDir: home,
       env: options.env,

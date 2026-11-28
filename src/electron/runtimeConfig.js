@@ -37,6 +37,7 @@ const USAGE_STRUCTURAL_KEYS = Object.freeze([
   'historyIntervalMs',
   'sessionUsageArchiveEnabled',
   'projectsEnabled',
+  'claudeDesktopSplitEnabled',
   'wslScanEnabled'
 ]);
 // Functions and identity fields deliberately stay out: this key answers only
@@ -53,6 +54,7 @@ const USAGE_CONFIG_FINGERPRINT_KEYS = Object.freeze([
   'historyEnabled',
   'dailyHistoryArchiveEnabled',
   'projectsEnabled',
+  'claudeDesktopSplitEnabled',
   'historyIntervalMs',
   'watchEnabled',
   'watchUsePolling',
@@ -115,6 +117,8 @@ function usageConfigFromSettings(settings = {}, context = {}) {
     dailyHistoryArchiveEnabled: settings.sessionUsageArchiveEnabled !== false,
     dailyHistoryArchiveWriteEnabled: context.dailyHistoryArchiveWriteEnabled,
     projectsEnabled: settings.projectsEnabled !== false,
+    claudeDesktopSplitEnabled: settings.claudeDesktopSplitEnabled !== false,
+    reasonixNativeSessionsEnabled: context.reasonixNativeSessionsEnabled === true,
     historyIntervalMs: context.historyIntervalMs ?? settings.historyIntervalMs,
     watchEnabled: context.watchEnabled,
     // Deliberately passed through as a tri-state rather than coerced: undefined
