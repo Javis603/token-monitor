@@ -74,8 +74,9 @@
               memo = null;
               repaint();
             } else {
-              entry.retryAt = Date.now() + (entry.attempts < 3 ? 2000 : 30_000);
-              if (entry.attempts < 3) setTimeout(() => { if (entries.get(id) === entry) repaint(); }, 2000);
+              const delay = entry.attempts < 3 ? 2000 : 30_000;
+              entry.retryAt = Date.now() + delay;
+              setTimeout(() => { if (entries.get(id) === entry) repaint(); }, delay);
             }
           });
         }

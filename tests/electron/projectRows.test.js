@@ -396,3 +396,28 @@ test('attaching a page applies chained explicit model aliases only once with gro
   await ready;
   assert.deepEqual({ ...attach(stats, settings).periods.allTime.projects.sample.models }, { b: 18 });
 });
+
+test('paged project reads resume after the longer retry without an unrelated repaint', async t => {
+  const { createPagedProjectReader } = require('../../src/electron/renderer/projectRows');
+  t.mock.timers.enable({ apis: ['Date', 'setTimeout'] });
+  const stats = {
+    snapshot: { id: 1, source: 1 },
+    allTimeProjectRevisions: { remote: 'rev' },
+    periods: { allTime: { projects: {} } },
+    devices: [{ deviceId: 'remote', allTimeProjectsOmitted: true }]
+  };
+  let reads = 0;
+  const attach = createPagedProjectReader(async () => {
+    reads++;
+    return reads === 4 ? { sample: { label: 'Sample', tokens: 7 } } : null;
+  }, () => attach(stats, {}));
+  const flush = () => new Promise(resolve => setImmediate(resolve));
+  attach(stats, {});
+  await flush();
+  for (const interval of [2000, 2000, 30_000]) {
+    t.mock.timers.tick(interval);
+    await flush();
+  }
+  assert.equal(reads, 4);
+  assert.equal(attach(stats, {}).periods.allTime.projects.sample.tokens, 7);
+});
