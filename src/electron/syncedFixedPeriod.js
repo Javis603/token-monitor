@@ -75,6 +75,7 @@ async function resolveSyncedFixedPeriod(selection, devices, revisions, options) 
     let period;
     try { period = await options.read(device.deviceId, selection, range, revision); }
     catch (_) { /* the existing History fallback handles an unavailable transport */ }
+    if (!period) options.onRangeReadMiss?.();
     return { device, range, period };
   }));
   const scanned = entries.filter(entry => entry.period);

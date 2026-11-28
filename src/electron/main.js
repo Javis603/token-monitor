@@ -5990,15 +5990,17 @@ function refreshEdgeDockDerivedPeriods(visibleStats) {
       };
       const retry = await Promise.all(selectionsToRead.map(async selection => {
         let snapshot;
+        let retrySelection = false;
         if (useSyncedRanges) {
           try {
-            snapshot = await resolveSyncedPeriodForStats(source, generation, selection, loadHistory);
+            snapshot = await resolveSyncedPeriodForStats(source, generation, selection, {
+              loadHistory, onRangeReadMiss: () => { retrySelection = true; }
+            });
           } catch (error) {
             console.log(`[edge-dock] fixed period read failed: ${error.message}`);
           }
         }
         if (!isCurrent()) return false;
-        let retrySelection = useSyncedRanges && (!snapshot || snapshot.detailsAvailable === false);
         if (!snapshot && historyEnabled) {
           dashboardHistory ??= getDashboardHistory({ includeDevices: true }, loadHistory);
           const history = await dashboardHistory;
@@ -8083,7 +8085,7 @@ async function resolveAllTimeProjects(stats, source, id) {
   }
 }
 
-async function resolveSyncedPeriodForStats(stats, source, selection, loadHistory) {
+async function resolveSyncedPeriodForStats(stats, source, selection, { loadHistory, onRangeReadMiss } = {}) {
   const revisions = stats?.fixedRangeRevisions || {};
   const legacyPeriod = selection === 'today' || selection === 'month';
   if (mode !== 'sync' || source !== hubModeGeneration || (!legacyPeriod && !fixedPeriodRangesApi.isDerived(selection))
@@ -8115,7 +8117,7 @@ async function resolveSyncedPeriodForStats(stats, source, selection, loadHistory
   };
   const fixed = legacyPeriod
     ? await resolveSyncedSessionPeriod(selection, stats.devices || [], revisions, { ...options, read })
-    : await resolveSyncedFixedPeriod(selection, stats.devices || [], revisions, { ...options, localDevice, read, history });
+    : await resolveSyncedFixedPeriod(selection, stats.devices || [], revisions, { ...options, localDevice, read, history, onRangeReadMiss });
   if (!fixed || source !== hubModeGeneration) return null;
   const current = config.hubMode === 'icloud'
     ? config.icloudSync?.getStats() : currentHubStatsCache();

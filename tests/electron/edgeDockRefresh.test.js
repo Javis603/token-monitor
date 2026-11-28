@@ -317,9 +317,12 @@ test('an exact period repaints while another waits and a failed range retries at
     return { unref() {} };
   };
   context.clearTimeout = () => {};
-  context.resolveSyncedPeriodForStats = async (_stats, _generation, selection) => {
+  context.resolveSyncedPeriodForStats = async (_stats, _generation, selection, { onRangeReadMiss }) => {
     if (selection === 'yesterday') return { status: 'ready', period: { totalTokens: 7 } };
-    return ++weekReads === 1 ? week.promise : { status: 'ready', period: { totalTokens: 70 } };
+    if (++weekReads !== 1) return { status: 'ready', period: { totalTokens: 70 } };
+    await week.promise;
+    onRangeReadMiss();
+    return { status: 'ready', detailsAvailable: true, period: { totalTokens: 0 } };
   };
   context.repaintDockSurfaces();
   await new Promise(setImmediate);
