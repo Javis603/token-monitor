@@ -467,6 +467,7 @@ html.native-liquid-glass .seg-indicator {
   flex-direction: column;
   overflow-y: auto;
   overflow-x: hidden;
+  scrollbar-width: none;
   scroll-padding-top: 12px;
   mask-image: linear-gradient(to bottom, transparent, black 4px);
 }

@@ -1485,9 +1485,7 @@ function renderHero(overview) {
       if (seg !== cacheMissComponents[0]) return [];
       return [{
         key: 'cacheMiss', labelKey: 'dashboard.tooltip.inputCacheMiss',
-        tokens: anatomy.cacheWrite + anatomy.cacheMiss,
-        share: (anatomy.cacheWrite + anatomy.cacheMiss) / (anatomy.totalTokens
-          || anatomy.cacheRead + anatomy.cacheWrite + anatomy.cacheMiss + anatomy.output + anatomy.unclassified)
+        tokens: anatomy.cacheWrite + anatomy.cacheMiss
       }];
     });
     patchDashboardMarkup(els.heroAnatomy, segments.map((seg) => {
@@ -1499,7 +1497,6 @@ function renderHero(overview) {
         + `<span class="dash-anatomy-dot kind-${kind}" aria-hidden="true"></span>`
         + `<span class="dash-anatomy-label">${escapeHtml(t(seg.labelKey))}</span>`
         + `<strong>${escapeHtml(formatCompact(seg.tokens))}</strong>`
-        + `<span class="dash-anatomy-pct">(${escapeHtml(formatHeroPercent(seg.share))})</span>`
         + `</span>`;
     }).join(''));
   }
@@ -3376,8 +3373,8 @@ function refreshActiveHover() {
     const candles = state.chartKind === 'candle';
     const entries = candles ? state.chartModel?.candles : state.chartModel?.bars;
     const index = entries?.findIndex(entry => (candles ? entry.key : entry.label) === activeHover.key) ?? -1;
-    const anchor = index >= 0 ? els.chart.querySelector(`.bar-hover[data-i="${index}"]`) : null;
-    if (anchor) (candles ? showCandleTooltip : showBarTooltip)(entries[index], anchor);
+    const hit = index >= 0 ? els.chart.querySelector(`.bar-hover[data-i="${index}"]`) : null;
+    if (hit) (candles ? showCandleTooltip : showBarTooltip)(entries[index], activeHover.point);
     else hideTooltip();
   }
 }
@@ -5400,9 +5397,10 @@ els.chart.addEventListener('mousemove', (ev) => {
   const candles = state.chartKind === 'candle';
   const entry = candles ? state.chartModel.candles[i] : state.chartModel.bars[i];
   if (!entry) { hideTooltip(); return; }
-  activeHover = { kind: 'trend', chartKind: state.chartKind, key: candles ? entry.key : entry.label };
-  if (candles) showCandleTooltip(entry, hit);
-  else showBarTooltip(entry, hit);
+  const point = { x: ev.clientX, y: ev.clientY };
+  activeHover = { kind: 'trend', chartKind: state.chartKind, key: candles ? entry.key : entry.label, point };
+  if (candles) showCandleTooltip(entry, point);
+  else showBarTooltip(entry, point);
 });
 els.chart.addEventListener('mouseleave', hideTooltip);
 

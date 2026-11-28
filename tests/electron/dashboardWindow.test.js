@@ -577,6 +577,29 @@ test('Hero labels partial coverage and distinguishes unavailable totals from zer
   assert.equal(cost.textContent, '0');
 });
 
+test('Dashboard hero shows token counts and displays the cache hit rate separately', () => {
+  let markup;
+  const heroCache = { textContent: '' };
+  const context = {
+    els: { heroAnatomy: {}, heroCache },
+    state: { selectedDeviceId: 'all', periodKey: 'today' },
+    lastHeroRender: {}, t: String, escapeHtml: String, formatExactTokens: String,
+    formatCompact: String, updateHeroTokens() {}, heroCacheMissDetails: () => [],
+    patchDashboardMarkup(_target, html) { markup = html; }
+  };
+  context.formatHeroPercent = dashboardFunction('formatHeroPercent', '\nfunction renderHero', context);
+  const render = dashboardFunction('renderHero', '\nfunction renderVelocity', context);
+  const segments = [
+    { key: 'cacheRead', labelKey: 'Cached input', tokens: 970, share: 0.97 },
+    { key: 'cacheMiss', labelKey: 'Uncached input', tokens: 29, share: 0.029 },
+    { key: 'output', labelKey: 'Output', tokens: 1, share: 0.001 }
+  ];
+  render({ hero: { tokens: 1000, cacheHitRate: 0.97, anatomy: { cacheWrite: 0, cacheMiss: 29, segments } } });
+  assert.deepEqual(Array.from(markup.matchAll(/<strong>(\d+)<\/strong>/g), match => match[1]), ['970', '29', '1']);
+  assert.doesNotMatch(markup, /%/);
+  assert.equal(heroCache.textContent, '97%');
+});
+
 test('Dashboard tooltips distinguish unrecorded days and buckets from recorded zeros', () => {
   const tooltip = { innerHTML: '' };
   const context = {
@@ -1010,6 +1033,42 @@ test('dashboard tooltips stay anchored above pointer and survive live renderNow 
   // Above anchor: top (200) - gap (11) - tip height (50) = 139px; horizontal center: 306 - 60 = 246px.
   assert.equal(style.transform, 'translate3d(246px, 139px, 0)');
   assert.equal(dataset.visible, 'true');
+
+  const hit = {
+    getAttribute: () => '0',
+    getBoundingClientRect: () => ({ left: 300, top: 100, bottom: 500, width: 12 })
+  };
+  let move;
+  const chart = {
+    addEventListener(name, handler) { if (name === 'mousemove') move = handler; },
+    querySelector: () => hit
+  };
+  const bar = { label: '2026-11-15', total: 42 };
+  const candle = { key: bar.label, close: 42 };
+  const readings = [];
+  const show = (entry, anchor) => {
+    readings.push(entry.total ?? entry.close);
+    positionTooltip(anchor);
+  };
+  const hoverContext = {
+    ...context, els: { tooltip, chart }, activeHover: null,
+    state: { chartKind: 'bar', chartModel: { bars: [bar], candles: [candle] } },
+    showBarTooltip: show, showCandleTooltip: show, hideTooltip() {}
+  };
+  const chartListener = js.indexOf("els.chart.addEventListener('mousemove'");
+  vm.runInNewContext(js.slice(chartListener, js.indexOf('els.heatmap.addEventListener', chartListener)), hoverContext);
+  const refresh = dashboardFunction('refreshActiveHover', '\nlet localSessionActivity', hoverContext);
+  for (const [kind, entry, valueField] of [['bar', bar, 'total'], ['candle', candle, 'close']]) {
+    hoverContext.state.chartKind = kind;
+    move({ target: { closest: () => hit }, clientX: 306, clientY: 200 });
+    assert.equal(style.transform, 'translate3d(246px, 139px, 0)');
+    move({ target: { closest: () => hit }, clientX: 308, clientY: 350 });
+    assert.equal(style.transform, 'translate3d(248px, 289px, 0)');
+    entry[valueField]++;
+    refresh();
+    assert.equal(readings.at(-1), 43);
+    assert.equal(style.transform, 'translate3d(248px, 289px, 0)');
+  }
 });
 
 test('widget bottom-left viewSwitcherMenu offers Usage Dashboard launcher', () => {
