@@ -1320,6 +1320,20 @@ html.native-high-contrast .dash-stage {
   white-space: nowrap;
 }
 
+.topo-session-meta {
+  display: inline-flex;
+  min-width: 0;
+}
+
+.topo-session-meta,
+.topo-session-meta > .topo-node-sub-text {
+  white-space: pre;
+}
+
+.dash-session-effort {
+  flex: none;
+}
+
 .dash-client-marks {
   display: inline-flex;
   align-items: center;
@@ -2329,6 +2343,11 @@ html.native-liquid-glass .dash-skyline-reset-btn {
   gap: 4px;
   min-width: 0;
   white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.dash-session-meta-text:has(> .dash-session-effort) > span:not([class]) {
   overflow: hidden;
   text-overflow: ellipsis;
 }
