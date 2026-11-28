@@ -47,7 +47,7 @@ function fixture() {
     notchController: null,
     pushEdgeDockCells: (cells) => { context.dockStats = cells.stats; context.dockPeriods = cells.derivedPeriods; },
     buildEdgeDockCells: (stats, options) => ({ stats, derivedPeriods: options.derivedPeriods }),
-    EDGE_DOCK_DERIVED_PERIODS: ['week', 'last7', 'last30'],
+    EDGE_DOCK_DERIVED_PERIODS: ['yesterday', 'week', 'last7', 'last30'],
     fixedPeriodRangesApi: {
       localDayKey: () => '2026-10-07',
       deviceInventorySignature: () => 'devices',

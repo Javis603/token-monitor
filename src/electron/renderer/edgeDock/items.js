@@ -28,9 +28,9 @@
 })(typeof window !== 'undefined' ? window : null, function createEdgeDockItems(limitProviders, usageItems, pluginPlacements, antigravity) {
   // Usage readouts follow the widget's own period choices; each shows tokens
   // with its cost beneath, so tokens and cost are no longer separate items.
-  const USAGE_PERIODS = Object.freeze(['today', 'week', 'last7', 'last30', 'month', 'allTime']);
-  // Periods the collector does not report directly; they are summed from History.
-  const DERIVED_PERIODS = Object.freeze(['week', 'last7', 'last30']);
+  const USAGE_PERIODS = Object.freeze(['today', 'yesterday', 'week', 'last7', 'last30', 'month', 'allTime']);
+  // Periods summed from History rather than read from core today/month/allTime.
+  const DERIVED_PERIODS = Object.freeze(['yesterday', 'week', 'last7', 'last30']);
   // 'sessions' is a readout too, but of the tracked clients' own sessions rather
   // than of a usage period: it is the one item that lists work every client can
   // answer for, including the clients that have no limits provider at all.
