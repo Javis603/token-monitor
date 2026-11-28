@@ -1529,6 +1529,39 @@ test('remote sessions never read local transcripts, delayed Hub A history is fen
   assert.equal(context.state.stats.snapshot.source, 2);
 });
 
+test('Attribution says "no usage history" only for confirmed zero usage', () => {
+  const js = read('src', 'electron', 'renderer', 'dashboard', 'dashboard.js');
+  const breakdown = { innerHTML: '' };
+  const summary = { textContent: '' };
+  const context = {
+    els: { breakdown, breakdownSummary: summary },
+    state: { breakdownMode: 'both', locale: 'en' },
+    lastBreakdownStructureSig: '',
+    escapeHtml: (s) => String(s ?? ''),
+    t: (k) => k
+  };
+  vm.runInNewContext(js.slice(js.indexOf('function renderBreakdown('), js.indexOf('\nfunction captureListSnapshot(')), context);
+  vm.runInNewContext(js.slice(js.indexOf('function ghostBar('), js.indexOf('\nfunction ghostTopologyNodeHtml')), context);
+  const ghosts = () => breakdown.innerHTML.match(/dash-bd-row is-ghost/g)?.length || 0;
+
+  context.renderBreakdown({ hero: { accountingStatus: 'ready', tokens: 0 }, tools: [], models: [] });
+  assert.equal(summary.textContent, 'dashboard.empty');
+  assert.equal(ghosts(), 6);
+
+  // Usage without breakdown detail, or not yet accounted, must not claim there is no history.
+  context.renderBreakdown({ hero: { accountingStatus: 'ready', tokens: 40 }, tools: [], models: [] });
+  assert.equal(summary.textContent, '');
+  assert.equal(ghosts(), 6);
+  context.renderBreakdown({ hero: { accountingStatus: 'unavailable', tokens: 0 }, tools: [], models: [] });
+  assert.equal(summary.textContent, '');
+
+  // A filtered-out kind with data in the other kind is not "no history" either.
+  context.state.breakdownMode = 'model';
+  context.renderBreakdown({ hero: { accountingStatus: 'ready', tokens: 40 }, tools: [{ id: 'codex', tokens: 40 }], models: [] });
+  assert.equal(summary.textContent, '');
+  assert.equal(ghosts(), 5);
+});
+
 test('renderQuotas renders expired plan status without meter, hover refresh handles quotes, rate expiry clears idle topology rates, and ledger matches chart range and focus', async () => {
   const js = read('src', 'electron', 'renderer', 'dashboard', 'dashboard.js');
   const charts = require('../../src/electron/renderer/usageCharts');

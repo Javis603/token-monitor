@@ -1013,7 +1013,10 @@ function renderBreakdown(overview) {
   if (state.breakdownMode !== 'client' && models.length > 0) {
     groups.push({ kind: 'model', titleKey: 'dashboard.stack.model', rows: models.slice(0, 6) });
   }
-  if (els.breakdownSummary) els.breakdownSummary.textContent = groups.length ? '' : t('dashboard.empty');
+  // Only confirmed zero usage reads as "no history"; missing detail or a
+  // filtered-out kind leaves the ghosts without a claim.
+  const confirmedEmpty = overview?.hero?.accountingStatus === 'ready' && overview.hero.tokens === 0;
+  if (els.breakdownSummary) els.breakdownSummary.textContent = !groups.length && confirmedEmpty ? t('dashboard.empty') : '';
   if (groups.length === 0) {
     lastBreakdownStructureSig = '';
     const ghostGroups = [
