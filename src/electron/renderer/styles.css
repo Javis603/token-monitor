@@ -5232,6 +5232,9 @@ html.is-windows .settings-panel select option {
   align-items: center;
   gap: 6px;
 }
+.home-limit-window .home-list-value[data-limit-motion-value] {
+  font-size: 0.625rem;
+}
 .home-limit-window.is-untouched .home-limit-track {
   opacity: 0.72;
 }
