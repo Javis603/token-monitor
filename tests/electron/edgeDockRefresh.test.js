@@ -36,6 +36,7 @@ function fixture() {
     },
     hubModeGeneration: 1,
     statsPushRevision: 0,
+    latestStatsMatchCurrentSource: () => true,
     settings: { hubMode: 'local', limitsEnabled: false, limitProviders: [] },
     mode: 'local',
     localStats: { updatedAt: '2026-10-07T00:00:00Z' },
@@ -260,6 +261,7 @@ test('a late synchronized range cannot replace a newer revision with History off
   context.latestStats = { fixedRangeRevisions: { here: 'old' } };
   context.repaintDockSurfaces();
   context.repaintDockSurfaces();
+  await new Promise(setImmediate);
   context.latestStats = { fixedRangeRevisions: { here: 'new' } };
   context.repaintDockSurfaces();
   await new Promise(setImmediate);
@@ -268,6 +270,69 @@ test('a late synchronized range cannot replace a newer revision with History off
   await new Promise(setImmediate);
   assert.equal(context.dockPeriods.yesterday.totalTokens, 200);
   assert.deepEqual(calls, ['old', 'new']);
+});
+
+test('Edge Dock discards a previous Hub snapshot until the replacement source publishes', async () => {
+  const { context } = fixture();
+  context.mode = 'sync';
+  context.settings.edgeDockItems = [{ type: 'stat', metric: 'yesterday' }];
+  let currentSource = true;
+  context.latestStatsMatchCurrentSource = () => currentSource;
+  const previous = deferred();
+  const calls = [];
+  context.resolveSyncedPeriodForStats = async (stats, generation) => {
+    calls.push([stats.fixedRangeRevisions.here, generation]);
+    return generation === 1 ? previous.promise : { status: 'ready', period: { totalTokens: 222 } };
+  };
+  context.latestStats = { fixedRangeRevisions: { here: 'old' } };
+  context.repaintDockSurfaces();
+  await new Promise(setImmediate);
+  context.hubModeGeneration++;
+  currentSource = false;
+  context.repaintDockSurfaces();
+  previous.resolve({ status: 'ready', period: { totalTokens: 111 } });
+  await new Promise(setImmediate);
+  assert.deepEqual({ ...context.dockPeriods }, {});
+  assert.deepEqual(calls, [['old', 1]]);
+
+  context.latestStats = { fixedRangeRevisions: { here: 'new' } };
+  currentSource = true;
+  context.repaintDockSurfaces();
+  await new Promise(setImmediate);
+  assert.deepEqual(calls, [['old', 1], ['new', 2]]);
+  assert.equal(context.dockPeriods.yesterday.totalTokens, 222);
+});
+
+test('an exact period repaints while another waits and a failed range retries at the same revision', async () => {
+  const { context } = fixture();
+  context.mode = 'sync';
+  context.settings.historyEnabled = false;
+  context.settings.edgeDockItems = ['yesterday', 'week'].map(metric => ({ type: 'stat', metric }));
+  context.latestStats = { fixedRangeRevisions: { here: 'rev' } };
+  const week = deferred();
+  const retries = [];
+  let weekReads = 0;
+  context.setTimeout = (callback, delay) => {
+    if (delay === 5000) retries.push(callback);
+    return { unref() {} };
+  };
+  context.clearTimeout = () => {};
+  context.resolveSyncedPeriodForStats = async (_stats, _generation, selection) => {
+    if (selection === 'yesterday') return { status: 'ready', period: { totalTokens: 7 } };
+    return ++weekReads === 1 ? week.promise : { status: 'ready', period: { totalTokens: 70 } };
+  };
+  context.repaintDockSurfaces();
+  await new Promise(setImmediate);
+  assert.equal(context.dockPeriods.yesterday.totalTokens, 7);
+  assert.equal(context.dockPeriods.week, undefined);
+  week.resolve(null);
+  await new Promise(setImmediate);
+  assert.equal(retries.length, 1);
+  retries[0]();
+  await new Promise(setImmediate);
+  assert.equal(weekReads, 2);
+  assert.equal(context.dockPeriods.week.totalTokens, 70);
+  assert.equal(retries.length, 1);
 });
 
 test('a delayed derived-period repaint retains the manually refreshed snapshot until a stats push replaces it', async () => {

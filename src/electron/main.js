@@ -5909,9 +5909,12 @@ function scheduleEdgeDockPeriodRollover(devices) {
 // until the next push, without changing the renderer/widget snapshot source.
 let edgeDockManualStats = null;
 
+function edgeDockHasCurrentManualStats() {
+  return edgeDockManualStats?.generation === hubModeGeneration && edgeDockManualStats.runtime === deviceRuntimeHandle;
+}
+
 function edgeDockStats() {
-  return edgeDockManualStats?.generation === hubModeGeneration && edgeDockManualStats.runtime === deviceRuntimeHandle
-    ? edgeDockManualStats.stats : latestStats;
+  return edgeDockHasCurrentManualStats() ? edgeDockManualStats.stats : latestStats;
 }
 
 function repaintDockSurfaces() {
@@ -5926,7 +5929,7 @@ function edgeDockDerivedSelections() {
 
 function refreshEdgeDockDerivedPeriods(visibleStats) {
   const selections = edgeDockDerivedSelections();
-  if (!selections.length || !visibleStats) {
+  if (!selections.length || !visibleStats || (!edgeDockHasCurrentManualStats() && !latestStatsMatchCurrentSource())) {
     edgeDockPeriodRead = null;
     scheduleEdgeDockPeriodRollover(null);
     return {};
@@ -5971,45 +5974,64 @@ function refreshEdgeDockDerivedPeriods(visibleStats) {
     const periods = edgeDockPeriodRead?.scope === scope ? edgeDockPeriodRead.periods : {};
     const request = { scope, signature, periods };
     edgeDockPeriodRead = request;
-    void (async () => {
-      const periods = {};
-      if (useSyncedRanges) {
-        const snapshots = await Promise.all(missing.map(selection => resolveSyncedPeriodForStats(source, generation, selection)));
-        for (const [index, snapshot] of snapshots.entries()) {
-          if (snapshot?.status === 'ready' && snapshot.period) periods[missing[index]] = snapshot.period;
-        }
-      }
-      if (edgeDockPeriodRead !== request || generation !== hubModeGeneration) return;
-      const useHistory = missing.filter(selection => !periods[selection]);
-      let retryHistory = false;
-      if (historyEnabled && useHistory.length) {
-        const history = await getDashboardHistory({ includeDevices: true }).catch(error => {
+    const isCurrent = () => edgeDockPeriodRead === request && generation === hubModeGeneration
+      && (edgeDockHasCurrentManualStats() || latestStatsMatchCurrentSource());
+
+    async function loadPeriods(selectionsToRead, retriesLeft) {
+      if (!isCurrent()) return;
+      let historyRead;
+      let dashboardHistory;
+      const loadHistory = () => {
+        if (!isCurrent()) return Promise.resolve(null);
+        return historyRead ??= resolveCompleteHistoryWithDevices(historyResolverOptions()).catch(error => {
           console.log(`[edge-dock] History fallback failed: ${error.message}`);
           return null;
         });
-        retryHistory = history === null;
-        const current = edgeDockStats();
-        if (edgeDockPeriodRead !== request || generation !== hubModeGeneration || !current) return;
-        const stats = electronPresentationStats(current);
-        const sources = fixedPeriodRangesApi.joinDeviceHistorySources(history?.deviceHistories || [], stats.devices || []);
-        for (const selection of history ? useHistory : []) {
-          const snapshot = fixedPeriodRangesApi.fixedPeriodSnapshotFromDevices(selection, sources, {
-            historyAvailable: history?.fixedPeriods?.historyTransportAvailable === true,
-            todayKey,
-            locale,
-            ...(mode === 'sync' ? { weekStartsOn: SYNC_WEEK_STARTS_ON } : {})
-          });
-          if (snapshot?.status === 'ready' && snapshot.period) periods[selection] = snapshot.period;
+      };
+      const retry = await Promise.all(selectionsToRead.map(async selection => {
+        let snapshot;
+        if (useSyncedRanges) {
+          try {
+            snapshot = await resolveSyncedPeriodForStats(source, generation, selection, loadHistory);
+          } catch (error) {
+            console.log(`[edge-dock] fixed period read failed: ${error.message}`);
+          }
         }
+        if (!isCurrent()) return false;
+        let retrySelection = useSyncedRanges && (!snapshot || snapshot.detailsAvailable === false);
+        if (!snapshot && historyEnabled) {
+          dashboardHistory ??= getDashboardHistory({ includeDevices: true }, loadHistory);
+          const history = await dashboardHistory;
+          if (!isCurrent()) return false;
+          retrySelection ||= history === null;
+          if (history) {
+            const stats = electronPresentationStats(edgeDockStats());
+            const sources = fixedPeriodRangesApi.joinDeviceHistorySources(history.deviceHistories || [], stats.devices || []);
+            snapshot = fixedPeriodRangesApi.fixedPeriodSnapshotFromDevices(selection, sources, {
+              historyAvailable: history.fixedPeriods?.historyTransportAvailable === true,
+              todayKey,
+              locale,
+              ...(mode === 'sync' ? { weekStartsOn: SYNC_WEEK_STARTS_ON } : {})
+            });
+          }
+        }
+        if (snapshot?.status === 'ready' && snapshot.period) {
+          request.periods = { ...request.periods, [selection]: snapshot.period };
+        } else if (Object.hasOwn(request.periods, selection)) {
+          const { [selection]: _previous, ...periods } = request.periods;
+          request.periods = periods;
+        }
+        repaintDockSurfaces();
+        return retrySelection;
+      }));
+      const pending = selectionsToRead.filter((_, index) => retry[index]);
+      if (isCurrent() && retriesLeft && pending.length) {
+        setTimeout(() => void loadPeriods(pending, retriesLeft - 1), 5000).unref();
       }
-      request.periods = periods;
-      repaintDockSurfaces();
-      // Publish resolved ranges first, then allow the next push to retry History.
-      if (retryHistory) request.signature = null;
-    })().catch((error) => {
-      console.log(`[edge-dock] fixed period read failed: ${error.message}`);
-      if (edgeDockPeriodRead === request) edgeDockPeriodRead = null;
-    });
+    }
+
+    // Defer the first read so its repaint cannot re-enter the current projection.
+    void Promise.resolve().then(() => loadPeriods(missing, 2));
   }
   return { ...edgeDockPeriodRead.periods, ...native };
 }
@@ -8061,7 +8083,7 @@ async function resolveAllTimeProjects(stats, source, id) {
   }
 }
 
-async function resolveSyncedPeriodForStats(stats, source, selection) {
+async function resolveSyncedPeriodForStats(stats, source, selection, loadHistory) {
   const revisions = stats?.fixedRangeRevisions || {};
   const legacyPeriod = selection === 'today' || selection === 'month';
   if (mode !== 'sync' || source !== hubModeGeneration || (!legacyPeriod && !fixedPeriodRangesApi.isDerived(selection))
@@ -8087,8 +8109,8 @@ async function resolveSyncedPeriodForStats(stats, source, selection) {
   const history = async (devices) => {
     if (!config.historyEnabled) return null;
     try {
-      const resolved = await resolveCompleteHistoryWithDevices(config);
-      return historyFallbackForDevices(selection, devices, resolved.deviceHistories, options);
+      const resolved = await (loadHistory ? loadHistory() : resolveCompleteHistoryWithDevices(config));
+      return resolved && historyFallbackForDevices(selection, devices, resolved.deviceHistories, options);
     } catch (_) { return null; }
   };
   const fixed = legacyPeriod
@@ -8114,11 +8136,12 @@ async function resolveSyncedPeriodForStats(stats, source, selection) {
   };
 }
 
-async function getDashboardHistory(options = {}) {
+async function getDashboardHistory(options = {}, loadWithDevices = () => resolveCompleteHistoryWithDevices(historyResolverOptions())) {
   const includeDevices = options?.includeDevices === true;
   const resolved = includeDevices
-    ? await resolveCompleteHistoryWithDevices(historyResolverOptions())
+    ? await loadWithDevices()
     : { history: await getCompleteHistory(), deviceHistories: undefined };
+  if (!resolved) return null;
   const history = resolved.history;
   const source = completeHistorySource(historyResolverOptions());
   return projectModelAliasHistory({
