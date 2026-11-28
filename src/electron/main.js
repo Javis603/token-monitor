@@ -411,6 +411,7 @@ const {
 const {
   describeWindowBehavior,
   floatingAlwaysOnTopLevel,
+  normalizeWindowBehavior,
   normalizeWindowBehaviorSettings,
   windowBehaviorSelection
 } = require('./windowBehavior');
@@ -530,6 +531,8 @@ function appWindowIcon() {
 
 const DEFAULT_WINDOW = { width: 340, height: 650 };
 const WINDOW_LIMITS = { minWidth: 240, minHeight: 140, maxWidth: 1200, maxHeight: 1400 };
+const DEFAULT_DASHBOARD_WINDOW = { width: 1180, height: 760 };
+const DASHBOARD_WINDOW_LIMITS = { minWidth: 720, minHeight: 520 };
 const ZOOM_LIMITS = { min: 0.7, max: 1.6, step: 0.1 };
 const TRAY_CONTENT_VALUES = new Set(['tokens', 'cost', 'both', 'tokensMonth', 'costMonth', 'bothMonth', 'tokensAll', 'costAll', 'bothAll', 'limitsAllSessions', 'liveTokenRate', 'bars', 'barsSession', 'barsWeekly', 'barsAllSessions', 'icon', 'custom']);
 const HUB_MODE_VALUES = new Set(['local', 'client', 'host', 'icloud']);
@@ -552,6 +555,7 @@ const TRAY_OPEN_VIEW_IDS = new Set(['home', 'project', 'session', 'limits', 'tre
 let mainWindow = null;
 let dashboardWindow = null;
 let dashboardWindowReady = false;
+let pendingDashboardWindowBounds = null;
 let settingsPath = null;
 let settings = null;
 let initialLimitProvidersPending = false;
@@ -649,11 +653,15 @@ function defaultSettings() {
     heatmapMetric: 'cost',
     dashboardHeatmapMetric: null,
     dashboardStageView: 'flow',
+    dashboardBackdrop: 'inherit',
+    dashboardWindowBehavior: 'normal',
+    dashboardWindowBounds: null,
     dashboardFlowMode: 'sync',
     dashboardFollowPeriodTabs: false,
     dashboardVisiblePeriods: [],
     dashboardShowVelocity: true,
     dashboardShowQuotas: true,
+    dashboardQuotaProviderOrder: '',
     modelRankingMetric: 'tokens',
     homeActiveDaysWindow: 'all',
     showExactHomeTrendTokens: false,
@@ -1539,11 +1547,10 @@ function isBoundsOnScreen(bounds) {
   } catch (_) { return false; }
 }
 
-function restoredBounds() {
-  const saved = settings?.windowBounds;
-  if (!saved || typeof saved.width !== 'number' || typeof saved.height !== 'number') return null;
-  const width = Math.min(WINDOW_LIMITS.maxWidth, Math.max(WINDOW_LIMITS.minWidth, saved.width));
-  const height = Math.min(WINDOW_LIMITS.maxHeight, Math.max(WINDOW_LIMITS.minHeight, saved.height));
+function restoredBounds(saved, { minWidth, minHeight, maxWidth = Infinity, maxHeight = Infinity } = WINDOW_LIMITS) {
+  if (!Number.isFinite(saved?.width) || !Number.isFinite(saved?.height)) return null;
+  const width = Math.min(maxWidth, Math.max(minWidth, saved.width));
+  const height = Math.min(maxHeight, Math.max(minHeight, saved.height));
   if (!isBoundsOnScreen({ ...saved, width, height })) return { width, height };
   return { x: saved.x, y: saved.y, width, height };
 }
@@ -1821,10 +1828,10 @@ function collapsedMargin() {
   return floatingBubbleCollapsedMargin(process.platform);
 }
 
-function persistWindowBounds(next) {
-  const prev = settings.windowBounds || {};
+function persistWindowBounds(next, key = 'windowBounds') {
+  const prev = settings[key] || {};
   if (prev.x === next.x && prev.y === next.y && prev.width === next.width && prev.height === next.height) return false;
-  settings.windowBounds = next;
+  settings[key] = next;
   saveSettings();
   return true;
 }
@@ -2226,11 +2233,16 @@ function readSettings() {
     merged.heatmapMetric = normalizeHeatmapMetric(merged.heatmapMetric);
     merged.dashboardHeatmapMetric = merged.dashboardHeatmapMetric == null ? null : normalizeHeatmapMetric(merged.dashboardHeatmapMetric);
     merged.dashboardStageView = normalizeDashboardStageView(merged.dashboardStageView);
+    merged.dashboardBackdrop = normalizeDashboardBackdrop(saved.dashboardBackdrop ?? (saved.dashboardFlat === true ? 'solid' : 'inherit'));
+    merged.dashboardWindowBehavior = normalizeWindowBehavior(merged.dashboardWindowBehavior, 'normal');
     merged.dashboardFlowMode = normalizeDashboardFlowMode(merged.dashboardFlowMode);
     merged.dashboardVisiblePeriods = normalizeDashboardPeriods(merged.dashboardVisiblePeriods);
     merged.dashboardFollowPeriodTabs = parseBoolean(merged.dashboardFollowPeriodTabs, false);
     merged.dashboardShowVelocity = parseBoolean(merged.dashboardShowVelocity, true);
     merged.dashboardShowQuotas = parseBoolean(merged.dashboardShowQuotas, true);
+    merged.dashboardQuotaProviderOrder = require('./plugins/limits').desktopProviderPreference(
+      merged.dashboardQuotaProviderOrder ?? '', parseLimitProviders
+    );
     merged.modelRankingMetric = normalizeRankingMetric(merged.modelRankingMetric);
     merged.homeActiveDaysWindow = normalizeHomeActiveDaysWindow(merged.homeActiveDaysWindow);
     merged.showExactHomeTrendTokens = parseBoolean(merged.showExactHomeTrendTokens, false);
@@ -2644,13 +2656,44 @@ function nativeBlurEnabled(source = settings) {
   return floatingBubbleNativeGlassEnabled(source);
 }
 
+function normalizeDashboardBackdrop(value, platform = process.platform) {
+  if (value === 'solid') return value;
+  if (platform === 'darwin' && (value === 'vibrancy' || isLiquidGlassBackdrop(value))) return value;
+  if (platform === 'win32' && ['acrylic', 'mica', 'mica-alt', 'accent'].includes(value)) return value;
+  return 'inherit';
+}
+
+function dashboardMaterialSettings(source) {
+  const mode = normalizeDashboardBackdrop(source.dashboardBackdrop);
+  if (mode === 'inherit') return source;
+  if (mode === 'solid') return { ...source, systemGlass: false };
+  return process.platform === 'darwin'
+    ? { ...source, systemGlass: true, macBackdrop: mode }
+    : { ...source, systemGlass: true, windowsBackdrop: mode };
+}
+
+function applyDashboardWindowBehavior(win, source = settings) {
+  if (!win || win.isDestroyed()) return;
+  const mode = normalizeWindowBehavior(source.dashboardWindowBehavior, 'normal');
+  const behavior = describeWindowBehavior({ windowBehavior: mode });
+  win.setAlwaysOnTop(behavior.alwaysOnTop, floatingAlwaysOnTopLevel());
+  win.setMovable(behavior.draggable);
+  win.setResizable(behavior.resizable);
+}
+
+function syncDashboardWindowsBackdrop(win, source = settings) {
+  const effective = dashboardMaterialSettings(source);
+  syncWindowsBackdrop(win, { enabled: nativeBlurEnabled(effective), mode: effective.windowsBackdrop });
+}
+
 function nativeMaterialOptions(source = settings, dashboard = false) {
+  if (dashboard) source = dashboardMaterialSettings(source);
   return {
     enabled: nativeBlurEnabled(source),
     liquidGlass: isLiquidGlassBackdrop(source.macBackdrop),
     style: liquidGlassStyle(source.macBackdrop),
     tintOpacity: liquidGlassTint(source),
-    opaque: dashboard && source.dashboardFlat === true,
+    opaque: dashboard && source.dashboardBackdrop === 'solid',
     reducedTransparency: nativeTheme.prefersReducedTransparency === true,
     highContrast: nativeTheme.shouldUseHighContrastColors === true,
     dark: !isLightHex(source.themeColors?.bg),
@@ -2664,7 +2707,7 @@ function applyNativeMaterial(source = settings) {
   const windowsMaterial = { enabled: nativeBlurEnabled(source), mode: source.windowsBackdrop };
   const hadAccent = windowsAccentActive(mainWindow);
   syncWindowsBackdrop(mainWindow, windowsMaterial);
-  syncWindowsBackdrop(dashboardWindow, windowsMaterial);
+  syncDashboardWindowsBackdrop(dashboardWindow, source);
   limitsHistoryController?.syncMaterial();
   return hadAccent !== windowsAccentActive(mainWindow);
 }
@@ -6570,7 +6613,7 @@ function exitTrayMode() {
     if (typeof mainWindow.setSkipTaskbar === 'function') mainWindow.setSkipTaskbar(skipTaskbarForSettings(settings));
     setWindowMaximizable(mainWindow, true);
     applyMacSpaceBehavior(false);
-    const restore = restoredBounds() || DEFAULT_WINDOW;
+    const restore = restoredBounds(settings?.windowBounds) || DEFAULT_WINDOW;
     mainWindow.setBounds({
       width: restore.width,
       height: restore.height,
@@ -6732,6 +6775,7 @@ function stopAll() {
   disposePluginRuntime();
   cancelMainWindowHibernate();
   stopPersistBoundsTimer();
+  persistDashboardWindowBounds(dashboardWindow);
   stopLocalCollector({ skipCloseWatchers: true });
   stopStatsStream();
   stopHostStats();
@@ -7520,7 +7564,7 @@ function createWindow(boundsOverride, options = {}) {
   cancelMainWindowHibernate();
   ensureSettingsLoaded();
   const collapsedFloatingBubble = options.collapsedFloatingBubble === true;
-  const bounds = boundsOverride || restoredBounds() || DEFAULT_WINDOW;
+  const bounds = boundsOverride || restoredBounds(settings?.windowBounds) || DEFAULT_WINDOW;
   const collapsedSizeLimits = {
     minWidth: bounds.width,
     minHeight: bounds.height,
@@ -7776,10 +7820,58 @@ function discardFailedDashboardWindow(win, reason) {
   win.destroy();
 }
 
-function showDashboardWindow(win) {
+function showDashboardWindow(win, bounds) {
   if (win.isMinimized()) win.restore();
+  if (bounds) {
+    const { x, y, width, height } = win.getBounds();
+    if (width !== bounds.width || height !== bounds.height) {
+      win.setMinimumSize(
+        Math.min(bounds.width, DASHBOARD_WINDOW_LIMITS.minWidth),
+        Math.min(bounds.height, DASHBOARD_WINDOW_LIMITS.minHeight)
+      );
+    }
+    if (width !== bounds.width || height !== bounds.height
+      || (bounds.x !== undefined && (x !== bounds.x || y !== bounds.y))) {
+      win.setBounds(bounds);
+    }
+  }
   win.show();
   win.focus();
+  // macOS can reposition the window as it orders it front for the first time.
+  if (process.platform === 'darwin' && typeof bounds?.x === 'number') {
+    const [x, y] = win.getPosition();
+    if (x !== bounds.x || y !== bounds.y) win.setPosition(bounds.x, bounds.y);
+  }
+}
+
+function persistDashboardWindowBounds(win) {
+  if (!dashboardWindowReady || win !== dashboardWindow) return;
+  const bounds = normalWindowBounds(win) || pendingDashboardWindowBounds;
+  if (!bounds) return;
+  pendingDashboardWindowBounds = null;
+  if (!canPositionWindow()) {
+    bounds.x = settings.dashboardWindowBounds?.x;
+    bounds.y = settings.dashboardWindowBounds?.y;
+  }
+  persistWindowBounds(bounds, 'dashboardWindowBounds');
+}
+
+function restoredDashboardBounds() {
+  const saved = restoredBounds(settings?.dashboardWindowBounds, DASHBOARD_WINDOW_LIMITS);
+  const bounds = saved || DEFAULT_DASHBOARD_WINDOW;
+  const canPosition = canPositionWindow();
+  const { workArea } = (canPosition && displayForBounds(saved)) || screen.getPrimaryDisplay();
+  const width = Math.min(bounds.width, workArea.width);
+  const height = Math.min(bounds.height, workArea.height);
+  if (!saved || !canPosition) return { width, height };
+  const x = saved.x ?? workArea.x + Math.floor((workArea.width - width) / 2);
+  const y = saved.y ?? workArea.y + Math.floor((workArea.height - height) / 2);
+  return {
+    x: Math.max(workArea.x, Math.min(x, workArea.x + workArea.width - width)),
+    y: Math.max(workArea.y, Math.min(y, workArea.y + workArea.height - height)),
+    width,
+    height
+  };
 }
 
 function createDashboardWindow() {
@@ -7789,11 +7881,11 @@ function createDashboardWindow() {
     if (dashboardWindowReady) showDashboardWindow(dashboardWindow);
     return dashboardWindow;
   }
+  const bounds = restoredDashboardBounds();
   const windowOptions = {
-    width: 1180,
-    height: 760,
-    minWidth: 720,
-    minHeight: 520,
+    ...bounds,
+    minWidth: Math.min(bounds.width, DASHBOARD_WINDOW_LIMITS.minWidth),
+    minHeight: Math.min(bounds.height, DASHBOARD_WINDOW_LIMITS.minHeight),
     frame: false,
     transparent: true,
     show: false,
@@ -7812,7 +7904,8 @@ function createDashboardWindow() {
   dashboardWindowReady = false;
   applyWindowsChrome(win, { round: true });
   suppressLinuxSystemContextMenu(win);
-  syncWindowsBackdrop(win, { enabled: nativeBlurEnabled(), mode: settings.windowsBackdrop });
+  applyDashboardWindowBehavior(win);
+  syncDashboardWindowsBackdrop(win);
   attachNativeMaterialVisibility(win, () => nativeMaterialOptions(settings, true));
   syncNativeMaterialVisibility(win, nativeMaterialOptions(settings, true));
   win.webContents.setWindowOpenHandler(({ url }) => {
@@ -7834,10 +7927,23 @@ function createDashboardWindow() {
   win.on('unresponsive', () => {
     if (!win.isVisible()) discardFailedDashboardWindow(win, 'renderer became unresponsive while opening');
   });
+  let boundsTimer;
+  const scheduleBoundsSave = () => {
+    if (!dashboardWindowReady || win !== dashboardWindow) return;
+    const bounds = normalWindowBounds(win);
+    if (!bounds) return;
+    pendingDashboardWindowBounds = bounds;
+    clearTimeout(boundsTimer);
+    boundsTimer = setTimeout(() => persistDashboardWindowBounds(win), 400);
+  };
+  for (const event of ['resize', 'resized', 'move', 'moved']) win.on(event, scheduleBoundsSave);
+  win.on('close', () => persistDashboardWindowBounds(win));
   win.on('closed', () => {
+    clearTimeout(boundsTimer);
     if (dashboardWindow === win) {
       dashboardWindow = null;
       dashboardWindowReady = false;
+      pendingDashboardWindowBounds = null;
     }
   });
   win.loadFile(path.join(__dirname, 'renderer', 'dashboard', 'dashboard.html'))
@@ -8360,8 +8466,17 @@ app.whenReady().then(() => {
     if (patch.dashboardHeatmapMetric !== undefined) {
       normalizedPatch.dashboardHeatmapMetric = patch.dashboardHeatmapMetric === null ? null : normalizeHeatmapMetric(patch.dashboardHeatmapMetric);
     }
+    if (patch.dashboardWindowBehavior !== undefined) {
+      normalizedPatch.dashboardWindowBehavior = normalizeWindowBehavior(patch.dashboardWindowBehavior, 'normal');
+    }
+    if (patch.dashboardBackdrop !== undefined) normalizedPatch.dashboardBackdrop = normalizeDashboardBackdrop(patch.dashboardBackdrop);
     if (patch.dashboardStageView !== undefined) normalizedPatch.dashboardStageView = normalizeDashboardStageView(patch.dashboardStageView);
     if (patch.dashboardFlowMode !== undefined) normalizedPatch.dashboardFlowMode = normalizeDashboardFlowMode(patch.dashboardFlowMode);
+    if (patch.dashboardQuotaProviderOrder !== undefined) {
+      normalizedPatch.dashboardQuotaProviderOrder = require('./plugins/limits').desktopProviderPreference(
+        patch.dashboardQuotaProviderOrder ?? '', parseLimitProviders
+      );
+    }
     if (patch.dashboardVisiblePeriods !== undefined) normalizedPatch.dashboardVisiblePeriods = normalizeDashboardPeriods(patch.dashboardVisiblePeriods);
     for (const key of ['dashboardFollowPeriodTabs', 'dashboardShowVelocity', 'dashboardShowQuotas']) {
       if (patch[key] !== undefined) normalizedPatch[key] = parseBoolean(patch[key], settings[key]);
@@ -8621,6 +8736,9 @@ app.whenReady().then(() => {
       || settings.language !== previousLanguage
     ) && latestStats) updateDiscordRpcDisplay(latestStats);
     applyWindowSettings();
+    if (settings.dashboardWindowBehavior !== previousSettingsState.dashboardWindowBehavior) {
+      applyDashboardWindowBehavior(dashboardWindow);
+    }
     syncFloatingBubbleAvailability();
     syncDockSurfaces();
     applyNativeMaterial();
@@ -9267,8 +9385,9 @@ app.whenReady().then(() => {
     // A shared renderer can retain an opaque canvas over the native material.
     // Restore transparency after load, before revealing the prepared Dashboard.
     if (process.platform === 'darwin') win.setBackgroundColor('#00000000');
+    const bounds = dashboardWindowReady ? null : restoredDashboardBounds();
     dashboardWindowReady = true;
-    showDashboardWindow(win);
+    showDashboardWindow(win, bounds);
   });
   ipcMain.on('dashboard:openAppSettings', (event) => {
     if (event.sender === dashboardWindow?.webContents && event.senderFrame === event.sender.mainFrame) openSettingsFromTray();

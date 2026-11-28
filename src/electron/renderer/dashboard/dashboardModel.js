@@ -918,25 +918,15 @@
     }));
   }
 
-  /**
-   * Projects live quotas from `stats.limits.providers` using `homeOverview` and `balanceDisplay`.
-   * Respects `AGENTS.md` Balance Quotas tripwire (`windows[].metric === 'credits'`, never a provider whitelist).
-   *
-   * @param {any} stats
-   * @param {any} settings
-   * @param {number} [nowMs]
-   */
-  function buildQuotaAccounts(stats, settings, nowMs = Date.now()) {
-    if (settings?.limitsEnabled === false) return [];
-    const providers = stats?.limits?.providers;
-    if (!Array.isArray(providers) || providers.length === 0) return [];
+  /** @param {any} stats @param {any} settings @returns {{ id: string, label: string }[]} */
+  function dashboardQuotaProviders(stats, settings) {
+    const providers = Array.isArray(stats?.limits?.providers) ? stats.limits.providers : [];
     const catalog = limitProvidersApi?.LIMIT_PROVIDER_CATALOG || [];
-    const showUsed = Boolean(settings?.showLimitUsed);
-
+    /** @type {{ id: string, label: string }[]} */
     const providerOptions = catalog.length > 0
       ? catalog.map((/** @type {any} */ p) => ({ id: String(p.id || '').toLowerCase(), label: p.label }))
       : providers.map((/** @type {any} */ p) => ({ id: String(p.provider || '').toLowerCase(), label: p.provider }));
-    const knownOptionIds = new Set(providerOptions.map((/** @type {any} */ opt) => opt.id));
+    const knownOptionIds = new Set(providerOptions.map(opt => opt.id));
     for (const p of providers) {
       const pid = String(p?.provider || '').trim().toLowerCase();
       if (pid && !knownOptionIds.has(pid)) {
@@ -953,7 +943,19 @@
               ? settings.limitProviders
               : String(settings.limitProviders || '').split(',').map((/** @type {string} */ s) => s.trim().toLowerCase()).filter(Boolean)))
       : providerOptions.map(/** @param {any} p */ (p) => p.id);
-    if (enabled.length === 0) return [];
+    const enabledIds = new Set(enabled);
+    const options = providerOptions.filter(option => enabledIds.has(option.id));
+    return limitProviderOrderApi.orderedLimitProviders(options, settings?.dashboardQuotaProviderOrder);
+  }
+
+  /** @param {any} stats @param {any} settings @param {number} [nowMs] */
+  function buildQuotaAccounts(stats, settings, nowMs = Date.now()) {
+    if (settings?.limitsEnabled === false) return [];
+    const providers = stats?.limits?.providers;
+    if (!Array.isArray(providers) || providers.length === 0) return [];
+    const providerOptions = dashboardQuotaProviders(stats, settings);
+    if (providerOptions.length === 0) return [];
+    const showUsed = Boolean(settings?.showLimitUsed);
 
     const colors = { ...(usageCharts?.clientColors || {}), factory: usageCharts?.clientColors?.droid || '#888888' };
     const maskEmail = settings?.maskLimitAccountEmails === true;
@@ -975,10 +977,9 @@
       ? homeOverviewApi.homeLimitAccountsForProviders({
           providers,
           providerOptions,
-          enabledProviderIds: enabled,
           colors,
           limit: 24,
-          sort: 'remaining',
+          sort: settings?.dashboardQuotaProviderOrder ? 'configured' : 'remaining',
           isWindowHidden,
           compact: false,
           accountPlan: (/** @type {any} */ provider) => {
@@ -989,7 +990,7 @@
           },
           accountName: (/** @type {any} */ provider, /** @type {number} */ index, /** @type {any[]} */ providerEntries) => {
             const id = String(provider?.provider || '').trim().toLowerCase();
-            const option = catalog.find((/** @type {any} */ entry) => String(entry?.id || '').toLowerCase() === id);
+            const option = providerOptions.find(entry => entry.id === id);
             const label = option?.label || String(provider?.provider || id);
             if (!Array.isArray(providerEntries) || providerEntries.length <= 1) return label;
             const accountTitle = accountIdentityApi?.accountTitleLabel?.(provider, providerEntries, { maskEmail, index })
@@ -2986,6 +2987,7 @@
     buildToolRows,
     buildModelRows,
     buildQuotaAccounts,
+    dashboardQuotaProviders,
     buildSessionList,
     buildWorkspaceList,
     buildLiveVelocityModel,

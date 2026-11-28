@@ -23,9 +23,12 @@ function dashboardWindowFixture(platform = 'win32', settings = {}) {
   const windows = [];
   const backdrops = new Map();
   const handlers = new Map();
+  const displays = [{ workArea: { x: 0, y: 0, width: 1920, height: 1080 } }];
+  const boundsTimers = new Map();
   class Window extends EventEmitter {
-    constructor() {
+    constructor({ x = 40, y = 50, width, height }) {
       super();
+      this.bounds = { x, y, width, height };
       this.calls = [];
       this.webContents = new EventEmitter();
       this.webContents.setWindowOpenHandler = () => {};
@@ -38,46 +41,84 @@ function dashboardWindowFixture(platform = 'win32', settings = {}) {
     isDestroyed() { return this.destroyed === true; }
     isVisible() { return this.visible === true; }
     isMinimized() { return this.minimized === true; }
+    getBounds() { return { ...this.bounds }; }
+    setBounds(bounds) { Object.assign(this.bounds, bounds); this.calls.push('bounds'); }
+    setMinimumSize() {}
+    getPosition() { return [this.bounds.x, this.bounds.y]; }
+    setPosition(x, y) { Object.assign(this.bounds, { x, y }); }
     hide() { this.visible = false; this.calls.push('hide'); }
-    show() { this.visible = true; this.calls.push('show'); }
+    show() {
+      this.visible = true;
+      if (this.shiftOnShow) this.bounds.x += 80;
+      this.calls.push('show');
+    }
     focus() { this.calls.push('focus'); }
     setBackgroundColor(color) { this.calls.push(['background', color]); }
     restore() { this.minimized = false; this.calls.push('restore'); }
+    setAlwaysOnTop(value) { this.alwaysOnTop = value; }
+    setMovable(value) { this.movable = value; }
+    setResizable(value) { this.resizable = value; }
     loadFile(file) { this.loadedFile = file; this.calls.push('load'); return Promise.resolve(); }
+    close() { this.emit('close'); this.destroy(); }
     destroy() { this.destroyed = true; this.emit('closed'); }
     static fromWebContents(sender) { return windows.find(win => win.webContents === sender); }
   }
   const context = vm.createContext({
     dashboardWindow: null, dashboardWindowReady: false, mainWindow: null, lastRendererStatsFingerprint: null,
+    pendingDashboardWindowBounds: null,
     BrowserWindow: Window, process: { platform }, path, __dirname: path.join(rootDir, 'src', 'electron'),
+    screen: {
+      getDisplayMatching: ({ x }) => displays.findLast(({ workArea }) => x >= workArea.x) || displays[0],
+      getPrimaryDisplay: () => displays[0]
+    },
+    canPositionWindow: () => true,
+    normalWindowBounds: require('../../src/electron/windowState').normalWindowBounds,
+    saveSettings() {},
     appWindowIcon: () => ({}), applyWindowsChrome() {}, suppressLinuxSystemContextMenu() {},
     syncWindowsBackdrop(win, { enabled, mode = 'acrylic' }) {
       if (platform === 'win32' && win) backdrops.set(win, enabled ? mode : 'transparent');
     },
     windowsAccentActive: win => backdrops.get(win) === 'accent',
     nativeBlurEnabled: (source = settings) => source.systemGlass !== false,
+    ...require('../../src/electron/windowBehavior'),
     attachNativeMaterialVisibility() {}, syncNativeMaterialVisibility() {},
-    nativeMaterialOptions: () => ({}), limitsHistoryController: null, settings,
+    isLiquidGlassBackdrop: require('../../src/electron/macBackdropMode').isLiquidGlassBackdrop,
+    liquidGlassStyle: require('../../src/electron/macBackdropMode').liquidGlassStyle,
+    liquidGlassTint: require('../../src/electron/macBackdropMode').liquidGlassTint,
+    nativeTheme: {}, floatingBubbleState: {}, isLightHex: () => false,
+    limitsHistoryController: null, settings,
     isAllowedExternalUrl: () => false, console: { log() {} },
     ipcMain: { on: (name, handler) => handlers.set(name, handler) }
   });
   const main = read('src', 'electron', 'main.js');
-  vm.runInContext(main.slice(main.indexOf('function applyNativeMaterial('), main.indexOf('function withHistoryPreview(')), context);
+  vm.runInContext(main.slice(main.indexOf('const DEFAULT_WINDOW ='), main.indexOf('const ZOOM_LIMITS ='))
+    + main.slice(main.indexOf('function isBoundsOnScreen('), main.indexOf('let persistBoundsTimer'))
+    + main.slice(main.indexOf('function displayForBounds('), main.indexOf('function displayForPoint('))
+    + main.slice(main.indexOf('function persistWindowBounds('), main.indexOf('function collapseFloatingBubble(')), context);
+  vm.runInContext(main.slice(main.indexOf('function normalizeDashboardBackdrop('), main.indexOf('function withHistoryPreview(')), context);
   vm.runInContext(main.slice(main.indexOf('function discardFailedDashboardWindow('), main.indexOf('async function getDashboardHistory(')), context);
   vm.runInContext(main.slice(main.indexOf("ipcMain.on('dashboard:ready'"), main.indexOf("ipcMain.on('dashboard:minimize'")), context);
   const app = new EventEmitter();
-  const timers = [];
-  Object.assign(context, { app, quitRequested: false, setTimeout: fn => timers.push(fn) });
+  Object.assign(context, {
+    app, quitRequested: false,
+    setTimeout(fn, delay) { const id = Symbol(); boundsTimers.set(id, { fn, delay }); return id; },
+    clearTimeout(id) { boundsTimers.delete(id); }
+  });
   vm.runInContext(main.slice(main.indexOf('const rendererCrashReloadAt ='), main.indexOf('// Every quit route')), context);
   return {
-    windows, backdrops, open: () => context.createDashboardWindow(),
+    windows, backdrops, displays, open: () => context.createDashboardWindow(),
     applyNativeMaterial: () => context.applyNativeMaterial(),
+    applyWindowBehavior: win => context.applyDashboardWindowBehavior(win),
+    materialOptions: () => context.nativeMaterialOptions(settings, true),
     ready: win => handlers.get('dashboard:ready')({ sender: win.webContents }),
     crash(win) {
       const details = { reason: 'crashed' };
       win.webContents.emit('render-process-gone', {}, details);
       app.emit('render-process-gone', {}, win.webContents, details);
-      for (const fn of timers.splice(0)) fn();
+      for (const [id, { fn }] of boundsTimers) {
+        boundsTimers.delete(id);
+        fn();
+      }
     }
   };
 }
@@ -96,7 +137,113 @@ test('Windows Dashboard uses the widget backdrop on open and when appearance cha
   settings.systemGlass = false;
   f.applyNativeMaterial();
   assert.equal(f.backdrops.get(win), 'transparent');
+  settings.dashboardBackdrop = 'mica';
+  f.applyNativeMaterial();
+  assert.equal(f.backdrops.get(win), 'mica');
+  assert.equal(settings.windowsBackdrop, 'accent');
+  settings.dashboardBackdrop = 'solid';
+  f.applyNativeMaterial();
+  assert.equal(f.backdrops.get(win), 'transparent');
   assert.equal(f.open(), win);
+});
+
+test('Dashboard display mode applies on open and changes without affecting the main window mode', () => {
+  const settings = { windowBehavior: 'floating' };
+  const f = dashboardWindowFixture('darwin', settings);
+  const win = f.open();
+  assert.deepEqual([win.alwaysOnTop, win.movable, win.resizable], [false, true, true]);
+
+  settings.dashboardWindowBehavior = 'floating';
+  f.applyWindowBehavior(win);
+  assert.deepEqual([win.alwaysOnTop, win.movable, win.resizable], [true, true, true]);
+
+  settings.dashboardWindowBehavior = 'desktop';
+  f.applyWindowBehavior(win);
+  assert.deepEqual([win.alwaysOnTop, win.movable, win.resizable], [false, false, false]);
+  assert.equal(settings.windowBehavior, 'floating');
+});
+
+test('Dashboard reopens pinned at its last bounds and falls back to an available display', () => {
+  const mainBounds = { x: 20, y: 30, width: 440, height: 640 };
+  const settings = { windowBounds: mainBounds, dashboardWindowBehavior: 'normal' };
+  const f = dashboardWindowFixture('darwin', settings);
+  f.displays.push({ workArea: { x: 1920, y: 0, width: 1920, height: 1080 } });
+  const win = f.open();
+  assert.deepEqual(win.getBounds(), { x: 40, y: 50, width: 1180, height: 760 });
+  f.ready(win);
+  const bounds = { x: 1990, y: 80, width: 1440, height: 840 };
+  Object.assign(win.bounds, bounds);
+  win.emit('move');
+  win.emit('resize');
+  settings.dashboardWindowBehavior = 'desktop';
+  f.applyWindowBehavior(win);
+  win.close();
+  assert.deepEqual(settings.dashboardWindowBounds, bounds);
+  assert.deepEqual(settings.windowBounds, mainBounds);
+
+  const reopened = f.open();
+  assert.deepEqual(reopened.getBounds(), bounds);
+  assert.equal(reopened.movable, false);
+  assert.equal(reopened.resizable, false);
+  reopened.shiftOnShow = true;
+  f.ready(reopened);
+  assert.deepEqual(reopened.getBounds(), bounds);
+  reopened.close();
+  f.displays.pop();
+  assert.deepEqual(f.open().getBounds(), { ...bounds, x: 240, y: 120 });
+});
+
+test('Dashboard keeps pinned controls on-screen after changes to the display layout', () => {
+  const scenarios = [
+    [{ x: 1700, y: 80, width: 1180, height: 760 }, { x: 740, y: 80, width: 1180, height: 760 }],
+    [{ x: 2100, y: 50, width: 3000, height: 1700 }, { x: 0, y: 0, width: 1920, height: 1080 }],
+    [{ x: 100, y: 90, width: 2400, height: 1400 }, { x: 0, y: 0, width: 1920, height: 1080 }]
+  ];
+  for (const [saved, expected] of scenarios) {
+    const f = dashboardWindowFixture('darwin', { dashboardWindowBounds: saved, dashboardWindowBehavior: 'desktop' });
+    const win = f.open();
+    win.shiftOnShow = true;
+    f.ready(win);
+    assert.deepEqual(win.getBounds(), expected);
+    assert.equal(win.movable, false);
+    assert.equal(win.resizable, false);
+  }
+});
+
+test('Dashboard applies the smaller work area before revealing a loading pinned window', () => {
+  const settings = { dashboardWindowBounds: { x: 100, y: 80, width: 1600, height: 900 }, dashboardWindowBehavior: 'desktop' };
+  const f = dashboardWindowFixture('darwin', settings);
+  const win = f.open();
+  f.displays[0].workArea = { x: 0, y: 30, width: 1024, height: 738 };
+  f.ready(win);
+  assert.deepEqual(win.getBounds(), { x: 0, y: 30, width: 1024, height: 738 });
+  assert.deepEqual(win.calls, ['load', ['background', '#00000000'], 'bounds', 'show', 'focus']);
+  assert.equal(win.resizable, false);
+});
+
+test('Dashboard saves a move immediately followed by minimizing and closing', () => {
+  const settings = { dashboardWindowBounds: { x: 100, y: 80, width: 920, height: 620 } };
+  const f = dashboardWindowFixture('darwin', settings);
+  const win = f.open();
+  f.ready(win);
+  win.setPosition(300, 120);
+  win.emit('move');
+  win.minimized = true;
+  win.close();
+  assert.deepEqual(f.open().getBounds(), { x: 300, y: 120, width: 920, height: 620 });
+});
+
+test('macOS Dashboard can override inherited glass or use a solid background', () => {
+  const settings = { systemGlass: true, macBackdrop: 'liquid-glass', macClearGlassTint: 20 };
+  const f = dashboardWindowFixture('darwin', settings);
+  assert.equal(f.materialOptions().style, 'regular');
+  settings.dashboardBackdrop = 'liquid-glass-clear';
+  assert.equal(f.materialOptions().style, 'clear');
+  assert.equal(f.materialOptions().tintOpacity, 0.2);
+  assert.equal(settings.macBackdrop, 'liquid-glass');
+  settings.dashboardBackdrop = 'solid';
+  assert.equal(f.materialOptions().opaque, true);
+  assert.equal(f.materialOptions().enabled, false);
 });
 
 test('macOS Dashboard restores its transparent canvas before reveal and after reload', () => {
@@ -303,7 +450,8 @@ test('dashboard.js fetches history over IPC and renders both tabs', () => {
   assert.match(js, /charts\.candleChartSvg/);
   assert.match(js, /charts\.heatmapSvg/);
   assert.match(js, /modelApi\.isometricHeatmapSvg/);
-  assert.match(js, /saveDashboardSettings\(\(\) => \(\{ dashboardFlat: !state\.flat \}\), \{ shortcut: true \}\)/);
+  assert.doesNotMatch(html, /id="themeToggle"/);
+  assert.match(js, /saveDashboardSettings\(\{ dashboardBackdrop: input.value \}\)/);
   assert.match(js, /dashboard\.minimize\(\)/);
   assert.match(js, /dashboard\.ready\(\)/);
   assert.match(js, /onDashboardHistoryChanged\?\.\(handleDashboardHistoryChanged\)/);
@@ -492,10 +640,57 @@ test('dashboard reuses the shared scheduler to defer hidden render work', () => 
   const dashboardScript = html.indexOf('<script src="dashboard.js"></script>');
 
   assert.ok(schedulerScript >= 0 && schedulerScript < dashboardScript);
-  assert.match(js, /createStatsRenderScheduler\(\{[\s\S]*isHidden: \(\) => dashboardReady && document\.hidden,[\s\S]*render: renderNow/);
+  assert.match(js, /createStatsRenderScheduler\(\{\s*isHidden: \(\) => dashboardReady && document\.hidden,/);
   assert.match(js, /function render\(\) \{\s*dashboardRenderScheduler\.request\(\);\s*\}/);
   assert.match(js, /function handleDashboardVisibilityChange\(\)[\s\S]*visibilityChanged\(\)[\s\S]*scheduleDashboardRefresh\(\)/);
   assert.match(js, /document\.addEventListener\('visibilitychange', handleDashboardVisibilityChange\)/);
+});
+
+test('Dashboard refreshes the open quota order for late provider readings after a drag', () => {
+  const js = read('src', 'electron', 'renderer', 'dashboard', 'dashboard.js');
+  const provider = 'plugin:quota-test:provider';
+  let quotaOrderOpen = false;
+  let dragging = false;
+  let deferred = false;
+  const markup = [];
+  const context = vm.createContext({
+    statsRenderSchedulerApi: require('../../src/electron/renderer/statsRenderScheduler'),
+    modelApi: require('../../src/electron/renderer/dashboard/dashboardModel'),
+    document: { hidden: false },
+    dashboardReady: true,
+    state: { stats: {}, settings: { limitProviders: `codex,claude,${provider}` } },
+    dashboardSettings: {
+      quotaOrder: { classList: { contains: () => !quotaOrderOpen } },
+      quotaOrderList: {},
+      quotaOrderReset: {}
+    },
+    queuedDashboardQuotaOrder: null,
+    dashboardQuotaOrderDrag: { deferRender() { return (deferred = dragging); } },
+    renderNow() {},
+    dashboardQuotaOrderRows: () => [],
+    patchDashboardMarkup(_list, html) { markup.push(html); return true; },
+    escapeHtml: String,
+    t: String
+  });
+  vm.runInContext(js.slice(js.indexOf('const dashboardRenderScheduler'), js.indexOf('function scheduleDashboardRefresh('))
+    + js.slice(js.indexOf('function renderDashboardQuotaOrder('), js.indexOf('function renderDashboardBackdrop(')), context);
+  context.render();
+  assert.equal(markup.length, 0);
+  quotaOrderOpen = true;
+  context.renderDashboardQuotaOrder(context.state.settings);
+  assert.doesNotMatch(markup[0], /plugin:quota-test:provider/);
+
+  dragging = true;
+  context.state.stats = { limits: { providers: [{ provider }] } };
+  context.render();
+  assert.equal(deferred, true);
+  assert.equal(markup.length, 1);
+
+  dragging = false;
+  context.queuedDashboardQuotaOrder = { dashboardQuotaProviderOrder: 'codex,claude' };
+  context.renderDashboardQuotaOrder(context.state.settings);
+  const ids = Array.from(markup[1].matchAll(/data-quota-provider="([^"]+)"/g), ([, id]) => id);
+  assert.deepEqual(ids, ['codex', 'claude', provider]);
 });
 
 test('dashboard restore coalesces either native event order into one refresh', () => {
@@ -4307,7 +4502,7 @@ test('Dashboard shortcuts share the settings queue and report a rejected write o
   const pending = [];
   const state = { settings: { dashboardStageView: 'flow' }, stageView: 'flow' };
   const context = {
-    state, dashboardSettingsSave: Promise.resolve(),
+    state, dashboardSettingsSave: Promise.resolve(), queuedDashboardQuotaOrder: null,
     dashboardSettings: { error, shortcutError, popover: { matches: () => false } },
     window: { tokenMonitor: { updateSettings: patch => new Promise((resolve, reject) => pending.push({ patch, resolve, reject })) } },
     syncDashboardSettings() {
@@ -4334,6 +4529,66 @@ test('Dashboard shortcuts share the settings queue and report a rejected write o
   assert.equal(shortcutError.hidden, true);
   pending[2].resolve();
   await retry;
+});
+
+test('Dashboard queues quota drops before resets and keeps the newest order through older acknowledgements', async () => {
+  const js = read('src', 'electron', 'renderer', 'dashboard', 'dashboard.js');
+  const pending = [];
+  const reset = {};
+  const seenOrders = [];
+  let drag;
+  const context = {
+    state: { settings: { dashboardQuotaProviderOrder: 'claude,codex,opencode' } },
+    queuedDashboardQuotaOrder: null, dashboardSettingsSave: Promise.resolve(),
+    dashboardSettings: { quotaOrderReset: reset, error: { classList: { add() {} } }, shortcutError: { classList: { add() {} } } },
+    applyDashboardQuotaOrder() {},
+    renderDashboardQuotaOrder() { seenOrders.push(context.queuedDashboardQuotaOrder?.dashboardQuotaProviderOrder); },
+    syncDashboardSettings() { context.renderDashboardQuotaOrder(); },
+    window: {
+      TokenMonitorSettingsListFilter: require('../../src/electron/renderer/settingsListFilter'),
+      TokenMonitorRowDragController: { createRowDragController(config) { drag = config; } },
+      tokenMonitor: { updateSettings: patch => new Promise(resolve => pending.push({ patch, resolve })) }
+    }
+  };
+  vm.runInNewContext(js.slice(js.indexOf('function saveDashboardSettings('), js.indexOf('function populatePeriodSelect('))
+    + js.slice(js.indexOf('const dashboardQuotaOrderDrag ='), js.indexOf('function dashboardQuotaOrderRows('))
+    + js.slice(js.indexOf('function saveDashboardQuotaOrder('), js.indexOf('function renderDashboardQuotaOrder(')), context);
+  const first = context.saveDashboardQuotaOrder(['opencode', 'codex']);
+  await Promise.resolve();
+  assert.equal(pending[0].patch.dashboardQuotaProviderOrder, 'claude,opencode,codex');
+  drag.mirrorOrder(['codex', 'opencode']);
+  const last = context.saveDashboardQuotaOrder(null);
+  assert.equal(seenOrders.at(-1), '');
+  context.state.settings.dashboardQuotaProviderOrder = pending[0].patch.dashboardQuotaProviderOrder;
+  pending[0].resolve();
+  await first;
+  await Promise.resolve();
+  assert.equal(context.queuedDashboardQuotaOrder.dashboardQuotaProviderOrder, '');
+  assert.equal(pending[1].patch.dashboardQuotaProviderOrder, 'claude,codex,opencode');
+  pending[1].resolve();
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(pending[2].patch.dashboardQuotaProviderOrder, '');
+  pending[2].resolve();
+  await last;
+  assert.equal(context.queuedDashboardQuotaOrder, null);
+});
+
+test('Dashboard offers Mica only on supported Windows builds and shows Acrylic for a saved Mica fallback', () => {
+  const select = {};
+  const context = {
+    state: { platform: 'win32', osRelease: '10.0.22000' },
+    dashboardSettings: { backdrop: select }, dashboardBackdropOptionsMarkup: '',
+    window: { TokenMonitorWindowsBackdropMode: require('../../src/electron/windowsBackdropMode') },
+    t: value => value, escapeHtml: value => value
+  };
+  const render = dashboardFunction('renderDashboardBackdrop', '\nfunction showDashboardQuotaOrder(', context);
+  render({ dashboardBackdrop: 'mica-alt' });
+  assert.doesNotMatch(select.innerHTML, /value="mica/);
+  assert.equal(select.value, 'acrylic');
+  context.state.osRelease = '10.0.22621';
+  render({ dashboardBackdrop: 'mica-alt' });
+  assert.match(select.innerHTML, /value="mica-alt"/);
+  assert.equal(select.value, 'mica-alt');
 });
 
 

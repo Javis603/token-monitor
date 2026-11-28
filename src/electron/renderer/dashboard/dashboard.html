@@ -26,7 +26,6 @@
         </div>
 
         <div class="dash-header-actions">
-          <button id="themeToggle" type="button" class="icon-button" aria-label="Theme">◐</button>
           <button id="refreshBtn" type="button" class="icon-button refresh-button" aria-label="Refresh"><span class="refresh-button-icon" aria-hidden="true"></span><span class="refresh-button-spinner" aria-hidden="true"></span></button>
           <button id="dashSettingsTrigger" type="button" class="icon-button settings-icon-button dash-settings-trigger" popovertarget="dashSettings" aria-label="Dashboard settings"></button>
           <button id="minBtn" type="button" class="icon-button" aria-label="Minimize">−</button>
@@ -35,40 +34,55 @@
       </header>
       <p id="dashShortcutSaveError" class="dash-shortcut-save-error hidden" role="alert" data-i18n="dashboard.settings.saveFailed"></p>
       <section id="dashSettings" class="settings-help-popover dash-settings" popover="auto" role="dialog" aria-labelledby="dashSettingsTitle">
-        <h2 id="dashSettingsTitle" data-i18n="dashboard.settings.title">Dashboard settings</h2>
-        <div class="settings-panel dash-settings-fields">
-          <div class="period-tab-settings">
-            <div class="edge-dock-composer-heading" id="dashPeriodChoicesLabel" data-i18n="periodRange.tabsTitle">Usage range buttons</div>
-            <label class="checkbox-label settings-item"><span class="settings-item-text" data-i18n="dashboard.settings.followPeriods">Follow main app</span><input type="checkbox" id="dashFollowPeriods" autofocus></label>
-            <div id="dashPeriodChoices" class="period-tab-list period-tab-list-shown" role="group" aria-labelledby="dashPeriodChoicesLabel"></div>
+        <div id="dashSettingsMain">
+          <h2 id="dashSettingsTitle" data-i18n="dashboard.settings.title">Dashboard settings</h2>
+          <div class="settings-panel dash-settings-fields">
+            <section class="dash-settings-group" aria-labelledby="dashPeriodChoicesLabel">
+              <h3 id="dashPeriodChoicesLabel" class="settings-group-header" data-i18n="periodRange.tabsTitle">Usage range buttons</h3>
+              <label class="checkbox-label settings-item"><span class="settings-item-text" data-i18n="dashboard.settings.followPeriods">Follow main app</span><input type="checkbox" id="dashFollowPeriods" autofocus></label>
+              <div id="dashPeriodChoices" class="period-tab-list period-tab-list-shown" role="group" aria-labelledby="dashPeriodChoicesLabel"></div>
+            </section>
+            <section class="dash-settings-group" aria-labelledby="dashOverviewSettingsTitle">
+              <h3 id="dashOverviewSettingsTitle" class="settings-group-header" data-i18n="dashboard.tab.activity">Overview</h3>
+              <label class="checkbox-label settings-item"><span class="settings-item-text" data-i18n="dashboard.velocity.title">Live Velocity</span><input type="checkbox" id="dashShowVelocity"></label>
+              <label class="checkbox-label settings-item"><span class="settings-item-text" data-i18n="home.limits">Limits</span><input type="checkbox" id="dashShowQuotas"></label>
+              <button type="button" id="dashQuotaOrderOpen" class="main-view-link" aria-controls="dashQuotaOrder" data-i18n="dashboard.settings.quotaOrder">Limit provider order</button>
+              <div class="settings-item">
+                <label for="dashFlowMode" class="settings-item-text settings-item-title" data-i18n="dashboard.settings.flowMode">Live Flow animation</label>
+                <select id="dashFlowMode">
+                  <option value="sync" data-i18n="dashboard.settings.flowModeSync">Synchronized</option>
+                  <option value="stagger" data-i18n="dashboard.settings.flowModeStagger">Staggered</option>
+                </select>
+              </div>
+            </section>
+            <section class="dash-settings-group" aria-labelledby="dashAppearanceTitle">
+              <h3 id="dashAppearanceTitle" class="settings-group-header" data-i18n="settings.appearance.title">Appearance</h3>
+              <div class="settings-item">
+                <label for="dashWindowBehavior" class="settings-item-text settings-item-title" data-i18n="settings.display.windowBehavior">Display mode</label>
+                <select id="dashWindowBehavior">
+                  <option value="floating" data-i18n="settings.windowBehavior.floating">Floating above apps</option>
+                  <option value="normal" data-i18n="settings.windowBehavior.normal">Normal window</option>
+                  <option value="desktop" data-i18n="settings.windowBehavior.desktop">Desktop pinned</option>
+                </select>
+              </div>
+              <div class="settings-item">
+                <label for="dashBackdrop" class="settings-item-text settings-item-title" data-i18n="dashboard.settings.backdrop">Background</label>
+                <select id="dashBackdrop"></select>
+              </div>
+            </section>
           </div>
-          <label class="checkbox-label settings-item"><span class="settings-item-text" data-i18n="dashboard.velocity.title">Live Velocity</span><input type="checkbox" id="dashShowVelocity"></label>
-          <label class="checkbox-label settings-item"><span class="settings-item-text" data-i18n="home.limits">Limits</span><input type="checkbox" id="dashShowQuotas"></label>
-          <div class="settings-item">
-            <label for="dashDefaultStage" class="settings-item-text settings-item-title" data-i18n="dashboard.settings.stage">Overview view</label>
-            <select id="dashDefaultStage">
-              <option value="flow" data-i18n="dashboard.stage.flow">Live Flow</option>
-              <option value="3d" data-i18n="dashboard.stage.activity3d">3D</option>
-              <option value="2d" data-i18n="dashboard.stage.activity2d">2D</option>
-            </select>
+          <button id="dashOpenAppSettings" type="button" class="seg-btn" data-i18n="dashboard.settings.openApp">Open app settings</button>
+        </div>
+        <div id="dashQuotaOrder" class="main-view-subpage hidden" aria-labelledby="dashQuotaOrderTitle">
+          <button type="button" id="dashQuotaOrderBack" class="main-view-back" data-i18n="dashboard.settings.title">Dashboard settings</button>
+          <h2 id="dashQuotaOrderTitle" data-i18n="dashboard.settings.quotaOrder">Limit provider order</h2>
+          <div class="settings-note-row home-limit-provider-header">
+            <p class="settings-note" data-i18n="dashboard.settings.quotaOrderHint">Least remaining first by default. Drag to set a custom order.</p>
+            <button type="button" id="dashQuotaOrderReset" class="tool-header-action" data-i18n-aria-label="settings.views.resetOrder" aria-label="Reset order" disabled>↺</button>
           </div>
-          <div class="settings-item">
-            <label for="dashFlowMode" class="settings-item-text settings-item-title" data-i18n="dashboard.settings.flowMode">Live Flow animation</label>
-            <select id="dashFlowMode">
-              <option value="sync" data-i18n="dashboard.settings.flowModeSync">Synchronized</option>
-              <option value="stagger" data-i18n="dashboard.settings.flowModeStagger">Staggered</option>
-            </select>
-          </div>
-          <div class="settings-item">
-            <label for="dashDefaultMetric" class="settings-item-text settings-item-title" data-i18n="dashboard.settings.heatmap">Heatmap metric</label>
-            <select id="dashDefaultMetric">
-              <option value="tokens" data-i18n="dashboard.heatmap.tokens">Tokens</option>
-              <option value="cost" data-i18n="dashboard.heatmap.cost">Cost</option>
-            </select>
-          </div>
+          <div id="dashQuotaOrderList" class="settings-nested-list home-limit-provider-list"></div>
         </div>
         <p id="dashSettingsError" class="hidden" role="alert" data-i18n="dashboard.settings.saveFailed"></p>
-        <button id="dashOpenAppSettings" type="button" class="seg-btn" data-i18n="dashboard.settings.openApp">Open app settings</button>
       </section>
 
       <div id="dashWorkspace" class="dash-workspace" data-fleet="single">
@@ -313,6 +327,10 @@
     <script src="../glassRendering.js"></script>
     <script src="../contentBlur.js"></script>
     <script src="../selectControl.js"></script>
+    <script src="../verticalDragSort.js"></script>
+    <script src="../rowDragController.js"></script>
+    <script src="../settingsListFilter.js"></script>
+    <script src="../../windowsBackdropMode.js"></script>
     <script src="../accountIdentity.js"></script>
     <script src="dashboardModel.js"></script>
     <script src="activitySkyline3d.js"></script>

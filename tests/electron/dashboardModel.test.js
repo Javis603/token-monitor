@@ -1142,6 +1142,14 @@ test('buildQuotaAccounts normalizes CSV limitProviders and respects limitsEnable
 
   const masterOff = model.buildQuotaAccounts(stats, { limitsEnabled: false, limitProviders: 'claude,codex' }, Date.now());
   assert.deepEqual(masterOff, []);
+
+  const settings = { limitProviders: 'claude,codex', homeLimitProviderOrder: 'claude,codex' };
+  const quotaOrder = (dashboardQuotaProviderOrder) => model.buildQuotaAccounts(stats, {
+    ...settings, dashboardQuotaProviderOrder
+  }).map(account => account.providerId);
+  assert.deepEqual(quotaOrder(undefined), ['codex', 'claude']);
+  assert.deepEqual(quotaOrder('claude,codex'), ['claude', 'codex']);
+  assert.deepEqual(quotaOrder(''), ['codex', 'claude']);
 });
 
 test('buildQuotaAccounts preserves MiMo expired plan metadata without fabricating zero percent', () => {
