@@ -526,10 +526,12 @@ html.native-high-contrast .dash-stage {
 }
 
 .dash-heatmap-title-group,
+/* A subtitle that does not fit beside the title drops below it instead of truncating. */
 .dash-work-heading {
   display: flex;
+  flex-wrap: wrap;
   align-items: baseline;
-  gap: 10px;
+  gap: 2px 10px;
   min-width: 0;
 }
 
@@ -951,10 +953,12 @@ html.native-high-contrast .dash-stage {
   gap: 5px;
   height: calc(3 * 11px * 1.3 + 2 * 5px);
   overflow-y: auto;
-  overscroll-behavior: contain;
   scrollbar-width: none;
 }
 .dash-velocity-models::-webkit-scrollbar { display: none; }
+/* Few models sit at the bottom, as before the list had a fixed height. An auto
+   margin (not justify-content: flex-end) keeps an overflowing list scrollable. */
+.dash-velocity-models > :first-child { margin-top: auto; }
 
 .dash-velocity-model {
   flex: none;
@@ -1023,19 +1027,6 @@ html.native-high-contrast .dash-stage {
   align-items: center;
   width: 100%;
   min-height: 214px;
-}
-
-.dash-activity-col[data-stage="flow"]:has(.dash-topo-canvas.is-empty) {
-  min-height: 190px;
-}
-
-.dash-topo-wrap:has(.dash-topo-canvas.is-empty),
-.dash-topo-canvas.is-empty {
-  min-height: 0;
-}
-
-.dash-topo-canvas.is-empty {
-  align-items: start;
 }
 
 .dash-topo-links {

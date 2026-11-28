@@ -2588,7 +2588,7 @@ function renderTopology(overview, revealed = false, cardRateSamples = {}) {
 
   // Keep the scroll containers and focused nodes on membership/rank changes.
   // The link layer owns its SVG children and stays mounted through node updates.
-  const changed = patchDashboardMarkup(els.topology, `<div class="dash-topo-canvas${emptyFlow ? ' is-empty' : ''}" data-flow-mode="${flowMode}">`
+  const changed = patchDashboardMarkup(els.topology, `<div class="dash-topo-canvas" data-flow-mode="${flowMode}">`
     + `<svg class="dash-topo-links" data-dom-island aria-hidden="true"></svg>`
     + `<div class="dash-topo-col"><div class="dash-topo-col-head"><span>${escapeHtml(t('dashboard.topology.colDevices'))}</span><span>${graph.counts.devices}</span></div><div class="dash-topo-col-scroll" data-topo-col="devices">${devicesHtml}</div></div>`
     + `<div class="dash-topo-col"><div class="dash-topo-col-head"><span>${escapeHtml(hubColTitle)}</span><span>${graph.counts.hubs}</span></div><div class="dash-topo-col-scroll" data-topo-col="hubs">${hubsHtml || ghostHub}</div></div>`

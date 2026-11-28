@@ -3228,7 +3228,6 @@ test('dashboard groups subagent hierarchies and review groups in Work Panel, Top
     }
   };
   context.renderTopology(emptyFlow);
-  assert.match(topology.innerHTML, /dash-topo-canvas is-empty/);
   assert.equal(topology.innerHTML.match(/class="topo-node is-ghost" aria-hidden="true"/g)?.length, 2);
   assert.doesNotMatch(topology.innerHTML.slice(topology.innerHTML.indexOf('is-ghost')), /data-topo-kind/);
   context.renderTopology({ ...emptyFlow, hero: { accountingStatus: 'unavailable', tokens: 0 } });
