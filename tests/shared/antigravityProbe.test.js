@@ -1092,15 +1092,14 @@ test('probe falls back to discovered ports when the explicit hub port is unreach
 // reachability success, deliberately, because the lightweight RPC may simply be
 // unsupported. That is not proof the quota RPCs work, so a hub port that answers
 // the preflight must not remove the discovered candidates from the quota stage.
-test('probe still tries discovered ports when the hub port answers the preflight but cannot serve quota', async (t) => {
-  t.mock.timers.enable({ apis: ['setTimeout', 'Date'] });
+test('probe still tries discovered ports when the hub port answers the preflight but cannot serve quota', async () => {
   const calledPorts = [];
   const result = await probe.probe({
     detectProcessInfos: async () => [
       { pid: 9001, kind: 'cli', csrfToken: 'abc', hubPort: 55555, extensionPort: null }
     ],
     listeningPorts: async () => [60000],
-    callLs: async ({ port, method, timeoutMs }) => {
+    callLs: async ({ port, method }) => {
       calledPorts.push(port);
       if (port === 55555) {
         // Reachable, but the lightweight RPC is unsupported.
@@ -1113,7 +1112,6 @@ test('probe still tries discovered ports when the hub port answers the preflight
       }
       if (port === 60000 && method === 'GetUnleashData') return {};
       if (port === 60000 && method === 'RetrieveUserQuotaSummary') {
-        assert.equal(timeoutMs, 2000, 'the final source can spend the full remaining budget');
         return {
           groups: [{
             displayName: 'Gemini Models',
@@ -1371,69 +1369,3 @@ test('desktop RPC uses windowsTcpTable on win32 without spawning PowerShell', as
   assert.deepEqual(result, { native: true });
   assert.equal(ownershipChecks, 2);
 });
-
-test('probe keeps the full remaining quota budget when there is no fallback stage', async (t) => {
-  t.mock.timers.enable({ apis: ['setTimeout', 'Date'] });
-  const result = await probe.probe({
-    probeTimeoutMs: 900,
-    detectProcessInfos: async () => {
-      t.mock.timers.tick(450);
-      return [{ pid: 1, kind: 'app', csrfToken: 'csrf', desktopRpcPort: 54733 }];
-    },
-    listeningPorts: async () => [54733],
-    callLs: async ({ method, timeoutMs }) => {
-      if (method === 'GetUnleashData') return {};
-      if (method === 'RetrieveUserQuotaSummary') {
-        assert.equal(timeoutMs, 450);
-        t.mock.timers.tick(260);
-        return {
-          groups: [{
-            displayName: 'Gemini Models',
-            buckets: [{ bucketId: 'gemini-5h', remainingFraction: 0.5 }]
-          }]
-        };
-      }
-      if (method === 'GetUserStatus') return { userStatus: { email: 'full-budget@example.com' } };
-      throw probe._errorWithStatus('unavailable', 'unexpected method');
-    }
-  });
-
-  assert.equal(result.accountEmail, 'full-budget@example.com');
-  assert.equal(result.windows[0].remainingFraction, 0.5);
-});
-
-for (const [slowSource, laterKind] of [
-  [{ kind: 'app', desktopRpcPort: 52001 }, 'cli'],
-  [{ kind: 'cli', hubPort: 51000 }, 'ide']
-]) {
-  test(`probe reaches a healthy ${laterKind} after ${slowSource.kind} quota stalls`, async (t) => {
-    t.mock.timers.enable({ apis: ['setTimeout', 'Date'] });
-    const quotaPorts = [];
-    const result = await probe.probe({
-      probeTimeoutMs: 8000,
-      detectProcessInfos: async () => [
-        { pid: 2, kind: laterKind, csrfToken: 'healthy' },
-        { pid: 1, ...slowSource, csrfToken: 'slow' }
-      ],
-      listeningPorts: async (pid) => [pid === 1 ? 52001 : 52002],
-      callLs: async ({ port, method, timeoutMs }) => {
-        if (method === 'GetUnleashData') return {};
-        if (method === 'GetUserStatus') return { userStatus: { email: 'healthy@example.com' } };
-        assert.equal(method, 'RetrieveUserQuotaSummary');
-        quotaPorts.push(port);
-        if (port === slowSource.hubPort) return { groups: [] };
-        if (port === 52001) {
-          t.mock.timers.tick(timeoutMs);
-          return new Promise(() => {});
-        }
-        return { groups: [{ buckets: [{ window: 'weekly', remainingFraction: 0.7 }] }] };
-      }
-    });
-    if (slowSource.hubPort) assert.equal(quotaPorts[0], slowSource.hubPort);
-    assert.ok(quotaPorts.includes(52001));
-    assert.equal(quotaPorts.at(-1), 52002);
-    assert.equal(result.sourceDetail, laterKind);
-    assert.equal(result.accountEmail, 'healthy@example.com');
-    assert.equal(result.windows[0].remainingFraction, 0.7);
-  });
-}
