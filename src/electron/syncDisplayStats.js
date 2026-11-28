@@ -203,7 +203,9 @@ function composeLocalSyncStats(hubStats, localDevice, options = {}) {
     // alongside for the sync settings panel (null until the Hub has one).
     if (device.deviceId === localDeviceId) {
       const merged = { ...previous, ...device, hubReceivedAt: previous?.receivedAt || null };
-      if (!hasOwn(device, 'sessionDetailsOmitted')) delete merged.sessionDetailsOmitted;
+      for (const flag of ['sessionDetailsOmitted', 'allTimeProjectsOmitted', 'allTimeProjectsIncomplete']) {
+        if (!hasOwn(device, flag)) delete merged[flag];
+      }
       return merged;
     }
     if (!previous) return device;

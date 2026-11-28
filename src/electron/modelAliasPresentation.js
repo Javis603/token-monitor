@@ -31,7 +31,7 @@ function mapValues(value, project) {
   for (let i = 0; i < keys.length; i += 1) {
     const key = keys[i];
     const row = value[key];
-    const projected = project(row);
+    const projected = project(row, key);
     if (result !== value) { result[key] = projected; continue; }
     if (projected === row) continue;
     result = { ...value };
@@ -376,8 +376,10 @@ function projectModelAliasHistory(history, aliases, options = {}) {
 function projectModelAliasStats(stats, aliases, options = {}) {
   if (!stats || typeof stats !== 'object') return stats;
   const grouping = normalizeModelAliasGrouping(options.grouping);
-  const plan = aliasPlan(grouping === 'off' ? [] : [...collectStatsModelIds(stats)], aliases, grouping);
-  if (!plan.active) return stats;
+  const modelIds = grouping === 'off' ? [] : [...collectStatsModelIds(stats)];
+  const plan = aliasPlan(modelIds, aliases, grouping);
+  const projectModelIds = Object.keys(stats.allTimeProjectRevisions || {}).length ? modelIds : null;
+  if (!plan.active) return projectModelIds ? { ...stats, projectModelIds } : stats;
 
   const projectRecord = (record) => {
     let result = record;
@@ -386,7 +388,15 @@ function projectModelAliasStats(stats, aliases, options = {}) {
       if (result === record) result = { ...record };
       result[field] = projected;
     };
-    if (record.periods) set('periods', mapValues(record.periods, (period) => projectUsage(period, plan.resolve)));
+    if (record.periods) set('periods', mapValues(record.periods, (period, key) => {
+      const projected = projectUsage(period, plan.resolve);
+      if (key !== 'allTime' || !projectModelIds || projected.projects === period.projects) return projected;
+      const projects = mapValues(projected.projects, (row, id) => {
+        const raw = period.projects[id].models;
+        return raw && raw !== row.models ? { ...row, rawProjectModels: raw } : row;
+      });
+      return { ...projected, projects };
+    }));
     for (const field of ['today', 'month', 'allTime']) {
       if (record[field]) set(field, projectUsage(record[field], plan.resolve));
     }
@@ -407,6 +417,7 @@ function projectModelAliasStats(stats, aliases, options = {}) {
     addModelMapIds(pricingSourceIds, stats[period]?.models);
   }
   result.modelAliasSourceIds = [...pricingSourceIds].sort();
+  if (projectModelIds) result.projectModelIds = projectModelIds;
 
   if (Array.isArray(stats.devices)) result.devices = mapRows(stats.devices, projectRecord);
   for (const field of ['nativeSessions', 'nativeProjects']) {

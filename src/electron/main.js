@@ -180,6 +180,7 @@ const {
   projectModelAliasHistory
 } = require('./modelAliasPresentation');
 const { createHub } = require('../hub/server');
+const { fetchProjectPages, projectPageUpload, projectUploadPages } = require('../shared/projectPageClient');
 const { fetchFixedRange, fixedRangeUploadPages } = require('../shared/fixedRangeClient');
 const { SYNC_WEEK_STARTS_ON } = require('../shared/fixedRangeSync');
 const { createFixedRangeReadCache, resolveSyncedFixedPeriod, resolveSyncedSessionPeriod, historyFallbackForDevices } = require('./syncedFixedPeriod');
@@ -290,7 +291,7 @@ const {
 const { createUsageTransform, usageTransformSettings } = require('../shared/usage/usageTransform');
 const { createUsageHost, terminateUsageHostSubprocesses, whenUsageHostsIdle } = require('../shared/usage/usageHost');
 const { clearDailyHistoryArchive } = require('../shared/dailyHistoryArchive');
-const { aggregateDevices, aggregateHistory } = require('../shared/usage');
+const { aggregateDevices, aggregateHistory, normalizePeriod } = require('../shared/usage');
 const {
   HUB_RESPONSE_HEADER,
   HUB_RESPONSE_MINIMAL,
@@ -4412,11 +4413,23 @@ function startHostCollector() {
         if (stale && stale !== visibleSummary.deviceId) {
           handle.hub.deleteDevice(stale);
         }
-        const payload = syncPayload(visibleSummary, options);
+        let projects;
+        const getAllTimeProjectsRevision = () => (projects ??= projectPageUpload(visibleSummary))?.revision;
+        const payload = syncPayload(visibleSummary, { ...options, getAllTimeProjectsRevision });
         if (payload.allTimeProjectsOmitted === true) {
           console.log('[host-ingest] all-time project breakdown omitted to reduce the sync snapshot size');
         }
         const accepted = embeddedHub.hub.ingest(payload);
+        if (projects && payload.allTimeProjectsRevision && !handle.hub.getProjectPages(payload.deviceId)) {
+          try {
+            for (const page of projectUploadPages(projects)) {
+              const result = handle.hub.acceptProjectPage(payload.deviceId, page);
+              if (result.status !== 200 || result.complete) break;
+            }
+          } catch (error) {
+            console.log(`[host-ingest] all-time project upload deferred: ${error.message}`);
+          }
+        }
         const fixedRangeAt = JSON.stringify([visibleSummary.updatedAt, options.sessionTitleSyncGeneration, visibleSummary.projectsEnabled !== false, visibleSummary.nativeRangeWindows, Boolean(visibleSummary.dailySessionPeriods)]);
         if (visibleSummary.nativeRanges && handle.fixedRangeAt !== fixedRangeAt) {
           try {
@@ -7953,8 +7966,39 @@ function createDashboardWindow() {
   return win;
 }
 
-async function getSyncedFixedPeriod(snapshotId, source, selection) {
-  return resolveSyncedPeriodForStats(rendererSnapshots.get(snapshotId, source), source, selection);
+async function getSyncedFixedPeriod(snapshotId, source, selection, deviceId) {
+  const stats = rendererSnapshots.get(snapshotId, source);
+  if (selection === 'allTimeProjects') return resolveAllTimeProjects(stats, source, deviceId);
+  return resolveSyncedPeriodForStats(stats, source, selection);
+}
+
+async function resolveAllTimeProjects(stats, source, id) {
+  if (mode !== 'sync' || source !== hubModeGeneration || typeof id !== 'string') return null;
+  const revisions = stats?.allTimeProjectRevisions || {};
+  const revision = Object.hasOwn(revisions, id) && revisions[id];
+  const device = stats?.devices?.find(device => device.deviceId === id);
+  if (!revision || !device?.allTimeProjectsOmitted || device.allTimeProjectsIncomplete || device.projectsEnabled === false) return null;
+  const config = historyResolverOptions();
+  const headers = config.secret ? { authorization: `Bearer ${config.secret}` } : {};
+  try {
+    let projects;
+    if (config.hubMode === 'host') {
+      const snapshot = config.embeddedHub?.hub.getProjectPages(id);
+      if (snapshot?.revision === revision) projects = Object.fromEntries(snapshot.pages.flat());
+    } else if (config.hubUrl) {
+      const key = JSON.stringify([source, currentHubStatsIdentity(config.hubMode), 'allTimeProjects', id, revision]);
+      projects = await fixedRangeReads.read(key, abort => {
+        const signal = AbortSignal.any([abort, AbortSignal.timeout(15_000)]);
+        return fetchProjectPages((url, init) => fetchFromHub(url, { ...init, signal, redirect: 'error' }),
+          config.hubUrl, id, revision, headers);
+      });
+    }
+    const current = currentHubStatsCache();
+    if (!projects || source !== hubModeGeneration || current && current.allTimeProjectRevisions?.[id] !== revision) return null;
+    return normalizePeriod({ projects }).projects;
+  } catch (_) {
+    return null;
+  }
 }
 
 async function resolveSyncedPeriodForStats(stats, source, selection) {

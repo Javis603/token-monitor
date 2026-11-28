@@ -9,6 +9,7 @@ const { syncLimits } = require('./limits/core');
 const { stripSessionTextFromDeviceRecord } = require('./usage');
 const { uploadFixedRangeVersion } = require('./fixedRangeClient');
 const { FIXED_RANGE_HEADER, FIXED_RANGE_VERSION } = require('./fixedRangeSync');
+const { projectPageUpload, sendProjectPages } = require('./projectPageClient');
 const { isReasonixSyntheticSession } = require('./providers/reasonix/sessionGuard');
 
 const SYNC_PAYLOAD_MARGIN_BYTES = 16 * 1024;
@@ -197,10 +198,12 @@ function sessionsWithoutReasonix(sessions) {
 
 function buildSyncPayload(summary, {
   pagedSessions = false,
+  getAllTimeProjectsRevision,
   omitHistory = false,
   omitDailyTotals = false,
   omitAllTimeProjects = false,
   omitHistoryTokenComponents = false,
+  omitHistoricalModelThroughput = false,
   omitModelThroughput = false,
   syncSessionTitles = false,
   sessionTitleSyncGeneration
@@ -244,6 +247,7 @@ function buildSyncPayload(summary, {
   delete payload.dailySessionPeriods;
   const projectsEnabled = summary.projectsEnabled !== false;
   delete payload.allTimeProjectsOmitted;
+  delete payload.allTimeProjectsRevision;
   delete payload.allTimeProjectsIncomplete;
   delete payload.sessionDetailsOmitted;
   delete payload.periodProjectsOmitted;
@@ -265,13 +269,15 @@ function buildSyncPayload(summary, {
     if (omitAllTimeProjects && hasOwn(payload.allTime, 'projects')) {
       delete payload.allTime.projects;
       payload.allTimeProjectsOmitted = true;
+      const revision = getAllTimeProjectsRevision?.();
+      if (revision) payload.allTimeProjectsRevision = revision;
     }
   }
-  if (omitModelThroughput) {
-    for (const period of ['today', 'month', 'allTime']) {
-      if (payload[period]) delete payload[period].modelThroughput;
-    }
+  if (omitHistoricalModelThroughput || omitModelThroughput) {
+    if (payload.month) delete payload.month.modelThroughput;
+    if (payload.allTime) delete payload.allTime.modelThroughput;
   }
+  if (omitModelThroughput && payload.today) delete payload.today.modelThroughput;
   if (pagedSessions) {
     for (const name of ['today', 'month']) {
       const period = payload[name];
@@ -318,10 +324,10 @@ function serializeSyncPayload(summary, options = {}) {
     body = JSON.stringify(payload);
   }
   if (Buffer.byteLength(body, 'utf8') > maxBytes
-    && ['today', 'month', 'allTime'].some((period) => payload[period]?.modelThroughput)) {
-    // Optional live attribution must never evict aggregate usage or session detail.
-    // Omit the whole map so readers re-baseline rather than infer missing keys as zero.
-    buildOptions.omitModelThroughput = true;
+    && (payload.month?.modelThroughput || payload.allTime?.modelThroughput)) {
+    // Live rates compare consecutive Today observations, so keep that map
+    // ahead of older timing detail and recoverable session rows.
+    buildOptions.omitHistoricalModelThroughput = true;
     payload = buildSyncPayload(summary, buildOptions);
     body = JSON.stringify(payload);
   }
@@ -350,15 +356,21 @@ function serializeSyncPayload(summary, options = {}) {
       if (Buffer.byteLength(body, 'utf8') <= maxBytes) break;
     }
   }
-  return { payload, body, bytes: Buffer.byteLength(body, 'utf8') };
+  const bytes = Buffer.byteLength(body, 'utf8');
+  if (bytes > maxBytes && payload.today?.modelThroughput) {
+    // If even the core payload cannot fit with Today's map, omit it as a
+    // unit and refit the session rows in the space it frees.
+    return serializeSyncPayload(summary, { ...options, omitModelThroughput: true });
+  }
+  return { payload, body, bytes };
 }
 
 function syncPayload(summary, options = {}) {
   return serializeSyncPayload(summary, options).payload;
 }
 
-async function postSyncPayload(fetchFn, url, { headers = {}, summary, logger, syncSessionTitles = false, sessionTitleSyncGeneration, acknowledgedHistoryKey, pagedSessions = false } = {}) {
-  const syncOptions = { syncSessionTitles, sessionTitleSyncGeneration, pagedSessions };
+async function postSyncPayload(fetchFn, url, { headers = {}, summary, logger, syncSessionTitles = false, sessionTitleSyncGeneration, acknowledgedHistoryKey, pagedSessions = false, getAllTimeProjectsRevision } = {}) {
+  const syncOptions = { syncSessionTitles, sessionTitleSyncGeneration, pagedSessions, getAllTimeProjectsRevision };
   if (acknowledgedHistoryKey && summary?.history !== undefined
     && historyKey(historyForUpload(summary)) === acknowledgedHistoryKey) {
     // Omit before cloning and sizing: the freed budget belongs to live detail.
@@ -422,6 +434,7 @@ function createSyncPayloadUploader({ now = Date.now } = {}) {
   let acknowledgedFixedRangeAt = null;
   /** @type {Record<string, any>[] | null} */
   let fixedRangeBaseline = null;
+  let projectBaseline = null;
   let generation = 0;
 
   function resetHistory({ preserveDelta = false } = {}) {
@@ -430,6 +443,7 @@ function createSyncPayloadUploader({ now = Date.now } = {}) {
     if (!preserveDelta) {
       deltaBaseline = null;
       fixedRangeBaseline = null;
+      projectBaseline = null;
     }
     generation += 1;
   }
@@ -480,11 +494,23 @@ function createSyncPayloadUploader({ now = Date.now } = {}) {
           ? { revision: ack.upload.revision, payload: JSON.parse(JSON.stringify(upload.payload)) } : null;
         if (hasOwn(upload.payload, 'history')) acknowledged = { key: historyKey(upload.payload.history), at: startedAt };
       };
-      const result = await postSyncPayload(send, url, { ...options,
+      let projects;
+      const getAllTimeProjectsRevision = () => (projects ??= projectPageUpload(options.summary))?.revision;
+      const result = await postSyncPayload(send, url, { ...options, getAllTimeProjectsRevision,
         acknowledgedHistoryKey: deltaBaseline ? undefined : baseline });
       const ack = await readAck(result);
       remember(result, ack);
       const summary = options.summary;
+      if (projects && ack?.ok && ack.deviceId === (summary?.deviceId || summary?.id)
+        && ack.allTimeProjectPages === 1 && ack.allTimeProjectsRevision !== projects.revision
+        && result.payload?.allTimeProjectsRevision === projects.revision && requestGeneration === generation) {
+        try {
+          await sendProjectPages(fetchFn, url.replace(/\/api\/ingest$/, ''), ack.deviceId, projects, headers, projectBaseline);
+          if (requestGeneration === generation) projectBaseline = projects;
+        } catch (error) {
+          options.logger?.(`all-time project upload deferred: ${error.message}`);
+        }
+      }
       const daily = ack?.dailySessionRanges === 1 && summary?.dailySessionPeriods;
       const fixedRangeRecord = daily ? summary : { ...summary, dailySessionPeriods: undefined };
       const fixedRangeAt = JSON.stringify([summary?.updatedAt, options.sessionTitleSyncGeneration, summary?.projectsEnabled !== false, summary?.nativeRangeWindows, Boolean(daily)]);

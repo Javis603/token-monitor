@@ -3856,7 +3856,12 @@ function sessionRowsForPeriod(period) {
   return modelRowsForPeriod(period);
 }
 
-function projectRowsForPeriod(period) {
+const readAllTimeProjects = projectRowsApi.createPagedProjectReader(
+  (snapshot, deviceId) => window.tokenMonitor.getSyncedFixedPeriod?.(snapshot.id, snapshot.source, 'allTimeProjects', deviceId),
+  () => statsRenderScheduler.request()
+);
+
+function projectRowsForPeriod(period, stats = state.stats) {
   return projectRowsApi.projectRowsForPeriod(period, {
     clientLabels,
     clientColors,
@@ -3866,7 +3871,7 @@ function projectRowsForPeriod(period) {
     fallbackColors: fallbackModelColors,
     unknownClientLabel: t('projects.unknownTool'),
     unknownModelLabel: t('projects.unknownModel'),
-    allowSessionModelAttribution: !projectRowsApi.projectBreakdownIncomplete(state.stats, state.period),
+    allowSessionModelAttribution: !projectRowsApi.projectBreakdownIncomplete(stats, state.period),
     nativeProjects: state.stats?.nativeProjects?.[state.period] || {}
   });
 }
@@ -9223,12 +9228,14 @@ function renderAppContent({ fromSearch = false } = {}) {
     els.serviceStatusPanel?.classList.add('hidden');
     els.trendsPanel.classList.add('hidden');
     els.breakdown.classList.remove('hidden');
-    const rows = rowsForPeriod(period);
+    const projectStats = state.breakdown === 'project' && state.period === 'allTime'
+      ? readAllTimeProjects(state.stats, state.settings) : state.stats;
+    const rows = projectStats === state.stats ? rowsForPeriod(period) : projectRowsForPeriod(projectStats.periods.allTime, projectStats);
     state.sessionRowsCache = state.breakdown === 'session'
       ? { stats: state.stats, period: state.period, rows }
       : null;
     let incompleteHint = '';
-    if (state.breakdown === 'project' && projectRowsApi.projectBreakdownIncomplete(state.stats, state.period)) {
+    if (state.breakdown === 'project' && projectRowsApi.projectBreakdownIncomplete(projectStats, state.period)) {
       incompleteHint = 'projects.incomplete';
     } else if (state.breakdown === 'session' && sessionBreakdownIncomplete()) {
       incompleteHint = 'sessions.incomplete';
