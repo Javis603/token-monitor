@@ -11,7 +11,7 @@ const { createStatsPublicationBatcher } = require('../../src/electron/statsPubli
 const main = fs.readFileSync(path.join(__dirname, '../../src/electron/main.js'), 'utf8');
 const refreshSource = main.slice(main.indexOf('let manualStatsRefreshInFlight ='), main.indexOf('function managedPricingSidecarPath('));
 const dockSource = main.slice(main.indexOf('function configuredDockItemLists('), main.indexOf('function edgeDockShowsLiveRate('))
-  + main.slice(main.indexOf('// Week / last-7 / last-30 are not collector periods'), main.indexOf('// Hand cells to the controller'));
+  + main.slice(main.indexOf('// Only ranges without a matching local snapshot'), main.indexOf('// Hand cells to the controller'));
 const pushSource = main.slice(main.indexOf('function sendPush('), main.indexOf('function statsHistoryRevision('));
 
 function deferred() {
@@ -28,6 +28,8 @@ function fixture() {
   const calls = [];
   const context = {
     AbortSignal,
+    setTimeout,
+    clearTimeout,
     deviceRuntimeHandle: {
       refreshLimits: (...args) => { calls.push(['limits', ...args]); return limits.promise; },
       tick: (...args) => { calls.push(['usage', ...args]); return usage.promise; }
@@ -49,12 +51,15 @@ function fixture() {
     buildEdgeDockCells: (stats, options) => ({ stats, derivedPeriods: options.derivedPeriods }),
     EDGE_DOCK_DERIVED_PERIODS: ['yesterday', 'week', 'last7', 'last30'],
     fixedPeriodRangesApi: {
+      ...require('../../src/electron/renderer/fixedPeriodRanges'),
       localDayKey: () => '2026-10-07',
       deviceInventorySignature: () => 'devices',
       joinDeviceHistorySources: (_, devices) => devices,
       fixedPeriodSnapshotFromDevices: (_, devices) => ({ status: 'ready', period: devices[0] })
     },
     getDashboardHistory: () => history.promise,
+    collectorCalendarLocale: () => 'en-GB',
+    SYNC_WEEK_STARTS_ON: 1,
     app: { getLocale: () => 'en' },
     resolveRegionalLocale: () => 'en',
     trayMenuLocale: () => 'en',
@@ -183,6 +188,86 @@ test('Client manual refresh paints the fresh Hub response without a stats push o
   assert.deepEqual(requests, ['https://hub.example/api/stats']);
   assert.equal(context.dockStats, fresh);
   assert.equal(context.latestStats, old, 'a manual read must not become latestStats');
+});
+
+test('Edge Dock uses all four matching local scan ranges with History off and discards them at rollover', () => {
+  const { context } = fixture();
+  const ranges = context.fixedPeriodRangesApi;
+  const selections = context.EDGE_DOCK_DERIVED_PERIODS;
+  context.settings.edgeDockItems = selections.map(metric => ({ type: 'stat', metric }));
+  context.settings.historyEnabled = false;
+  context.getDashboardHistory = () => assert.fail('native ranges do not need History');
+  let todayKey = '2026-10-07';
+  ranges.localDayKey = () => todayKey;
+  let rollover;
+  context.setTimeout = callback => {
+    rollover = callback;
+    return { unref() {} };
+  };
+  context.clearTimeout = () => {};
+  const periods = Object.fromEntries(selections.map((metric, index) => [metric, { totalTokens: index + 1, costUsd: 2.5 }]));
+  context.latestStats = {
+    periods,
+    nativeRangeWindows: Object.fromEntries(selections.map(metric => [metric, ranges.rangeForSelection(metric, { todayKey, locale: 'en-GB' })]))
+  };
+
+  context.repaintDockSurfaces();
+  assert.deepEqual({ ...context.dockPeriods }, periods);
+  todayKey = '2026-10-08';
+  rollover();
+  assert.deepEqual({ ...context.dockPeriods }, {});
+});
+
+test('Edge Dock prefers synchronized ranges and reads History only for unresolved selections', async () => {
+  const { context } = fixture();
+  context.mode = 'sync';
+  context.settings.edgeDockItems = ['yesterday', 'week'].map(metric => ({ type: 'stat', metric }));
+  const device = { deviceId: 'here', totalTokens: 10 };
+  const stats = { fixedRangeRevisions: { here: 'rev1' }, devices: [device] };
+  context.latestStats = stats;
+  context.electronPresentationStats = source => ({ ...source });
+  context.resolveSyncedPeriodForStats = async (source, generation, selection) => {
+    assert.equal(source, stats, 'reuse the captured stats rather than a presentation copy');
+    assert.equal(generation, context.hubModeGeneration);
+    return selection === 'yesterday' ? { status: 'ready', period: { totalTokens: 100 } } : null;
+  };
+  const fallbackSelections = [];
+  context.getDashboardHistory = async () => ({ fixedPeriods: { historyTransportAvailable: true } });
+  context.fixedPeriodRangesApi.fixedPeriodSnapshotFromDevices = (selection, devices) => {
+    fallbackSelections.push(selection);
+    return { status: 'ready', period: devices[0] };
+  };
+  context.repaintDockSurfaces();
+  await new Promise(setImmediate);
+  assert.deepEqual(fallbackSelections, ['week']);
+  assert.equal(context.dockPeriods.yesterday.totalTokens, 100);
+  assert.equal(context.dockPeriods.week.totalTokens, 10);
+});
+
+test('a late synchronized range cannot replace a newer revision with History off', async () => {
+  const { context } = fixture();
+  context.mode = 'sync';
+  context.settings.historyEnabled = false;
+  context.settings.edgeDockItems = [{ type: 'stat', metric: 'yesterday' }];
+  context.getDashboardHistory = () => assert.fail('History is off');
+  const previous = deferred();
+  const calls = [];
+  context.resolveSyncedPeriodForStats = async source => {
+    const revision = source.fixedRangeRevisions.here;
+    calls.push(revision);
+    return revision === 'old' ? previous.promise : { status: 'ready', period: { totalTokens: 200 } };
+  };
+  context.latestStats = { fixedRangeRevisions: { here: 'old' } };
+  context.repaintDockSurfaces();
+  context.repaintDockSurfaces();
+  context.latestStats = { fixedRangeRevisions: { here: 'new' } };
+  context.repaintDockSurfaces();
+  await new Promise(setImmediate);
+  assert.equal(context.dockPeriods.yesterday.totalTokens, 200);
+  previous.resolve({ status: 'ready', period: { totalTokens: 100 } });
+  await new Promise(setImmediate);
+  assert.equal(context.dockPeriods.yesterday.totalTokens, 200);
+  assert.deepEqual(calls, ['old', 'new']);
 });
 
 test('a delayed derived-period repaint retains the manually refreshed snapshot until a stats push replaces it', async () => {

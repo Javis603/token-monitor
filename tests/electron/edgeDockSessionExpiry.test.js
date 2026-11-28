@@ -20,7 +20,7 @@ const dock = fs.readFileSync(path.join(__dirname, '..', '..', 'src', 'electron',
 // module before the fix: a default tracker reported `nextExpiryAt` 8015 and the delay
 // computed as 20ms, an epoch one reported 1789898282825 and 8020ms.
 test('the dock rate tracker is read on the same clock its timer is scheduled with', () => {
-  const tracker = main.slice(main.indexOf('function edgeDockLiveRateSample('), main.indexOf('// Week / last-7 / last-30 are not collector periods'));
+  const tracker = main.slice(main.indexOf('function edgeDockLiveRateSample('), main.indexOf('// Only ranges without a matching local snapshot'));
   assert.match(tracker, /createLiveTokenRateGroupTracker\(\{/);
   assert.match(tracker, /now: Date\.now,/);
   assert.match(tracker, /Math\.max\(0, expiresAt - Date\.now\(\)\)/);

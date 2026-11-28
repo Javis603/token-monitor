@@ -69,7 +69,7 @@ test('floating glass previews share live tints without replacing styles or saved
     settingsForRenderer: () => { throw new Error('preview must not project account settings'); },
     edgeDockController: { setAppearance: read, isRunning: () => true, stop() {} },
     notchController: { setAppearance: read, isRunning: () => true },
-    syncNotch: read, canUseEdgeDock: () => false
+    syncNotch: read, canUseEdgeDock: () => false, scheduleEdgeDockPeriodRollover() {}
   });
   vm.runInContext(`let dockAppearancePreview = null;\n${definitions}`, context);
   context.previewDockAppearance({ macGlassTint: 80, macBackdrop: 'vibrancy', themeColors: { bg: '#fff' } });
@@ -98,7 +98,7 @@ test('frosted glass previews deliver opacity and depth to both floating renderer
     settingsForRenderer: () => { throw new Error('preview must not project account settings'); },
     edgeDockController: { setAppearance: receive, isRunning: () => true, stop() {} },
     notchController: { setAppearance: receive, isRunning: () => true },
-    syncNotch() {}, canUseEdgeDock: () => false
+    syncNotch() {}, canUseEdgeDock: () => false, scheduleEdgeDockPeriodRollover() {}
   });
   vm.runInContext(`let dockAppearancePreview = null;\n${definitions}`, context);
   context.previewDockAppearance({ glassOpacity: 17, glassBlur: 75 });

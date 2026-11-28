@@ -832,9 +832,8 @@
         cacheSessions: rate === null ? [] : cacheSessionRows(period)
       };
     }
-    // Native periods come straight from stats; week/last7/last30 are summed from
-    // History by the caller and arrive as `derivedPeriods`, or not at all while
-    // History is unavailable — which renders as unknown, never as zero.
+    // The caller resolves fixed ranges against the current calendar before
+    // handing them to the dock. Missing ranges render as unknown.
     const derived = dockItems.DERIVED_PERIODS.includes(metric);
     const period = derived ? options.derivedPeriods?.[metric] || null : stats?.periods?.[metric] || null;
     const clients = period ? clientBreakdown(period, 'tokens') : [];

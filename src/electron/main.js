@@ -5887,11 +5887,23 @@ function edgeDockLiveRateSample(visibleStats) {
   return edgeDockRateTracker.getSample();
 }
 
-// Week / last-7 / last-30 are not collector periods; the widget sums them from
-// History. The dock does the same, once per History revision and day, and
-// re-projects when the answer lands. Until then those readouts show unknown.
-let edgeDockDerivedPeriods = {};
-let edgeDockDerivedSignature = '';
+// Only ranges without a matching local snapshot need an asynchronous read.
+let edgeDockPeriodRead = null;
+let edgeDockPeriodTimer = null;
+
+function scheduleEdgeDockPeriodRollover(devices) {
+  clearTimeout(edgeDockPeriodTimer);
+  edgeDockPeriodTimer = null;
+  if (!devices) return;
+  const now = Date.now();
+  let deadline = new Date(now).setHours(24, 0, 0, 0);
+  for (const device of devices) {
+    const boundary = fixedPeriodRangesApi.nextDeviceDayBoundary(device, now);
+    if (boundary > now) deadline = Math.min(deadline, boundary);
+  }
+  edgeDockPeriodTimer = setTimeout(repaintDockSurfaces, deadline - now);
+  edgeDockPeriodTimer.unref();
+}
 
 // A manual read is not a shared push snapshot. Keep it for dock re-projections
 // until the next push, without changing the renderer/widget snapshot source.
@@ -5915,45 +5927,91 @@ function edgeDockDerivedSelections() {
 function refreshEdgeDockDerivedPeriods(visibleStats) {
   const selections = edgeDockDerivedSelections();
   if (!selections.length || !visibleStats) {
-    edgeDockDerivedPeriods = {};
-    edgeDockDerivedSignature = '';
-    return;
+    edgeDockPeriodRead = null;
+    scheduleEdgeDockPeriodRollover(null);
+    return {};
   }
+
+  scheduleEdgeDockPeriodRollover(mode === 'local' ? [] : visibleStats.devices || []);
   const todayKey = fixedPeriodRangesApi.localDayKey();
-  const signature = [
-    selections.join(','),
-    todayKey,
-    settings?.historyEnabled !== false,
-    fixedPeriodRangesApi.deviceInventorySignature(visibleStats.devices || []),
-    visibleStats.deviceHistoryRevision || visibleStats.historyRevision || ''
-  ].join('|');
-  if (signature === edgeDockDerivedSignature) return;
-  edgeDockDerivedSignature = signature;
-  getDashboardHistory({ includeDevices: true })
-    .then((history) => {
-      const source = edgeDockStats();
-      if (signature !== edgeDockDerivedSignature || !source) return;
-      const stats = electronPresentationStats(source);
-      const sources = fixedPeriodRangesApi.joinDeviceHistorySources(history?.deviceHistories || [], stats.devices || []);
-      const preferred = typeof app.getPreferredSystemLanguages === 'function' ? app.getPreferredSystemLanguages() : [app.getLocale()];
-      const next = {};
-      for (const selection of selections) {
-        const snapshot = fixedPeriodRangesApi.fixedPeriodSnapshotFromDevices(selection, sources, {
-          historyEnabled: settings?.historyEnabled !== false,
-          historyAvailable: history?.fixedPeriods?.historyTransportAvailable === true,
-          todayKey,
-          locale: resolveRegionalLocale([...preferred, trayMenuLocale()])
-        });
-        if (snapshot?.status === 'ready' && snapshot.period) next[selection] = snapshot.period;
+  const locale = collectorCalendarLocale();
+  const native = {};
+  if (mode === 'local') {
+    for (const selection of selections) {
+      const snapshot = fixedPeriodRangesApi.nativeRangeSnapshot(selection, visibleStats, { todayKey, locale });
+      if (snapshot) native[selection] = snapshot.period;
+    }
+  }
+  const missing = selections.filter(selection => !native[selection]);
+  const historyEnabled = settings?.historyEnabled !== false;
+  // Use the captured stats, which owns the local scan reference used by the
+  // sync resolver. Quota and presentation projections can copy that object.
+  const source = edgeDockStats() || visibleStats;
+  const generation = hubModeGeneration;
+  const revisions = Object.entries(source.fixedRangeRevisions || {}).sort();
+  const useSyncedRanges = mode === 'sync' && (revisions.length > 0 || source.localFixedRangeRevision);
+  if (!missing.length || (!useSyncedRanges && !historyEnabled)) {
+    edgeDockPeriodRead = null;
+    return native;
+  }
+
+  const devices = source.devices || [];
+  const scope = JSON.stringify([
+    generation, mode, missing, todayKey, locale, historyEnabled,
+    settings?.clients, settings?.modelAliases, settings?.modelAliasGrouping,
+    devices.map(device => [device.deviceId, device.trackedClients,
+      device.periodWindows?.timeZone, fixedPeriodRangesApi.deviceDayState(device)?.currentKey])
+  ]);
+  const signature = JSON.stringify([
+    scope, visibleStats.deviceHistoryRevision || visibleStats.historyRevision,
+    revisions, source.localFixedRangeRevision,
+    useSyncedRanges ? devices.map(device => device.updatedAt) : null
+  ]);
+  if (edgeDockPeriodRead?.signature !== signature) {
+    const periods = edgeDockPeriodRead?.scope === scope ? edgeDockPeriodRead.periods : {};
+    const request = { scope, signature, periods };
+    edgeDockPeriodRead = request;
+    void (async () => {
+      const periods = {};
+      if (useSyncedRanges) {
+        const snapshots = await Promise.all(missing.map(selection => resolveSyncedPeriodForStats(source, generation, selection)));
+        for (const [index, snapshot] of snapshots.entries()) {
+          if (snapshot?.status === 'ready' && snapshot.period) periods[missing[index]] = snapshot.period;
+        }
       }
-      edgeDockDerivedPeriods = next;
-      updateEdgeDockCells(stats);
-    })
-    .catch((error) => {
-      console.log(`[edge-dock] history for derived periods failed: ${error.message}`);
-      // Let the next stats push retry rather than pinning the failure.
-      if (signature === edgeDockDerivedSignature) edgeDockDerivedSignature = '';
+      if (edgeDockPeriodRead !== request || generation !== hubModeGeneration) return;
+      const useHistory = missing.filter(selection => !periods[selection]);
+      let retryHistory = false;
+      if (historyEnabled && useHistory.length) {
+        const history = await getDashboardHistory({ includeDevices: true }).catch(error => {
+          console.log(`[edge-dock] History fallback failed: ${error.message}`);
+          return null;
+        });
+        retryHistory = history === null;
+        const current = edgeDockStats();
+        if (edgeDockPeriodRead !== request || generation !== hubModeGeneration || !current) return;
+        const stats = electronPresentationStats(current);
+        const sources = fixedPeriodRangesApi.joinDeviceHistorySources(history?.deviceHistories || [], stats.devices || []);
+        for (const selection of history ? useHistory : []) {
+          const snapshot = fixedPeriodRangesApi.fixedPeriodSnapshotFromDevices(selection, sources, {
+            historyAvailable: history?.fixedPeriods?.historyTransportAvailable === true,
+            todayKey,
+            locale,
+            ...(mode === 'sync' ? { weekStartsOn: SYNC_WEEK_STARTS_ON } : {})
+          });
+          if (snapshot?.status === 'ready' && snapshot.period) periods[selection] = snapshot.period;
+        }
+      }
+      request.periods = periods;
+      repaintDockSurfaces();
+      // Publish resolved ranges first, then allow the next push to retry History.
+      if (retryHistory) request.signature = null;
+    })().catch((error) => {
+      console.log(`[edge-dock] fixed period read failed: ${error.message}`);
+      if (edgeDockPeriodRead === request) edgeDockPeriodRead = null;
     });
+  }
+  return { ...edgeDockPeriodRead.periods, ...native };
 }
 
 // The Codex reset forecast is the Limits view's opt-in; the dock shows it on the
@@ -6002,13 +6060,13 @@ async function refreshStatsFromEdgeDock() {
 
 function edgeDockCellsFor(visibleStats, items = settings?.edgeDockItems, options = {}) {
   visibleStats = desktopQuotaStats(visibleStats);
-  refreshEdgeDockDerivedPeriods(visibleStats);
+  const derivedPeriods = refreshEdgeDockDerivedPeriods(visibleStats);
   refreshEdgeDockForecast();
   syncCodexPresentationActiveAccount();
   return buildEdgeDockCells(visibleStats, {
     includeUnavailableAccounts: options.includeUnavailableAccounts === true,
     availablePluginRefs: (pluginRuntime?.manager.surfaceCatalog('edgeDock') || []).map(view => view.ref),
-    derivedPeriods: edgeDockDerivedPeriods,
+    derivedPeriods,
     codexResetForecast: edgeDockForecastWanted() ? edgeDockForecast : null,
     localDeviceId: settings?.deviceId,
     // What the card's rows need to name the device a reading came from. The
@@ -6191,6 +6249,8 @@ function syncDockSurfaces(rendererSettings) {
   syncNotch(rendererSettings);
   if (!canUseEdgeDock(settings)) {
     edgeDockController?.stop();
+    edgeDockPeriodRead = null;
+    scheduleEdgeDockPeriodRollover(null);
     // The same sample feeds top-only rate and sessions items.
     if (!notchController?.isRunning()) {
       if (edgeDockRateTimer) clearTimeout(edgeDockRateTimer);
